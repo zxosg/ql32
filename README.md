@@ -10,7 +10,8 @@ chips. A Linux build is the primary development and test host.
 
 ## Repository map
 
-- `docs/specification/` — authoritative requirements and public contracts.
+- `docs/specification/` — requirements and evolving public contracts.
+- `docs/reference/` — language manual links and provenance.
 - `src/language/` — lexer, parser, semantic analysis, and bytecode compiler.
 - `src/vm/` — bytecode execution and per-session VM state.
 - `src/runtime/`, `src/system/`, `src/ui/` — portable services.
@@ -18,11 +19,12 @@ chips. A Linux build is the primary development and test host.
 - `boards/` — board-specific build profiles and pin/resource definitions.
 - `tests/` — host-side language, VM, and integration tests.
 
-## Foundation milestone (M0)
+## M1 implementation
 
-M0 establishes the build, architectural contracts, board profiles, and host
-test layout. The next implementation slice is lexer/parser support for simple
-expressions, followed by bytecode execution of variables and `PRINT`.
+The first Linux vertical slice now includes a lexer, expression parser,
+bytecode compiler/VM, session variables, assignment, and `PRINT`. The planned
+M1 path adds the structured language features in tested slices. Embedded
+firmware and the GUI are later integration work.
 
 ## Build
 
