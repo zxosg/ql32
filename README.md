@@ -10,6 +10,7 @@ chips. A Linux build is the primary development and test host.
 
 ## Repository map
 
+- `PROJECT-HANDOFF.md` — durable project context and next M1 work for new chats.
 - `docs/specification/` — requirements and evolving public contracts.
 - `docs/reference/` — language manual links and provenance.
 - `src/language/` — lexer, parser, semantic analysis, and bytecode compiler.
