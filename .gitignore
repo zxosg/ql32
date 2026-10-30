@@ -1,0 +1,10 @@
+# Build outputs
+/build/
+/build-*/
+/.pio/
+
+# Editor and local files
+.cache/
+*.swp
+*.swo
+
