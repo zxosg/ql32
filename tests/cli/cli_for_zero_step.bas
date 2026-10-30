@@ -1,0 +1,3 @@
+FOR x = 1 TO 3 STEP 0
+  PRINT x
+END FOR x

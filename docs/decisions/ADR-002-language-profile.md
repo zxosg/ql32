@@ -14,7 +14,7 @@ mark the minimum abbreviation, lowercase letters are optional, and recognized
 tokens expand to full canonical spelling when listed. `REM` is the historical
 abbreviation of `REMark`; apostrophe remains a QL/32 comment alias.
 
-M1 is delivered in slices: expression/variable/`PRINT` core first, then blocks, procedures/functions, arrays, and interactive commands by M1 completion. The full set includes `IF`, `FOR`, `REPeat`, and `SELect ON`.
+M1 is delivered in slices: expression/variable/`PRINT` core first, then blocks, procedures/functions/locals, arrays, block `SELect ON`, and the initial in-memory command loop. The full set includes `IF`, `FOR`, `REPeat`, and `SELect ON`; the current implementation does not yet fulfill all M1 requirements.
 
 Structured conditionals use `ELSE IF condition THEN` as an `ELSE` with a
 nested `IF`. `ELSEIF` is not a separate keyword; nested conditionals close
@@ -22,6 +22,26 @@ with matching `END IF` statements.
 
 M1 retains SuperBASIC's flexible `FOR` range lists: mixed single values and
 `start TO end [STEP step]` intervals, inline and block forms, and explicit
-`NEXT variable` / `EXIT variable`. Historical implementation quirks remain
-outside the contract unless verified.
+`NEXT variable` / `EXIT variable`. `REPeat name` supports inline and block
+forms; `NEXT name` restarts it, while `EXIT name` leaves the named loop. A
+control statement may target an outer loop. Nested inline loops and omitted
+loop names are outside the initial implementation. Historical implementation
+quirks remain outside the contract unless verified.
+
+The expression profile, Boolean rules, `PRINT` output, and stored-line update
+rules are specified in QL32-LANG-001. In brief, arithmetic is strict about
+types, booleans are numeric 0/1 with nonzero numeric truth, comparisons share
+one precedence level, and the supported PRINT separators have deterministic
+text-stream behavior. Numbered lines replace the same number, and a blank
+numbered line deletes it. These are implementation decisions until covered by
+the conformance suite; they do not by themselves establish SMSQ/E
+compatibility.
+
+Current implementation decisions: numeric arrays use zero-based inclusive
+bounds and are limited to one million host elements per array; procedure and
+function scalar arguments are copied by value; `SELect` singleton arms use
+exact binary64 equality; and stdin command batches support `LIST`, `RUN`, and
+`NEW`. Those behaviors remain QL/32-specific where they have not been
+verified against SMSQ/E. The detailed remaining work is tracked in
+`PROJECT-HANDOFF.md` and the language specification.
 

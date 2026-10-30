@@ -1,0 +1,17 @@
+score=85
+IF score >= 90 THEN
+  PRINT "A"
+ELSE IF score >= 80 THEN
+  PRINT "B"
+ELSE
+  PRINT "C"
+END IF
+END IF
+IF -1 THEN
+  PRINT "truth"
+END IF
+IF 0 THEN
+  PRINT 1/0
+ELSE
+  PRINT "safe"
+END IF

@@ -25,7 +25,8 @@ int main(int argc, char** argv) {
 
     try {
         ql32::Interpreter interpreter;
-        interpreter.execute(source, std::cout);
+        if (argc == 2) interpreter.execute(source, std::cout);
+        else interpreter.executeInteractive(source, std::cout);
     } catch (const std::exception& error) {
         std::cerr << "ql32: " << error.what() << '\n';
         return 1;

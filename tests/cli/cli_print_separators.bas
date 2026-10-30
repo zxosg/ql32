@@ -1,0 +1,6 @@
+PRINT "A"; "B"
+PRINT "A"!"B"
+PRINT "A","B"
+PRINT "A"\"B"
+PRINT "C"! : PRINT "D"
+PRINT "E"; : PRINT "F"

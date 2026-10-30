@@ -1,8 +1,8 @@
 # QL/32 BASIC language specification
 
 **Document ID:** QL32-LANG-001  
-**Version:** 0.2 (M1 implementation draft)
-**Status:** Approved language direction; detailed semantics become normative with conformance tests
+**Version:** 0.3 (M1 language contract)
+**Status:** Approved profile; implementation and conformance remain in progress
 **Sources:** [reference index](../reference/README.md), [language decision](../decisions/ADR-002-language-profile.md)
 
 ## 1. Language profile
@@ -60,7 +60,8 @@ source_line   := [line_number] [statement (":" statement)*] [comment] newline
 statement     := assignment | print
 comment       := ("REMark" | "REM" | "'") characters_to_end_of_line
 assignment    := identifier "=" expression
-print         := "PRINT" [expression]
+print         := "PRINT" [expression (print_separator expression)* [print_separator]]
+print_separator := ";" | "!" | "," | "\\"
 expression    := literal | identifier | "(" expression ")" | unary | binary
 ```
 
@@ -72,22 +73,84 @@ expression    := literal | identifier | "(" expression ")" | unary | binary
 | `count%` | signed 32-bit integer | 0 | 32-bit width |
 | `title$` | dynamic UTF-8 string | empty | UTF-8 representation |
 
-Implicit scalar declaration is allowed. Boolean expressions produce a logical value usable by conditions. Their numeric representation and conversions are still open. Native resource handles are opaque and session-owned, never raw memory addresses. Invalid conversion, integer overflow, division by zero, and array bounds violations are defined runtime errors.
+Implicit scalar declaration is allowed. Boolean expressions produce numeric
+`1` for true and `0` for false, matching the cited SuperBASIC behavior. Any
+finite numeric value other than zero is true in a condition; zero is false.
+Strings are not conditions. A Boolean result is an ordinary numeric value and
+can participate in later arithmetic. Native resource handles are opaque and
+session-owned, never raw memory addresses. Invalid conversion, integer
+overflow, division by zero, and array bounds violations are defined runtime
+errors.
 
 ## 4. Expressions
 
-M1's target operators are unary `+` and `-`, binary `+ - * / DIV MOD ^`, comparisons, `AND OR NOT`, parentheses, function calls, and array indexing. `/` performs floating division. For integer operands, `DIV` rounds the quotient downward and `MOD` satisfies `x = y * (x DIV y) + (x MOD y)`; this follows the cited SuperBASIC operator description. Int32 overflow is an error. Nonintegral operands to `DIV`/`MOD` are rejected in M1, a QL/32 restriction.
+M1's target operators are unary `+ - NOT`, binary `+ - * / DIV MOD ^`,
+numeric comparisons, string equality/inequality, `AND OR XOR`, parentheses,
+function calls, and array indexing. `&`, `INSTR`, approximate equality `==`,
+bitwise operators, and chained comparisons are outside M1.
 
-The first slice accepts literals, variables, parentheses, unary signs, and `+ - * /` with conventional arithmetic precedence. Adding two strings with `+` concatenates them; mixing strings and numbers in arithmetic is a type error. Before expanding the language, freeze a table for full precedence and associativity, comparison coercion, Boolean evaluation, exponent edge cases, and numeric conversions. Unsupported constructs produce explicit syntax errors.
+Precedence from highest to lowest is:
+
+| Level | Operators | Associativity |
+| --- | --- | --- |
+| 1 | parentheses | innermost first |
+| 2 | unary `+ -` | right to left |
+| 3 | `^` | left to right |
+| 4 | `* / DIV MOD` | left to right |
+| 5 | binary `+ -` | left to right |
+| 6 | `< <= = <> >= >` | one comparison per unparenthesized expression |
+| 7 | `NOT` | right to left; applies to the comparison expression to its right |
+| 8 | `AND` | left to right |
+| 9 | `OR XOR` | left to right |
+
+Thus `-2^2` is `(-2)^2`, `2^3^2` is `(2^3)^2`, and
+`NOT value = 0` means `NOT (value = 0)`. Parentheses can make another grouping
+explicit. The table is the QL/32 precedence profile: it groups `*`, `/`,
+`DIV`, and `MOD` together and groups all comparisons together, unlike the
+reference's ordered precedence list. These simplifications are not class S
+compatibility claims.
+
+Numeric literals and unsuffixed numeric variables are binary64. Arithmetic
+operators require numeric operands and do not parse strings implicitly. Binary
+`+` adds two numbers or concatenates two strings; it rejects a mixed pair.
+This string use of `+` is a QL/32 choice; the cited SuperBASIC operator is
+`&`, which M1 does not implement. String equality and inequality compare UTF-8
+byte sequences exactly and are case-sensitive. Relational comparisons require
+two numbers. Numeric comparison and logical operators return numeric `1` or
+`0`. `NOT` and `AND`, `OR`, `XOR` accept numeric operands only; logical
+operators test each operand for nonzero and evaluate both operands from left
+to right. No implicit number-to-string or string-to-number conversion occurs.
+`PRINT` formats either value type directly.
+
+`/` is binary64 division and division by zero is an error. `DIV` and `MOD`
+require finite, integral operands in the Int32 range. `DIV` is floor division,
+and `MOD` satisfies `x = y * (x DIV y) + (x MOD y)`; divisor zero is an error.
+`DIV` also errors if its quotient is outside the Int32 range. `^` uses
+binary64 operands; a non-finite result, zero raised to a negative
+power, or a negative base with a non-integral exponent is a runtime error.
+`0^0` evaluates to `1`. Assignment to a `%` variable requires an exact
+integral result in the Int32 range; it does not truncate or wrap. Assignment to
+a `$` variable requires a string. These strict conversion rules are QL/32
+choices where they differ from the dynamic SuperBASIC value model.
 
 ## 5. Statements and blocks
 
-`name = expression` assigns a scalar. The first runnable slice accepts one
-optional expression per `PRINT`; plain `PRINT` emits a newline. Lists of
-expressions, comma/semicolon layout, trailing separators, and `#channel`
-syntax are deferred until their output behavior is specified.
+`name = expression` assigns a scalar. `PRINT` accepts a comma-separated list
+of expressions and the SuperBASIC separators `;`, `!`, `,`, and `\` between
+items. Semicolon adds no spacing. Exclamation inserts one space between items
+when the cursor is not at the start of a line. Comma advances to the next
+8-column tab stop. Backslash emits a line feed before the next item. A
+trailing separator suppresses PRINT's automatic final line feed; a trailing
+backslash supplies one explicitly. `PRINT` without items emits a line feed.
+The Linux text stream has no device width, so `!` does not wrap and comma tabs
+are fixed at eight character columns. `TO column`, channel selection, and
+device-specific wrapping are deferred to display/output integration.
 
-The full M1 block set is:
+Numbers print using locale-independent shortest round-trip decimal notation;
+zero, including negative zero, prints as `0`. Strings print as their contents.
+There is no implicit padding or number-to-string conversion outside PRINT.
+
+The implemented block set includes:
 
 ```basic
 IF condition THEN
@@ -145,21 +208,34 @@ differences in loop-variable types are not silently copied.
 
 Both block and inline forms are in M1 scope. The block form ends with
 `END FOR variable`. The inline form puts its body on the same source line and
-does not require `END FOR`. Nested inline loops, especially multiple inline
-`FOR` statements on one line, require conformance tests before being accepted.
+does not require `END FOR`. The first implementation rejects nested inline
+loops; block loops may still contain other block or inline loops.
 
 `NEXT variable` advances to the next iteration, skipping the rest of the
 current body; at the final value of an interval it does not advance beyond that
 interval. It then proceeds through subsequent items in the range list before
-ending the loop. `EXIT variable` leaves the named loop and continues after its
-matching `END FOR`, or after the inline loop body. Loop-control statements
-must identify an open matching loop in M1. Behavior for omitted identifiers,
-multiple ranges' exact evaluation timing, and line-level inline-loop edge cases
-must be specified by tests before compatibility is claimed.
+ending the loop. When `NEXT` has no later value, it has no effect, allowing the
+remaining body to run before `END FOR` closes the loop. Range expressions are
+evaluated once, in source order, when the loop is entered.
 
-Exact `SELect` arm syntax still needs verification. Optional loop identifiers
-and historical ROM-specific quirks are deferred where they do not fit this
-portable, explicit M1 contract.
+`REPeat name` starts a block loop closed by `END REPeat name`; `REPeat name:`
+starts an inline loop whose body continues to the end of that source line.
+`NEXT name` restarts the named loop at its first body statement. A repeat loop
+continues indefinitely unless an `EXIT name` leaves it. `EXIT name` also leaves
+a named `FOR` loop, continuing after `END FOR` or after the inline loop body.
+Loop-control statements must identify an open matching loop in M1, and may
+target an outer loop from a nested loop. Omitted identifiers and nested inline
+loops remain outside this explicit M1 syntax.
+
+`SELect ON expression` is a numeric multi-way branch. Each arm starts with
+`= value[, value ...]` or `= start TO end`; the optional final arm is
+`= REMAINDER`. The first matching arm runs, then control continues after
+`END SELect`. Ranges are inclusive. QL/32 currently compares singleton values
+with exact binary64 equality, a QL/32-specific choice; historical
+SuperBASIC's floating-point match behavior has not been established here.
+Only the block form is implemented; inline `SELect` is deferred. Optional
+loop identifiers and historical ROM-specific quirks are deferred where they
+do not fit this portable, explicit M1 contract.
 
 Named loop ends and exits must match the opening loop. `IF` conditions use the logical truth rule finalized with the Boolean conversion table.
 
@@ -183,11 +259,25 @@ Definitions are program-level. A function is called in an expression and must re
 
 ## 7. Arrays
 
-`DIM array%(upper)` and multidimensional variants are planned for M1. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. Board-specific allocation limits remain to be measured.
+`DIM array%(upper)` and multidimensional variants are implemented. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. The host allocation limit is one million elements per array; board-specific limits remain to be measured. Array arguments are not yet passed by reference.
 
 ## 8. Immediate mode, commands, and errors
 
-Immediate statements execute without changing stored program source. Session variables remain inspectable after execution until explicitly reset. `RUN` clears variables in that session before starting the stored program. M1 requires source storage, `RUN`, and `LIST` on the Linux host; `EDIT`, `LOAD`, `SAVE`, and `DIR` arrive with editor/filesystem work in M2. The target shell also has `NEW`, `STOP`, `MEM`, `HELP`, and later `CONT`. Line-number replacement behavior remains an open decision.
+Immediate statements execute without changing stored program source. Entering a
+line numbered 1 through 32767 stores it without executing it; entering another
+line with the same number replaces the whole stored line. The last occurrence
+of a repeated number in one input batch wins. A numbered line containing only
+whitespace deletes that stored line. A comment-only line is stored as a no-op,
+so it can retain a program comment. In stdin command batches, numbered lines
+are stored in memory and `LIST`, `RUN`, and `NEW` are supported. `LIST` prints
+ascending line numbers; `RUN` clears variables and executes the stored lines;
+`NEW` clears the program and variables. Invalid line bodies are stored and
+diagnosed when `RUN` compiles the program; atomic validation on line entry is
+not implemented. Unnumbered statements execute immediately. A `.bas` file
+passed to the Linux CLI is a complete source unit executed in file order; it
+does not edit a persistent interactive program. `EDIT`, `LOAD`, `SAVE`, and
+`DIR` arrive with editor/filesystem work in M2. The target shell also has
+`STOP`, `MEM`, `HELP`, and later `CONT`.
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
 
@@ -204,10 +294,22 @@ Full historical numeric formats, third-party toolkit commands, `GO TO`/`GO SUB` 
 | 1 | Linux build and CLI; lexer/parser for assignments and expressions; source-span diagnostics |
 | 2 | Bytecode VM; isolated session state; variables and `PRINT`; `hello.bas` runs |
 | 3 | Block `IF`, block and inline `FOR` with mixed ranges, `NEXT`/`EXIT`, `REPeat`; loop and branch edge cases |
-| 4 | Procedures, functions, locals, recursion limit, arrays, `SELect ON` |
-| 5 | Immediate mode and program commands; shared conformance suite on Linux |
+| 4 | Procedures, functions, locals, recursion limit, arrays, block `SELect ON` |
+| 5 | In-memory numbered lines; `LIST`, `RUN`, `NEW`, immediate statements; shared Linux conformance suite |
 
-The suite covers success cases, syntax/type failures, overflow, division by zero, array bounds, session isolation, and cancellation. Class S requires a source link and tests of syntax and behavior.
+The CLI suite has 24 cases and covers success cases, syntax/type failures,
+overflow, division by zero, array bounds, and stored-program commands.
+Session isolation and cancellation are not yet covered. Expression and output
+cases shall include `-2^2` → `4`, `2^3^2` → `64`, `NOT 2 = 0` → `1`,
+`-7 DIV 3` → `-3`, and `-7 MOD 3` → `2`, plus mixed-type rejection and each
+`PRINT` separator. Class S requires a source link and tests of syntax and
+behavior.
 
-Before implementing the relevant feature, decide: full precedence and conversions; `PRINT` separators and formatting; line-number replacement behavior; `SELect` arms; multiple-range evaluation timing and inline-loop nesting; and array limits. These do not block the first expression/VM slice.
+The expression precedence/conversion rules, Boolean truth model, `PRINT`
+separators/formatting, and line-number replacement behavior are specified
+above. Remaining M1 work includes full abbreviation handling and canonical
+listing, validating stored lines when entered, array-by-reference parameters,
+and broader session and language conformance coverage. Multiple-range
+evaluation timing, nested inline loops, and board allocation limits also need
+further review.
 

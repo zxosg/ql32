@@ -22,10 +22,12 @@ chips. A Linux build is the primary development and test host.
 
 ## M1 implementation
 
-The first Linux vertical slice now includes a lexer, expression parser,
-bytecode compiler/VM, session variables, assignment, and `PRINT`. The planned
-M1 path adds the structured language features in tested slices. Embedded
-firmware and the GUI are later integration work.
+The Linux CLI currently includes expressions, structured blocks, procedures,
+functions, locals, arrays, `SELect ON`, and initial in-memory numbered-line
+commands (`LIST`, `RUN`, and `NEW`). Its 24-case CTest suite passes. This is
+still an incomplete M1 slice; see [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md) for
+the verified scope and remaining work. Embedded firmware and the GUI are later
+integration work.
 
 ## Build
 

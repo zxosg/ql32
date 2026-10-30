@@ -1,0 +1,10 @@
+10 PRINT "first"
+20 PRINT "second"
+first
+second
+10 PRINT "replacement"
+20 PRINT "second"
+replacement
+second
+10 PRINT "replacement"
+replacement

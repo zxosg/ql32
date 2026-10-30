@@ -1,0 +1,12 @@
+10 PRINT "first"
+20 PRINT "second"
+LIST
+RUN
+10 PRINT "replacement"
+LIST
+RUN
+20
+LIST
+RUN
+NEW
+LIST
