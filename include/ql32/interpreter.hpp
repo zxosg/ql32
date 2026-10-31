@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <stop_token>
 #include <unordered_map>
 #include <variant>
 
@@ -13,8 +14,10 @@ using Value = std::variant<double, std::string>;
 
 class Interpreter {
 public:
-    void execute(const std::string& source, std::ostream& output);
+    void execute(const std::string& source, std::ostream& output, std::stop_token stop = {});
     void executeInteractive(const std::string& source, std::ostream& output);
+    void runRepl(std::istream& input, std::ostream& output, std::ostream& diagnostics,
+                 bool showPrompt = false);
     void clear();
 
 private:

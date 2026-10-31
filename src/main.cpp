@@ -4,6 +4,9 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#if defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 int main(int argc, char** argv) {
     if (argc > 2) {
@@ -20,6 +23,13 @@ int main(int argc, char** argv) {
         }
         source.assign(std::istreambuf_iterator<char>(file), {});
     } else {
+#if defined(__unix__) || defined(__APPLE__)
+        if (::isatty(STDIN_FILENO)) {
+            ql32::Interpreter interpreter;
+            interpreter.runRepl(std::cin, std::cout, std::cerr, true);
+            return 0;
+        }
+#endif
         source.assign(std::istreambuf_iterator<char>(std::cin), {});
     }
 

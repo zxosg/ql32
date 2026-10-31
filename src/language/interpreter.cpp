@@ -1,4 +1,5 @@
 #include "ql32/interpreter.hpp"
+#include "bytecode.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -6,6 +7,7 @@
 #include <cctype>
 #include <cstdint>
 #include <limits>
+#include <istream>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -14,10 +16,16 @@
 
 namespace ql32 {
 namespace {
+using detail::ArrayArgumentCandidate;
+using detail::ForItemSpec;
+using detail::Instruction;
+using detail::Op;
+using detail::PrintSeparator;
+using detail::SelectItemSpec;
 
 enum class Kind {
     End, Newline, Number, String, Identifier, Print, If, Then, Else, EndKeyword, Dim,
-    Select, On, Remainder,
+    Select, On, Remainder, Remark,
     For, To, Step, Next, Repeat, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
     Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
@@ -32,6 +40,34 @@ struct Token {
     double number = 0;
     int line = 1;
     int column = 1;
+    std::size_t sourceStart = 0;
+    std::size_t sourceLength = 0;
+};
+
+struct Keyword {
+    std::string_view spelling;
+    std::string_view mandatory;
+    Kind kind;
+    std::string_view canonical;
+};
+
+constexpr Keyword keywords[] = {
+    {"PRINT", "PRINT", Kind::Print, "PRINT"}, {"DIM", "DIM", Kind::Dim, "DIM"},
+    {"SELECT", "SEL", Kind::Select, "SELect"}, {"ON", "ON", Kind::On, "ON"},
+    {"REMARK", "REM", Kind::Remark, "REMark"},
+    {"REMAINDER", "REMAINDER", Kind::Remainder, "REMAINDER"},
+    {"IF", "IF", Kind::If, "IF"}, {"THEN", "THEN", Kind::Then, "THEN"},
+    {"ELSE", "ELSE", Kind::Else, "ELSE"}, {"END", "END", Kind::EndKeyword, "END"},
+    {"FOR", "FOR", Kind::For, "FOR"}, {"TO", "TO", Kind::To, "TO"},
+    {"STEP", "STEP", Kind::Step, "STEP"}, {"NEXT", "NEXT", Kind::Next, "NEXT"},
+    {"REPEAT", "REP", Kind::Repeat, "REPeat"}, {"EXIT", "EXIT", Kind::Exit, "EXIT"},
+    {"DEFINE", "DEF", Kind::Define, "DEFine"},
+    {"PROCEDURE", "PROC", Kind::Procedure, "PROCedure"},
+    {"FUNCTION", "FN", Kind::Function, "FuNction"},
+    {"LOCAL", "LOC", Kind::Local, "LOCal"}, {"RETURN", "RET", Kind::Return, "RETurn"},
+    {"DIV", "DIV", Kind::Div, "DIV"}, {"MOD", "MOD", Kind::Mod, "MOD"},
+    {"AND", "AND", Kind::And, "AND"}, {"OR", "OR", Kind::Or, "OR"},
+    {"XOR", "XOR", Kind::Xor, "XOR"}, {"NOT", "NOT", Kind::Not, "NOT"}
 };
 
 class Lexer {
@@ -164,123 +200,86 @@ private:
         std::string text(source_.substr(start, offset_ - start));
         std::string upper = text;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        if (upper == "PRINT") return {Kind::Print, upper, 0, line_, column};
-        if (upper == "DIM") return {Kind::Dim, upper, 0, line_, column};
-        if (upper == "SELECT") return {Kind::Select, upper, 0, line_, column};
-        if (upper == "ON") return {Kind::On, upper, 0, line_, column};
-        if (upper == "REMAINDER") return {Kind::Remainder, upper, 0, line_, column};
-        if (upper == "IF") return {Kind::If, upper, 0, line_, column};
-        if (upper == "THEN") return {Kind::Then, upper, 0, line_, column};
-        if (upper == "ELSE") return {Kind::Else, upper, 0, line_, column};
-        if (upper == "END") return {Kind::EndKeyword, upper, 0, line_, column};
-        if (upper == "FOR") return {Kind::For, upper, 0, line_, column};
-        if (upper == "TO") return {Kind::To, upper, 0, line_, column};
-        if (upper == "STEP") return {Kind::Step, upper, 0, line_, column};
-        if (upper == "NEXT") return {Kind::Next, upper, 0, line_, column};
-        if (upper == "REPEAT") return {Kind::Repeat, upper, 0, line_, column};
-        if (upper == "EXIT") return {Kind::Exit, upper, 0, line_, column};
-        if (upper == "DEFINE") return {Kind::Define, upper, 0, line_, column};
-        if (upper == "PROCEDURE") return {Kind::Procedure, upper, 0, line_, column};
-        if (upper == "FUNCTION") return {Kind::Function, upper, 0, line_, column};
-        if (upper == "LOCAL") return {Kind::Local, upper, 0, line_, column};
-        if (upper == "RETURN") return {Kind::Return, upper, 0, line_, column};
-        if (upper == "DIV") return {Kind::Div, upper, 0, line_, column};
-        if (upper == "MOD") return {Kind::Mod, upper, 0, line_, column};
-        if (upper == "AND") return {Kind::And, upper, 0, line_, column};
-        if (upper == "OR") return {Kind::Or, upper, 0, line_, column};
-        if (upper == "XOR") return {Kind::Xor, upper, 0, line_, column};
-        if (upper == "NOT") return {Kind::Not, upper, 0, line_, column};
-        if (upper.size() >= 3 && upper.size() <= 6 &&
-            std::string_view("REMARK").starts_with(upper)) {
+        const Keyword* matched = nullptr;
+        for (const Keyword& keyword : keywords) {
+            std::size_t inputIndex = 0;
+            bool subsequence = true;
+            for (const char expected : keyword.spelling) {
+                if (inputIndex < upper.size() && upper[inputIndex] == expected) ++inputIndex;
+            }
+            subsequence = inputIndex == upper.size();
+            std::size_t mandatoryIndex = 0;
+            bool containsMandatory = true;
+            for (const char expected : upper) {
+                if (mandatoryIndex < keyword.mandatory.size() &&
+                    expected == keyword.mandatory[mandatoryIndex]) ++mandatoryIndex;
+            }
+            containsMandatory = mandatoryIndex == keyword.mandatory.size();
+            if (subsequence && containsMandatory) {
+                if (matched != nullptr)
+                    fail("ambiguous keyword abbreviation");
+                matched = &keyword;
+            }
+        }
+        if (matched != nullptr && matched->spelling == "REMARK") {
             skipComment();
             return {Kind::Newline, "", 0, line_, column};
         }
-        return {Kind::Identifier, upper, 0, line_, column};
+        if (matched != nullptr)
+            return {matched->kind, std::string(matched->canonical), 0, line_, column,
+                    start, text.size()};
+        return {Kind::Identifier, upper, 0, line_, column, start, text.size()};
     }
 };
 
-enum class PrintSeparator { None, Semicolon, Exclamation, Comma, Backslash };
-enum class Op {
-    Push, Load, Store, Add, Subtract, Multiply, Divide, IntegerDivide, Modulo,
-    Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
-    And, Or, Xor, Negate, Not, Print, PrintSeparator, PrintEnd, JumpIfFalse, Jump,
-    ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
-    DimArray, ArrayGet, ArraySet, SelectBegin, SelectMatch, SelectRemainder, SelectEnd
-};
-
-struct ForItemSpec {
-    bool hasEnd = false;
-    bool hasStep = false;
-};
-
-struct SelectItemSpec {
-    bool hasEnd = false;
-};
-
-struct ForRange {
-    double start = 0;
-    double end = 0;
-    double step = 1;
-    bool single = false;
-};
-
-struct ForState {
-    std::vector<ForRange> ranges;
-    std::size_t item = 0;
-};
-
-struct RuntimeFrame {
-    std::size_t returnAddress = 0;
-    bool function = false;
-    std::unordered_map<std::string, Value> locals;
-};
-
-struct RuntimeArray {
-    std::vector<std::size_t> lengths;
-    std::vector<Value> values;
-};
-
-struct SelectState {
-    double value = 0;
-    bool matched = false;
-};
-
-struct Instruction {
-    Op op;
-    Value value = 0.0;
-    std::string name;
-    int line = 1;
-    int column = 1;
-    PrintSeparator separator = PrintSeparator::None;
-    std::size_t target = 0;
-    std::size_t exitTarget = 0;
-    std::size_t loopId = 0;
-    std::vector<ForItemSpec> forItems;
-    bool explicitNext = false;
-    bool clearTarget = false;
-    std::size_t argCount = 0;
-    bool expectsValue = false;
-    std::vector<std::string> parameters;
-    std::vector<std::string> localNames;
-    std::size_t rank = 0;
-    std::vector<SelectItemSpec> selectItems;
-};
+std::string canonicalizeKeywords(const std::string& source) {
+    const std::vector<Token> tokens = Lexer(source).scan();
+    std::string result;
+    std::size_t copiedThrough = 0;
+    for (const Token& token : tokens) {
+        if (token.sourceLength == 0 || token.sourceStart < copiedThrough) continue;
+        const auto keyword = std::find_if(std::begin(keywords), std::end(keywords),
+            [&](const Keyword& candidate) {
+                return candidate.kind == token.kind && candidate.kind != Kind::Remark;
+            });
+        if (keyword == std::end(keywords)) continue;
+        result.append(source, copiedThrough, token.sourceStart - copiedThrough);
+        result.append(keyword->canonical);
+        copiedThrough = token.sourceStart + token.sourceLength;
+    }
+    result.append(source, copiedThrough, std::string::npos);
+    return result;
+}
 
 struct DefinitionInfo {
     std::size_t address = 0;
     bool function = false;
     std::vector<std::string> parameters;
     std::vector<std::string> locals;
+    std::vector<std::size_t> parameterArrayRanks;
 };
 
 class Compiler {
 public:
     explicit Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
 
-    std::vector<Instruction> compile() {
-        block();
-        if (!check(Kind::End)) error(peek(), "unexpected block terminator");
-        resolveCalls();
+    std::vector<Instruction> compile(bool tolerateUnresolvedCalls = false,
+                                     bool tolerateIncompleteBlocks = false) {
+        try {
+            block();
+            if (!check(Kind::End)) error(peek(), "unexpected block terminator");
+        } catch (const std::runtime_error& error) {
+            const std::string message = error.what();
+            const bool incomplete = message.find("expected END IF") != std::string::npos ||
+                message.find("expected END FOR") != std::string::npos ||
+                message.find("expected END REPeat") != std::string::npos ||
+                message.find("expected END DEFINE") != std::string::npos ||
+                message.find("expected END SELECT") != std::string::npos ||
+                message.find("SELECT requires at least one arm") != std::string::npos;
+            if (!tolerateIncompleteBlocks || !incomplete || !check(Kind::End)) throw;
+            return {};
+        }
+        resolveCalls(tolerateUnresolvedCalls);
         return std::move(code_);
     }
 
@@ -301,6 +300,15 @@ private:
     std::vector<LoopContext> loops_;
     std::size_t nextLoopId_ = 1;
     bool inDefinition_ = false;
+    std::string currentDefinitionName_;
+
+    bool isCurrentParameter(const std::string& name) const {
+        const auto definition = definitions_.find(currentDefinitionName_);
+        return definition != definitions_.end() &&
+               std::find(definition->second.parameters.begin(),
+                         definition->second.parameters.end(), name) !=
+                   definition->second.parameters.end();
+    }
 
     const Token& peek() const { return tokens_[current_]; }
     const Token& previous() const { return tokens_[current_ - 1]; }
@@ -330,7 +338,9 @@ private:
                 tokens_[current_ + 1].kind == Kind::Newline ||
                 tokens_[current_ + 1].kind == Kind::End ||
                 (tokens_[current_ + 1].kind == Kind::Identifier &&
-                 current_ + 2 < tokens_.size() && tokens_[current_ + 2].kind == Kind::Equal));
+                 current_ + 2 < tokens_.size() &&
+                 (tokens_[current_ + 2].kind == Kind::Equal ||
+                  tokens_[current_ + 2].kind == Kind::LeftParen)));
     }
     [[noreturn]] void error(const Token& token, const char* message) const {
         throw std::runtime_error("line " + std::to_string(token.line) + ", column " +
@@ -345,7 +355,7 @@ private:
         code_.push_back({op, std::move(value), std::move(name), token.line,
                          token.column, separator});
     }
-    void resolveCalls() {
+    void resolveCalls(bool tolerateUnresolvedCalls) {
         for (Instruction& instruction : code_) {
             if (instruction.op != Op::Call) continue;
             const auto found = definitions_.find(instruction.name);
@@ -358,6 +368,14 @@ private:
                     instruction.rank = array->second;
                     continue;
                 }
+                if (tolerateUnresolvedCalls) continue;
+                if (!instruction.ownerDefinition.empty()) {
+                    const auto owner = definitions_.find(instruction.ownerDefinition);
+                    if (owner != definitions_.end() &&
+                        std::find(owner->second.parameters.begin(), owner->second.parameters.end(),
+                                  instruction.name) != owner->second.parameters.end())
+                        continue;
+                }
                 error(instruction, "undefined procedure or function");
             }
             const DefinitionInfo& definition = found->second;
@@ -368,6 +386,98 @@ private:
             instruction.target = definition.address;
             instruction.parameters = definition.parameters;
             instruction.localNames = definition.locals;
+            for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
+                const auto array = arrays_.find(argument.name);
+                if (array == arrays_.end()) continue;
+                std::size_t& parameterRank =
+                    definitions_[instruction.name].parameterArrayRanks[argument.parameterIndex];
+                if (parameterRank != 0 && parameterRank != array->second)
+                    error(instruction, "array parameter is called with inconsistent ranks");
+                parameterRank = array->second;
+                code_[argument.loadInstruction].op = Op::PushArrayRef;
+            }
+        }
+        bool propagated = true;
+        while (propagated) {
+            propagated = false;
+            for (Instruction& instruction : code_) {
+                if (instruction.op != Op::Call || instruction.ownerDefinition.empty()) continue;
+                const auto caller = definitions_.find(instruction.ownerDefinition);
+                const auto callee = definitions_.find(instruction.name);
+                if (caller == definitions_.end() || callee == definitions_.end()) continue;
+                for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
+                    const auto parameter = std::find(caller->second.parameters.begin(),
+                                                     caller->second.parameters.end(), argument.name);
+                    if (parameter == caller->second.parameters.end()) continue;
+                    const std::size_t callerIndex = static_cast<std::size_t>(
+                        parameter - caller->second.parameters.begin());
+                    const std::size_t rank = caller->second.parameterArrayRanks[callerIndex];
+                    if (rank == 0) continue;
+                    std::size_t& targetRank =
+                        definitions_[instruction.name].parameterArrayRanks[argument.parameterIndex];
+                    if (targetRank != 0 && targetRank != rank)
+                        error(instruction, "array parameter is called with inconsistent ranks");
+                    if (targetRank == 0) {
+                        targetRank = rank;
+                        propagated = true;
+                    }
+                    code_[argument.loadInstruction].op = Op::PushArrayRef;
+                }
+            }
+        }
+        for (const Instruction& instruction : code_) {
+            if (instruction.op != Op::Call) continue;
+            const auto callee = definitions_.find(instruction.name);
+            if (callee == definitions_.end()) continue;
+            for (std::size_t i = 0; i < callee->second.parameterArrayRanks.size(); ++i) {
+                if (callee->second.parameterArrayRanks[i] == 0) continue;
+                const auto argument = std::find_if(instruction.arrayArgumentCandidates.begin(),
+                    instruction.arrayArgumentCandidates.end(),
+                    [&](const ArrayArgumentCandidate& candidate) {
+                        return candidate.parameterIndex == i;
+                    });
+                if (argument == instruction.arrayArgumentCandidates.end() ||
+                    code_[argument->loadInstruction].op != Op::PushArrayRef)
+                    error(instruction, "array argument required for array parameter");
+            }
+        }
+        for (Instruction& instruction : code_) {
+            if (instruction.op == Op::Call && !instruction.ownerDefinition.empty()) {
+                const auto owner = definitions_.find(instruction.ownerDefinition);
+                if (owner != definitions_.end()) {
+                    const auto parameter = std::find(owner->second.parameters.begin(),
+                                                     owner->second.parameters.end(), instruction.name);
+                    if (parameter != owner->second.parameters.end()) {
+                        const std::size_t index = static_cast<std::size_t>(
+                            parameter - owner->second.parameters.begin());
+                        const std::size_t rank = owner->second.parameterArrayRanks[index];
+                        if (rank == 0) error(instruction, "array parameter has no array argument");
+                        if (instruction.argCount != rank)
+                            throw std::runtime_error("line " + std::to_string(instruction.line) +
+                                ", column " + std::to_string(instruction.column) +
+                                ": incorrect array rank (indexes " +
+                                std::to_string(instruction.argCount) + ", rank " +
+                                std::to_string(rank) + ")");
+                        instruction.op = Op::ArrayGet;
+                        instruction.rank = rank;
+                        continue;
+                    }
+                }
+            }
+            if (instruction.op == Op::ArraySet && !instruction.ownerDefinition.empty()) {
+                const auto owner = definitions_.find(instruction.ownerDefinition);
+                if (owner != definitions_.end()) {
+                    const auto parameter = std::find(owner->second.parameters.begin(),
+                                                     owner->second.parameters.end(), instruction.name);
+                    if (parameter != owner->second.parameters.end()) {
+                        const std::size_t index = static_cast<std::size_t>(
+                            parameter - owner->second.parameters.begin());
+                        instruction.rank = owner->second.parameterArrayRanks[index];
+                        if (instruction.rank == 0)
+                            error(instruction, "array parameter has no array argument");
+                    }
+                }
+            }
         }
     }
     void block() {
@@ -446,22 +556,32 @@ private:
         code_.push_back(std::move(instruction));
         loop.exitInstructions.push_back(code_.size() - 1);
     }
-    std::size_t callArguments() {
+    std::size_t callArguments(std::vector<ArrayArgumentCandidate>* arrayCandidates = nullptr) {
         if (!match(Kind::LeftParen)) error(peek(), "expected '(' before arguments");
         std::size_t count = 0;
         if (!check(Kind::RightParen)) {
             do {
+                const bool bareName = check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+                    (tokens_[current_ + 1].kind == Kind::Comma ||
+                     tokens_[current_ + 1].kind == Kind::RightParen);
+                const std::string candidateName = bareName ? peek().text : std::string{};
+                const std::size_t expressionStart = code_.size();
                 expression();
+                if (arrayCandidates && bareName)
+                    arrayCandidates->push_back({count, candidateName, expressionStart});
                 ++count;
             } while (match(Kind::Comma));
         }
         if (!match(Kind::RightParen)) error(peek(), "expected ')' after arguments");
         return count;
     }
-    void emitCall(const Token& name, std::size_t arguments, bool expectsValue) {
+    void emitCall(const Token& name, std::size_t arguments, bool expectsValue,
+                  std::vector<ArrayArgumentCandidate> arrayCandidates = {}) {
         Instruction instruction{Op::Call, 0.0, name.text, name.line, name.column};
         instruction.argCount = arguments;
         instruction.expectsValue = expectsValue;
+        instruction.arrayArgumentCandidates = std::move(arrayCandidates);
+        instruction.ownerDefinition = currentDefinitionName_;
         code_.push_back(std::move(instruction));
     }
     void blockDim() {
@@ -500,6 +620,7 @@ private:
 
         std::vector<std::size_t> endJumps;
         bool hasRemainder = false;
+        std::size_t remainderFalseJump = std::numeric_limits<std::size_t>::max();
         std::size_t armCount = 0;
         while (check(Kind::Equal) ||
                (check(Kind::Number) && isLineNumber() && current_ + 1 < tokens_.size() &&
@@ -515,6 +636,8 @@ private:
                 Instruction remainder{Op::SelectRemainder, 0.0, {}, armToken.line, armToken.column};
                 code_.push_back(std::move(remainder));
                 falseJump = code_.size();
+                emit(Op::JumpIfFalse, armToken);
+                remainderFalseJump = code_.size() - 1;
             } else {
                 std::vector<SelectItemSpec> items;
                 while (true) {
@@ -544,9 +667,12 @@ private:
         if (armCount == 0) error(peek(), "SELECT requires at least one arm");
         if (!match(Kind::EndKeyword)) error(peek(), "expected END SELECT");
         if (!match(Kind::Select)) error(peek(), "expected SELECT after END");
+        const std::size_t selectEnd = code_.size();
         Instruction finish{Op::SelectEnd, 0.0, {}, keyword.line, keyword.column};
         code_.push_back(std::move(finish));
-        for (const std::size_t jump : endJumps) code_[jump].target = code_.size();
+        if (remainderFalseJump != std::numeric_limits<std::size_t>::max())
+            code_[remainderFalseJump].target = selectEnd;
+        for (const std::size_t jump : endJumps) code_[jump].target = selectEnd;
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
     }
@@ -584,6 +710,7 @@ private:
         definition.address = code_.size();
         definition.function = isFunction;
         definition.parameters = parameters;
+        definition.parameterArrayRanks.resize(parameters.size());
         definitions_.emplace(name.text, definition);
 
         if (!match(Kind::Newline)) error(peek(), "expected end of line after definition header");
@@ -607,8 +734,10 @@ private:
         }
 
         inDefinition_ = true;
+        currentDefinitionName_ = name.text;
         block();
         inDefinition_ = false;
+        currentDefinitionName_.clear();
         if (!match(Kind::EndKeyword)) error(peek(), "expected END DEFINE");
         if (!match(Kind::Define)) error(peek(), "expected DEFINE after END");
         if (check(Kind::Identifier)) {
@@ -778,23 +907,26 @@ private:
             emitExit(keyword, name);
             return;
         }
-        if (check(Kind::Identifier) && arrays_.contains(peek().text) &&
+        if (check(Kind::Identifier) && (arrays_.contains(peek().text) || isCurrentParameter(peek().text)) &&
             current_ + 1 < tokens_.size() && tokens_[current_ + 1].kind == Kind::LeftParen) {
             const Token name = advance();
             const std::size_t rank = callArguments();
-            if (rank != arrays_[name.text]) error(name, "incorrect array rank");
+            if (arrays_.contains(name.text) && rank != arrays_.at(name.text))
+                error(name, "incorrect array rank");
             if (!match(Kind::Equal)) error(peek(), "expected '=' after array index");
             expression();
             Instruction instruction{Op::ArraySet, 0.0, name.text, name.line, name.column};
             instruction.rank = rank;
+            instruction.ownerDefinition = currentDefinitionName_;
             code_.push_back(std::move(instruction));
             return;
         }
         if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
             tokens_[current_ + 1].kind == Kind::LeftParen) {
             const Token name = advance();
-            const std::size_t arguments = callArguments();
-            emitCall(name, arguments, false);
+            std::vector<ArrayArgumentCandidate> arrayCandidates;
+            const std::size_t arguments = callArguments(&arrayCandidates);
+            emitCall(name, arguments, false, std::move(arrayCandidates));
             return;
         }
         if (match(Kind::Print)) {
@@ -912,8 +1044,9 @@ private:
         if (match(Kind::Identifier)) {
             const Token t = previous();
             if (check(Kind::LeftParen)) {
-                const std::size_t arguments = callArguments();
-                emitCall(t, arguments, true);
+                std::vector<ArrayArgumentCandidate> arrayCandidates;
+                const std::size_t arguments = callArguments(&arrayCandidates);
+                emitCall(t, arguments, true, std::move(arrayCandidates));
             } else {
                 emit(Op::Load, t, 0.0, t.text);
             }
@@ -928,477 +1061,26 @@ private:
     }
 };
 
-double numeric(const Value& value, const Instruction& at) {
-    if (const auto* number = std::get_if<double>(&value)) return *number;
-    throw std::runtime_error("line " + std::to_string(at.line) + ", column " +
-                             std::to_string(at.column) + ": numeric value required");
-}
-
-[[noreturn]] void runtimeError(const Instruction& at, const char* message) {
-    throw std::runtime_error("line " + std::to_string(at.line) + ", column " +
-                             std::to_string(at.column) + ": " + message);
-}
-
-std::size_t utf8Length(const std::string& text) {
-    std::size_t count = 0;
-    for (const unsigned char byte : text)
-        if ((byte & 0xc0) != 0x80) ++count;
-    return count;
-}
-
-void writeText(const std::string& text, std::ostream& output, std::size_t& column) {
-    output << text;
-    column += utf8Length(text);
-}
-
-void printValue(const Value& value, std::ostream& output, std::size_t& column) {
-    if (const auto* number = std::get_if<double>(&value)) {
-        if (*number == 0) {
-            writeText("0", output, column);
-        } else {
-            char buffer[64];
-            const auto converted = std::to_chars(buffer, buffer + sizeof(buffer), *number);
-            if (converted.ec != std::errc{}) throw std::runtime_error("numeric formatting failed");
-            writeText(std::string(buffer, converted.ptr), output, column);
-        }
-    } else {
-        writeText(std::get<std::string>(value), output, column);
+std::string joinProgramLines(const std::map<int, std::string>& program) {
+    std::string source;
+    for (const auto& [number, body] : program) {
+        (void)number;
+        source += body;
+        source.push_back('\n');
     }
+    return source;
 }
 
-void printSeparator(PrintSeparator separator, std::ostream& output, std::size_t& column) {
-    switch (separator) {
-    case PrintSeparator::None:
-    case PrintSeparator::Semicolon:
-        break;
-    case PrintSeparator::Exclamation:
-        if (column != 0) writeText(" ", output, column);
-        break;
-    case PrintSeparator::Comma: {
-        const std::size_t spaces = 8 - (column % 8);
-        writeText(std::string(spaces, ' '), output, column);
-        break;
-    }
-    case PrintSeparator::Backslash:
-        output << '\n';
-        column = 0;
-        break;
-    }
+void validateProgramLines(const std::map<int, std::string>& program) {
+    Compiler compiler(Lexer(joinProgramLines(program)).scan());
+    (void)compiler.compile(true, true);
 }
 
 } // namespace
 
-void Interpreter::execute(const std::string& source, std::ostream& output) {
+std::vector<detail::Instruction> detail::compileSource(const std::string& source) {
     Compiler compiler(Lexer(source).scan());
-    const auto code = compiler.compile();
-    std::vector<Value> stack;
-    std::unordered_map<std::size_t, ForState> forStates;
-    std::vector<RuntimeFrame> callFrames;
-    std::unordered_map<std::string, RuntimeArray> arrays;
-    std::vector<SelectState> selectStates;
-    auto pop = [&]() {
-        if (stack.empty()) throw std::runtime_error("internal VM stack underflow");
-        Value value = std::move(stack.back());
-        stack.pop_back();
-        return value;
-    };
-    auto assignLoopValue = [&](const Instruction& instruction, double value) {
-        if (!std::isfinite(value)) runtimeError(instruction, "numeric overflow");
-        if (!instruction.name.empty() && instruction.name.back() == '%' &&
-            (std::trunc(value) != value ||
-             value < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
-             value > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
-            runtimeError(instruction, "Int32 value out of range");
-        variables_[instruction.name] = value;
-    };
-    auto rangeContains = [](const ForRange& range, double value) {
-        if (range.single) return true;
-        return range.step > 0 ? value <= range.end : value >= range.end;
-    };
-    auto arrayOffset = [&](const Instruction& instruction) {
-        const auto found = arrays.find(instruction.name);
-        if (found == arrays.end()) runtimeError(instruction, "array is not dimensioned");
-        RuntimeArray& array = found->second;
-        if (array.lengths.size() != instruction.rank)
-            runtimeError(instruction, "incorrect array rank");
-        std::vector<std::size_t> indices(instruction.rank);
-        for (std::size_t i = instruction.rank; i-- > 0;) {
-            const double index = numeric(pop(), instruction);
-            if (std::trunc(index) != index || index < 0 || index > 2147483647.0)
-                runtimeError(instruction, "array index must be a nonnegative integer");
-            indices[i] = static_cast<std::size_t>(index);
-        }
-        std::size_t offset = 0;
-        for (std::size_t i = 0; i < indices.size(); ++i) {
-            if (indices[i] >= array.lengths[i]) runtimeError(instruction, "array index out of bounds");
-            offset = offset * array.lengths[i] + indices[i];
-        }
-        return std::pair<RuntimeArray*, std::size_t>{&array, offset};
-    };
-
-    std::size_t pc = 0;
-    while (pc < code.size()) {
-        const auto& instruction = code[pc++];
-        switch (instruction.op) {
-        case Op::Call: {
-            if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
-            std::vector<Value> arguments(instruction.argCount);
-            for (std::size_t i = instruction.argCount; i-- > 0;)
-                arguments[i] = pop();
-            RuntimeFrame frame;
-            frame.returnAddress = pc;
-            frame.function = instruction.expectsValue;
-            for (std::size_t i = 0; i < instruction.parameters.size(); ++i)
-                frame.locals[instruction.parameters[i]] = std::move(arguments[i]);
-            for (const std::string& local : instruction.localNames) {
-                if (!frame.locals.contains(local)) {
-                    if (!local.empty() && local.back() == '$') frame.locals[local] = std::string{};
-                    else frame.locals[local] = 0.0;
-                }
-            }
-            callFrames.push_back(std::move(frame));
-            pc = instruction.target;
-            break;
-        }
-        case Op::Return: {
-            if (callFrames.empty()) runtimeError(instruction, "RETURN outside a definition");
-            RuntimeFrame& frame = callFrames.back();
-            Value result = 0.0;
-            if (instruction.expectsValue) {
-                if (!frame.function) runtimeError(instruction, "procedure cannot return a value");
-                result = pop();
-            } else if (frame.function) {
-                runtimeError(instruction, "function must return a value");
-            }
-            pc = frame.returnAddress;
-            const bool returnsValue = frame.function;
-            callFrames.pop_back();
-            if (returnsValue) stack.push_back(std::move(result));
-            break;
-        }
-        case Op::FunctionEnd:
-            runtimeError(instruction, "function did not return a value");
-        case Op::DimArray: {
-            std::vector<std::size_t> lengths(instruction.rank);
-            std::size_t elements = 1;
-            for (std::size_t i = instruction.rank; i-- > 0;) {
-                const double upper = numeric(pop(), instruction);
-                if (std::trunc(upper) != upper || upper < 0 || upper > 2147483647.0)
-                    runtimeError(instruction, "array upper bound must be a nonnegative integer");
-                const std::size_t length = static_cast<std::size_t>(upper) + 1;
-                if (elements > 1000000 / length)
-                    runtimeError(instruction, "array allocation limit exceeded");
-                elements *= length;
-                lengths[i] = length;
-            }
-            RuntimeArray array;
-            array.lengths = std::move(lengths);
-            if (!instruction.name.empty() && instruction.name.back() == '$')
-                array.values.resize(elements, std::string{});
-            else
-                array.values.resize(elements, 0.0);
-            arrays[instruction.name] = std::move(array);
-            break;
-        }
-        case Op::ArrayGet: {
-            auto [array, offset] = arrayOffset(instruction);
-            stack.push_back(array->values[offset]);
-            break;
-        }
-        case Op::ArraySet: {
-            Value value = pop();
-            auto [array, offset] = arrayOffset(instruction);
-            if (!instruction.name.empty() && instruction.name.back() == '$') {
-                if (!std::holds_alternative<std::string>(value))
-                    runtimeError(instruction, "string value required for array element");
-            } else {
-                const double number = numeric(value, instruction);
-                if (!instruction.name.empty() && instruction.name.back() == '%' &&
-                    (std::trunc(number) != number ||
-                     number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
-                     number > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
-                    runtimeError(instruction, "Int32 array element out of range");
-            }
-            array->values[offset] = std::move(value);
-            break;
-        }
-        case Op::SelectBegin: {
-            const double value = numeric(pop(), instruction);
-            selectStates.push_back({value, false});
-            break;
-        }
-        case Op::SelectMatch: {
-            if (selectStates.empty()) runtimeError(instruction, "inactive SELECT block");
-            bool matched = false;
-            for (std::size_t i = instruction.selectItems.size(); i-- > 0;) {
-                const SelectItemSpec& item = instruction.selectItems[i];
-                double end = 0;
-                if (item.hasEnd) end = numeric(pop(), instruction);
-                const double start = numeric(pop(), instruction);
-                const double selected = selectStates.back().value;
-                const bool thisMatch = item.hasEnd ? (selected >= start && selected <= end)
-                                                   : (selected == start);
-                matched = matched || thisMatch;
-            }
-            if (matched) selectStates.back().matched = true;
-            stack.emplace_back(matched ? 1.0 : 0.0);
-            break;
-        }
-        case Op::SelectRemainder: {
-            if (selectStates.empty()) runtimeError(instruction, "inactive SELECT block");
-            const bool matched = !selectStates.back().matched;
-            if (matched) selectStates.back().matched = true;
-            stack.emplace_back(matched ? 1.0 : 0.0);
-            break;
-        }
-        case Op::SelectEnd:
-            if (selectStates.empty()) runtimeError(instruction, "inactive SELECT block");
-            selectStates.pop_back();
-            break;
-        case Op::ForInit: {
-            ForState state;
-            state.ranges.resize(instruction.forItems.size());
-            for (std::size_t i = instruction.forItems.size(); i-- > 0;) {
-                const ForItemSpec& spec = instruction.forItems[i];
-                ForRange& range = state.ranges[i];
-                if (spec.hasStep) range.step = numeric(pop(), instruction);
-                if (spec.hasEnd) range.end = numeric(pop(), instruction);
-                range.start = numeric(pop(), instruction);
-                range.single = !spec.hasEnd;
-                if (spec.hasEnd && range.step == 0)
-                    runtimeError(instruction, "FOR step cannot be zero");
-            }
-            while (state.item < state.ranges.size() &&
-                   !rangeContains(state.ranges[state.item], state.ranges[state.item].start))
-                ++state.item;
-            if (state.item == state.ranges.size()) {
-                pc = instruction.target;
-                break;
-            }
-            const double initial = state.ranges[state.item].start;
-            assignLoopValue(instruction, initial);
-            forStates[instruction.loopId] = std::move(state);
-            break;
-        }
-        case Op::ForNext: {
-            auto found = forStates.find(instruction.loopId);
-            if (found == forStates.end()) runtimeError(instruction, "inactive FOR loop");
-            ForState& state = found->second;
-            const auto variable = variables_.find(instruction.name);
-            if (variable == variables_.end()) runtimeError(instruction, "missing FOR variable");
-            const double current = numeric(variable->second, instruction);
-            const ForRange& range = state.ranges[state.item];
-            const double next = range.single ? current : current + range.step;
-            if (!range.single && !std::isfinite(next))
-                runtimeError(instruction, "numeric overflow");
-            if (!range.single && rangeContains(range, next)) {
-                assignLoopValue(instruction, next);
-                for (auto loop = forStates.begin(); loop != forStates.end();) {
-                    if (loop->first > instruction.loopId) loop = forStates.erase(loop);
-                    else ++loop;
-                }
-                pc = instruction.target;
-                break;
-            }
-            ++state.item;
-            while (state.item < state.ranges.size() &&
-                   !rangeContains(state.ranges[state.item], state.ranges[state.item].start))
-                ++state.item;
-            if (state.item == state.ranges.size()) {
-                if (!instruction.explicitNext) {
-                    forStates.erase(found);
-                    pc = instruction.exitTarget;
-                } else {
-                    --state.item;
-                }
-                break;
-            }
-            assignLoopValue(instruction, state.ranges[state.item].start);
-            for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId) loop = forStates.erase(loop);
-                else ++loop;
-            }
-            pc = instruction.target;
-            break;
-        }
-        case Op::LoopNext:
-            for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId) loop = forStates.erase(loop);
-                else ++loop;
-            }
-            pc = instruction.target;
-            break;
-        case Op::ExitLoop:
-            for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first >= instruction.loopId) loop = forStates.erase(loop);
-                else ++loop;
-            }
-            pc = instruction.target;
-            break;
-        case Op::JumpIfFalse:
-            if (numeric(pop(), instruction) == 0) pc = instruction.target;
-            break;
-        case Op::Jump:
-            pc = instruction.target;
-            break;
-        case Op::Push: stack.push_back(instruction.value); break;
-        case Op::Load: {
-            if (!callFrames.empty()) {
-                const auto local = callFrames.back().locals.find(instruction.name);
-                if (local != callFrames.back().locals.end()) {
-                    stack.push_back(local->second);
-                    break;
-                }
-            }
-            const auto found = variables_.find(instruction.name);
-            if (found != variables_.end()) {
-                stack.push_back(found->second);
-            } else if (!instruction.name.empty() && instruction.name.back() == '$') {
-                stack.emplace_back(std::string{});
-            } else {
-                stack.emplace_back(0.0);
-            }
-            break;
-        }
-        case Op::Store: {
-            Value value = pop();
-            if (!instruction.name.empty() && instruction.name.back() == '$') {
-                if (!std::holds_alternative<std::string>(value))
-                    throw std::runtime_error("line " + std::to_string(instruction.line) +
-                                             ", column " + std::to_string(instruction.column) +
-                                             ": string value required");
-            } else {
-                const double number = numeric(value, instruction);
-                if (!instruction.name.empty() && instruction.name.back() == '%') {
-                    if (std::trunc(number) != number ||
-                        number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
-                        number > static_cast<double>(std::numeric_limits<std::int32_t>::max()))
-                        throw std::runtime_error("line " + std::to_string(instruction.line) +
-                                                 ", column " + std::to_string(instruction.column) +
-                                                 ": Int32 value out of range");
-                }
-            }
-            if (!callFrames.empty() && callFrames.back().locals.contains(instruction.name))
-                callFrames.back().locals[instruction.name] = std::move(value);
-            else
-                variables_[instruction.name] = std::move(value);
-            break;
-        }
-        case Op::Negate: {
-            const double value = -numeric(pop(), instruction);
-            if (!std::isfinite(value)) runtimeError(instruction, "numeric overflow");
-            stack.push_back(value);
-            break;
-        }
-        case Op::Not: {
-            const double value = numeric(pop(), instruction);
-            stack.emplace_back(value == 0 ? 1.0 : 0.0);
-            break;
-        }
-        case Op::Add: case Op::Subtract: case Op::Multiply: case Op::Divide:
-        case Op::IntegerDivide: case Op::Modulo: case Op::Power: {
-            Value right = pop();
-            Value left = pop();
-            if (instruction.op == Op::Add &&
-                std::holds_alternative<std::string>(left) &&
-                std::holds_alternative<std::string>(right)) {
-                stack.push_back(std::get<std::string>(left) + std::get<std::string>(right));
-                break;
-            }
-            const double a = numeric(left, instruction);
-            const double b = numeric(right, instruction);
-            if ((instruction.op == Op::Divide || instruction.op == Op::IntegerDivide ||
-                 instruction.op == Op::Modulo) && b == 0)
-                runtimeError(instruction, "division by zero");
-            if (instruction.op == Op::Power && a == 0 && b < 0)
-                runtimeError(instruction, "division by zero");
-            if (instruction.op == Op::Power && a < 0 && std::trunc(b) != b)
-                runtimeError(instruction, "invalid exponent");
-            double result = 0;
-            if (instruction.op == Op::Add) result = a + b;
-            else if (instruction.op == Op::Subtract) result = a - b;
-            else if (instruction.op == Op::Multiply) result = a * b;
-            else if (instruction.op == Op::Divide) result = a / b;
-            else if (instruction.op == Op::Power) result = std::pow(a, b);
-            else {
-                if (std::trunc(a) != a || std::trunc(b) != b ||
-                    a < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
-                    a > static_cast<double>(std::numeric_limits<std::int32_t>::max()) ||
-                    b < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
-                    b > static_cast<double>(std::numeric_limits<std::int32_t>::max()))
-                    runtimeError(instruction, "Int32 operands required");
-                const auto lhs = static_cast<std::int64_t>(a);
-                const auto rhs = static_cast<std::int64_t>(b);
-                std::int64_t quotient = lhs / rhs;
-                std::int64_t remainder = lhs % rhs;
-                if (remainder != 0 && ((lhs < 0) != (rhs < 0))) {
-                    --quotient;
-                    remainder += rhs;
-                }
-                if (instruction.op == Op::IntegerDivide) {
-                    if (quotient < std::numeric_limits<std::int32_t>::min() ||
-                        quotient > std::numeric_limits<std::int32_t>::max())
-                        runtimeError(instruction, "Int32 result out of range");
-                    result = static_cast<double>(quotient);
-                } else {
-                    result = static_cast<double>(remainder);
-                }
-            }
-            if (!std::isfinite(result)) runtimeError(instruction, "numeric overflow");
-            stack.push_back(result);
-            break;
-        }
-        case Op::Equal: case Op::NotEqual: case Op::Less: case Op::LessEqual:
-        case Op::Greater: case Op::GreaterEqual: {
-            const Value right = pop();
-            const Value left = pop();
-            bool result = false;
-            const bool strings = std::holds_alternative<std::string>(left) &&
-                                 std::holds_alternative<std::string>(right);
-            if (instruction.op == Op::Equal || instruction.op == Op::NotEqual) {
-                if (strings) result = std::get<std::string>(left) == std::get<std::string>(right);
-                else if (std::holds_alternative<double>(left) && std::holds_alternative<double>(right))
-                    result = std::get<double>(left) == std::get<double>(right);
-                else runtimeError(instruction, "values must have matching types");
-                if (instruction.op == Op::NotEqual) result = !result;
-            } else {
-                if (strings) runtimeError(instruction, "relational comparison requires numbers");
-                const double a = numeric(left, instruction);
-                const double b = numeric(right, instruction);
-                switch (instruction.op) {
-                case Op::Less: result = a < b; break;
-                case Op::LessEqual: result = a <= b; break;
-                case Op::Greater: result = a > b; break;
-                case Op::GreaterEqual: result = a >= b; break;
-                default: break;
-                }
-            }
-            stack.emplace_back(result ? 1.0 : 0.0);
-            break;
-        }
-        case Op::And: case Op::Or: case Op::Xor: {
-            const double right = numeric(pop(), instruction);
-            const double left = numeric(pop(), instruction);
-            const bool a = left != 0;
-            const bool b = right != 0;
-            const bool result = instruction.op == Op::And ? (a && b) :
-                                instruction.op == Op::Or ? (a || b) : (a != b);
-            stack.emplace_back(result ? 1.0 : 0.0);
-            break;
-        }
-        case Op::Print:
-            printSeparator(instruction.separator, output, output_column_);
-            printValue(pop(), output, output_column_);
-            break;
-        case Op::PrintSeparator:
-            printSeparator(instruction.separator, output, output_column_);
-            break;
-        case Op::PrintEnd:
-            output << '\n';
-            output_column_ = 0;
-            break;
-        }
-    }
+    return compiler.compile();
 }
 
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
@@ -1446,9 +1128,12 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
             const auto parsed = std::from_chars(line.data(), line.data() + numberEnd, number);
             if (parsed.ec != std::errc{} || number < 1 || number > 32767)
                 throw std::runtime_error("program line number must be in 1..32767");
-            std::string body = trim(line.substr(numberEnd));
-            if (body.empty()) program_.erase(number);
-            else program_[number] = std::move(body);
+            std::string body = canonicalizeKeywords(trim(line.substr(numberEnd)));
+            std::map<int, std::string> candidate = program_;
+            if (body.empty()) candidate.erase(number);
+            else candidate[number] = std::move(body);
+            validateProgramLines(candidate);
+            program_.swap(candidate);
             continue;
         }
 
@@ -1463,15 +1148,25 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
             clear();
         } else if (word == "RUN") {
             clear();
-            std::string programSource;
-            for (const auto& [number, body] : program_) {
-                (void)number;
-                programSource += body;
-                programSource.push_back('\n');
-            }
-            execute(programSource, output);
+            execute(joinProgramLines(program_), output);
         } else {
             execute(line + "\n", output);
+        }
+    }
+}
+
+void Interpreter::runRepl(std::istream& input, std::ostream& output,
+                          std::ostream& diagnostics, bool showPrompt) {
+    std::string line;
+    while (true) {
+        if (showPrompt) {
+            output << "ql32> " << std::flush;
+        }
+        if (!std::getline(input, line)) break;
+        try {
+            executeInteractive(line + "\n", output);
+        } catch (const std::exception& error) {
+            diagnostics << "ql32: " << error.what() << '\n';
         }
     }
 }

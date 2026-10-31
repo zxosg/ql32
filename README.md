@@ -10,7 +10,7 @@ chips. A Linux build is the primary development and test host.
 
 ## Repository map
 
-- `PROJECT-HANDOFF.md` — durable project context and next M1 work for new chats.
+- `PROJECT-HANDOFF.md` — durable milestone context and next steps for new chats.
 - `docs/specification/` — requirements and evolving public contracts.
 - `docs/reference/` — language manual links and provenance.
 - `src/language/` — lexer, parser, semantic analysis, and bytecode compiler.
@@ -20,14 +20,14 @@ chips. A Linux build is the primary development and test host.
 - `boards/` — board-specific build profiles and pin/resource definitions.
 - `tests/` — host-side language, VM, and integration tests.
 
-## M1 implementation
+## M1 status
 
-The Linux CLI currently includes expressions, structured blocks, procedures,
-functions, locals, arrays, `SELect ON`, and initial in-memory numbered-line
-commands (`LIST`, `RUN`, and `NEW`). Its 24-case CTest suite passes. This is
-still an incomplete M1 slice; see [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md) for
-the verified scope and remaining work. Embedded firmware and the GUI are later
-integration work.
+The Linux CLI includes expressions, structured blocks, procedures, functions,
+locals, arrays, `SELect ON`, in-memory numbered-line commands (`LIST`, `RUN`,
+and `NEW`), and a persistent terminal REPL. Its 30-case CTest suite passes,
+and M1 acceptance is complete on Linux. See [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md)
+for the M2 starting point. Embedded firmware and the GUI are later integration
+work.
 
 ## Build
 

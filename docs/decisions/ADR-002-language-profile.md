@@ -14,7 +14,7 @@ mark the minimum abbreviation, lowercase letters are optional, and recognized
 tokens expand to full canonical spelling when listed. `REM` is the historical
 abbreviation of `REMark`; apostrophe remains a QL/32 comment alias.
 
-M1 is delivered in slices: expression/variable/`PRINT` core first, then blocks, procedures/functions/locals, arrays, block `SELect ON`, and the initial in-memory command loop. The full set includes `IF`, `FOR`, `REPeat`, and `SELect ON`; the current implementation does not yet fulfill all M1 requirements.
+M1 is delivered in slices: expression/variable/`PRINT` core first, then blocks, procedures/functions/locals, arrays, block `SELect ON`, and the in-memory command loop. The Linux implementation now meets the defined M1 acceptance matrix, including the persistent terminal REPL and verified bytecode. Later milestones add editor/filesystem and UI integration.
 
 Structured conditionals use `ELSE IF condition THEN` as an `ELSE` with a
 nested `IF`. `ELSEIF` is not a separate keyword; nested conditionals close
@@ -38,10 +38,11 @@ the conformance suite; they do not by themselves establish SMSQ/E
 compatibility.
 
 Current implementation decisions: numeric arrays use zero-based inclusive
-bounds and are limited to one million host elements per array; procedure and
-function scalar arguments are copied by value; `SELect` singleton arms use
-exact binary64 equality; and stdin command batches support `LIST`, `RUN`, and
-`NEW`. Those behaviors remain QL/32-specific where they have not been
-verified against SMSQ/E. The detailed remaining work is tracked in
-`PROJECT-HANDOFF.md` and the language specification.
+bounds and are limited to one million host elements per array; scalar
+procedure/function arguments are copied by value and array arguments by
+reference; `SELect` singleton arms use exact binary64 equality; and stdin
+command batches and the terminal REPL support `LIST`, `RUN`, and `NEW`. Those
+behaviors remain QL/32-specific where they have not been verified against
+SMSQ/E. M1 acceptance and the next milestone are tracked in `PROJECT-HANDOFF.md`
+and the language specification.
 

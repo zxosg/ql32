@@ -2,7 +2,7 @@
 
 **Document ID:** QL32-LANG-001  
 **Version:** 0.3 (M1 language contract)
-**Status:** Approved profile; implementation and conformance remain in progress
+**Status:** Approved profile; M1 implementation acceptance complete on Linux
 **Sources:** [reference index](../reference/README.md), [language decision](../decisions/ADR-002-language-profile.md)
 
 ## 1. Language profile
@@ -34,23 +34,23 @@ the programmer must type it. Thus `DEF FN` means `DEFine FuNction`,
 `REM` means `REMark`. The [original QL user guide](../reference/README.md)
 also says recognized keywords are reproduced in full.
 
-QL/32 shall normalize a recognized abbreviated keyword to its canonical
-mixed-case spelling when storing/listing a program. For example, entering
+QL/32 normalizes recognized abbreviated keywords to their canonical mixed-case
+spelling when storing/listing a numbered program. For example, entering
 `10 def fn Square(x)` shall list as
 `10 DEFine FuNction Square(x)`. Keyword resolution uses a table of canonical
 spellings and mandatory letters, rather than a blanket prefix rule: `FN`
 matches `FuNction` even though it is not a contiguous prefix. The full spelling
 also matches. Intermediate omissions of lowercase letters are accepted when
-they preserve order and resolve uniquely. If two registered keywords match
-the same token in the same syntactic position, the parser reports an ambiguous
-keyword instead of choosing arbitrarily. Intermediate spellings and collision
-handling are QL/32 rules until checked against a live SMSQ/E interpreter.
+they preserve order and satisfy the mandatory-letter sequence. If more than
+one registered spelling matches, tokenization reports an ambiguous keyword.
+Intermediate spellings and collision handling are QL/32 rules until checked
+against a live SMSQ/E interpreter.
 
 Expansion applies to keyword tokens in code, not text inside strings or
-comments, nor to longer user identifiers. The command table must record
-abbreviations for every M1 keyword. Conformance tests shall cover minimum,
-full, mixed-case, intermediate, and collision cases, plus round-trip
-`LIST` output.
+comments, nor to longer user identifiers. The current keyword table implements
+the profile for the supported M1 keyword set. Conformance tests cover `DEF FN`,
+`RET`, mixed case, and canonical `LIST` output; remaining spellings still need
+coverage against the complete keyword table.
 
 The first slice accepts this grammar (later sections extend it):
 
@@ -253,13 +253,13 @@ DEFine FuNction Square(value)
 END DEFine
 ```
 
-Definitions are program-level. A function is called in an expression and must return a value; reaching `END DEFine` without one is a runtime error. A procedure is invoked as a statement. `LOCal` creates invocation-local names. Name lookup searches locals, parameters, then session globals. Recursion is supported with a bounded call stack; nested definitions are excluded from M1.
+Definitions are program-level. A function is called in an expression and must return a value; reaching `END DEFine` without one is a runtime error. A procedure is invoked as a statement. `LOCal` creates invocation-local names. Name lookup searches locals, parameters, then session globals. Recursion is supported with a bounded call stack; nested definitions are excluded from M1. Scalar arguments are copied into each invocation. A dimensioned array passed as a bare argument is aliased by the callee, so element updates are visible to the caller; forwarding that alias through another procedure/function is also supported.
 
-**QL/32 difference:** scalar arguments are passed by value by default; arrays by reference. Historical SuperBASIC procedure parameters can be passed by reference. These calls are class Q unless a compatible form is added later.
+**QL/32 difference:** scalar arguments are passed by value by default; array parameters use reference semantics when the actual argument names a dimensioned array. Historical SuperBASIC procedure parameters can be passed by reference. These calls are class Q unless a compatible form is added later.
 
 ## 7. Arrays
 
-`DIM array%(upper)` and multidimensional variants are implemented. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. The host allocation limit is one million elements per array; board-specific limits remain to be measured. Array arguments are not yet passed by reference.
+`DIM array%(upper)` and multidimensional variants are implemented. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. The host allocation limit is one million elements per array; board-specific limits remain to be measured. Dimensioned arrays can be passed to procedure/function parameters by reference.
 
 ## 8. Immediate mode, commands, and errors
 
@@ -268,12 +268,16 @@ line numbered 1 through 32767 stores it without executing it; entering another
 line with the same number replaces the whole stored line. The last occurrence
 of a repeated number in one input batch wins. A numbered line containing only
 whitespace deletes that stored line. A comment-only line is stored as a no-op,
-so it can retain a program comment. In stdin command batches, numbered lines
-are stored in memory and `LIST`, `RUN`, and `NEW` are supported. `LIST` prints
-ascending line numbers; `RUN` clears variables and executes the stored lines;
-`NEW` clears the program and variables. Invalid line bodies are stored and
-diagnosed when `RUN` compiles the program; atomic validation on line entry is
-not implemented. Unnumbered statements execute immediately. A `.bas` file
+so it can retain a program comment. In stdin command batches and the persistent
+terminal REPL, numbered lines are stored in memory and `LIST`, `RUN`, and
+`NEW` are supported. The REPL processes one entry at a time, preserves session
+state, and continues after an entry error. `LIST` prints
+ascending line numbers with recognized keywords canonicalized; `RUN` clears
+variables and executes the stored lines; `NEW` clears the program and
+variables. Each numbered replacement is checked against a candidate program
+before the old line is replaced. Incomplete block prefixes are accepted so
+multi-line structures can be entered incrementally; unresolved procedure and
+function calls are bound when `RUN` compiles the complete program. Unnumbered statements execute immediately. A `.bas` file
 passed to the Linux CLI is a complete source unit executed in file order; it
 does not edit a persistent interactive program. `EDIT`, `LOAD`, `SAVE`, and
 `DIR` arrive with editor/filesystem work in M2. The target shell also has
@@ -292,14 +296,15 @@ Full historical numeric formats, third-party toolkit commands, `GO TO`/`GO SUB` 
 | Slice | Executable evidence |
 | --- | --- |
 | 1 | Linux build and CLI; lexer/parser for assignments and expressions; source-span diagnostics |
-| 2 | Bytecode VM; isolated session state; variables and `PRINT`; `hello.bas` runs |
+| 2 | Verified bytecode VM; isolated session state; variables and `PRINT`; `hello.bas` runs |
 | 3 | Block `IF`, block and inline `FOR` with mixed ranges, `NEXT`/`EXIT`, `REPeat`; loop and branch edge cases |
-| 4 | Procedures, functions, locals, recursion limit, arrays, block `SELect ON` |
-| 5 | In-memory numbered lines; `LIST`, `RUN`, `NEW`, immediate statements; shared Linux conformance suite |
+| 4 | Procedures, functions, locals, verified recursion limit, arrays, block `SELect ON` |
+| 5 | In-memory numbered lines; persistent terminal REPL; `LIST`, `RUN`, `NEW`, immediate statements; shared Linux conformance suite |
 
-The CLI suite has 24 cases and covers success cases, syntax/type failures,
-overflow, division by zero, array bounds, and stored-program commands.
-Session isolation and cancellation are not yet covered. Expression and output
+The 30-case suite covers success cases, syntax/type failures, overflow,
+division by zero, array bounds/allocation limits and parameter type/rank,
+stored-program validation, array references, source-order range evaluation,
+session isolation, REPL recovery, recursion limits, and cancellation. Expression and output
 cases shall include `-2^2` → `4`, `2^3^2` → `64`, `NOT 2 = 0` → `1`,
 `-7 DIV 3` → `-3`, and `-7 MOD 3` → `2`, plus mixed-type rejection and each
 `PRINT` separator. Class S requires a source link and tests of syntax and
@@ -307,9 +312,13 @@ behavior.
 
 The expression precedence/conversion rules, Boolean truth model, `PRINT`
 separators/formatting, and line-number replacement behavior are specified
-above. Remaining M1 work includes full abbreviation handling and canonical
-listing, validating stored lines when entered, array-by-reference parameters,
-and broader session and language conformance coverage. Multiple-range
-evaluation timing, nested inline loops, and board allocation limits also need
-further review.
+above. M1 acceptance is complete: the supported-keyword and semantic cases
+pass on a clean Linux build, the compiler and VM are separate portable layers,
+and emitted bytecode is structurally and stack-flow verified before execution.
+Forward calls and incomplete blocks are intentionally accepted during line
+entry; unresolved calls are checked when the complete stored program is
+compiled by `RUN`. Multiple-range evaluation is tested once in source order.
+Nested inline loops are outside the explicit M1 grammar, and board allocation
+limits are a later hardware qualification item. Broader SMSQ/E compatibility
+claims remain limited to behavior with both source references and tests.
 
