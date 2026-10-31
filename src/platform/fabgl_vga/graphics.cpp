@@ -118,4 +118,20 @@ void FabglGraphics::closeSession(graphics::SessionId session) {
     activeSession_ = 0;
 }
 
+graphics::WindowInfo FabglGraphics::windowInfo(graphics::SessionId session) {
+    if (hasActiveSession_ && activeSession_ != session)
+        throw std::runtime_error("FabGL VGA adapter supports one active graphics session");
+    return {static_cast<std::uint32_t>(canvas_.getWidth()),
+            static_cast<std::uint32_t>(canvas_.getHeight()), 3, 8, 0};
+}
+
+graphics::RgbColor FabglGraphics::paletteColor(graphics::SessionId,
+                                                std::uint16_t index) {
+    if (index >= palette.size()) throw std::out_of_range("color index must be from 0 to 7");
+    const Rgb color = palette[index];
+    return {static_cast<std::uint8_t>(color.red * 255),
+            static_cast<std::uint8_t>(color.green * 255),
+            static_cast<std::uint8_t>(color.blue * 255)};
+}
+
 } // namespace ql32::platform::fabgl_vga

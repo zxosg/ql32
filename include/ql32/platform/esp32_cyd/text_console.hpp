@@ -14,6 +14,7 @@ class TftTextConsole final : public std::streambuf {
 public:
     explicit TftTextConsole(Adafruit_ILI9341& display);
     void clear();
+    void reconfigure();
 
 protected:
     int_type overflow(int_type character) override;
@@ -30,6 +31,7 @@ private:
     void put(char character);
     void advanceLine();
     void redraw();
+    void updateGeometry();
 };
 
 } // namespace ql32::platform::esp32_cyd

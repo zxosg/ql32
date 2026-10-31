@@ -348,7 +348,7 @@ ExecutionStatus Interpreter::executeResumable(const std::string& source, std::os
     if (execution_) throw std::runtime_error("interpreter already has a suspended execution");
     execution_ = std::make_unique<detail::VMExecutionState>();
     try {
-        execution_->code = detail::compileSource(source);
+        execution_->code = detail::compileSource(detail::expandIncludes(source, storage_.get()));
         verifyBytecode(execution_->code);
         const auto status = runExecution(output, stop);
         if (status == ExecutionStatus::Completed) execution_.reset();
@@ -487,6 +487,87 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto* text = std::get_if<std::string>(&arguments[0]);
                     if (!text) runtimeError(instruction, "string value required");
                     pushValue(static_cast<double>(utf8Length(*text)));
+                    break;
+                }
+                if (instruction.name == "GWIDTH" || instruction.name == "GHEIGHT" ||
+                    instruction.name == "GDEPTH" || instruction.name == "GROTATION" ||
+                    instruction.name == "GPALETTESIZE" || instruction.name == "GPALETTE$" ||
+                    instruction.name == "ROTATE") {
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    const auto integerArgument = [&](std::size_t index) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number) runtimeError(instruction, "numeric value required");
+                        if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < 0 || *number > 65535)
+                            runtimeError(instruction, "argument must be a nonnegative integer");
+                        return static_cast<std::uint16_t>(*number);
+                    };
+                    if (instruction.name == "ROTATE") {
+                        const auto degrees = integerArgument(0);
+                        if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270)
+                            runtimeError(instruction, "rotation must be 0, 90, 180, or 270 degrees");
+                        graphics_->setRotation(session_id_, degrees);
+                    } else if (instruction.name == "GPALETTE$") {
+                        const auto index = integerArgument(0);
+                        if (index >= graphics_->windowInfo(session_id_).paletteSize)
+                            runtimeError(instruction, "palette index out of range");
+                        const auto color = graphics_->paletteColor(session_id_, index);
+                        constexpr char hex[] = "0123456789ABCDEF";
+                        std::string result = "#000000";
+                        const std::uint8_t channels[] = {color.red, color.green, color.blue};
+                        for (std::size_t i = 0; i < 3; ++i) {
+                            result[1 + i * 2] = hex[channels[i] >> 4];
+                            result[2 + i * 2] = hex[channels[i] & 0x0F];
+                        }
+                        pushValue(std::move(result));
+                    } else {
+                        const auto info = graphics_->windowInfo(session_id_);
+                        if (instruction.name == "GWIDTH") pushValue(static_cast<double>(info.width));
+                        else if (instruction.name == "GHEIGHT") pushValue(static_cast<double>(info.height));
+                        else if (instruction.name == "GDEPTH") pushValue(static_cast<double>(info.colorDepth));
+                        else if (instruction.name == "GROTATION") pushValue(static_cast<double>(info.rotationDegrees));
+                        else pushValue(static_cast<double>(info.paletteSize));
+                    }
+                    break;
+                }
+                if (instruction.name == "GETNET") {
+                    if (!network_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "network service unavailable");
+                    const auto* ssid = std::get_if<std::string>(&arguments[0]);
+                    const auto* password = std::get_if<std::string>(&arguments[1]);
+                    if (!ssid || !password) runtimeError(instruction, "string values required");
+                    network_->connectWifi(*ssid, *password);
+                    break;
+                }
+                if (instruction.name == "DISNET") {
+                    if (!network_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "network service unavailable");
+                    network_->disconnectWifi();
+                    break;
+                }
+                if (instruction.name == "NETSTAT$" || instruction.name == "NETADDR$" ||
+                    instruction.name == "NETSIGNAL") {
+                    if (!network_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "network service unavailable");
+                    const runtime::WifiStatus status = network_->wifiStatus();
+                    if (instruction.name == "NETADDR$") {
+                        pushValue(status.ipv4Address);
+                    } else if (instruction.name == "NETSIGNAL") {
+                        pushValue(status.state == runtime::WifiState::Connected ?
+                            static_cast<double>(status.signalDbm) : 0.0);
+                    } else {
+                        switch (status.state) {
+                        case runtime::WifiState::Disconnected: pushValue(std::string("DISCONNECTED")); break;
+                        case runtime::WifiState::Connecting: pushValue(std::string("CONNECTING")); break;
+                        case runtime::WifiState::Connected: pushValue(std::string("CONNECTED")); break;
+                        case runtime::WifiState::Failed: pushValue(std::string("FAILED")); break;
+                        }
+                    }
                     break;
                 }
                 if (instruction.name == "ALERT" || instruction.name == "CONFIRM") {

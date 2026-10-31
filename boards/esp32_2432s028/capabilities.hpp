@@ -14,6 +14,7 @@ constexpr platform::Capabilities capabilities() {
         platform::capabilityBit(platform::ServiceKind::Display) |
             platform::capabilityBit(platform::ServiceKind::Input) |
             platform::capabilityBit(platform::ServiceKind::Storage) |
+            platform::capabilityBit(platform::ServiceKind::Network) |
             platform::capabilityBit(platform::ServiceKind::Clock) |
             platform::capabilityBit(platform::ServiceKind::Channels),
         platform::inputBit(platform::InputKind::Serial)

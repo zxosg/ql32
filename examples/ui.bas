@@ -1,25 +1,25 @@
-dialog = DINIT("Profile")
-DTEXT(dialog, "Edit the profile")
-DEDIT(dialog, "Name", "Ada")
-DINT(dialog, "Age", 36, 0, 150)
-DFLOAT(dialog, "Score", 1.5, 0, 10)
-DCHOICE(dialog, "Color", 2, "Red|Green|Blue")
-DCHECK(dialog, "Active", 1)
-DBUTTONS(dialog, "Apply", "Cancel")
+dialogHandle = DINIT("Profile")
+DTEXT dialogHandle, "Edit the profile"
+DEDIT dialogHandle, "Name", "Ada"
+DINT dialogHandle, "Age", 36, 0, 150
+DFLOAT dialogHandle, "Score", 1.5, 0, 10
+DCHOICE dialogHandle, "Color", 2, "Red|Green|Blue"
+DCHECK dialogHandle, "Active", 1
+DBUTTONS dialogHandle, "Apply", "Cancel"
 
-IF DIALOG(dialog) THEN
-  PRINT "Name: "; DGET$(dialog, 2)
-  PRINT "Age: "; DGET(dialog, 3)
-  PRINT "Score: "; DGET(dialog, 4)
-  PRINT "Color option: "; DGET(dialog, 5)
-  PRINT "Active: "; DGET(dialog, 6)
+IF DIALOG(dialogHandle) THEN
+  PRINT "Name: "; DGET$(dialogHandle, 2)
+  PRINT "Age: "; DGET(dialogHandle, 3)
+  PRINT "Score: "; DGET(dialogHandle, 4)
+  PRINT "Color option: "; DGET(dialogHandle, 5)
+  PRINT "Active: "; DGET(dialogHandle, 6)
 ELSE
   PRINT "Dialog cancelled"
 END IF
 
-menu = MINIT("Main menu")
-MCARD(menu, 10, "Open", "O")
-MCARD(menu, 20, "Save", "S")
-MCARD(menu, 90, "Exit", "X")
-command = MENU(menu)
+menuHandle = MINIT("Main menu")
+MCARD menuHandle, 10, "Open", "O"
+MCARD menuHandle, 20, "Save", "S"
+MCARD menuHandle, 90, "Exit", "X"
+command = MENU(menuHandle)
 PRINT "Selected command: "; command

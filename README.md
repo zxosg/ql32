@@ -31,8 +31,15 @@ interpreter sessions through the async service. The Linux console presenter
 supports alerts, confirmations, typed dialogs, and menus. BASIC exposes
 session-owned dialog and menu builders through `DINIT`/`DIALOG` and
 `MINIT`/`MENU`; [examples/ui.bas](examples/ui.bas) exercises typed results and
-stable menu IDs. Embedded UI integration remains future work. See
+stable menu IDs. Embedded ESP32 line presenters are integrated. See
 [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md).
+
+`INCLUDE "relative/path.bas"` at the start of a source module expands a BASIC
+library/header file before compilation. Included procedures and functions
+become part of that module. For example, run
+`./build/ql32 examples/include_demo.bas`; it includes
+`examples/lib/arithmetic.bas` and prints `42`. This is BASIC source inclusion,
+not C/C++ header or binary-library linking.
 
 ## Build
 

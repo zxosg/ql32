@@ -32,7 +32,8 @@ using detail::PrintSeparator;
 using detail::SelectItemSpec;
 
 enum class Kind {
-    End, Newline, Number, String, Identifier, Print, If, Then, Else, EndKeyword, Dim,
+    End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
+    Print, If, Then, Else, EndKeyword, Go, Goto, Dim,
     Select, On, Remainder, Remark,
     For, To, Step, Next, Repeat, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
@@ -63,6 +64,7 @@ constexpr Keyword keywords[] = {
     {"PRINT", "PRINT", Kind::Print, "PRINT"}, {"DIM", "DIM", Kind::Dim, "DIM"},
     {"SELECT", "SEL", Kind::Select, "SELect"}, {"ON", "ON", Kind::On, "ON"},
     {"REMARK", "REM", Kind::Remark, "REMark"},
+    {"GO", "GO", Kind::Go, "GO"}, {"GOTO", "GOTO", Kind::Goto, "GOTO"},
     {"REMAINDER", "REMAINDER", Kind::Remainder, "REMAINDER"},
     {"IF", "IF", Kind::If, "IF"}, {"THEN", "THEN", Kind::Then, "THEN"},
     {"ELSE", "ELSE", Kind::Else, "ELSE"}, {"END", "END", Kind::EndKeyword, "END"},
@@ -78,19 +80,36 @@ constexpr Keyword keywords[] = {
     {"XOR", "XOR", Kind::Xor, "XOR"}, {"NOT", "NOT", Kind::Not, "NOT"}
 };
 
-bool isBuiltinName(const std::string& name) {
+constexpr std::string_view builtinCommands[] = {
+    "WRITE", "CLOSE", "ALERT", "DTEXT", "DEDIT", "DINT", "DFLOAT",
+    "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
+    "INK", "PAPER", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE"
+};
+
+bool isBuiltinCommandName(std::string_view name) {
+    return std::find(std::begin(builtinCommands), std::end(builtinCommands), name) !=
+           std::end(builtinCommands);
+}
+
+bool isBuiltinFunctionName(std::string_view name) {
     return name == "LEN" || name == "OPEN" || name == "READ$" || name == "EOF" ||
-           name == "WRITE" || name == "CLOSE" || name == "ALERT" || name == "CONFIRM" ||
-           name == "DINIT" || name == "DTEXT" || name == "DEDIT" || name == "DINT" ||
-           name == "DFLOAT" || name == "DCHOICE" || name == "DCHECK" ||
-           name == "DBUTTONS" || name == "DIALOG" || name == "DGET" ||
-           name == "DGET$" || name == "MINIT" || name == "MCARD" || name == "MENU" ||
-           name == "INK" || name == "PAPER" || name == "LINE" || name == "RECT" ||
-           name == "CIRCLE" || name == "TEXT" || name == "CLS";
+           name == "CONFIRM" || name == "DIALOG" || name == "DINIT" ||
+           name == "DGET" || name == "DGET$" || name == "MINIT" || name == "MENU" ||
+           name == "NETSTAT$" || name == "NETADDR$" || name == "NETSIGNAL" ||
+           name == "GWIDTH" || name == "GHEIGHT" || name == "GDEPTH" ||
+           name == "GROTATION" || name == "GPALETTESIZE" || name == "GPALETTE$";
+}
+
+bool isBuiltinName(const std::string& name) {
+    return isBuiltinCommandName(name) || isBuiltinFunctionName(name);
 }
 
 std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "LEN") return {1, true};
+    if (instruction.name == "GETNET") return {2, false};
+    if (instruction.name == "DISNET") return {0, false};
+    if (instruction.name == "NETSTAT$" || instruction.name == "NETADDR$") return {0, true};
+    if (instruction.name == "NETSIGNAL") return {0, true};
     if (instruction.name == "ALERT") return {2, false};
     if (instruction.name == "CONFIRM") return {2, true};
     if (instruction.name == "OPEN") return {2, true};
@@ -111,6 +130,11 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "CIRCLE") return {3, false};
     if (instruction.name == "TEXT") return {3, false};
     if (instruction.name == "CLS") return {0, false};
+    if (instruction.name == "ROTATE") return {1, false};
+    if (instruction.name == "GWIDTH" || instruction.name == "GHEIGHT" ||
+        instruction.name == "GDEPTH" || instruction.name == "GROTATION" ||
+        instruction.name == "GPALETTESIZE") return {0, true};
+    if (instruction.name == "GPALETTE$") return {1, true};
     return {0, false};
 }
 
@@ -246,6 +270,10 @@ private:
         std::string text(source_.substr(start, offset_ - start));
         std::string upper = text;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (isBuiltinCommandName(upper))
+            return {Kind::BuiltinCommand, upper, 0, line_, column, start, text.size()};
+        if (isBuiltinFunctionName(upper))
+            return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
         const Keyword* matched = nullptr;
         for (const Keyword& keyword : keywords) {
             std::size_t inputIndex = 0;
@@ -284,6 +312,12 @@ std::string canonicalizeKeywords(const std::string& source) {
     std::size_t copiedThrough = 0;
     for (const Token& token : tokens) {
         if (token.sourceLength == 0 || token.sourceStart < copiedThrough) continue;
+        if (token.kind == Kind::BuiltinCommand) {
+            result.append(source, copiedThrough, token.sourceStart - copiedThrough);
+            result.append(token.text);
+            copiedThrough = token.sourceStart + token.sourceLength;
+            continue;
+        }
         const auto keyword = std::find_if(std::begin(keywords), std::end(keywords),
             [&](const Keyword& candidate) {
                 return candidate.kind == token.kind && candidate.kind != Kind::Remark;
@@ -305,6 +339,14 @@ struct DefinitionInfo {
     std::vector<std::size_t> parameterArrayRanks;
 };
 
+struct SourceTarget {
+    std::size_t address = 0;
+    std::vector<std::size_t> scopes;
+    std::string ownerDefinition;
+    int line = 1;
+    int column = 1;
+};
+
 class Compiler {
 public:
     explicit Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {
@@ -316,7 +358,8 @@ public:
     }
 
     std::vector<Instruction> compile(bool tolerateUnresolvedCalls = false,
-                                     bool tolerateIncompleteBlocks = false) {
+                                     bool tolerateIncompleteBlocks = false,
+                                     bool tolerateUnresolvedSourceJumps = false) {
         try {
             block();
             if (!check(Kind::End)) error(peek(), "unexpected block terminator");
@@ -331,6 +374,7 @@ public:
             if (!tolerateIncompleteBlocks || !incomplete || !check(Kind::End)) throw;
             return {};
         }
+        resolveSourceJumps(tolerateUnresolvedSourceJumps);
         resolveCalls(tolerateUnresolvedCalls);
         return std::move(code_);
     }
@@ -341,6 +385,10 @@ private:
     std::unordered_map<std::string, DefinitionInfo> definitions_;
     std::unordered_map<std::string, std::size_t> arrays_;
     std::unordered_set<std::string> declaredFunctions_;
+    std::unordered_map<int, SourceTarget> lineTargets_;
+    std::unordered_map<std::string, SourceTarget> labels_;
+    std::vector<std::size_t> controlScopes_;
+    std::size_t nextControlScope_ = 1;
     std::size_t current_ = 0;
     struct LoopContext {
         std::size_t id;
@@ -354,6 +402,57 @@ private:
     std::size_t nextLoopId_ = 1;
     bool inDefinition_ = false;
     std::string currentDefinitionName_;
+
+    std::string scopedLabel(const std::string& name) const {
+        return currentDefinitionName_ + "\x1f" + name;
+    }
+    SourceTarget currentSourceTarget(const Token& token) const {
+        return {code_.size(), controlScopes_, currentDefinitionName_, token.line, token.column};
+    }
+    void registerLineTarget(const Token& token) {
+        const double number = token.number;
+        if (!std::isfinite(number) || std::trunc(number) != number || number < 1 || number > 32767)
+            error(token, "program line number must be in 1..32767");
+        if (!lineTargets_.emplace(static_cast<int>(number), currentSourceTarget(token)).second)
+            error(token, "duplicate program line number");
+    }
+    bool labelDeclaration() const {
+        return check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+               tokens_[current_ + 1].kind == Kind::Colon;
+    }
+    void registerLabel() {
+        const Token label = advance();
+        advance(); // ':'
+        if (!labels_.emplace(scopedLabel(label.text), currentSourceTarget(label)).second)
+            error(label, "duplicate label");
+    }
+    void resolveSourceJumps(bool tolerateUnresolved) {
+        for (Instruction& instruction : code_) {
+            if (!instruction.sourceJump) continue;
+            const SourceTarget* target = nullptr;
+            if (instruction.targetIsLineNumber) {
+                static const SourceTarget beginning{};
+                if (instruction.sourceLineTarget == 0) target = &beginning;
+                else {
+                    const auto found = lineTargets_.find(instruction.sourceLineTarget);
+                    if (found != lineTargets_.end()) target = &found->second;
+                }
+            } else {
+                const auto found = labels_.find(instruction.ownerDefinition + "\x1f" + instruction.name);
+                if (found != labels_.end()) target = &found->second;
+            }
+            if (!target) {
+                if (tolerateUnresolved) continue;
+                error(instruction, instruction.targetIsLineNumber ?
+                      "GOTO line number does not exist" : "GOTO label does not exist");
+            }
+            if (target->ownerDefinition != instruction.ownerDefinition)
+                error(instruction, "GOTO cannot cross a procedure or function boundary");
+            if (target->scopes != instruction.jumpScopes)
+                error(instruction, "GOTO cannot enter or leave a structured loop or SELECT block");
+            instruction.target = target->address;
+        }
+    }
 
     bool isCurrentParameter(const std::string& name) const {
         const auto definition = definitions_.find(currentDefinitionName_);
@@ -387,13 +486,13 @@ private:
                 tokens_[current_ + 1].kind == Kind::Select ||
                 tokens_[current_ + 1].kind == Kind::Equal ||
                 tokens_[current_ + 1].kind == Kind::Local ||
+                tokens_[current_ + 1].kind == Kind::Go ||
+                tokens_[current_ + 1].kind == Kind::Goto ||
+                tokens_[current_ + 1].kind == Kind::BuiltinCommand ||
                 tokens_[current_ + 1].kind == Kind::Return ||
                 tokens_[current_ + 1].kind == Kind::Newline ||
                 tokens_[current_ + 1].kind == Kind::End ||
-                (tokens_[current_ + 1].kind == Kind::Identifier &&
-                 current_ + 2 < tokens_.size() &&
-                 (tokens_[current_ + 2].kind == Kind::Equal ||
-                  tokens_[current_ + 2].kind == Kind::LeftParen)));
+                tokens_[current_ + 1].kind == Kind::Identifier);
     }
     [[noreturn]] void error(const Token& token, const char* message) const {
         throw std::runtime_error("line " + std::to_string(token.line) + ", column " +
@@ -546,7 +645,13 @@ private:
         while (!check(Kind::End) && !check(Kind::Else) && !check(Kind::EndKeyword)) {
             if (match(Kind::Newline) || match(Kind::Colon)) continue;
             if (check(Kind::Number) && isLineNumber()) {
-                advance();
+                const Token lineNumber = advance();
+                registerLineTarget(lineNumber);
+                if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End) ||
+                    check(Kind::Else) || check(Kind::EndKeyword)) continue;
+            }
+            if (labelDeclaration()) {
+                registerLabel();
                 if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End) ||
                     check(Kind::Else) || check(Kind::EndKeyword)) continue;
             }
@@ -637,6 +742,33 @@ private:
         if (!match(Kind::RightParen)) error(peek(), "expected ')' after arguments");
         return count;
     }
+    bool commandArgumentTerminator() const {
+        return check(Kind::Newline) || check(Kind::Colon) || check(Kind::End) ||
+               check(Kind::EndKeyword);
+    }
+    std::size_t commandArguments(std::vector<ArrayArgumentCandidate>* arrayCandidates = nullptr) {
+        std::size_t count = 0;
+        if (commandArgumentTerminator()) return count;
+        while (true) {
+            const bool bareName = check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+                (tokens_[current_ + 1].kind == Kind::Comma ||
+                 commandArgumentTerminatorAt(current_ + 1));
+            const std::string candidateName = bareName ? peek().text : std::string{};
+            const std::size_t expressionStart = code_.size();
+            expression();
+            if (arrayCandidates && bareName)
+                arrayCandidates->push_back({count, candidateName, expressionStart});
+            ++count;
+            if (!match(Kind::Comma)) break;
+            if (commandArgumentTerminator()) error(peek(), "expected argument after ','");
+        }
+        return count;
+    }
+    bool commandArgumentTerminatorAt(std::size_t index) const {
+        const Kind kind = tokens_[index].kind;
+        return kind == Kind::Newline || kind == Kind::Colon || kind == Kind::End ||
+               kind == Kind::EndKeyword;
+    }
     void emitCall(const Token& name, std::size_t arguments, bool expectsValue,
                   std::vector<ArrayArgumentCandidate> arrayCandidates = {}) {
         Instruction instruction{Op::Call, 0.0, name.text, name.line, name.column};
@@ -659,10 +791,18 @@ private:
         code_.push_back(std::move(instruction));
     }
     void selectArm() {
-        while (!check(Kind::End) && !check(Kind::EndKeyword) && !check(Kind::Equal)) {
+        while (!check(Kind::End) && !check(Kind::EndKeyword) && !check(Kind::Equal) &&
+               !(check(Kind::Number) && isLineNumber() && current_ + 1 < tokens_.size() &&
+                 tokens_[current_ + 1].kind == Kind::Equal)) {
             if (match(Kind::Newline) || match(Kind::Colon)) continue;
             if (check(Kind::Number) && isLineNumber()) {
-                advance();
+                const Token lineNumber = advance();
+                registerLineTarget(lineNumber);
+                if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End) ||
+                    check(Kind::EndKeyword)) continue;
+            }
+            if (labelDeclaration()) {
+                registerLabel();
                 if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End)) continue;
             }
             statement();
@@ -677,6 +817,7 @@ private:
         expression();
         Instruction begin{Op::SelectBegin, 0.0, {}, keyword.line, keyword.column};
         code_.push_back(std::move(begin));
+        controlScopes_.push_back(nextControlScope_++);
         if (!match(Kind::Newline)) error(peek(), "expected end of line after SELECT ON");
         while (match(Kind::Newline)) {}
 
@@ -735,6 +876,7 @@ private:
         if (remainderFalseJump != std::numeric_limits<std::size_t>::max())
             code_[remainderFalseJump].target = selectEnd;
         for (const std::size_t jump : endJumps) code_[jump].target = selectEnd;
+        controlScopes_.pop_back();
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
     }
@@ -845,6 +987,7 @@ private:
         init.forItems = std::move(items);
         code_.push_back(std::move(init));
         const std::size_t body = code_.size();
+        controlScopes_.push_back(code_[initIndex].loopId);
         loops_.push_back({code_[initIndex].loopId, variable.text, body, true, {}, {}});
 
         if (match(Kind::Colon)) {
@@ -871,6 +1014,7 @@ private:
             for (const std::size_t index : loops_.back().exitInstructions)
                 code_[index].target = code_.size();
             loops_.pop_back();
+            controlScopes_.pop_back();
             return;
         }
 
@@ -890,6 +1034,7 @@ private:
         for (const std::size_t index : loops_.back().exitInstructions)
             code_[index].target = code_.size();
         loops_.pop_back();
+        controlScopes_.pop_back();
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
     }
@@ -899,6 +1044,7 @@ private:
         const Token name = advance();
         const std::size_t loopId = nextLoopId_++;
         const std::size_t body = code_.size();
+        controlScopes_.push_back(loopId);
         loops_.push_back({loopId, name.text, body, false, {}, {}});
 
         if (match(Kind::Colon)) {
@@ -917,6 +1063,7 @@ private:
             for (const std::size_t index : loops_.back().exitInstructions)
                 code_[index].target = exit;
             loops_.pop_back();
+            controlScopes_.pop_back();
             return;
         }
 
@@ -935,11 +1082,35 @@ private:
         for (const std::size_t index : loops_.back().exitInstructions)
             code_[index].target = exit;
         loops_.pop_back();
+        controlScopes_.pop_back();
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
     }
+    void gotoStatement() {
+        const Token keyword = advance();
+        if (keyword.kind == Kind::Go && !match(Kind::To))
+            error(peek(), "expected TO after GO");
+        Instruction jump{Op::Jump, 0.0, {}, keyword.line, keyword.column};
+        jump.sourceJump = true;
+        jump.jumpScopes = controlScopes_;
+        jump.ownerDefinition = currentDefinitionName_;
+        if (check(Kind::Number)) {
+            const Token target = advance();
+            if (!std::isfinite(target.number) || std::trunc(target.number) != target.number ||
+                target.number < 0 || target.number > 32767)
+                error(target, "GOTO target must be a line number in 0..32767");
+            jump.targetIsLineNumber = true;
+            jump.sourceLineTarget = static_cast<int>(target.number);
+        } else if (check(Kind::Identifier)) {
+            jump.name = advance().text;
+        } else {
+            error(peek(), "expected a line number or label after GOTO");
+        }
+        code_.push_back(std::move(jump));
+    }
     void statement() {
         if (check(Kind::If)) { blockIf(); return; }
+        if (check(Kind::Go) || check(Kind::Goto)) { gotoStatement(); return; }
         if (check(Kind::For)) { blockFor(); return; }
         if (check(Kind::Repeat)) { blockRepeat(); return; }
         if (check(Kind::Define)) { blockDefinition(); return; }
@@ -970,6 +1141,17 @@ private:
             emitExit(keyword, name);
             return;
         }
+        if (check(Kind::BuiltinCommand)) {
+            const Token name = advance();
+            if (check(Kind::LeftParen))
+                error(peek(), "commands take arguments without call parentheses");
+            std::vector<ArrayArgumentCandidate> arrayCandidates;
+            const std::size_t arguments = commandArguments(&arrayCandidates);
+            emitCall(name, arguments, false, std::move(arrayCandidates));
+            return;
+        }
+        if (check(Kind::BuiltinFunction))
+            error(peek(), "function call must be used as a value");
         if (check(Kind::Identifier) && (arrays_.find(peek().text) != arrays_.end() || isCurrentParameter(peek().text)) &&
             current_ + 1 < tokens_.size() && tokens_[current_ + 1].kind == Kind::LeftParen) {
             const Token name = advance();
@@ -982,14 +1164,6 @@ private:
             instruction.rank = rank;
             instruction.ownerDefinition = currentDefinitionName_;
             code_.push_back(std::move(instruction));
-            return;
-        }
-        if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
-            tokens_[current_ + 1].kind == Kind::LeftParen) {
-            const Token name = advance();
-            std::vector<ArrayArgumentCandidate> arrayCandidates;
-            const std::size_t arguments = callArguments(&arrayCandidates);
-            emitCall(name, arguments, false, std::move(arrayCandidates));
             return;
         }
         if (match(Kind::Print)) {
@@ -1019,6 +1193,18 @@ private:
             advance();
             expression();
             emit(Op::Store, name, 0.0, name.text);
+            return;
+        }
+        if (check(Kind::Identifier)) {
+            const Token name = advance();
+            if (check(Kind::LeftParen)) {
+                if (isBuiltinFunctionName(name.text))
+                    error(name, "function call must be used as a value");
+                error(peek(), "procedure calls use command syntax without parentheses");
+            }
+            std::vector<ArrayArgumentCandidate> arrayCandidates;
+            const std::size_t arguments = commandArguments(&arrayCandidates);
+            emitCall(name, arguments, false, std::move(arrayCandidates));
             return;
         }
         error(peek(), "expected assignment or PRINT");
@@ -1143,8 +1329,19 @@ private:
     void primary() {
         if (match(Kind::Number)) { const Token t = previous(); emit(Op::Push, t, t.number); return; }
         if (match(Kind::String)) { const Token t = previous(); emit(Op::Push, t, t.text); return; }
+        if (match(Kind::BuiltinFunction)) {
+            const Token t = previous();
+            if (!check(Kind::LeftParen)) error(t, "built-in function requires parentheses");
+            std::vector<ArrayArgumentCandidate> arrayCandidates;
+            const std::size_t arguments = callArguments(&arrayCandidates);
+            emitCall(t, arguments, true, std::move(arrayCandidates));
+            return;
+        }
         if (match(Kind::Identifier)) {
             const Token t = previous();
+            if (declaredFunctions_.find(t.text) != declaredFunctions_.end() &&
+                !check(Kind::LeftParen))
+                error(t, "function call requires parentheses");
             const bool scalarStringSyntax = !isBuiltinName(t.text) && !t.text.empty() &&
                 t.text.back() == '$' &&
                 arrays_.find(t.text) == arrays_.end() &&
@@ -1175,16 +1372,190 @@ private:
 std::string joinProgramLines(const std::map<int, std::string>& program) {
     std::string source;
     for (const auto& [number, body] : program) {
-        (void)number;
+        source += std::to_string(number);
+        source.push_back(' ');
         source += body;
         source.push_back('\n');
     }
     return source;
 }
 
-void validateProgramLines(const std::map<int, std::string>& program) {
-    Compiler compiler(Lexer(joinProgramLines(program)).scan());
-    (void)compiler.compile(true, true);
+std::string trimSourceLine(std::string value) {
+    const auto first = value.find_first_not_of(" \t\r");
+    if (first == std::string::npos) return {};
+    const auto last = value.find_last_not_of(" \t\r");
+    return value.substr(first, last - first + 1);
+}
+
+bool isSourceComment(const std::string& line) {
+    std::size_t start = line.find_first_not_of(" \t\r");
+    if (start != std::string::npos && std::isdigit(static_cast<unsigned char>(line[start]))) {
+        std::size_t afterNumber = start;
+        while (afterNumber < line.size() &&
+               std::isdigit(static_cast<unsigned char>(line[afterNumber]))) ++afterNumber;
+        if (afterNumber < line.size() &&
+            (line[afterNumber] == ' ' || line[afterNumber] == '\t'))
+            start = line.find_first_not_of(" \t\r", afterNumber);
+    }
+    const std::string trimmed = start == std::string::npos ? std::string{} :
+                                trimSourceLine(line.substr(start));
+    if (trimmed.empty() || trimmed.front() == '\'') return true;
+    if (trimmed.size() < 3) return false;
+    return std::toupper(static_cast<unsigned char>(trimmed[0])) == 'R' &&
+           std::toupper(static_cast<unsigned char>(trimmed[1])) == 'E' &&
+           std::toupper(static_cast<unsigned char>(trimmed[2])) == 'M';
+}
+
+std::string normalizeIncludePath(const std::string& path, const std::string& parent) {
+    if (path.empty() || path.front() == '/' || path.front() == '\\' ||
+        path.find(':') != std::string::npos)
+        throw std::runtime_error("INCLUDE path must be relative to the storage root");
+    std::string combined = parent.empty() ? path : parent + "/" + path;
+    std::replace(combined.begin(), combined.end(), '\\', '/');
+    std::vector<std::string> components;
+    std::size_t start = 0;
+    while (start <= combined.size()) {
+        const std::size_t separator = combined.find('/', start);
+        const std::string component = combined.substr(start,
+            separator == std::string::npos ? std::string::npos : separator - start);
+        if (!component.empty() && component != ".") {
+            if (component == "..") {
+                if (components.empty())
+                    throw std::runtime_error("INCLUDE path escapes the storage root");
+                components.pop_back();
+            } else {
+                components.push_back(component);
+            }
+        }
+        if (separator == std::string::npos) break;
+        start = separator + 1;
+    }
+    if (components.empty()) throw std::runtime_error("INCLUDE path is empty");
+    std::string normalized;
+    for (const auto& component : components) {
+        if (!normalized.empty()) normalized.push_back('/');
+        normalized += component;
+    }
+    return normalized;
+}
+
+std::optional<std::string> includePathFromLine(const std::string& sourceLine,
+                                               bool& recognized) {
+    recognized = false;
+    std::size_t position = sourceLine.find_first_not_of(" \t\r");
+    if (position == std::string::npos) return std::nullopt;
+    if (std::isdigit(static_cast<unsigned char>(sourceLine[position]))) {
+        while (position < sourceLine.size() &&
+               std::isdigit(static_cast<unsigned char>(sourceLine[position]))) ++position;
+        if (position < sourceLine.size() &&
+            (sourceLine[position] == ' ' || sourceLine[position] == '\t')) {
+            while (position < sourceLine.size() &&
+                   (sourceLine[position] == ' ' || sourceLine[position] == '\t')) ++position;
+        } else {
+            position = sourceLine.find_first_not_of(" \t\r");
+        }
+    }
+    if (position == std::string::npos) return std::nullopt;
+    constexpr char keyword[] = "INCLUDE";
+    if (sourceLine.size() - position < sizeof(keyword) - 1) return std::nullopt;
+    for (std::size_t i = 0; i < sizeof(keyword) - 1; ++i)
+        if (std::toupper(static_cast<unsigned char>(sourceLine[position + i])) != keyword[i])
+            return std::nullopt;
+    position += sizeof(keyword) - 1;
+    if (position < sourceLine.size() &&
+        !std::isspace(static_cast<unsigned char>(sourceLine[position])))
+        return std::nullopt;
+    recognized = true;
+    while (position < sourceLine.size() &&
+           std::isspace(static_cast<unsigned char>(sourceLine[position]))) ++position;
+    if (position >= sourceLine.size() || sourceLine[position] != '"')
+        throw std::runtime_error("INCLUDE requires a quoted file path");
+    ++position;
+    std::string path;
+    bool closed = false;
+    while (position < sourceLine.size()) {
+        if (sourceLine[position] == '"') {
+            if (position + 1 < sourceLine.size() && sourceLine[position + 1] == '"') {
+                path.push_back('"');
+                position += 2;
+            } else {
+                ++position;
+                closed = true;
+                break;
+            }
+        } else {
+            path.push_back(sourceLine[position++]);
+        }
+    }
+    if (!closed || path.empty()) throw std::runtime_error("invalid INCLUDE file path");
+    const std::string trailing = trimSourceLine(sourceLine.substr(position));
+    if (!trailing.empty() && trailing.front() != '\'')
+        throw std::runtime_error("unexpected text after INCLUDE file path");
+    return path;
+}
+
+std::string expandIncludesRecursive(const std::string& source,
+                                    runtime::StorageService* storage,
+                                    const std::string& parent,
+                                    std::vector<std::string>& activePaths,
+                                    std::size_t depth,
+                                    std::size_t& expandedBytes) {
+    constexpr std::size_t maxDepth = 16;
+    constexpr std::size_t maxBytes = 64 * 1024;
+    if (depth > maxDepth) throw std::runtime_error("INCLUDE nesting exceeds 16 files");
+
+    std::string expanded;
+    std::istringstream input(source);
+    bool headerOpen = true;
+    for (std::string line; std::getline(input, line);) {
+        bool isInclude = false;
+        const auto path = includePathFromLine(line, isInclude);
+        if (isInclude) {
+            if (!headerOpen)
+                throw std::runtime_error("INCLUDE directives must appear before module code");
+            if (!storage)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "INCLUDE requires a storage service");
+            const std::string normalizedPath = normalizeIncludePath(*path, parent);
+            if (std::find(activePaths.begin(), activePaths.end(), normalizedPath) !=
+                activePaths.end())
+                throw std::runtime_error("INCLUDE cycle detected at " + normalizedPath);
+            std::string contents;
+            try {
+                contents = storage->readText(normalizedPath);
+            } catch (const runtime::ServiceError& error) {
+                throw runtime::ServiceError(error.code(), "INCLUDE \"" + normalizedPath +
+                                            "\": " + error.what());
+            }
+            const std::size_t slash = normalizedPath.find_last_of('/');
+            const std::string includedParent = slash == std::string::npos ? std::string{} :
+                                               normalizedPath.substr(0, slash);
+            activePaths.push_back(normalizedPath);
+            const std::string included = expandIncludesRecursive(contents, storage,
+                includedParent, activePaths, depth + 1, expandedBytes);
+            activePaths.pop_back();
+            expanded += included;
+            continue;
+        }
+
+        if (!trimSourceLine(line).empty() && !isSourceComment(line)) headerOpen = false;
+        if (line.size() + 1 > maxBytes - expandedBytes)
+            throw std::runtime_error("expanded source exceeds 64 KiB");
+        expandedBytes += line.size() + 1;
+        expanded += line;
+        expanded.push_back('\n');
+    }
+    return expanded;
+}
+
+void validateProgramLines(const std::map<int, std::string>& program,
+                          runtime::StorageService* storage) {
+    std::vector<std::string> activePaths;
+    std::size_t expandedBytes = 0;
+    const std::string source = expandIncludesRecursive(joinProgramLines(program), storage,
+        {}, activePaths, 0, expandedBytes);
+    Compiler compiler(Lexer(source).scan());
+    (void)compiler.compile(true, true, true);
 }
 
 } // namespace
@@ -1192,10 +1563,11 @@ void validateProgramLines(const std::map<int, std::string>& program) {
 Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<runtime::ChannelService> channels,
                          std::shared_ptr<ui::Service> ui,
-                         std::shared_ptr<graphics::Service> graphics)
+                         std::shared_ptr<graphics::Service> graphics,
+                         std::shared_ptr<runtime::NetworkService> network)
     : uiSession_(std::make_unique<detail::UISessionState>()),
       storage_(std::move(storage)), channels_(std::move(channels)), ui_(std::move(ui)),
-      graphics_(std::move(graphics)),
+      graphics_(std::move(graphics)), network_(std::move(network)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)) {
     if (session_id_ == 0)
         session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
@@ -1212,7 +1584,20 @@ std::vector<detail::Instruction> detail::compileSource(const std::string& source
     return compiler.compile();
 }
 
+std::string detail::expandIncludes(const std::string& source,
+                                   runtime::StorageService* storage) {
+    std::vector<std::string> activePaths;
+    std::size_t expandedBytes = 0;
+    return expandIncludesRecursive(source, storage, {}, activePaths, 0, expandedBytes);
+}
+
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
+    if (executeInteractiveResumable(source, output) == ExecutionStatus::Suspended)
+        throw std::runtime_error("execution suspended; use executeResumable() and resume()");
+}
+
+ExecutionStatus Interpreter::executeInteractiveResumable(
+    const std::string& source, std::ostream& output, runtime::CancellationToken stop) {
     auto trim = [](std::string value) {
         const auto first = value.find_first_not_of(" \t\r");
         if (first == std::string::npos) return std::string{};
@@ -1271,8 +1656,7 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
         }
     }
     if (!commandMode) {
-        execute(source, output);
-        return;
+        return executeResumable(source, output, stop);
     }
 
     std::istringstream input(source);
@@ -1287,7 +1671,7 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
             std::map<int, std::string> candidate = program_;
             if (body.empty()) candidate.erase(number);
             else candidate[number] = std::move(body);
-            validateProgramLines(candidate);
+            validateProgramLines(candidate, storage_.get());
             program_.swap(candidate);
             continue;
         }
@@ -1304,7 +1688,9 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
             clear();
         } else if (word == "RUN") {
             clear();
-            execute(joinProgramLines(program_), output);
+            if (executeResumable(joinProgramLines(program_), output, stop) ==
+                ExecutionStatus::Suspended)
+                return ExecutionStatus::Suspended;
         } else if (word == "LOAD" || word.rfind("LOAD ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
@@ -1329,7 +1715,7 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
                 if (body.empty()) candidate.erase(number);
                 else candidate[number] = body;
             }
-            validateProgramLines(candidate);
+            validateProgramLines(candidate, storage_.get());
             program_.swap(candidate);
             clear();
         } else if (word == "SAVE" || word.rfind("SAVE ", 0) == 0) {
@@ -1351,9 +1737,12 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
                 output << entry.name << (entry.isDirectory ? "/" : "") << '\n';
             output_column_ = 0;
         } else {
-            execute(line + "\n", output);
+            if (executeResumable(line + "\n", output, stop) ==
+                ExecutionStatus::Suspended)
+                return ExecutionStatus::Suspended;
         }
     }
+    return ExecutionStatus::Completed;
 }
 
 void Interpreter::runRepl(std::istream& input, std::ostream& output,

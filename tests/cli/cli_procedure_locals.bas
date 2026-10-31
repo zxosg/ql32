@@ -1,5 +1,5 @@
 value=5
-Show(value)
+Show value
 PRINT value
 PRINT scratch
 DEFine PROCedure Show(parameter)

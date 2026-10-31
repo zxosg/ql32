@@ -98,6 +98,19 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_esp32_clock_tests PRIVATE tests/fakes include)
   target_compile_features(ql32_esp32_clock_tests PRIVATE cxx_std_20)
   add_test(NAME ql32_esp32_clock_tests COMMAND ql32_esp32_clock_tests)
+  add_executable(ql32_esp32_network_tests
+    tests/esp32_network_tests.cpp
+    src/platform/esp32/network.cpp
+  )
+  target_include_directories(ql32_esp32_network_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_esp32_network_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_esp32_network_tests COMMAND ql32_esp32_network_tests)
+  add_executable(ql32_network_service_tests tests/network_service_tests.cpp)
+  target_link_libraries(ql32_network_service_tests PRIVATE ql32_core)
+  add_test(NAME ql32_network_service_tests COMMAND ql32_network_service_tests)
+  add_executable(ql32_include_tests tests/include_tests.cpp)
+  target_link_libraries(ql32_include_tests PRIVATE ql32_core)
+  add_test(NAME ql32_include_tests COMMAND ql32_include_tests)
   add_executable(ql32_esp32_storage_tests
     tests/esp32_storage_tests.cpp
     src/platform/esp32/sd_storage.cpp
@@ -142,6 +155,15 @@ if(QL32_BUILD_TESTS)
     tests/fakes include)
   target_compile_features(ql32_esp32_cyd_console_tests PRIVATE cxx_std_17)
   add_test(NAME ql32_esp32_cyd_console_tests COMMAND ql32_esp32_cyd_console_tests)
+
+  add_executable(ql32_line_ui_presenter_tests
+    tests/line_ui_presenter_tests.cpp
+    src/platform/esp32/line_ui_presenter.cpp
+  )
+  target_link_libraries(ql32_line_ui_presenter_tests PRIVATE ql32_core)
+  target_include_directories(ql32_line_ui_presenter_tests PRIVATE include)
+  target_compile_features(ql32_line_ui_presenter_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_line_ui_presenter_tests COMMAND ql32_line_ui_presenter_tests)
   add_executable(ql32_linux_graphics_tests tests/linux_graphics_tests.cpp)
   target_link_libraries(ql32_linux_graphics_tests PRIVATE ql32_core)
   add_test(NAME ql32_linux_graphics_tests COMMAND ql32_linux_graphics_tests)

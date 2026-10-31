@@ -8,10 +8,25 @@
 
 namespace ql32::platform::esp32_cyd {
 
+// Adafruit's ILI9341 driver uses the controller's portrait-native dimensions
+// even though the CYD's glass is mounted landscape at rotation index 0.
+// Keep its drawing bounds in the CYD's physical pixel orientation.
+class CydIli9341Display final : public Adafruit_ILI9341 {
+public:
+    using Adafruit_ILI9341::Adafruit_ILI9341;
+
+    void setRotationDegrees(std::uint16_t degrees) {
+        Adafruit_ILI9341::setRotation(static_cast<std::uint8_t>(degrees / 90));
+        const bool landscape = degrees == 0 || degrees == 180;
+        _width = landscape ? 320 : 240;
+        _height = landscape ? 240 : 320;
+    }
+};
+
 // ILI9341 adapter that keeps the BASIC graphics contract's indexed QL colors.
 class Ili9341Graphics final : public graphics::Service {
 public:
-    explicit Ili9341Graphics(Adafruit_ILI9341& display) : display_(display) {}
+    explicit Ili9341Graphics(CydIli9341Display& display) : display_(display) {}
     void setTextClearCallback(std::function<void()> callback) {
         clearText_ = std::move(callback);
     }
@@ -28,16 +43,20 @@ public:
               const std::string& value) override;
     void clear(graphics::SessionId session) override;
     void closeSession(graphics::SessionId session) override;
+    graphics::WindowInfo windowInfo(graphics::SessionId session) override;
+    graphics::RgbColor paletteColor(graphics::SessionId session, std::uint16_t index) override;
+    void setRotation(graphics::SessionId session, std::uint16_t degrees) override;
 
 private:
     void claim(graphics::SessionId session);
     std::uint16_t color(graphics::ColorIndex index) const;
 
-    Adafruit_ILI9341& display_;
+    CydIli9341Display& display_;
     graphics::SessionId activeSession_ = 0;
     bool hasActiveSession_ = false;
     graphics::ColorIndex ink_ = 7;
     graphics::ColorIndex paper_ = 0;
+    std::uint16_t rotationDegrees_ = 0;
     std::function<void()> clearText_;
 };
 

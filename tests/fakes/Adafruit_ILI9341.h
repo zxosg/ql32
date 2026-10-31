@@ -12,8 +12,14 @@ public:
         std::string text;
     };
 
-    std::int16_t width() const { return 320; }
-    std::int16_t height() const { return 240; }
+    std::int16_t width() const { return _width; }
+    std::int16_t height() const { return _height; }
+    void setRotation(std::uint8_t rotation) {
+        rotation_ = rotation % 4;
+        _width = rotation_ % 2 ? 320 : 240;
+        _height = rotation_ % 2 ? 240 : 320;
+        calls.push_back({"rotation", {rotation_}, {}});
+    }
     void fillScreen(std::uint16_t color) { calls.push_back({"fill", {color}, {}}); }
     void fillRect(std::int16_t x, std::int16_t y, std::int16_t width,
                   std::int16_t height, std::uint16_t color) {
@@ -50,4 +56,8 @@ public:
     }
 
     std::vector<Call> calls;
+protected:
+    std::uint8_t rotation_ = 1;
+    std::int16_t _width = 320;
+    std::int16_t _height = 240;
 };

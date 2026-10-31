@@ -23,10 +23,48 @@ lines, rectangles, and circles on the TFT. BASIC channel paths are relative to
 the SD root.
 
 To check that text and graphics use separate output paths, enter
-`PRINT "hello on LCD"`, then `TEXT(8,8,"positioned graphics text")`. The first
+`PRINT "hello on LCD"`, then `TEXT 8,8,"positioned graphics text"`. The first
 line appears in the scrolling strip at the bottom; the second is drawn at the
 requested coordinates. BASIC output is not echoed to serial unless the optional
 mirror flag is enabled.
+
+The CYD adapter presents a board-oriented 320x240 landscape window at rotation
+0, even though Adafruit's ILI9341 driver reports its controller-native
+240x320 dimensions at that index. QL/32 overrides the driver's drawing bounds
+to match the CYD glass, so geometry queries, drawing clipping, and the scrolling
+console use the same dimensions. Programs can query the active window:
+
+```basic
+ROTATE 0
+PRINT GWIDTH(), GHEIGHT(), GDEPTH()
+PRINT GPALETTESIZE(), GPALETTE$(2)
+```
+
+`ROTATE` accepts 0, 90, 180, or 270 degrees clockwise. On the CYD, 0 and 180
+are landscape (320x240), while 90 and 270 are portrait (240x320). A rotation
+clears the display and recalculates the scrolling console layout. This
+board-specific geometry follows the [CYD setup reference](https://blog.decryption.net.au/posts/cyd-for-beginners.html),
+which configures the ILI9341 as 320x240 at rotation 0. Rotation 0 and its
+320x240 window query have been confirmed on hardware.
+
+The async alert, confirmation, dialog, and menu presenter prints prompts to the
+TFT console and accepts each response through serial input. Use
+`examples/embedded_ui.bas` on the card as `startup.bas` to exercise the full
+flow. Replies are entered one line at a time; menus accept item numbers or
+shortcuts, choices accept their numbered position, and dialogs accept blank
+input to keep a field's current value.
+
+M6 BASIC network commands are `GETNET ssid$, password$` and `DISNET`; status
+functions are `NETSTAT$()`, `NETADDR$()`, and `NETSIGNAL()`. The connection starts
+asynchronously. `examples/network.bas` shows the calls with placeholders; enter
+real credentials only in a local, unsaved session because the serial REPL echoes
+the command line. Wi-Fi hardware verification is pending.
+
+`INCLUDE "library.bas"` at the top of a program expands BASIC library source
+from the SD card before compilation. Nested includes resolve relative to the
+including file. The include and all paths it references must stay on the SD
+root; C/C++ headers and compiled object libraries are not loaded by this BASIC
+directive.
 
 The profile uses the common CYD wiring: TFT SPI on GPIO 14/12/13 with CS 15,
 DC 2, backlight 21; SD uses a separate SPI bus on GPIO 18/19/23 with CS 5.
@@ -35,9 +73,16 @@ Boards sold under the same family name can differ. Check that the module is the
 and alternate revisions are not used by this target.
 
 The ESP32 image builds with PlatformIO `espressif32@6.12.0`
-(Arduino-ESP32 2.0.17), Adafruit ILI9341, and Adafruit GFX. The current image
-uses 690,337 bytes flash and 27,856 bytes RAM. The user has verified TFT
+(Arduino-ESP32 2.0.17), Adafruit ILI9341, and Adafruit GFX. It uses the shared
+[4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for
+firmware, NVS, and a 64 KiB coredump area. It requires a 4 MiB flash chip.
+There is no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD.
+The current image uses 1,183,489
+bytes of the firmware partition (29.1%) and 49,896 bytes RAM. The
+generated `firmware.bin` is 1,190,064 bytes. The user has verified TFT
 output, the serial REPL, and a small BASIC `FOR` loop printing to the LCD on
-the board. SD-card behavior remains to be checked. Define
+the board. The async line presenter for alerts, confirmations, dialogs, and
+menus is compiled into the image. The SD channel round-trip is verified on
+hardware: written text read back successfully and `EOF` returned `1`. Define
 `QL32_TFT_CONSOLE_SERIAL_MIRROR` in this environment's `build_flags` to mirror
 BASIC console output to serial.

@@ -14,6 +14,8 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/clock.hpp"
+#include "ql32/platform/esp32/line_ui_presenter.hpp"
+#include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
 #include "ql32/platform/fabgl_vga/graphics.hpp"
 #include "ql32/platform/fabgl_vga/keyboard.hpp"
@@ -42,12 +44,16 @@ fabgl::PS2Controller ps2;
 ql32::platform::fabgl_vga::FabglGraphics graphics(canvas);
 std::optional<ql32::platform::fabgl_vga::FabglKeyboard> keyboardInput;
 ql32::platform::esp32::Clock boardClock;
+ql32::platform::esp32::WifiNetworkService boardNetwork;
 SPIClass sdBus(HSPI);
 ql32::platform::esp32::SdStorage sdStorage(SD);
 ql32::platform::esp32::SdChannels sdChannels(SD);
 SerialOutputBuffer serialBuffer;
 std::ostream serialOutput(&serialBuffer);
 std::unique_ptr<ql32::Interpreter> interpreter;
+std::shared_ptr<ql32::ui::QueuedService> uiService =
+    std::make_shared<ql32::ui::QueuedService>();
+std::unique_ptr<ql32::platform::esp32::LineUiPresenter> uiPresenter;
 std::string inputLine;
 bool serialSawCarriageReturn = false;
 
@@ -63,17 +69,42 @@ void eraseInputCharacter() {
     Serial.print("\b \b");
 }
 
+bool resumePendingExecution() {
+    try {
+        const auto status = interpreter->resume(serialOutput);
+        if (status == ql32::ExecutionStatus::Completed) return true;
+        if (uiPresenter->beginNext()) return false;
+        throw std::runtime_error("suspended VM has no queued UI request");
+    } catch (const std::exception& error) {
+        Serial.printf("%s\n", error.what());
+        return true;
+    }
+}
+
 void submitInputLine() {
     Serial.println();
-    if (interpreter && !inputLine.empty()) {
+    bool showPrompt = true;
+    if (interpreter && (!inputLine.empty() || (uiPresenter && uiPresenter->active()))) {
         try {
-            interpreter->executeInteractive(inputLine + "\n", serialOutput);
+            if (uiPresenter->active()) {
+                if (uiPresenter->consumeLine(inputLine))
+                    showPrompt = resumePendingExecution();
+                else
+                    showPrompt = false;
+            } else {
+                const auto status = interpreter->executeInteractiveResumable(
+                    inputLine + "\n", serialOutput);
+                if (status == ql32::ExecutionStatus::Suspended) {
+                    if (uiPresenter->beginNext()) showPrompt = false;
+                    else throw std::runtime_error("suspended VM has no queued UI request");
+                }
+            }
         } catch (const std::exception& error) {
             Serial.printf("%s\n", error.what());
         }
     }
     inputLine.clear();
-    Serial.print("> ");
+    if (showPrompt && (!uiPresenter || !uiPresenter->active())) Serial.print("> ");
 }
 
 void receiveSerialCharacter(char character) {
@@ -150,10 +181,14 @@ void setup() {
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto channelService = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
+    auto networkService = std::shared_ptr<ql32::runtime::NetworkService>(
+        &boardNetwork, [](ql32::runtime::NetworkService*) {});
+    uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
+        uiService, serialOutput);
     interpreter = std::make_unique<ql32::Interpreter>(
-        storageService, channelService, nullptr, graphicsService);
+        storageService, channelService, uiService, graphicsService, networkService);
     std::string startupProgram =
-        "INK(7)\nTEXT(8,112,\"BASIC VM ready\")\n"
+        "INK 7\nTEXT 8,112,\"BASIC VM ready\"\n"
         "PRINT \"QL/32 BASIC VM running\"\n";
     if (sdReady) {
         try {
@@ -168,12 +203,16 @@ void setup() {
         }
     }
     try {
-        interpreter->execute(startupProgram, serialOutput);
+        const auto status = interpreter->executeResumable(startupProgram, serialOutput);
+        if (status == ql32::ExecutionStatus::Suspended) {
+            if (!uiPresenter->beginNext())
+                throw std::runtime_error("suspended VM has no queued UI request");
+        }
     } catch (const std::exception& error) {
         Serial.printf("BASIC VM error: %s\n", error.what());
     }
     Serial.println("BASIC REPL ready (USB serial and PS/2 keyboard)");
-    Serial.print("> ");
+    if (!uiPresenter->active()) Serial.print("> ");
 }
 
 void loop() {

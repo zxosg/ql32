@@ -19,17 +19,26 @@ constexpr std::uint16_t consoleForeground = 0xFFFF;
 } // namespace
 
 TftTextConsole::TftTextConsole(Adafruit_ILI9341& display)
-    : display_(display),
-      visibleRows_(static_cast<std::size_t>(std::max<std::int16_t>(
-          1, std::min<std::int16_t>(consoleHeight, display.height()) / characterHeight))),
-      columns_(static_cast<std::size_t>(std::max<std::int16_t>(1,
-          display.width() / characterWidth))),
-      firstRowY_(static_cast<std::int16_t>(std::max<std::int16_t>(
-          0, display.height() - consoleHeight))) {
+    : display_(display), visibleRows_(1), columns_(1), firstRowY_(0) {
+    updateGeometry();
     lines_.emplace_back();
     display_.fillRect(0, firstRowY_, display_.width(),
                       static_cast<std::int16_t>(display_.height() - firstRowY_),
                       consoleBackground);
+}
+
+void TftTextConsole::updateGeometry() {
+    visibleRows_ = static_cast<std::size_t>(std::max<std::int16_t>(
+        1, std::min<std::int16_t>(consoleHeight, display_.height()) / characterHeight));
+    columns_ = static_cast<std::size_t>(std::max<std::int16_t>(1,
+        display_.width() / characterWidth));
+    firstRowY_ = static_cast<std::int16_t>(std::max<std::int16_t>(
+        0, display_.height() - consoleHeight));
+}
+
+void TftTextConsole::reconfigure() {
+    updateGeometry();
+    clear();
 }
 
 void TftTextConsole::clear() {

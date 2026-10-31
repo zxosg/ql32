@@ -45,6 +45,64 @@ void testInterpreterSessions() {
     require(firstOutput.str() == "42\n", "interpreter did not retain its own variables");
 }
 
+void testGotoLineNumbersAndLabels() {
+    std::ostringstream output;
+    ql32::Interpreter numbered;
+    numbered.execute(
+        "10 PRINT \"start\"\n"
+        "20 GO TO 40\n"
+        "30 PRINT \"skipped\"\n"
+        "40 PRINT \"line target\"\n", output);
+    require(output.str() == "start\nline target\n",
+            "GO TO did not jump to the requested numbered source line");
+
+    ql32::Interpreter storedProgram;
+    std::ostringstream storedOutput;
+    storedProgram.executeInteractive("10 PRINT \"stored start\"\n", storedOutput);
+    storedProgram.executeInteractive("20 GOTO 40\n", storedOutput);
+    storedProgram.executeInteractive("30 PRINT \"stored skip\"\n", storedOutput);
+    storedProgram.executeInteractive("40 PRINT \"stored target\"\n", storedOutput);
+    storedProgram.executeInteractive("RUN\n", storedOutput);
+    require(storedOutput.str() == "stored start\nstored target\n",
+            "stored program did not resolve a forward line target at RUN");
+
+    std::ostringstream labelOutput;
+    ql32::Interpreter labeled;
+    labeled.execute(
+        "PRINT \"start\"\n"
+        "GOTO finish\n"
+        "PRINT \"skipped\"\n"
+        "finish: PRINT \"label target\"\n", labelOutput);
+    require(labelOutput.str() == "start\nlabel target\n",
+            "GOTO did not jump to a named label");
+
+    bool missingTargetRejected = false;
+    try {
+        ql32::Interpreter missing;
+        std::ostringstream ignored;
+        missing.execute("GOTO nowhere\n", ignored);
+    } catch (const std::runtime_error& error) {
+        missingTargetRejected = std::string(error.what()).find("GOTO label does not exist") !=
+                                std::string::npos;
+    }
+    require(missingTargetRejected, "undefined GOTO label was not diagnosed");
+
+    bool loopCrossingRejected = false;
+    try {
+        ql32::Interpreter crossing;
+        std::ostringstream ignored;
+        crossing.execute(
+            "GOTO inside\n"
+            "REPEAT loop\n"
+            "inside: PRINT 1\n"
+            "END REPEAT loop\n", ignored);
+    } catch (const std::runtime_error& error) {
+        loopCrossingRejected = std::string(error.what()).find("cannot enter or leave") !=
+                               std::string::npos;
+    }
+    require(loopCrossingRejected, "GOTO into a structured loop was not rejected");
+}
+
 void testCancellation() {
     ql32::Interpreter interpreter;
     ql32::runtime::CancellationSource source;
@@ -124,7 +182,7 @@ void testStoredProgramDiagnosticsAndArrayTypes() {
             "values$(0) = \"text\"\n"
             "END DEFine\n"
             "DIM values(0)\n"
-            "StoreText(values)\n", output);
+            "StoreText values\n", output);
     } catch (const std::runtime_error& error) {
         arrayTypeRejected = std::string(error.what()).find(
             "array argument type does not match parameter") != std::string::npos;
@@ -210,6 +268,46 @@ void testForwardCallsAndKnownSemanticErrors() {
             "rejected semantic line was added to the stored program");
 }
 
+void testProcedureFunctionCallSyntax() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "DEFINE FUNCTION AddOne(value)\n"
+        "  RETURN value + 1\n"
+        "END DEFINE\n"
+        "DEFINE PROCEDURE Show(value)\n"
+        "  PRINT value\n"
+        "END DEFINE\n"
+        "Show AddOne(4)\n", output);
+    require(output.str() == "5\n",
+            "statement procedure and expression function syntax did not compose");
+
+    bool parenthesizedProcedureRejected = false;
+    try {
+        interpreter.execute("Show(4)\n", output);
+    } catch (const std::runtime_error& error) {
+        parenthesizedProcedureRejected = std::string(error.what()).find(
+            "procedure calls use command syntax") != std::string::npos;
+    }
+    require(parenthesizedProcedureRejected,
+            "user-defined procedure accepted function-call parentheses");
+
+    bool functionParenthesesRequired = false;
+    try {
+        ql32::Interpreter functionWithoutParens;
+        functionWithoutParens.execute(
+            "DEFINE FUNCTION AddOne(value)\n"
+            "  RETURN value + 1\n"
+            "END DEFINE\n"
+            "PRINT AddOne\n", output);
+    } catch (const std::runtime_error& error) {
+        functionParenthesesRequired = std::string(error.what()).find(
+            "function call requires parentheses") != std::string::npos;
+    }
+    require(functionParenthesesRequired,
+            "user-defined function was accepted without parentheses");
+}
+
 void testForRangesEvaluateOnceInSourceOrder() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -267,7 +365,7 @@ void testUiCallsSuspendAndResumePerSession() {
     std::ostringstream secondOutput;
 
     const auto firstStatus = first.executeResumable(
-        "value = 41\nALERT(\"Saved\", \"Program saved\")\n"
+        "value = 41\nALERT \"Saved\", \"Program saved\"\n"
         "value = value + 1\nPRINT value\n", firstOutput);
     const auto secondStatus = second.executeResumable(
         "answer = CONFIRM(\"Continue\", \"Keep going?\")\n"
@@ -329,22 +427,22 @@ void testDialogMenuBasicCallsSuspendAndResume() {
     ql32::Interpreter interpreter({}, {}, service);
     std::ostringstream output;
     const std::string source =
-        "dialog = DINIT(\"Profile\")\n"
-        "DTEXT(dialog, \"Profile fields\")\n"
-        "DEDIT(dialog, \"Name\", \"Ada\")\n"
-        "DINT(dialog, \"Age\", 36, 0, 150)\n"
-        "DFLOAT(dialog, \"Score\", 1.5, 0, 10)\n"
-        "DCHOICE(dialog, \"Color\", 2, \"Red|Green|Blue\")\n"
-        "DCHECK(dialog, \"Active\", 1)\n"
-        "DBUTTONS(dialog, \"Apply\", \"Cancel\")\n"
-        "accepted = DIALOG(dialog)\n"
-        "PRINT accepted\nPRINT DGET$(dialog, 2)\n"
-        "PRINT DGET(dialog, 3)\nPRINT DGET(dialog, 4)\n"
-        "PRINT DGET(dialog, 5)\nPRINT DGET(dialog, 6)\n"
-        "menu = MINIT(\"Main\")\n"
-        "MCARD(menu, 17, \"Open\", \"O\")\n"
-        "MCARD(menu, 91, \"Exit\", \"X\")\n"
-        "selected = MENU(menu)\nPRINT selected\n";
+        "dialogHandle = DINIT(\"Profile\")\n"
+        "DTEXT dialogHandle, \"Profile fields\"\n"
+        "DEDIT dialogHandle, \"Name\", \"Ada\"\n"
+        "DINT dialogHandle, \"Age\", 36, 0, 150\n"
+        "DFLOAT dialogHandle, \"Score\", 1.5, 0, 10\n"
+        "DCHOICE dialogHandle, \"Color\", 2, \"Red|Green|Blue\"\n"
+        "DCHECK dialogHandle, \"Active\", 1\n"
+        "DBUTTONS dialogHandle, \"Apply\", \"Cancel\"\n"
+        "accepted = DIALOG(dialogHandle)\n"
+        "PRINT accepted\nPRINT DGET$(dialogHandle, 2)\n"
+        "PRINT DGET(dialogHandle, 3)\nPRINT DGET(dialogHandle, 4)\n"
+        "PRINT DGET(dialogHandle, 5)\nPRINT DGET(dialogHandle, 6)\n"
+        "menuHandle = MINIT(\"Main\")\n"
+        "MCARD menuHandle, 17, \"Open\", \"O\"\n"
+        "MCARD menuHandle, 91, \"Exit\", \"X\"\n"
+        "selected = MENU(menuHandle)\nPRINT selected\n";
     require(interpreter.executeResumable(source, output) == ql32::ExecutionStatus::Suspended,
             "BASIC DIALOG did not suspend while awaiting a presenter");
     const auto dialog = service->takeNextRequest();
@@ -372,7 +470,7 @@ void testDialogMenuBasicCallsSuspendAndResume() {
     ql32::Interpreter cancelled({}, {}, cancelService);
     std::ostringstream cancelledOutput;
     require(cancelled.executeResumable(
-                "dialog = DINIT(\"Cancel test\")\naccepted = DIALOG(dialog)\nPRINT accepted\n",
+                "dialogHandle = DINIT(\"Cancel test\")\naccepted = DIALOG(dialogHandle)\nPRINT accepted\n",
                 cancelledOutput) == ql32::ExecutionStatus::Suspended,
             "cancel test dialog did not suspend");
     const auto pending = cancelService->takeNextRequest();
@@ -385,10 +483,10 @@ void testDialogMenuBasicCallsSuspendAndResume() {
     auto replService = std::make_shared<ql32::ui::QueuedService>();
     ql32::Interpreter repl({}, {}, replService);
     std::ostringstream replOutput;
-    repl.execute("dialog = DINIT(\"REPL dialog\")\n", replOutput);
-    repl.execute("DEDIT(dialog, \"Name\", \"Initial\")\n", replOutput);
+    repl.execute("dialogHandle = DINIT(\"REPL dialog\")\n", replOutput);
+    repl.execute("DEDIT dialogHandle, \"Name\", \"Initial\"\n", replOutput);
     require(repl.executeResumable(
-                "accepted = DIALOG(dialog)\nPRINT DGET$(dialog, 1)\n", replOutput) ==
+                "accepted = DIALOG(dialogHandle)\nPRINT DGET$(dialogHandle, 1)\n", replOutput) ==
                 ql32::ExecutionStatus::Suspended,
             "dialog handle did not survive separate REPL entries");
     const auto replDialog = replService->takeNextRequest();
@@ -404,12 +502,14 @@ void testDialogMenuBasicCallsSuspendAndResume() {
 int main() {
     try {
         testInterpreterSessions();
+        testGotoLineNumbersAndLabels();
         testCancellation();
         testAtomicProgramLineAndBlocks();
         testPersistentRepl();
         testStoredProgramDiagnosticsAndArrayTypes();
         testKeywordAbbreviationCoverage();
         testForwardCallsAndKnownSemanticErrors();
+        testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
         testSuperBasicStringSlices();
         testUiCallsSuspendAndResumePerSession();

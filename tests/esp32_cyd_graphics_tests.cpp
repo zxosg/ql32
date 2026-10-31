@@ -9,7 +9,7 @@ void require(bool value, const char* message) {
 }
 
 void testIndexedPaletteAndDrawing() {
-    Adafruit_ILI9341 display;
+    ql32::platform::esp32_cyd::CydIli9341Display display;
     ql32::platform::esp32_cyd::Ili9341Graphics graphics(display);
     graphics.setPaper(1, 0);
     graphics.clear(1);
@@ -31,7 +31,7 @@ void testIndexedPaletteAndDrawing() {
 }
 
 void testOwnershipAndValidation() {
-    Adafruit_ILI9341 display;
+    ql32::platform::esp32_cyd::CydIli9341Display display;
     ql32::platform::esp32_cyd::Ili9341Graphics graphics(display);
     graphics.setInk(1, 7);
     try {
@@ -55,10 +55,53 @@ void testOwnershipAndValidation() {
     graphics.clear(2);
 }
 
+void testRotationAndWindowQueries() {
+    ql32::platform::esp32_cyd::CydIli9341Display display;
+    ql32::platform::esp32_cyd::Ili9341Graphics graphics(display);
+    graphics.setRotation(3, 0);
+    auto info = graphics.windowInfo(3);
+    require(display.calls[display.calls.size() - 2].name == "rotation" &&
+                display.calls[display.calls.size() - 2].values[0] == 0,
+            "zero degrees did not select the CYD's landscape rotation index");
+    require(info.width == 320 && info.height == 240 && info.colorDepth == 16 &&
+                info.paletteSize == 8 && info.rotationDegrees == 0,
+            "CYD landscape window metadata mismatch at zero degrees");
+    graphics.rectangle(3, {310, 230}, 20, 20);
+    const auto& clipped = display.calls.back();
+    require(clipped.name == "rect" && clipped.values[0] == 310 &&
+                clipped.values[1] == 230 && clipped.values[2] == 10 &&
+                clipped.values[3] == 10,
+            "landscape drawing bounds did not use the 320x240 CYD geometry");
+    graphics.setRotation(3, 90);
+    info = graphics.windowInfo(3);
+    require(display.calls[display.calls.size() - 2].values[0] == 1 && info.width == 240 &&
+                info.height == 320 && info.rotationDegrees == 90,
+            "quarter-turn rotation metadata mismatch");
+    graphics.setRotation(3, 180);
+    info = graphics.windowInfo(3);
+    require(display.calls[display.calls.size() - 2].values[0] == 2 && info.width == 320 &&
+                info.height == 240 && info.rotationDegrees == 180,
+            "half-turn landscape metadata mismatch");
+    graphics.setRotation(3, 270);
+    info = graphics.windowInfo(3);
+    require(display.calls[display.calls.size() - 2].values[0] == 3 && info.width == 240 &&
+                info.height == 320 && info.rotationDegrees == 270,
+            "three-quarter-turn portrait metadata mismatch");
+    const auto red = graphics.paletteColor(3, 2);
+    require(red.red == 255 && red.green == 0 && red.blue == 0,
+            "palette query did not return QL red");
+    try {
+        graphics.setRotation(3, 45);
+        throw std::runtime_error("unsupported rotation was accepted");
+    } catch (const std::invalid_argument&) {
+    }
+}
+
 } // namespace
 
 int main() {
     testIndexedPaletteAndDrawing();
     testOwnershipAndValidation();
+    testRotationAndWindowQueries();
     return 0;
 }

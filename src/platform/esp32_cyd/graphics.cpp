@@ -117,4 +117,34 @@ void Ili9341Graphics::closeSession(graphics::SessionId session) {
     hasActiveSession_ = false;
 }
 
+graphics::WindowInfo Ili9341Graphics::windowInfo(graphics::SessionId session) {
+    if (hasActiveSession_ && activeSession_ != session)
+        throw std::runtime_error("ILI9341 adapter supports one active graphics session");
+    return {static_cast<std::uint32_t>(display_.width()),
+            static_cast<std::uint32_t>(display_.height()), 16,
+            static_cast<std::uint16_t>(qlPalette.size()), rotationDegrees_};
+}
+
+graphics::RgbColor Ili9341Graphics::paletteColor(graphics::SessionId session,
+                                                  std::uint16_t index) {
+    if (hasActiveSession_ && activeSession_ != session)
+        throw std::runtime_error("ILI9341 adapter supports one active graphics session");
+    if (index >= qlPalette.size())
+        throw std::out_of_range("color index must be from 0 to 7");
+    const std::uint16_t value = color(static_cast<graphics::ColorIndex>(index));
+    return {static_cast<std::uint8_t>(((value >> 11) & 0x1F) * 255 / 31),
+            static_cast<std::uint8_t>(((value >> 5) & 0x3F) * 255 / 63),
+            static_cast<std::uint8_t>((value & 0x1F) * 255 / 31)};
+}
+
+void Ili9341Graphics::setRotation(graphics::SessionId session, std::uint16_t degrees) {
+    if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270)
+        throw std::invalid_argument("rotation must be 0, 90, 180, or 270 degrees");
+    claim(session);
+    display_.setRotationDegrees(degrees);
+    rotationDegrees_ = degrees;
+    display_.fillScreen(color(paper_));
+    if (clearText_) clearText_();
+}
+
 } // namespace ql32::platform::esp32_cyd

@@ -40,10 +40,28 @@ void testScrollingAndClear() {
             "clearing console did not clear its display region");
 }
 
+void testReconfigureAfterRotation() {
+    Adafruit_ILI9341 display;
+    ql32::platform::esp32_cyd::TftTextConsole console(display);
+    display.setRotation(0);
+    console.reconfigure();
+    std::ostream output(&console);
+    output << "P";
+    bool usedPortraitConsoleOrigin = false;
+    for (const auto& call : display.calls) {
+        if (call.name == "cursor" && call.values.size() == 2 &&
+            call.values[0] == 0 && call.values[1] == 256)
+            usedPortraitConsoleOrigin = true;
+    }
+    require(usedPortraitConsoleOrigin,
+            "console retained landscape geometry after display rotation");
+}
+
 } // namespace
 
 int main() {
     testPrintOutputAndWrapping();
     testScrollingAndClear();
+    testReconfigureAfterRotation();
     return 0;
 }

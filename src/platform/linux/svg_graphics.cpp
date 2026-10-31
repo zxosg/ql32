@@ -8,6 +8,11 @@
 namespace ql32::platform::linux_host {
 namespace {
 
+constexpr std::array<graphics::RgbColor, 8> qlPalette{{
+    {0, 0, 0}, {0, 0, 255}, {255, 0, 0}, {255, 0, 255},
+    {0, 255, 0}, {0, 255, 255}, {255, 255, 0}, {255, 255, 255}
+}};
+
 constexpr std::array<const char*, 8> colors{
     "#000000", "#0000FF", "#FF0000", "#FF00FF",
     "#00FF00", "#00FFFF", "#FFFF00", "#FFFFFF"};
@@ -124,6 +129,16 @@ void SvgGraphics::closeSession(graphics::SessionId session) {
            << "\"/>\n<g clip-path=\"url(#window)\">\n";
     for (const auto& element : w.elements) output << element;
     output << "</g>\n</svg>\n";
+}
+
+graphics::WindowInfo SvgGraphics::windowInfo(graphics::SessionId) {
+    return {width_, height_, 24, static_cast<std::uint16_t>(qlPalette.size()), 0};
+}
+
+graphics::RgbColor SvgGraphics::paletteColor(graphics::SessionId,
+                                              std::uint16_t index) {
+    if (index >= qlPalette.size()) throw std::out_of_range("color index must be from 0 to 7");
+    return qlPalette[index];
 }
 
 } // namespace ql32::platform::linux_host

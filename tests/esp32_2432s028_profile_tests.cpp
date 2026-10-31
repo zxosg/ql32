@@ -16,6 +16,7 @@ int main() {
     assert(profile.has(ql32::platform::ServiceKind::Display));
     assert(profile.has(ql32::platform::ServiceKind::Input));
     assert(profile.has(ql32::platform::ServiceKind::Storage));
+    assert(profile.has(ql32::platform::ServiceKind::Network));
     assert(profile.has(ql32::platform::ServiceKind::Channels));
     assert(profile.has(ql32::platform::InputKind::Serial));
     assert(!profile.has(ql32::platform::InputKind::Touch));

@@ -1,8 +1,8 @@
 # QL/32 BASIC language specification
 
 **Document ID:** QL32-LANG-001  
-**Version:** 0.3 (M1 language contract)
-**Status:** Approved profile; M1 implementation acceptance complete on Linux
+**Version:** 0.5 (M1 language contract)
+**Status:** Approved profile; M1 acceptance complete on Linux; source inclusion and GOTO implemented
 **Sources:** [reference index](../reference/README.md), [language decision](../decisions/ADR-002-language-profile.md)
 
 ## 1. Language profile
@@ -51,6 +51,30 @@ comments, nor to longer user identifiers. The current keyword table implements
 the profile for the supported M1 keyword set. Conformance tests cover `DEF FN`,
 `RET`, mixed case, and canonical `LIST` output; remaining spellings still need
 coverage against the complete keyword table.
+
+### 2.2 Source inclusion
+
+`INCLUDE "relative/path.bas"` is a QL/32 source directive processed before
+tokenization. It must appear in the module preamble, before executable module
+code and outside procedure bodies; blank lines and comments may precede it.
+Included files may contain more preamble includes and BASIC procedure/function
+definitions. Those definitions are textually inserted into the including
+module and can be called like local definitions. Includes resolve relative to
+the containing file; the initial source resolves from the configured storage
+root. Absolute paths and paths that escape that root are rejected.
+
+Expansion is recursive, rejects cycles, limits nesting to 16 files and
+expanded source to 64 KiB, and uses the platform storage service. A numbered
+program may place an `INCLUDE` directive on a line before its executable
+statements. The directive's line number is removed during expansion. Diagnostics
+for included code currently refer to line numbers in the expanded source.
+
+This borrows OPL32's quoted `INCLUDE` spelling, module-preamble placement, and
+textual expansion. OPL32 headers declare constants and procedure prototypes and
+do not contain module procedure bodies. QL/32 currently has no `CONST`,
+`EXTERNAL`, or OPX interface, so QL/32 include files can contain BASIC
+procedure/function definitions. `INCLUDE` does not compile C/C++ headers or
+link object libraries. See the [OPL reference notes](../reference/README.md).
 
 The first slice accepts this grammar (later sections extend it):
 
@@ -168,6 +192,27 @@ REPeat loop
 END REPeat loop
 ```
 
+QL/32 supports historical numeric-line jumps with `GOTO line_number` and
+`GO TO line_number`. `GOTO` may also target a QL/32 named label declared as
+`label:` at the start of a statement. Labels are case-insensitive and scoped
+to the main program or the procedure/function where they are declared. Line
+number targets must exist; `GOTO 0` restarts the main program. Named labels are
+a QL/32 extension: the [cited SuperBASIC `GO TO` syntax](https://superbasic-manual.readthedocs.io/en/latest/G/go--to.html) targets a line number.
+To protect loop and selection state, a jump cannot enter or leave a structured
+`FOR`, `REPeat`, or `SELect` block, nor cross a procedure/function boundary.
+Use structured loop control such as `EXIT` to leave those blocks.
+
+```basic
+10 PRINT "start"
+20 GO TO 40
+30 PRINT "skipped"
+40 PRINT "line target"
+
+GOTO finish
+PRINT "skipped"
+finish: PRINT "label target"
+```
+
 An `ELSE IF condition THEN` branch is written as an `ELSE` followed by a
 nested `IF`; it is not a distinct `ELSEIF` keyword. Each nested `IF` has
 its own `END IF`:
@@ -255,6 +300,10 @@ END DEFine
 
 Definitions are program-level. A function is called in an expression and must return a value; reaching `END DEFine` without one is a runtime error. A procedure is invoked as a statement. `LOCal` creates invocation-local names. Name lookup searches locals, parameters, then session globals. Recursion is supported with a bounded call stack; nested definitions are excluded from M1. Scalar arguments are copied into each invocation. A dimensioned array passed as a bare argument is aliased by the callee, so element updates are visible to the caller; forwarding that alias through another procedure/function is also supported.
 
+Procedure declarations retain parenthesized parameter lists, but procedure
+calls omit call parentheses: `ShowMessage "Hello"`. Function calls require
+parentheses in expressions: `value = Square(4)`.
+
 **QL/32 difference:** scalar arguments are passed by value by default; array parameters use reference semantics when the actual argument names a dimensioned array. Historical SuperBASIC procedure parameters can be passed by reference. These calls are class Q unless a compatible form is added later.
 
 ## 7. Arrays
@@ -294,16 +343,32 @@ statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
 interactive program. The Linux command loop provides `LOAD`, `SAVE`, and `DIR`.
 M2 also provides QL/32-specific `OPEN`, `READ$`, `EOF`, `WRITE`, and `CLOSE`
-file-channel calls; see [QL32-API-001](QL32-API-001.md). `EDIT` and the target
+file-channel operations; value-returning operations use function syntax while
+`WRITE channel, text$` and `CLOSE channel` are statement commands. See
+[QL32-API-001](QL32-API-001.md). `EDIT` and the target
 shell's `STOP`, `MEM`, `HELP`, and later `CONT` remain future work.
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
 
 ## 9. UI boundary and deferrals
 
-OPL-inspired `ALERT` and `CONFIRM` are M2 native calls, drawing is M3, and declarative `DINIT`, `DEDIT`, `DINT`, `DIALOG`, `MINIT`, `MCARD`, and `MENU` are M4 native calls. They do not alter M1 parser grammar. SuperBASIC remains the core language, including its loop forms; selected OPL-inspired refinements may be added when they simplify QL/32 without replacing that core. See [QL32-UI-001](QL32-UI-001.md). These are class P, not OPL source-compatible.
+Native commands and procedures are statement forms: write the name followed
+by zero or more comma-separated arguments, without call parentheses (for
+example, `ROTATE 90`, `ALERT title$, message$`, or `draw_line x1,y1`).
+Functions return values and require parentheses around their arguments,
+including empty parentheses for zero-argument functions (for example,
+`GWIDTH()` or `CONFIRM(title$, message$)`). A function call must be used in an
+expression; a procedure cannot be used as an expression. Parentheses remain
+part of other syntax such as definition parameter lists, array indexing,
+string slicing, and grouping. These rules apply to built-ins and
+user-defined procedures/functions alike. OPL-inspired `ALERT` and `CONFIRM`
+are M2 native APIs, drawing is M3, and declarative `DINIT`, `DEDIT`, `DINT`,
+`DIALOG`, `MINIT`, `MCARD`, and `MENU` are M4 APIs. SuperBASIC remains the core
+language, including its loop forms; selected OPL-inspired refinements may be
+added when they simplify QL/32 without replacing that core. See
+[QL32-UI-001](QL32-UI-001.md). These are class P, not OPL source-compatible.
 
-Full historical numeric formats, third-party toolkit commands, `GO TO`/`GO SUB` compatibility, historical channel syntax, `WHEN ERRor`, `TRY/CATCH`, `IMPORT`, native plugins, and unrestricted hardware access are outside the first M1 slice.
+Full historical numeric formats, `GO SUB` compatibility, third-party toolkit commands, historical channel syntax, `WHEN ERRor`, `TRY/CATCH`, `IMPORT`, native plugins, and unrestricted hardware access are outside the first M1 slice.
 
 ## 10. M1 conformance and unresolved choices
 

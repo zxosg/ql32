@@ -59,8 +59,13 @@ struct Instruction {
     bool sliceHasEnd = false;
     bool sliceSingle = false;
     std::vector<SelectItemSpec> selectItems;
+    bool sourceJump = false;
+    bool targetIsLineNumber = false;
+    int sourceLineTarget = 0;
+    std::vector<std::size_t> jumpScopes;
 };
 
 std::vector<Instruction> compileSource(const std::string& source);
+std::string expandIncludes(const std::string& source, runtime::StorageService* storage);
 
 } // namespace ql32::detail

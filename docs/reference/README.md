@@ -9,6 +9,7 @@ These are the sources linked in the “QL32 Project Idea” chat and used to com
 - [IF](https://superbasic-manual.readthedocs.io/en/latest/I/if.html): inline and block syntax; conditions and Boolean results use true/false and numeric `1`/`0`.
 - [FOR](https://superbasic-manual.readthedocs.io/en/latest/F/for.html) and [END FOR](https://superbasic-manual.readthedocs.io/en/latest/E/end--for.html): inline and block forms, mixed lists of single values and stepped intervals, `NEXT`, and `EXIT`.
 - [REPeat](https://superbasic-manual.readthedocs.io/en/latest/R/repeat.html), [END REPeat](https://superbasic-manual.readthedocs.io/en/latest/E/end--repeat.html), [NEXT](https://superbasic-manual.readthedocs.io/en/latest/N/next.html), and [EXIT](https://superbasic-manual.readthedocs.io/en/latest/E/exit.html): named loop syntax and loop-control behavior.
+- [GO TO](https://superbasic-manual.readthedocs.io/en/latest/G/go--to.html): QL ROM line-number jump syntax. QL/32 tests numeric targets; named labels are a QL/32 extension.
 - [END SELect](https://superbasic-manual.readthedocs.io/en/working/E/end--select.html) and [The Sinclair QL Series: QL SuperBASIC and its Applications](https://trastero.speccy.org/cosas/Libros/QL/PDF/The_Sinclair_QL_Series_QL_SuperBASIC_and_its_Applications_%5BEN%5D.pdf): `SELect ON`, `= value`, `= start TO end`, `= REMAINDER`, and block termination. The implementation supports the block form; its exact singleton matching remains QL/32-specific pending tests against SBASIC.
 - [DEFine PROCedure](https://superbasic-manual.readthedocs.io/en/latest/D/define--procedure.html), [END DEFine](https://superbasic-manual.readthedocs.io/en/latest/E/end--define.html), and [LOCal](https://superbasic-manual.readthedocs.io/en/latest/L/local.html): calls, returns, local variables.
 - [DIV](https://superbasic-manual.readthedocs.io/en/latest/D/div.html): floor quotient and paired `MOD` behavior.
@@ -21,6 +22,7 @@ These are the sources linked in the “QL32 Project Idea” chat and used to com
 ## Psion OPL
 
 - [Psion Series 3c, Series 5 and Siena OPL User Guide](PSION%203c%20Series5%20y%20Siena%20Programming%20Ref.pdf), supplied in `docs/reference`. Its Basics and Graphics & Friendlier Interaction sections cover OPL declarations, control flow, pixel windows, menus, and dialogs. OPL behavior varies by device generation; observe the Series 5/Series 3c markers.
+- The Series 5 OPL32 `INCLUDE` reference (Basics, “Series 5 Header Files, Constants and Procedure Prototypes”; OPL Reference chapter 9) places includes at module scope and describes header constants/prototypes rather than procedure bodies. QL/32's source-file inclusion is a documented adaptation, not OPL32 compatibility.
 - [Leigh Edwards, *Programming Psion Computers*](Programming-Psion-Computers.pdf), supplied in `docs/reference`; see OPL Reference chapter 9 for menus and dialogs, and the application architecture discussions for broader UI context.
 - Its `dINIT`/`DIALOG` controls and `mINIT`/`mCARD`/`MENU` illustrate the UI model. OPL variants differ by device. QL/32 adopts the model with its own syntax and session ownership.
 

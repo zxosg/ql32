@@ -50,8 +50,19 @@ public:
     void closeSession(SessionId session) override {
         events.push_back({"CLOSE_SESSION", session});
     }
+    WindowInfo windowInfo(SessionId) override { return info; }
+    RgbColor paletteColor(SessionId, std::uint16_t index) override {
+        if (index == 2) return {255, 0, 0};
+        if (index == 7) return {255, 255, 255};
+        throw std::out_of_range("palette index");
+    }
+    void setRotation(SessionId, std::uint16_t degrees) override {
+        info.rotationDegrees = degrees;
+        events.push_back({"ROTATE", 1, {}, {}, static_cast<int>(degrees)});
+    }
 
     std::vector<Event> events;
+    WindowInfo info{320, 240, 16, 8, 90};
 };
 
 void testDrawingCallsAndSessionOwnership() {
@@ -61,13 +72,13 @@ void testDrawingCallsAndSessionOwnership() {
     {
         ql32::Interpreter interpreter({}, {}, {}, graphics);
         interpreter.execute(
-            "INK(7)\n"
-            "PAPER(1)\n"
-            "LINE(1,2,30,40)\n"
-            "RECT(5,6,20,10)\n"
-            "CIRCLE(50,60,8)\n"
-            "TEXT(2,3,\"hello\")\n"
-            "CLS()\n", output);
+            "INK 7\n"
+            "PAPER 1\n"
+            "LINE 1,2,30,40\n"
+            "RECT 5,6,20,10\n"
+            "CIRCLE 50,60,8\n"
+            "TEXT 2,3,\"hello\"\n"
+            "CLS\n", output);
         require(graphics->events.size() == 7, "drawing calls were not dispatched");
         session = graphics->events.front().session;
         require(session != 0, "graphics calls used an invalid session");
@@ -95,14 +106,14 @@ void testDrawingArgumentValidation() {
     std::ostringstream output;
     bool invalidColor = false;
     try {
-        interpreter.execute("INK(8)\n", output);
+        interpreter.execute("INK 8\n", output);
     } catch (const std::runtime_error& error) {
         invalidColor = std::string(error.what()).find("color index") != std::string::npos;
     }
     require(invalidColor, "invalid palette index was accepted");
     bool invalidCoordinates = false;
     try {
-        interpreter.execute("LINE(1,2,3.5,4)\n", output);
+        interpreter.execute("LINE 1,2,3.5,4\n", output);
     } catch (const std::runtime_error& error) {
         invalidCoordinates = std::string(error.what()).find("pixel coordinate") !=
                              std::string::npos;
@@ -111,9 +122,47 @@ void testDrawingArgumentValidation() {
     require(graphics->events.empty(), "invalid drawing call reached the service");
 }
 
+void testDisplayCommands() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT GWIDTH()\nPRINT GHEIGHT()\nPRINT GDEPTH()\n"
+        "PRINT GROTATION()\nPRINT GPALETTESIZE()\nPRINT GPALETTE$(2)\n"
+        "ROTATE 270\nPRINT GROTATION()\n", output);
+    require(output.str() == "320\n240\n16\n90\n8\n#FF0000\n270\n",
+            "display queries or rotation command returned incorrect values");
+    bool invalidPalette = false;
+    try {
+        interpreter.execute("PRINT GPALETTE$(8)\n", output);
+    } catch (const std::runtime_error& error) {
+        invalidPalette = std::string(error.what()).find("palette index") != std::string::npos;
+    }
+    require(invalidPalette, "out-of-range palette index was accepted");
+
+    bool parenthesizedCommandRejected = false;
+    try {
+        interpreter.execute("ROTATE(90)\n", output);
+    } catch (const std::runtime_error&) {
+        parenthesizedCommandRejected = true;
+    }
+    require(parenthesizedCommandRejected,
+            "built-in command accepted function-call parentheses");
+    bool functionParenthesesRequired = false;
+    try {
+        interpreter.execute("PRINT GWIDTH\n", output);
+    } catch (const std::runtime_error& error) {
+        functionParenthesesRequired = std::string(error.what()).find("requires parentheses") !=
+                                      std::string::npos;
+    }
+    require(functionParenthesesRequired,
+            "built-in function was accepted without parentheses");
+}
+
 } // namespace
 
 int main() {
     testDrawingCallsAndSessionOwnership();
     testDrawingArgumentValidation();
+    testDisplayCommands();
 }

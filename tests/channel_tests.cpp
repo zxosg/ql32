@@ -88,21 +88,21 @@ void testBasicChannelCalls() {
         std::ostringstream output;
         interpreter.execute(
             "channel = OPEN(\"lines.txt\", \"WRITE\")\n"
-            "WRITE(channel, \"alpha\")\n"
-            "WRITE(channel, \"\")\n"
-            "CLOSE(channel)\n"
+            "WRITE channel, \"alpha\"\n"
+            "WRITE channel, \"\"\n"
+            "CLOSE channel\n"
             "channel = OPEN(\"lines.txt\", \"READ\")\n"
             "PRINT READ$(channel)\n"
             "PRINT EOF(channel)\n"
             "PRINT READ$(channel)\n"
             "PRINT EOF(channel)\n"
-            "CLOSE(channel)\n", output);
+            "CLOSE channel\n", output);
         require(output.str() == "alpha\n0\n\n1\n",
                 "BASIC channel calls handled lines or EOF incorrectly");
 
         bool arityChecked = false;
         try {
-            interpreter.execute("CLOSE()\n", output);
+            interpreter.execute("CLOSE\n", output);
         } catch (const std::runtime_error& error) {
             arityChecked = std::string(error.what()).find("incorrect argument count") !=
                            std::string::npos;
