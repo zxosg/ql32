@@ -1,0 +1,404 @@
+CHAPTER 13
+----------
+
+ARRAYS
+
+Suppose you are a prison governor and you have a new prison block which is
+called the West Block. It is ready to receive 50 new prisoners. You need to
+know which prisoner (known by his number) is in which cell. You could give
+each cell a name but it is simpler to give them numbers 1 to 50.
+
+In a computing simulation we will imagine just 5 prisoners with numbers
+which we can  put in a DATA statement:
+
+    DATA 50, 37, 86, 41, 32
+
+We set up an array of variables which share the name, west, and are
+distinguished by  a number appended in brackets.
+
+    +---+---+    +---+---+    +---+---+    +---+---+    +---+---+
+    |   |   |    |   |   |    |   |   |    |   |   |    |   |   |
+    |   |   |    |   |   |    |   |   |    |   |   |    |   |   |
+    |   |   |    |   |   |    |   |   |    |   |   |    |   |   |
+    +---+---+    +---+---+    +---+---+    +---+---+    +---+---+
+     west(1)      west(2)      west(3)      west(4)      west(5)
+
+It is necessary to declare an array and give its dimensions with a DIM
+statement:
+
+    DIM west(5)
+
+This enables SuperBASIC to allocate space, which might be a large amount.
+After the DIM statement has been executed the five variables can be used.
+
+The convicts can be READ from the DATA statement into the five array
+variables:
+
+    FOR cell = 1 TO 5 : READ west (cell)
+
+We can add another FOR loop with a PRINT statement to prove that the
+convicts are in the cells.
+
+    +---+---+    +---+---+    +---+---+    +---+---+    +---+---+
+    |   |   |    |   |   |    |   |   |    |   |   |    |   |   |
+    | 5 | 0 |    | 3 | 7 |    | 8 | 6 |    | 4 | 1 |    | 3 | 2 |
+    |   |   |    |   |   |    |   |   |    |   |   |    |   |   |
+    +---+---+    +---+---+    +---+---+    +---+---+    +---+---+
+     west(1)      west(2)      west(3)      west(4)      west(5)
+
+
+The complete program is shown below:
+
+    100 REMark Prisoners
+    110 DIM west(5)
+    120 FOR cell 1 = 1 TO 5 : READ west(cell)
+    130 FOR cell = 1 TO 5 : PRINT cell ! west(cell)
+    140 DATA 50, 37, 86, 41, 32
+
+The output from the program is:
+
+    1 50
+    2 37
+    3 86
+    4 41
+    5 32
+
+The numbers 1 to 5 are called "subscripts" of the array name, "west". The
+array, "west", is a numeric array consisting of five numeric array
+elements.
+
+You can replace line 130 by:
+
+    130 PRINT west
+
+This will output the values only:
+
+     0
+    50
+    37
+    86
+    41
+    32
+
+The zero at the top of the list appears because subscripts range from zero
+to the declared number. We will show later how useful the zero elements in
+arrays can be.
+
+Note also that when a numeric array is DIMensioned its elements are all
+given the value  zero.
+
+
+STRING ARRAYS
+
+String arrays are similar to numeric arrays but an extra dimension in the
+DIM statement specifies the length of each string variable in the array.
+Suppose that ten of the top players at Royal Birkdale for the 1982 British
+Golf Championship were denoted by their first names and placed in DATA
+statements.
+
+    DATA "Tom","Graham","Sevvy","Jack","Lee"
+    DATA "Nick","Bernard","Ben","Gregg","Hal"
+
+You would need ten different variable names, but if there were a hundred or
+a thousand  players the job would become impossibly tedious. An array is a
+set of variables designed to cope with problems of this kind. Each variable
+name consists of two parts:
+
+    a name according to the usual rules
+    a numeric part called a subscript
+
+Write the variable names as:
+
+    flat$(1),flat$(2),flat$(3)...etc
+
+Before you can use the array variables you must tell the system about the
+array and its dimensions:
+
+    DIM flat$(10,8)
+
+This causes eleven (0 to 10) variables to be reserved for use in the
+program. Each string variable in the array may have up to eight characters.
+DIM statements should usually be placed all together near the beginning of
+the program. Once the array has been declared in a DIM statement all the
+elements of the array can be used. One important advantage is that you can
+give the numeric part (the subscript) as a numeric variable. You can write:
+
+    FOR number = 1 TO 10 : READ flat$(number)
+
+This would place the golfers in their 'flats':
+
+      flat$(1)        flat$(2)        flat$(3) ............... flat$(10)
+    +----------+    +----------+    +----------+ ........... +----------+
+    |          |    |          |    |          |             |          |
+    |   Tom    |    |  Graham  |    |   Sevvy  |             |    Hal   |
+    |          |    |          |    |          |             |          |
+    +----------+    +----------+    +----------+ ........... +----------+
+
+You can refer to the variables in the usual way but remember to use the
+right subscript. Suppose that Tom and Sevvy wished to exchange flats. In
+computing terms one of them, Tom say, would have to move into a temporary
+flat to allow Sevvy time to move. You can write:
+
+    LET temp$ = flat$(1)    : REMark Tom into temporary
+    LET flat$(1) = flat$(3) : REMark Sevvy into flat$(1)
+    LET flat$(3) = temp$    : REMark Tom into flat$(3)
+
+The following program places the ten golfers in an array named flat$ and
+prints the names of the occupants with their 'flat numbers' (array
+subscripts) to prove that they are in residence. The occupants of flats 1
+and 3 then change places. The list of occupants is then printed again to
+show that the exchange has occurred.
+
+    100 REMark Golfers' Flats
+    110 DIM flat$(10,8)
+    120 FOR number = 1 TO 10 : READ flat$(number)
+    130 printlist
+    140 exchange
+    150 printlist
+    160 REMark End of main program
+    170 DEFine PROCedure printlist
+    180   FOR num = 1 TO 10 : PRINT num,flat$(num)
+    190 END DEFine
+    200 DEFine PROCedure exchange
+    210   LET temp$ = f1at$(1)
+    220   LET flat$(1) = f1at$(3)
+    230   LET flat$(3) = temp$
+    240 END DEFine
+    250 DATA "Tom","Graham","Sevvy","Jack","Lee"
+    260 DATA "Nick","Bernard","Ben","Greg","HaL"
+
+    -------------------------------------------
+      output (line 130)     output (line 150)
+    -------------------------------------------
+      1 Tom                 1 Sevvy
+      2 Graham              2 Graham
+      3 Sevvy               3 Tom
+      4 Jack                4 Jack
+      5 Lee                 5 Lee
+      6 Nick                6 Nick
+      7 Bernard             7 Bernard
+      8 Ben                 8 Ben
+      9 Gregg               9 Gregg
+     10 Hal                10 Hal
+    -------------------------------------------
+
+
+TWO DIMENSIONAL ARRAYS
+
+Sometimes the nature of a problem suggests two dimensions such as 3 floors
+of 10 flats rather than just a single row of 30.
+
+Suppose that 20 or more golfers need flats and there is a block of 30 flats
+divided into three floors of ten flats each. A realistic method of
+representing the block would be with a two-dimensional array You can think
+of the thirty variables as shown below:
+
+     flat$(2,0)      flat$(2,1)      flat$(2,2) ............. flat$(2,9)
+    +----------+    +----------+    +----------+ ........... +----------+
+    |          |    |          |    |          |             |          |
+    |          |    |          |    |          |  second(2)  |          |
+    |          |    |          |    |          |             |          |
+    +----------+    +----------+    +----------+ ........... +----------+
+
+     flat$(1,0)      flat$(1,1)      flat$(1,2) ............. flat$(1,9)
+    +----------+    +----------+    +----------+ ........... +----------+
+    |          |    |          |    |          |             |          |
+    |          |    |          |    |          |  first(1)   |          |
+    |          |    |          |    |          |             |          |
+    +----------+    +----------+    +----------+ ........... +----------+
+
+     flat$(0,0)      flat$(0,1)      flat$(0,2) ............. flat$(0,9)
+    +----------+    +----------+    +----------+ ........... +----------+
+    |          |    |          |    |          |             |          |
+    |          |    |          |    |          |  ground(0)  |          |
+    |          |    |          |    |          |             |          |
+    +----------+    +----------+    +----------+ ........... +----------+
+
+
+Assuming DATA statements with 30 names, a suitable way to place the names
+in the flats is:
+
+    120 FOR floor = 0 TO 2
+    130   FOR num = 0 TO 9
+    140     READ flats$(floor,num)
+    150   END FOR num
+    160 END FOR floor
+
+You also need a DIM statement:
+
+    20 DIM flat$(2,9,8)
+
+which shows that the first subscript can be from 0 to 2 (floor number) and
+the second subscript can be from 0 to 9 (room number). The third number
+states the maximum number of characters in each array element.
+
+We add a print routine to show that the golfers are in the flats and we use
+letters to save space.
+
+    100 REMark 30 Golfers
+    110 DIM flat$(2,9,8)
+    120 FOR floor = 0 TO 2
+    130 FOR num = 0 TO 9
+    140 READ flat$(floor,num) : REMark Golfer goes in
+    150 END FOR num
+    160 END FOR floor
+    170 REMark End of input
+    180 FOR floor = 0 TO 2
+    190 PRINT "Floor number" ! floor
+    200 FOR num = 0 TO 9
+    210 PRINT 'Flat' ! num ! flat$(floor,num)
+    220 END FOR num
+    230 END FOR floor
+    240 DATA "A","B","C","D","E","F","G","H","I","J"
+    250 DATA "K","L","M","N","O","P","Q","R","S","T"
+    260 DATA "U","V","W","X","Y","Z","@","`","$","%"
+
+The output starts:
+
+    Floor number 0
+    FLat 0 A
+    FLat 1 B
+    FLat 2 C
+
+and continues giving the thirty occupants.
+
+ARRAY SLICING
+
+You may find this section hard to read though it is essentially the same
+concept as string slicing. You will probably need string-slicing if you get
+beyond the learning stage of programming. The need for array-slicing is
+much rarer and you may wish to omit this section particularly on a first
+reading.
+
+We now use the golfers' flats to illustrate the concept of array slicing.
+The flats will be  numbered 0 to 9 to keep to single digits and names will
+be single characters for space reasons.
+
+       2,0    2,1    2,2    2,2    2,4    2,5    2,6    2,7    2,8    2,9
+      +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+
+flat$ | U |  | V |  | W |  | X |  | Y |  | Z |  | @ |  | ` |  | $ |  | % |
+      +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+
+
+       1,0    1,1    1,2    1,3    1,4    1,5    1,6    1,7    1,8    1,9
+      +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+
+flat$ | K |  | L |  | M |  | N |  | O |  | P |  | Q |  | R |  | S |  | T |
+      +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+
+
+
+       0,0    0,1    0,2    0,3    0,4    0,5    0,6    0,7    0,8    0,9
+      +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+
+flat$ | A |  | B |  | C |  | D |  | E |  | F |  | G |  | H |  | I |  | J |
+      +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+  +---+
+
+Given the above values the following are array slices:
+
+    flat$(1,3)        Means a single array element with value N
+    flat$(1,1 TO 6)   Means six elements with values L M N 0 P Q
+
+    ---------------------------
+      Array Element     Value
+    ---------------------------
+      flat$(1,1)        L
+      flat$(1,2)        M
+      flat$(1,3)        N
+      flat$(1,4)        O
+      flat$(1,5)        P
+      flat$(1,6)        Q
+    ---------------------------
+
+flat$(1)    Means flat$ (1,0 TO 9)
+            ten elements with values K L M N O P Q R S T
+
+In these examples a range of values of a subscript can be given instead of
+a single value. If a subscript is missing completely the complete range is
+assumed. In the third example the second subscript is missing and it is
+assumed by the system to be "0 TO 9".
+
+The techniques of array slicing and string slicing are similar though the
+latter is more widely applicable.
+
+
+PROBLEMS ON CHAPTER 13
+
+1. SORTING
+
+Place ten numbers in an array by reading from a DATA statement. Search the
+array to find the lowest number. Make this lowest number the value of the
+first element of a new array. Replace it in the first array with a very
+large number. Repeat this process making the second lowest number the
+second value in the new array and so on until you have a sorted array of
+numbers which should then be printed.
+2. SNAKES AND LADDERS
+
+Represent a snakes and ladders game with a 100 element numeric array. Each
+element should contain either.
+
+      zero
+
+or    a number in the range 10 to 90 meaning that a player should
+      transfer to that number by going 'up a ladder' or 'down a snake'.
+
+or    the digits 1, 2, 3, etc. to denote a particular player's position.
+
+Set up six snakes and six ladders by placing numbers in the array and
+simulate one 'solo' run by a single player to test the game.
+
+3. CROSSWORD BLANKS
+
+            1   2   3   4   5     columns
+          +---+---+---+---+---+
+         1|   |   |   |   |   |
+          +---+---+---+---+---+
+         2|   |   |   |   |XXX|
+          +---+---+---+---+---+
+    row  3|   |   |   |   |   |
+          +---+---+---+---+---+
+         4|XXX|   |   |   |   |
+          +---+---+---+---+---+
+         5|   |   |   |   |   |
+          +---+---+---+---+---+
+
+(The squares represented by XXX above are black squares, the file
+Chapt13a_pic contains a better diagram)
+
+Crosswords usually have an odd number of rows or columns in which the black
+squares have a symmetrical pattern. The pattern is said to have rotational
+symmetry because rotation through 180 degrees would not change it.
+
+Note that after rotation through 180 degrees the square in row 4, column 1
+could become the square in row 2, column 5. That is row 4, column 1 becomes
+row 2, column 5 in a 5 x 5 grid.
+
+Write a program to generate and display a symmetrical pattern of this kind.
+
+4. Modify the crossword pattern so that there are no sequences, across or
+down, of less than four white squares.
+
+5. CARD SHUFFLE
+
+Cards are denoted by the numbers 1-52 stored in an array. They can be
+converted  easily to actual card values when necessary. The cards should be
+'shuffled' as follows.
+
+    Choose any position in range 1-51 e.g. 17
+
+    Place the card in this position in a temporary store.
+
+    Shunt all the cards in positions 52 to 18 down to positions 51 to 17
+
+    Place the chosen card from the temporary store to position 52.
+
+    Deal similarly with the ranges 1-50, 1-49 .. down to 1-2 so that the
+    pack is well shuffled.
+
+    Output the result of the shuffle.
+
+6. Set up six DATA statements each containing a surname, initials and a
+telephone number (dialling code and local number). Decide on a suitable
+structure of arrays to store this information and READ it into the arrays.
+
+PRINT the data using a separate FOR loop and explain how the input format
+(DATA), the internal format (arrays) and output format are not necessarily
+all the same.
+
+

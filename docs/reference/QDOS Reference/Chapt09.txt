@@ -1,0 +1,451 @@
+CHAPTER 9
+---------
+
+DATATYPES VARIABLES AND IDENTIFIERS
+
+You will have noticed that a program (a sequence of statements) usually
+gets some data to work on (input) and produces some kind of results
+(output). You will also have  understood that there are internal
+arrangements for storing this data. In order to avoid  unnecessary
+technical explanations we have suggested that you imagine pigeon holes  and
+that you choose meaningful names for the pigeon holes. For example, if it
+is necessary to store a number which represents the score from simulated
+dice-throws you imagine a pigeon hole named score which might contain a
+number such as 8.
+
+Internally the pigeon holes are numbered and the system maintains a
+dictionary which connects particular names with particular numbered pigeon
+holes. We say that the name, score, points to its particular pigeon-hole
+(by means of the internal dictionary).
+
+        +------------------------------------+
+        |                          +-------+ |
+        |                          |       | |
+        |      score ------------> |   8   | |
+        |                          |       | |
+        |                          +-------+ |
+        +------------------------------------+
+
+
+The whole arrangement is called a variable.
+
+What you see is the word score. We say that this word, "score" is an
+identifier It is what we see and it identifies the concept we need, in this
+case the result, 8, of throwing a pair of dice. Because the identifier is
+what we see it becomes the thing we talk or write or think about. We write
+about score and its value at any particular moment.
+
+There are four simple data types called floating point, integer string and
+logical and these are explained below We talk about data types rather than
+variable types because data can occur on its own, for example 3.4 or 'Blue
+hat' as the value of a variable. But if you understand the different types
+of variables, you must also understand the different types of data.
+
+
+IDENTIFIERS AND  VARIABLES
+
+1. A SuperBASIC identifier must begin with a letter and is a sequence of:
+
+       upper or lower case letters
+       digits or underscore
+
+2. An identifier may be up to 255 characters in length so there is no
+   effective limit in practice.
+
+3. An identifier cannot be the same as a keyword of SuperBASIC.
+
+4. An integer variable name is an identifier with % on the end.
+
+5. A string variable name is an identifier with $ on the end.
+
+6. No other identifiers must use the symbols % and $.
+
+7. An identifier should usually be chosen so that it means something
+   to a human  reader but for SuperBASIC it does not have any
+   particular meaning other than  that it identifies certain things.
+
+FLOATING POINT VARIABLES
+
+Examples of the use of floating point variables are:
+
+    100 LET days = 24
+    110 LET sales = 3649.84
+    120 LET sales_per_day = sales/days
+    130 PRINT sales_per_day
+
+The value of a floating point variable may be anything in the range:
+
+              -615               +615
+    + or -  10      to + or -  10     with 8 significant figures.
+
+Suppose in the above program sales were, exceptionally only 3p. Change line
+110 to:
+
+    110 LET sales = 0.03
+
+This system will change this to:
+
+    110 LET sales = 3E-2
+
+To interpret this, start with 3 or 3.0 and move the decimal point -2
+places, i.e. two places left. This shows that:
+
+    3E-2 is the same as 0.03
+
+After running the program, the average daily sales are:
+
+    1.25E-3 which is the same as 0.00125
+
+Numbers with an E are said to be in exponent form:
+
+    (mantissa) E (exponent) = (mantissa) x 10 to the power (exponent)
+
+
+INTEGER VARIABLES
+
+Integer variables can have only whole number values in the range -32678 to
+32768. The following are examples of valid integer variable names which
+must end with %.
+
+    LET count% = 10
+    LET six_tally% = RND(10)
+    LET number_3% = 3
+
+The only disadvantage of integer variables, when whole numbers are
+required, is the slightly misleading % symbol on the end of the identifier.
+It has nothing to do with the concept of percentage. It is just a
+convenient symbol tagged on to show that the variable is an integer.
+
+
+NUMERIC FUNCTIONS
+
+Using a function is a bit like making an omelette. You put in an egg which
+is processed according to certain rules (the recipe) and get out an
+omelette. For example the function INT takes any number as input and
+outputs the whole number part. Anything which is input to a function is
+called a parameter or argument. INT is a function which gives the integer
+part of an expression. You may write:
+
+    PRINT INT(5.6)
+
+and 5 would be the output. We say that 5.6 is the parameter and the
+function returns the value 5. A function may have more than one parameter.
+You have already met:
+
+    RND(1 TO 6)
+
+which is a function with two parameters. But functions always return
+exactly one value. This must be so because you can put functions into
+expressions. For example:
+
+    PRINT 2 * INT(5.6)
+
+would produce the output 10. It is an important property of functions that
+you can use them in expressions. It follows that they must return a single
+value which is then used in the expression. INT and RND are system
+functions: they come with the system, but later you will see how to write
+your own.
+
+The following examples show common uses of the INT function.
+
+    100 REMark Rounding
+    110 INPUT decimal
+    120 PRINT INT(decimal + 0.5)
+
+In the example you input a decimal fraction and the output is rounded. Thus
+4.7 would become 5 but 4.3 would become 4.
+
+You can achieve the same result using an integer variable and coercion.
+
+Trigonometrical functions will be dealt with in a later section but other
+common numeric functions are given in the list below
+.
+
+---------------------------------------------------------------------------
+  FUNCTION    EFFECT              EXAMPLES            RETURNED VALUES
+---------------------------------------------------------------------------
+  ABS         Absolute or         ABS(7)              7
+              unsigned value      ABS(-4.3)           4.3
+
+              Integer part of a   INT(2.4)            2
+  INT         floating point      INT(0.4)            0
+              number              INT(-2.7)           -3
+
+                                  SQRT(2)             1.414214
+  SQRT        Square root         SQRT(16)            4
+                                  SQRT(2.6)           1.612452
+---------------------------------------------------------------------------
+
+There is a way of computing square roots which is easy to understand. To
+compute the square root of 8 first make a guess. It doesn't matter how bad
+the guess may be. Suppose you simply take half of 8 as the first guess
+which is 4.
+
+Because 4 is greater than the square root of 8 then 8/4 must be less than
+it. The reverse is also true. If you had guessed 2 which is less thanthe
+square root then 8/2 must be greater than it.
+
+It follows that if we take any guess and computer number/guess we have two
+numbers, one too small and one too big. We take the average of these
+numbers as our next approximation and thus get closer to the correct
+answer.
+
+We repeat this process until successive approximations are so close as to
+make little difference.
+
+    100 REMark Square Roots
+    110 LET number = 8
+    120 LET approx = number/2
+    130 REPeat root
+    140   LET newval = (approx + number/approx)/2
+    150   IF newval == approx THE EXIT root
+    160   LET approx = newval
+    170 END REPeat root
+    180 PRINT 'Square root of' ! number ! 'is' ! newval
+
+sample output:
+
+    Square root of 8 is 2.828427
+
+Notice that the conditional EXIT from the loop must be in the middle. The
+traditional structures do not cope with this situation as well as
+SuperBASIC does.
+
+The == sign in line 150 means "approximately equal to", that is, equal to
+within .0000001 of the values being compared.
+
+NUMERIC OPERATIONS
+
+SuperBASIC allows th eusual mathematical operations. You may notice that
+they ar elike functions with exactly two operands each. It is also
+conventional in these cases to put an operand on each side of the symbol.
+Sometimes the operation is denoted by a familiar symbol such as + or *.
+Sometimes the operation is denoted by a keyword like DIV or MOD but there
+is no real difference. Numeric operations have an order of priority. For
+example, the result of:
+
+    PRINT 7 + 3*2
+is 13 because the multiplication has a higher priority. However:
+
+    PRINT (7+3)*2
+
+will output 20, because brackets over-ride the usual priority. As you will
+see later so many things can be done with SuperBASIC expressions that a
+full statement about priority cannot be made at this stage (see the Concept
+Reference Guide if you wish) but the operations we now deal with have the
+following order of priority:
+
+    highest - raising to a power
+              multiplication and division (including DIV, MOD)
+    lowest  - add and subtract
+
+The symbols + and - are also used with only one operand which simply
+denotes positive or negative. Symbols used in this way have the highest
+priority of all and can only be over-ridden by the use of brackets.
+
+Finally if two symbols have equal priority the leftmost operation is
+performed first so that:
+
+ PRINT 7-2 + 5
+
+will cause the subtraction before the addition. This might be important if
+you should ever deal with very large or very small numbers.
+
+---------------------------------------------------------------------------
+  Operation        Symbol    Examples            Results   Note
+---------------------------------------------------------------------------
+  Add              +         7+6.6               13.6
+
+  Subtract         -         7-6.6               0.4
+
+  Multiply         *         3 * 2.1             6.3
+                             2.1 * (-3)         -6.3
+
+  Divide           /         7/2                 3.5       Do not divide
+                                                           by zero
+                            -17/5               -3.4
+
+  Raise to power   ^         4^1.5              8
+
+  Integer divide   DIV      -8 DIV 2           -4          Integers only
+                             7 DIV 2            3          Do not divide
+                                                           by zero
+
+  Modulus          MOD       13 MOD 5           3
+                             21 MOD 7           0
+                             17 MOD 8           7
+---------------------------------------------------------------------------
+
+Modulus returns the remainder part of a division. Any attempt to divide by
+zero will generate an error and terminate program exection
+
+
+NUMERIC EXPRESSIONS
+
+Strictly speaking, a numeric expression is an expression which evaluates to
+a number  and there are more possibilities than we need to discuss here.
+SuperBASIC allows you to do complex things if you want to but it also
+allows you to do simple things in simple ways. In this section we
+concentrate on those usual straightforward uses of mathematical features.
+
+Basically numeric expressions in SuperBASIC are the same as those of
+mathematics  but you must put the whole expression in the form of a
+sequence.
+(N.B. Some of these mathematical expressions are a little hard to represent
+using standard ASCII notation -DJ)
+
+    5 + 3
+    -----
+    6 - 4
+
+becomes in SuperBASIC (or other BASIC):
+
+    (5 + 3)/(6 - 4)
+
+In secondary school algebra there is an expression for one solution of a
+quadratic equation:
+
+  2
+ax  + bx + c = 0
+
+(due to ASCII limitations, the above line reads: a x-squared plus bx + c =
+0)
+
+One solution in mathematical notation is:
+
+               --------
+              / 2
+ x = - b + /\/ b  - 4ac
+     ------------------
+             2a
+
+If we start with the equation:
+  2
+2x  - 3x + 1 = 0
+
+
+Example 1
+
+The following program will find one solution.
+
+
+100 READ a,b,c
+110 PRINT 'Root is' ! (-b+SQRT(b^2 - 4*a*c))/(2*a)
+120 DATA 2,-3,1
+
+
+Example 2
+
+In problems which need to simulate the dealing of cards you can make cards
+correspond to the numbers 1 to 52 as follows:
+
+     1 to 13       Ace, two........king of hearts
+    14 to 26       Ace, two........king of clubs
+    27 to 39       Ace, two........king of diamonds
+    40 to 52       Ace, two........king of spades
+
+A particular card can be identified as follows:
+
+    100 REM Card identification
+    110 LET card = 23
+    120 LET suit = (card-1) DIV 13
+    130 LET value = card MOD 13
+    140 IF value = 0 THEN LET value = 13
+    150 IF value = 1 THEN PRINT "Ace of ";
+    160 IF value >= 2 AND value <= 10 THEN PRINT value ! "of ";
+    170 IF value = 11 THEN PRINT "Jack of ";
+    180 IF value = 12 THEN PRINT "Queen of ";
+    190 IF value = 13 THEN PRINT "King of ";
+    200 IF suit = 0 THEN PRINT "hearts"
+    210 IF suit = 1 THEN PRINT "clubs"
+    220 IF suit = 2 THEN PRINT "diamonds"
+    230 IF suit = 3 THEN PRINT "spades"
+
+There are new ideas in this program. They are in line 160. The meaning is
+clearly that the number is actually printed only if two logical statements
+are true. These are:
+
+    value is greater than or equal to 2 AND value is less than or
+    equal to 10
+
+Cards outside this range are either aces or 'court cards' and must be
+treated differently
+
+Note also the use of ! in the PRINT statement to provide a space and ; to
+ensure that output continues on the same line.
+
+There are two groups of mathematical functions which we have not discussed
+here. They are the trigonometric and logarithmic. You may need the former
+in organising screen displays. Types of functions are also fully defined in
+the reference section.
+
+
+LOGICAL VARIABLES
+
+Strictly speaking, SuperBASIC does not allow logical variables but it
+allows you to use other variables as logical ones. For example you can run
+the following program:
+
+    100 REMark Logical Variable
+    110 LET hungry = 1
+    120 IF hungry THEN PRINT "Have a bun"
+
+You expect a logical expression in line 120 but the numeric variable,
+hungry is there  on its own. The system interprets the value, 1, of hungry
+as true and the output is:
+
+    Have a bun
+
+If line 110 read:
+
+    LET hungry = 0
+
+there would be no output. The system interprets zero as false and all other
+values as true. That is useful but you can disguise the numeric quality of
+hungry by writing:
+
+    100 REMark Logical Variable
+    110 LET true = 1 : false = 0
+    120 LET hungry = true
+    130 IF hungry THEN PRINT "Have a bun"
+
+
+STRING VARIABLES
+
+There is much to be said about handling strings and string variables and
+this is left to a separate chapter.
+
+
+PROBLEMS ON CHAPTER 9
+
+1.  A rich oil dealer gambles by tossing a coin in the following way.
+    If it comes down heads he gets 1. If it comes down tails he throws
+    again but the possible reward is doubled. This is repeated so that
+    the rewards are as shown.
+
+        THROW    1  2  3  4   5   6   7
+        REWARDS  1  2  4  8  16  32  64
+
+    By simulating the game try to decide what would be a fair initial
+    payment for each such game:
+
+    (a) if the player is limited to a maximum of seven throws per game.
+
+    (b) if there is no maximum number of throws
+
+2.  Bill and Ben agree to gamble as follows. At a given signal each
+    divides his money into two halves and passes one half to the
+    other player. Each then divides his new total and passes half to
+    the other. Show what happens as the game proceeds if Bill starts
+    with 16p and Ben starts with 64p.
+
+3.  What happens if the game is changed so that each hands over an
+    amount equal to half of what the other possesses?
+
+4.  Write a program which forms random three letter words chosen from
+    A,B,C,D and prints them until 'BAD' appears.
+
+5.  Modify the last program so that it terminates when any real
+    three letter word appears.
+
+

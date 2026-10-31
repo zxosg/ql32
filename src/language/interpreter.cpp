@@ -1,7 +1,9 @@
 #include "ql32/interpreter.hpp"
 #include "bytecode.hpp"
+#include "../vm/execution_state.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <cctype>
@@ -12,10 +14,14 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace ql32 {
 namespace {
+std::atomic<runtime::SessionId> nextInterpreterSessionId{1};
+
 using detail::ArrayArgumentCandidate;
 using detail::ForItemSpec;
 using detail::Instruction;
@@ -69,6 +75,42 @@ constexpr Keyword keywords[] = {
     {"AND", "AND", Kind::And, "AND"}, {"OR", "OR", Kind::Or, "OR"},
     {"XOR", "XOR", Kind::Xor, "XOR"}, {"NOT", "NOT", Kind::Not, "NOT"}
 };
+
+bool isBuiltinName(const std::string& name) {
+    return name == "LEN" || name == "OPEN" || name == "READ$" || name == "EOF" ||
+           name == "WRITE" || name == "CLOSE" || name == "ALERT" || name == "CONFIRM" ||
+           name == "DINIT" || name == "DTEXT" || name == "DEDIT" || name == "DINT" ||
+           name == "DFLOAT" || name == "DCHOICE" || name == "DCHECK" ||
+           name == "DBUTTONS" || name == "DIALOG" || name == "DGET" ||
+           name == "DGET$" || name == "MINIT" || name == "MCARD" || name == "MENU" ||
+           name == "INK" || name == "PAPER" || name == "LINE" || name == "RECT" ||
+           name == "CIRCLE" || name == "TEXT" || name == "CLS";
+}
+
+std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
+    if (instruction.name == "LEN") return {1, true};
+    if (instruction.name == "ALERT") return {2, false};
+    if (instruction.name == "CONFIRM") return {2, true};
+    if (instruction.name == "OPEN") return {2, true};
+    if (instruction.name == "READ$" || instruction.name == "EOF") return {1, true};
+    if (instruction.name == "WRITE") return {2, false};
+    if (instruction.name == "CLOSE") return {1, false};
+    if (instruction.name == "DINIT" || instruction.name == "MINIT") return {1, true};
+    if (instruction.name == "DTEXT") return {2, false};
+    if (instruction.name == "DEDIT" || instruction.name == "DCHECK") return {3, false};
+    if (instruction.name == "DINT" || instruction.name == "DFLOAT") return {5, false};
+    if (instruction.name == "DCHOICE") return {4, false};
+    if (instruction.name == "DBUTTONS") return {3, false};
+    if (instruction.name == "DIALOG" || instruction.name == "MENU") return {1, true};
+    if (instruction.name == "DGET" || instruction.name == "DGET$") return {2, true};
+    if (instruction.name == "MCARD") return {4, false};
+    if (instruction.name == "INK" || instruction.name == "PAPER") return {1, false};
+    if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
+    if (instruction.name == "CIRCLE") return {3, false};
+    if (instruction.name == "TEXT") return {3, false};
+    if (instruction.name == "CLS") return {0, false};
+    return {0, false};
+}
 
 class Lexer {
 public:
@@ -261,7 +303,13 @@ struct DefinitionInfo {
 
 class Compiler {
 public:
-    explicit Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
+    explicit Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {
+        for (std::size_t i = 0; i + 2 < tokens_.size(); ++i) {
+            if (tokens_[i].kind == Kind::Define && tokens_[i + 1].kind == Kind::Function &&
+                tokens_[i + 2].kind == Kind::Identifier)
+                declaredFunctions_.insert(tokens_[i + 2].text);
+        }
+    }
 
     std::vector<Instruction> compile(bool tolerateUnresolvedCalls = false,
                                      bool tolerateIncompleteBlocks = false) {
@@ -288,6 +336,7 @@ private:
     std::vector<Instruction> code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
     std::unordered_map<std::string, std::size_t> arrays_;
+    std::unordered_set<std::string> declaredFunctions_;
     std::size_t current_ = 0;
     struct LoopContext {
         std::size_t id;
@@ -358,6 +407,15 @@ private:
     void resolveCalls(bool tolerateUnresolvedCalls) {
         for (Instruction& instruction : code_) {
             if (instruction.op != Op::Call) continue;
+            if (isBuiltinName(instruction.name)) {
+                const auto [arguments, returnsValue] = builtinSignature(instruction);
+                if (instruction.argCount != arguments)
+                    error(instruction, "incorrect argument count");
+                if (instruction.expectsValue != returnsValue)
+                    error(instruction, "built-in used in the wrong context");
+                instruction.builtin = true;
+                continue;
+            }
             const auto found = definitions_.find(instruction.name);
             if (found == definitions_.end()) {
                 const auto array = arrays_.find(instruction.name);
@@ -703,7 +761,8 @@ private:
             if (!match(Kind::RightParen)) error(peek(), "expected ')' after parameters");
         }
 
-        if (definitions_.contains(name.text)) error(name, "duplicate definition name");
+        if (definitions_.contains(name.text) || isBuiltinName(name.text))
+            error(name, "duplicate or reserved definition name");
         const std::size_t skipIndex = code_.size();
         emit(Op::Jump, defineKeyword);
         DefinitionInfo definition;
@@ -1038,12 +1097,59 @@ private:
         else if (match(Kind::Plus)) signedPrimary();
         else primary();
     }
+    bool startsStringSlice() const {
+        if (!check(Kind::LeftParen)) return false;
+        if (current_ + 1 < tokens_.size() &&
+            tokens_[current_ + 1].kind == Kind::RightParen) return true;
+        std::size_t depth = 0;
+        for (std::size_t i = current_ + 1; i < tokens_.size(); ++i) {
+            if (tokens_[i].kind == Kind::LeftParen) ++depth;
+            else if (tokens_[i].kind == Kind::RightParen) {
+                if (depth == 0) return false;
+                --depth;
+            } else if (tokens_[i].kind == Kind::To && depth == 0) {
+                return true;
+            } else if (tokens_[i].kind == Kind::End || tokens_[i].kind == Kind::Newline ||
+                       tokens_[i].kind == Kind::Colon) {
+                return false;
+            }
+        }
+        return false;
+    }
+    void stringSlice(const Token& name) {
+        const Token open = advance();
+        emit(Op::Load, name, 0.0, name.text);
+        Instruction slice{Op::StringSlice, 0.0, name.text, open.line, open.column};
+        if (!check(Kind::To) && !check(Kind::RightParen)) {
+            expression();
+            slice.sliceHasStart = true;
+        }
+        if (match(Kind::To)) {
+            if (!check(Kind::RightParen)) {
+                expression();
+                slice.sliceHasEnd = true;
+            }
+        } else if (slice.sliceHasStart) {
+            // A single descriptor selects one character, like SuperBASIC's s$(n).
+            slice.sliceSingle = true;
+        }
+        if (!match(Kind::RightParen)) error(peek(), "expected ')' after string slice");
+        code_.push_back(std::move(slice));
+    }
     void primary() {
         if (match(Kind::Number)) { const Token t = previous(); emit(Op::Push, t, t.number); return; }
         if (match(Kind::String)) { const Token t = previous(); emit(Op::Push, t, t.text); return; }
         if (match(Kind::Identifier)) {
             const Token t = previous();
-            if (check(Kind::LeftParen)) {
+            const bool scalarStringSyntax = !isBuiltinName(t.text) && !t.text.empty() &&
+                t.text.back() == '$' &&
+                !arrays_.contains(t.text) && !declaredFunctions_.contains(t.text) &&
+                check(Kind::LeftParen);
+            if (scalarStringSyntax ||
+                (!isBuiltinName(t.text) && !t.text.empty() && t.text.back() == '$' &&
+                 startsStringSlice())) {
+                stringSlice(t);
+            } else if (check(Kind::LeftParen)) {
                 std::vector<ArrayArgumentCandidate> arrayCandidates;
                 const std::size_t arguments = callArguments(&arrayCandidates);
                 emitCall(t, arguments, true, std::move(arrayCandidates));
@@ -1078,6 +1184,24 @@ void validateProgramLines(const std::map<int, std::string>& program) {
 
 } // namespace
 
+Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
+                         std::shared_ptr<runtime::ChannelService> channels,
+                         std::shared_ptr<ui::Service> ui,
+                         std::shared_ptr<graphics::Service> graphics)
+    : uiSession_(std::make_unique<detail::UISessionState>()),
+      storage_(std::move(storage)), channels_(std::move(channels)), ui_(std::move(ui)),
+      graphics_(std::move(graphics)),
+      session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)) {
+    if (session_id_ == 0)
+        session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
+}
+
+Interpreter::~Interpreter() {
+    if (ui_) ui_->cancelSession(session_id_);
+    if (channels_) channels_->closeSession(session_id_);
+    if (graphics_) graphics_->closeSession(session_id_);
+}
+
 std::vector<detail::Instruction> detail::compileSource(const std::string& source) {
     Compiler compiler(Lexer(source).scan());
     return compiler.compile();
@@ -1104,13 +1228,39 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
             return 0;
         return i;
     };
+    auto parseQuotedPath = [&](const std::string& text, const char* commandName) {
+        if (text.empty() || text.front() != '"')
+            throw std::runtime_error(std::string(commandName) + " requires a quoted relative path");
+        std::string path;
+        std::size_t i = 1;
+        bool closed = false;
+        while (i < text.size()) {
+            if (text[i] == '"') {
+                if (i + 1 < text.size() && text[i + 1] == '"') {
+                    path.push_back('"');
+                    i += 2;
+                } else {
+                    ++i;
+                    closed = true;
+                    break;
+                }
+            } else {
+                path.push_back(text[i++]);
+            }
+        }
+        if (!closed || !trim(text.substr(i)).empty())
+            throw std::runtime_error("invalid quoted file command path");
+        return path;
+    };
 
     bool commandMode = false;
     std::istringstream probe(source);
     for (std::string line; std::getline(probe, line);) {
         const std::size_t numberEnd = lineNumberEnd(line);
         const std::string word = command(line);
-        if (numberEnd != 0 || word == "RUN" || word == "LIST" || word == "NEW") {
+        if (numberEnd != 0 || word == "RUN" || word == "LIST" || word == "NEW" ||
+            word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
+            word.rfind("SAVE ", 0) == 0 || word == "DIR" || word.rfind("DIR ", 0) == 0) {
             commandMode = true;
             break;
         }
@@ -1139,6 +1289,7 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
 
         const std::string word = command(line);
         if (word.empty()) continue;
+        const std::string normalizedLine = trim(line);
         if (word == "LIST") {
             for (const auto& [number, body] : program_)
                 output << number << (body.empty() ? "" : " " + body) << '\n';
@@ -1149,6 +1300,51 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
         } else if (word == "RUN") {
             clear();
             execute(joinProgramLines(program_), output);
+        } else if (word == "LOAD" || word.rfind("LOAD ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const std::string argument = trim(normalizedLine.substr(4));
+            const std::string path = parseQuotedPath(argument, "LOAD");
+            const std::string contents = storage_->readText(path);
+            std::map<int, std::string> candidate;
+            std::istringstream file(contents);
+            for (std::string fileLine; std::getline(file, fileLine);) {
+                const std::string sourceLine = trim(fileLine);
+                if (sourceLine.empty()) continue;
+                const std::size_t storedNumberEnd = lineNumberEnd(fileLine);
+                if (storedNumberEnd == 0)
+                    throw std::runtime_error("LOAD expects numbered BASIC source lines");
+                int number = 0;
+                const auto parsed = std::from_chars(fileLine.data(),
+                    fileLine.data() + storedNumberEnd, number);
+                if (parsed.ec != std::errc{} || number < 1 || number > 32767)
+                    throw std::runtime_error("program line number must be in 1..32767");
+                const std::string body = canonicalizeKeywords(
+                    trim(fileLine.substr(storedNumberEnd)));
+                if (body.empty()) candidate.erase(number);
+                else candidate[number] = body;
+            }
+            validateProgramLines(candidate);
+            program_.swap(candidate);
+            clear();
+        } else if (word == "SAVE" || word.rfind("SAVE ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const std::string argument = trim(normalizedLine.substr(4));
+            const std::string path = parseQuotedPath(argument, "SAVE");
+            std::string contents;
+            for (const auto& [number, body] : program_)
+                contents += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
+            storage_->writeText(path, contents);
+        } else if (word == "DIR" || word.rfind("DIR ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            std::string path;
+            const std::string argument = trim(normalizedLine.substr(3));
+            if (!argument.empty()) path = parseQuotedPath(argument, "DIR");
+            for (const auto& entry : storage_->list(path))
+                output << entry.name << (entry.isDirectory ? "/" : "") << '\n';
+            output_column_ = 0;
         } else {
             execute(line + "\n", output);
         }
@@ -1156,7 +1352,8 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
 }
 
 void Interpreter::runRepl(std::istream& input, std::ostream& output,
-                          std::ostream& diagnostics, bool showPrompt) {
+                          std::ostream& diagnostics, bool showPrompt,
+                          std::function<bool()> dispatchUiRequest) {
     std::string line;
     while (true) {
         if (showPrompt) {
@@ -1166,11 +1363,31 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
         try {
             executeInteractive(line + "\n", output);
         } catch (const std::exception& error) {
-            diagnostics << "ql32: " << error.what() << '\n';
+            if (!execution_ || !dispatchUiRequest) {
+                diagnostics << "ql32: " << error.what() << '\n';
+                continue;
+            }
+            try {
+                while (execution_) {
+                    if (!dispatchUiRequest())
+                        throw std::runtime_error("no host presenter for pending UI request");
+                    if (resume(output) == ExecutionStatus::Completed) break;
+                }
+            } catch (const std::exception& dispatchError) {
+                if (ui_) ui_->cancelSession(session_id_);
+                execution_.reset();
+                diagnostics << "ql32: " << dispatchError.what() << '\n';
+            }
         }
     }
 }
 
-void Interpreter::clear() { variables_.clear(); output_column_ = 0; }
+void Interpreter::clear() {
+    if (ui_) ui_->cancelSession(session_id_);
+    execution_.reset();
+    *uiSession_ = detail::UISessionState{};
+    variables_.clear();
+    output_column_ = 0;
+}
 
 } // namespace ql32

@@ -1,7 +1,9 @@
 #include "ql32/interpreter.hpp"
 #include "../language/bytecode.hpp"
+#include "execution_state.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -24,19 +26,15 @@ using detail::PrintSeparator;
 using detail::ForItemSpec;
 using detail::SelectItemSpec;
 using detail::ArrayArgumentCandidate;
-
-struct ForRange { double start = 0; double end = 0; double step = 1; bool single = false; };
-struct ForState { std::vector<ForRange> ranges; std::size_t item = 0; };
-struct RuntimeFrame {
-    std::size_t returnAddress = 0;
-    bool function = false;
-    std::unordered_map<std::string, Value> locals;
-    std::unordered_map<std::string, std::string> arrayAliases;
-};
-struct ArrayReference { std::string name; };
-using StackEntry = std::variant<double, std::string, ArrayReference>;
-struct RuntimeArray { std::vector<std::size_t> lengths; std::vector<Value> values; };
-struct SelectState { double value = 0; bool matched = false; };
+using detail::ForRange;
+using detail::ForState;
+using detail::RuntimeFrame;
+using detail::ArrayReference;
+using detail::StackEntry;
+using detail::RuntimeArray;
+using detail::SelectState;
+using detail::DialogBuilder;
+using detail::MenuBuilder;
 
 void verifyBytecode(const std::vector<Instruction>& code) {
     const auto invalid = [](const Instruction& instruction, const char* reason) {
@@ -66,8 +64,9 @@ void verifyBytecode(const std::vector<Instruction>& code) {
             validTarget(instruction, instruction.exitTarget);
             break;
         case Op::Call:
-            if (instruction.target >= code.size()) invalid(instruction, "call target is invalid");
-            if (instruction.parameters.size() != instruction.argCount)
+            if (!instruction.builtin && instruction.target >= code.size())
+                invalid(instruction, "call target is invalid");
+            if (!instruction.builtin && instruction.parameters.size() != instruction.argCount)
                 invalid(instruction, "call argument metadata is inconsistent");
             break;
         case Op::DimArray:
@@ -81,6 +80,7 @@ void verifyBytecode(const std::vector<Instruction>& code) {
         case Op::Push:
         case Op::PushArrayRef:
         case Op::Load:
+        case Op::StringSlice:
         case Op::Store:
         case Op::Add:
         case Op::Subtract:
@@ -131,7 +131,8 @@ void verifyBytecode(const std::vector<Instruction>& code) {
     stackDepth[0] = 0;
     pending.push_back(0);
     for (const Instruction& instruction : code) {
-        if (instruction.op == Op::Call) merge(instruction.target, 0, instruction);
+        if (instruction.op == Op::Call && !instruction.builtin)
+            merge(instruction.target, 0, instruction);
     }
 
     while (!pending.empty()) {
@@ -200,6 +201,11 @@ void verifyBytecode(const std::vector<Instruction>& code) {
             break;
         case Op::ArrayGet:
             consumed = instruction.rank;
+            produced = 1;
+            break;
+        case Op::StringSlice:
+            consumed = 1 + static_cast<std::size_t>(instruction.sliceHasStart) +
+                       static_cast<std::size_t>(instruction.sliceHasEnd);
             produced = 1;
             break;
         case Op::ArraySet:
@@ -302,13 +308,49 @@ void printSeparator(PrintSeparator separator, std::ostream& output, std::size_t&
 } // namespace
 
 void Interpreter::execute(const std::string& source, std::ostream& output, std::stop_token stop) {
-    const auto code = detail::compileSource(source);
-    verifyBytecode(code);
-    std::vector<StackEntry> stack;
-    std::unordered_map<std::size_t, ForState> forStates;
-    std::vector<RuntimeFrame> callFrames;
-    std::unordered_map<std::string, RuntimeArray> arrays;
-    std::vector<SelectState> selectStates;
+    if (executeResumable(source, output, stop) == ExecutionStatus::Suspended)
+        throw std::runtime_error("execution suspended; use executeResumable() and resume()");
+}
+
+ExecutionStatus Interpreter::executeResumable(const std::string& source, std::ostream& output,
+                                               std::stop_token stop) {
+    if (execution_) throw std::runtime_error("interpreter already has a suspended execution");
+    execution_ = std::make_unique<detail::VMExecutionState>();
+    try {
+        execution_->code = detail::compileSource(source);
+        verifyBytecode(execution_->code);
+        const auto status = runExecution(output, stop);
+        if (status == ExecutionStatus::Completed) execution_.reset();
+        return status;
+    } catch (...) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        throw;
+    }
+}
+
+ExecutionStatus Interpreter::resume(std::ostream& output, std::stop_token stop) {
+    if (!execution_) throw std::runtime_error("interpreter has no suspended execution");
+    try {
+        const auto status = runExecution(output, stop);
+        if (status == ExecutionStatus::Completed) execution_.reset();
+        return status;
+    } catch (...) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        throw;
+    }
+}
+
+ExecutionStatus Interpreter::runExecution(std::ostream& output, std::stop_token stop) {
+    auto& state = *execution_;
+    auto& code = state.code;
+    auto& stack = state.stack;
+    auto& forStates = state.forStates;
+    auto& callFrames = state.callFrames;
+    auto& arrays = state.arrays;
+    auto& selectStates = state.selectStates;
+    auto& pc = state.pc;
     auto popEntry = [&]() -> StackEntry {
         if (stack.empty()) throw std::runtime_error("internal VM stack underflow");
         StackEntry value = std::move(stack.back());
@@ -370,16 +412,327 @@ void Interpreter::execute(const std::string& source, std::ostream& output, std::
         return std::pair<RuntimeArray*, std::size_t>{&array, offset};
     };
 
-    std::size_t pc = 0;
+    if (state.pendingUiRequest) {
+        if (!ui_) throw std::runtime_error("UI service unavailable");
+        const auto result = ui_->poll(*state.pendingUiRequest);
+        if (!result) return ExecutionStatus::Suspended;
+        if (state.pendingUiKind == ui::RequestKind::Confirm)
+            stack.emplace_back(result->kind == ui::ResultKind::Confirmed ? 1.0 : 0.0);
+        else if (state.pendingUiKind == ui::RequestKind::Dialog) {
+            auto found = uiSession_->dialogs.find(state.pendingUiBuilderHandle);
+            if (found == uiSession_->dialogs.end())
+                throw std::runtime_error("pending dialog builder no longer exists");
+            DialogBuilder& dialog = found->second;
+            dialog.hasResults = result->kind == ui::ResultKind::Submitted;
+            if (dialog.hasResults) {
+                dialog.results = result->fields;
+                for (std::size_t i = 0; i < dialog.fields.size(); ++i)
+                    dialog.fields[i].initialValue = dialog.results[i];
+            }
+            stack.emplace_back(dialog.hasResults ? 1.0 : 0.0);
+        } else if (state.pendingUiKind == ui::RequestKind::Menu) {
+            auto found = uiSession_->menus.find(state.pendingUiBuilderHandle);
+            if (found == uiSession_->menus.end())
+                throw std::runtime_error("pending menu builder no longer exists");
+            MenuBuilder& menu = found->second;
+            menu.hasResult = result->kind == ui::ResultKind::Selected;
+            menu.selectedCommand = menu.hasResult ? result->commandId : 0;
+            stack.emplace_back(static_cast<double>(menu.selectedCommand));
+        }
+        state.pendingUiRequest.reset();
+        state.pendingUiBuilderHandle = 0;
+    }
     while (pc < code.size()) {
         if (stop.stop_requested()) throw std::runtime_error("execution cancelled");
         const auto& instruction = code[pc++];
         switch (instruction.op) {
         case Op::Call: {
-            if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
             std::vector<StackEntry> arguments(instruction.argCount);
             for (std::size_t i = instruction.argCount; i-- > 0;)
                 arguments[i] = popEntry();
+            if (instruction.builtin) {
+                if (instruction.name == "LEN") {
+                    const auto* text = std::get_if<std::string>(&arguments[0]);
+                    if (!text) runtimeError(instruction, "string value required");
+                    pushValue(static_cast<double>(utf8Length(*text)));
+                    break;
+                }
+                if (instruction.name == "ALERT" || instruction.name == "CONFIRM") {
+                    if (!ui_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                           "UI service unavailable");
+                    const auto textArgument = [&](std::size_t index) -> const std::string& {
+                        if (const auto* text = std::get_if<std::string>(&arguments[index])) return *text;
+                        runtimeError(instruction, "string value required");
+                    };
+                    const std::string title = textArgument(0);
+                    const std::string message = textArgument(1);
+                    state.pendingUiKind = instruction.name == "ALERT" ?
+                        ui::RequestKind::Alert : ui::RequestKind::Confirm;
+                    state.pendingUiRequest = instruction.name == "ALERT" ?
+                        ui_->beginAlert(session_id_, title, message) :
+                        ui_->beginConfirm(session_id_, title, message);
+                    return ExecutionStatus::Suspended;
+                }
+                if (instruction.name == "DINIT" || instruction.name == "MINIT" ||
+                    instruction.name == "DTEXT" || instruction.name == "DEDIT" ||
+                    instruction.name == "DINT" || instruction.name == "DFLOAT" ||
+                    instruction.name == "DCHOICE" || instruction.name == "DCHECK" ||
+                    instruction.name == "DBUTTONS" || instruction.name == "DIALOG" ||
+                    instruction.name == "DGET" || instruction.name == "DGET$" ||
+                    instruction.name == "MCARD" || instruction.name == "MENU") {
+                    const auto stringArgument = [&](std::size_t index) -> const std::string& {
+                        if (const auto* value = std::get_if<std::string>(&arguments[index]))
+                            return *value;
+                        runtimeError(instruction, "string value required");
+                    };
+                    const auto numericArgument = [&](std::size_t index) {
+                        if (const auto* value = std::get_if<double>(&arguments[index]))
+                            return *value;
+                        runtimeError(instruction, "numeric value required");
+                    };
+                    const auto handleArgument = [&](std::size_t index) {
+                        const double value = numericArgument(index);
+                        if (!std::isfinite(value) || std::trunc(value) != value || value < 1 ||
+                            value > 9007199254740991.0)
+                            runtimeError(instruction, "invalid UI builder handle");
+                        return static_cast<std::uint64_t>(value);
+                    };
+                    const auto fieldPosition = [&](std::size_t index) {
+                        const double value = numericArgument(index);
+                        if (!std::isfinite(value) || std::trunc(value) != value || value < 1 ||
+                            value > 9007199254740991.0)
+                            runtimeError(instruction, "field number must be a positive integer");
+                        return static_cast<std::size_t>(value - 1);
+                    };
+                    if (instruction.name == "DINIT" || instruction.name == "MINIT") {
+                        if (uiSession_->nextUiBuilderHandle > 9007199254740991ULL)
+                            runtimeError(instruction, "UI builder handle limit exceeded");
+                        const std::uint64_t handle = uiSession_->nextUiBuilderHandle++;
+                        if (instruction.name == "DINIT")
+                            uiSession_->dialogs.emplace(handle, DialogBuilder{stringArgument(0)});
+                        else
+                            uiSession_->menus.emplace(handle, MenuBuilder{stringArgument(0)});
+                        pushValue(static_cast<double>(handle));
+                    } else if (instruction.name == "DTEXT" || instruction.name == "DEDIT" ||
+                               instruction.name == "DINT" || instruction.name == "DFLOAT" ||
+                               instruction.name == "DCHOICE" || instruction.name == "DCHECK" ||
+                               instruction.name == "DBUTTONS" || instruction.name == "DIALOG" ||
+                               instruction.name == "DGET" || instruction.name == "DGET$") {
+                        const std::uint64_t handle = handleArgument(0);
+                        const auto found = uiSession_->dialogs.find(handle);
+                        if (found == uiSession_->dialogs.end())
+                            runtimeError(instruction, "unknown dialog handle");
+                        DialogBuilder& dialog = found->second;
+                        if (instruction.name == "DTEXT") {
+                            dialog.fields.push_back({ui::FieldKind::Text, stringArgument(1),
+                                                     std::monostate{}});
+                        } else if (instruction.name == "DEDIT") {
+                            dialog.fields.push_back({ui::FieldKind::Edit, stringArgument(1),
+                                                     stringArgument(2)});
+                        } else if (instruction.name == "DINT" || instruction.name == "DFLOAT") {
+                            const double initial = numericArgument(2);
+                            const double minimum = numericArgument(3);
+                            const double maximum = numericArgument(4);
+                            if (!std::isfinite(minimum) || !std::isfinite(maximum) ||
+                                minimum > maximum ||
+                                (instruction.name == "DINT" && std::trunc(initial) != initial))
+                                runtimeError(instruction, "invalid dialog numeric range or initial value");
+                            dialog.fields.push_back({
+                                instruction.name == "DINT" ? ui::FieldKind::Integer : ui::FieldKind::Float,
+                                stringArgument(1), initial, {}, minimum, maximum});
+                        } else if (instruction.name == "DCHOICE") {
+                            const double initial = numericArgument(2);
+                            if (!std::isfinite(initial) || std::trunc(initial) != initial || initial < 1)
+                                runtimeError(instruction, "choice number must be a positive integer");
+                            std::vector<std::string> choices;
+                            const std::string& encoded = stringArgument(3);
+                            std::size_t start = 0;
+                            while (start <= encoded.size()) {
+                                const std::size_t separator = encoded.find('|', start);
+                                choices.push_back(encoded.substr(start, separator == std::string::npos ?
+                                    std::string::npos : separator - start));
+                                if (separator == std::string::npos) break;
+                                start = separator + 1;
+                            }
+                            if (choices.empty() || initial > static_cast<double>(choices.size()))
+                                runtimeError(instruction, "initial choice is outside the option list");
+                            dialog.fields.push_back({ui::FieldKind::Choice, stringArgument(1),
+                                                     initial - 1, std::move(choices)});
+                        } else if (instruction.name == "DCHECK") {
+                            const double initial = numericArgument(2);
+                            if (initial != 0 && initial != 1)
+                                runtimeError(instruction, "check initial value must be 0 or 1");
+                            dialog.fields.push_back({ui::FieldKind::Check, stringArgument(1),
+                                                     initial == 1});
+                        } else if (instruction.name == "DBUTTONS") {
+                            const std::string& accept = stringArgument(1);
+                            const std::string& cancel = stringArgument(2);
+                            if (accept.empty() || cancel.empty())
+                                runtimeError(instruction, "dialog button labels cannot be empty");
+                            dialog.acceptLabel = accept;
+                            dialog.cancelLabel = cancel;
+                        } else if (instruction.name == "DGET" || instruction.name == "DGET$") {
+                            if (!dialog.hasResults)
+                                runtimeError(instruction, "dialog has no submitted values");
+                            const std::size_t position = fieldPosition(1);
+                            if (position >= dialog.results.size())
+                                runtimeError(instruction, "dialog field number out of range");
+                            const ui::FieldValue& value = dialog.results[position];
+                            if (instruction.name == "DGET$") {
+                                const auto* text = std::get_if<std::string>(&value);
+                                if (!text) runtimeError(instruction, "dialog field is not a string");
+                                pushValue(*text);
+                            } else if (const auto* number = std::get_if<double>(&value)) {
+                                const double result = dialog.fields[position].kind == ui::FieldKind::Choice ?
+                                    *number + 1 : *number;
+                                pushValue(result);
+                            } else if (const auto* checked = std::get_if<bool>(&value)) {
+                                pushValue(*checked ? 1.0 : 0.0);
+                            } else {
+                                runtimeError(instruction, "dialog field has no value");
+                            }
+                        } else {
+                            if (!ui_) throw runtime::ServiceError(
+                                runtime::ServiceErrorCode::Unavailable, "UI service unavailable");
+                            dialog.hasResults = false;
+                            state.pendingUiKind = ui::RequestKind::Dialog;
+                            state.pendingUiBuilderHandle = handle;
+                            state.pendingUiRequest = ui_->beginDialog(
+                                session_id_, dialog.title, dialog.fields,
+                                dialog.acceptLabel, dialog.cancelLabel);
+                            return ExecutionStatus::Suspended;
+                        }
+                    } else if (instruction.name == "MCARD") {
+                        const std::uint64_t handle = handleArgument(0);
+                        const auto found = uiSession_->menus.find(handle);
+                        if (found == uiSession_->menus.end())
+                            runtimeError(instruction, "unknown menu handle");
+                        const double rawId = numericArgument(1);
+                        if (!std::isfinite(rawId) || std::trunc(rawId) != rawId || rawId < 1 ||
+                            rawId > static_cast<double>(std::numeric_limits<std::uint32_t>::max()))
+                            runtimeError(instruction, "menu command ID must be a positive 32-bit integer");
+                        const auto id = static_cast<std::uint32_t>(rawId);
+                        for (const auto& item : found->second.items)
+                            if (item.commandId == id)
+                                runtimeError(instruction, "duplicate menu command ID");
+                        found->second.items.push_back({id, stringArgument(2), stringArgument(3), true});
+                    } else if (instruction.name == "MENU") {
+                        if (!ui_) throw runtime::ServiceError(
+                            runtime::ServiceErrorCode::Unavailable, "UI service unavailable");
+                        const std::uint64_t handle = handleArgument(0);
+                        const auto found = uiSession_->menus.find(handle);
+                        if (found == uiSession_->menus.end())
+                            runtimeError(instruction, "unknown menu handle");
+                        found->second.hasResult = false;
+                        found->second.selectedCommand = 0;
+                        state.pendingUiKind = ui::RequestKind::Menu;
+                        state.pendingUiBuilderHandle = handle;
+                        state.pendingUiRequest = ui_->beginMenu(
+                            session_id_, found->second.title, found->second.items);
+                        return ExecutionStatus::Suspended;
+                    }
+                    break;
+                }
+                if (instruction.name == "INK" || instruction.name == "PAPER" ||
+                    instruction.name == "LINE" || instruction.name == "RECT" ||
+                    instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
+                    instruction.name == "CLS") {
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    const auto integerArgument = [&](std::size_t index,
+                                                     const char* description) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number) runtimeError(instruction, "numeric value required");
+                        const double value = *number;
+                        if (!std::isfinite(value) || std::trunc(value) != value ||
+                            value < std::numeric_limits<std::int32_t>::min() ||
+                            value > std::numeric_limits<std::int32_t>::max())
+                            runtimeError(instruction, description);
+                        return static_cast<std::int32_t>(value);
+                    };
+                    const auto pointArguments = [&]() {
+                        return graphics::Point{integerArgument(0, "pixel coordinate out of range"),
+                                               integerArgument(1, "pixel coordinate out of range")};
+                    };
+                    if (instruction.name == "INK" || instruction.name == "PAPER") {
+                        const auto color = integerArgument(0, "color index must be an integer from 0 to 7");
+                        if (color < 0 || color > 7)
+                            runtimeError(instruction, "color index must be an integer from 0 to 7");
+                        if (instruction.name == "INK")
+                            graphics_->setInk(session_id_, static_cast<graphics::ColorIndex>(color));
+                        else
+                            graphics_->setPaper(session_id_, static_cast<graphics::ColorIndex>(color));
+                    } else if (instruction.name == "LINE") {
+                        const auto from = pointArguments();
+                        const auto to = graphics::Point{
+                            integerArgument(2, "pixel coordinate out of range"),
+                            integerArgument(3, "pixel coordinate out of range")};
+                        graphics_->line(session_id_, from, to);
+                    } else if (instruction.name == "RECT") {
+                        const auto topLeft = pointArguments();
+                        const auto width = integerArgument(2, "rectangle size must be positive");
+                        const auto height = integerArgument(3, "rectangle size must be positive");
+                        if (width <= 0 || height <= 0)
+                            runtimeError(instruction, "rectangle size must be positive");
+                        graphics_->rectangle(session_id_, topLeft, width, height);
+                    } else if (instruction.name == "CIRCLE") {
+                        const auto center = pointArguments();
+                        const auto radius = integerArgument(2, "circle radius must be nonnegative");
+                        if (radius < 0) runtimeError(instruction, "circle radius must be nonnegative");
+                        graphics_->circle(session_id_, center, radius);
+                    } else if (instruction.name == "TEXT") {
+                        const auto position = pointArguments();
+                        const auto* value = std::get_if<std::string>(&arguments[2]);
+                        if (!value) runtimeError(instruction, "string value required");
+                        graphics_->text(session_id_, position, *value);
+                    } else {
+                        graphics_->clear(session_id_);
+                    }
+                    break;
+                }
+                if (!channels_)
+                    throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                "channel service unavailable");
+                const auto textArgument = [&](std::size_t index) -> const std::string& {
+                    if (const auto* text = std::get_if<std::string>(&arguments[index])) return *text;
+                    runtimeError(instruction, "string value required");
+                };
+                const auto channelArgument = [&](std::size_t index) {
+                    const auto* number = std::get_if<double>(&arguments[index]);
+                    if (!number) runtimeError(instruction, "numeric value required");
+                    const double value = *number;
+                    if (!std::isfinite(value) || std::trunc(value) != value || value < 1 ||
+                        value > 9007199254740991.0)
+                        runtimeError(instruction, "invalid channel number");
+                    return static_cast<runtime::ChannelId>(value);
+                };
+                if (instruction.name == "OPEN") {
+                    const std::string& path = textArgument(0);
+                    std::string mode = textArgument(1);
+                    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+                        return static_cast<char>(std::toupper(c));
+                    });
+                    runtime::ChannelMode channelMode;
+                    if (mode == "READ") channelMode = runtime::ChannelMode::Read;
+                    else if (mode == "WRITE") channelMode = runtime::ChannelMode::Write;
+                    else if (mode == "APPEND") channelMode = runtime::ChannelMode::Append;
+                    else runtimeError(instruction, "OPEN mode must be READ, WRITE, or APPEND");
+                    const auto id = channels_->open(session_id_, path, channelMode);
+                    pushValue(static_cast<double>(id));
+                } else if (instruction.name == "READ$") {
+                    const auto line = channels_->readLine(session_id_, channelArgument(0));
+                    pushValue(line ? Value(*line) : Value(std::string{}));
+                } else if (instruction.name == "EOF") {
+                    pushValue(channels_->atEnd(session_id_, channelArgument(0)) ? 1.0 : 0.0);
+                } else if (instruction.name == "WRITE") {
+                    channels_->write(session_id_, channelArgument(0), textArgument(1) + "\n");
+                } else if (instruction.name == "CLOSE") {
+                    channels_->close(session_id_, channelArgument(0));
+                }
+                break;
+            }
+            if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
             RuntimeFrame frame;
             frame.returnAddress = pc;
             frame.function = instruction.expectsValue;
@@ -456,6 +809,48 @@ void Interpreter::execute(const std::string& source, std::ostream& output, std::
         case Op::ArrayGet: {
             auto [array, offset] = arrayOffset(instruction);
             pushValue(array->values[offset]);
+            break;
+        }
+        case Op::StringSlice: {
+            double endValue = 0;
+            double startValue = 1;
+            if (instruction.sliceHasEnd) endValue = numeric(pop(), instruction);
+            if (instruction.sliceHasStart) startValue = numeric(pop(), instruction);
+            Value source = pop();
+            const auto* text = std::get_if<std::string>(&source);
+            if (!text) runtimeError(instruction, "string value required for slice");
+
+            std::vector<std::size_t> offsets;
+            offsets.reserve(text->size() + 1);
+            for (std::size_t i = 0; i < text->size(); ++i) {
+                const auto byte = static_cast<unsigned char>((*text)[i]);
+                if ((byte & 0xc0) != 0x80) offsets.push_back(i);
+            }
+            offsets.push_back(text->size());
+            const std::size_t length = offsets.size() - 1;
+            if (instruction.sliceSingle) endValue = startValue;
+            else if (!instruction.sliceHasEnd) endValue = static_cast<double>(length);
+            else if (endValue > static_cast<double>(length))
+                endValue = static_cast<double>(length);
+            const auto validIndex = [&](double value) {
+                return std::isfinite(value) && std::trunc(value) == value && value >= 1 &&
+                       value <= static_cast<double>(length);
+            };
+            if (length == 0 && !instruction.sliceHasStart && !instruction.sliceHasEnd &&
+                !instruction.sliceSingle) {
+                stack.emplace_back(std::string{});
+                break;
+            }
+            if (length == 0 && !instruction.sliceHasStart && instruction.sliceHasEnd &&
+                !instruction.sliceSingle && endValue == 0) {
+                stack.emplace_back(std::string{});
+                break;
+            }
+            if (!validIndex(startValue) || !validIndex(endValue) || endValue < startValue)
+                runtimeError(instruction, "string slice index out of bounds");
+            const std::size_t first = static_cast<std::size_t>(startValue) - 1;
+            const std::size_t last = static_cast<std::size_t>(endValue);
+            stack.emplace_back(text->substr(offsets[first], offsets[last] - offsets[first]));
             break;
         }
         case Op::ArraySet: {
@@ -754,6 +1149,7 @@ void Interpreter::execute(const std::string& source, std::ostream& output, std::
             break;
         }
     }
+    return ExecutionStatus::Completed;
 }
 
 

@@ -1,0 +1,409 @@
+ANSWERS TO SELF TEST ON CHAPTER 1
+---------------------------------
+
+1. Use the BREAK sequence to abandon a running program because:
+   a) something is wrong and you do not understand it
+   b) it is longer of interest
+   c) any other problem                       (three points)
+
+2. The RESET button is on the right hand side of the computer
+
+3. The effect of the RESET button is rather like switching the
+   computer off and on again.
+
+4. The SHIFT key:
+
+    a) is only effective while you hold it down whereas the CAPS
+       LOCK key stays effective after you have pressed it. (one point)
+
+    b) The SHIFT key affects all the letter digit and symbol keys,
+       but the CAPS LOCK key affects only letters. (one point)
+
+5. The CTRL <- (CTRL left arrow) keys delete the previous character
+   just left of the cursor
+
+6. The [ENTER] key causes a message or instruction to be entered for
+   action by the computer.
+
+7. We use [ENTER] for the ENTER key
+
+8. CLS [ENTER] causes part of the screen to be cleared.
+
+9. RUN [ENTER] causes a stored program to be executed.
+
+10. LIST [ENTER] causes a stored program to be displayed on the screen.
+
+11. NEW [ENTER] clears the main memory ready for a new program.
+
+12. Keywords of SuperBASIC are recognised in upper or lower case.
+
+13. The part of a keyword displayed in upper case is the allowed
+    abbreviation.
+
+
+CHECK YOUR SCORE
+
+14 to 16  is very good. Carry on reading.
+
+12 or 13  is good, but re-read some parts of chapter one.
+
+10 or 11  is fair, but re-read some parts of chapter one and do
+          the test again.
+
+Under 10. You should work carefully through chapter one again and
+          repeat the test.
+
+ANSWERS TO SELF TEST ON CHAPTER 2
+---------------------------------
+
+1. An internal number store is like a pigeon hole which you can
+   name and put numbers into.
+
+2. A LET statement which uses a particular name for the first time
+   will cause a pigeon hole to be created and named, for example
+
+       LET count = 1 [ENTER]                          (1 point)
+
+   A READ statement which uses a name for the first time will have
+   the same effect, for example:
+
+       READ count [ENTER]                             (1 point)
+
+3. You can find the value of a pigeon hole with a PRINT statement.
+
+4. The technical name for a pigeon hole is 'variable' because its
+   values can vary as a program runs.
+
+5. A variable gets its first value when it is first used in a LET
+   statement, INPUT statement or READ statement.
+
+6. A change in the value of a variable is usually caused by the
+   execution of a LET statement.
+
+7. The = sign in a LET statement represents an operation:
+
+       'Evaluate whatever is on the right hand side and place it
+       in the pigeon hole named on the left hand side: that is
+       'Let the left hand side become equal to the right hand side'.
+
+8. An un-numbered statement is executed immediately.
+
+9. A numbered statement is not executed immediately. It is stored.
+
+10. The quotes in a PRINT statement enclose text which is to be printed.
+
+11. When quotes are not used you are printing out the value of a variable.
+
+12. An INPUT statement makes the program pause so that you can type data
+    at the keyboard.
+
+13. DATA statements are never executed.
+
+14. They are used to provide values for the variables in READ statements.
+
+15. The technical word for the name of a pigeon hole is 'identifier'.
+
+16. Example answers:
+
+    i.    day
+    ii.   day_23
+    iii.  day_of_week (3 points)
+
+17. The space bar is especially important for putting spaces after
+    or before keywords so that they cannot be taken as identifiers
+    (names) chosen by the user.
+
+18. Freely chosen identifiers are important because they help you to
+    make programs easier to understand. Such programs are less prone
+    to errors and more adaptable.
+
+
+CHECK YOUR SCORE
+
+18 to 21   is very good. Carry on reading.
+16 or 17   good but re-read some parts of chapter two.
+14 or 15   fair, but re-read some parts of chapter two and do the
+           test again.
+Under 14   you should work carefuly through chapter two again and
+           repeat the test.
+
+
+ANSWERS TO SELF TEST ON CHAPTER 3
+
+1. A pixel is the smallest area of light that can be displayed on
+   the screen.
+
+2. There are 256 pixel positions across the low resolution mode.
+
+3. There are 256 pixel positions from top to bottom in the low
+   resolution mode.
+
+4. An address is determined by.
+
+       the up value, 0 to 100
+       the across value, 0 to a number computed by the system
+
+5. There are eight colours available in the low resolution mode
+   including black and white.
+
+6. i.   LINE draws a line, e.g. LINE a,b TO x,y
+   ii.  INK selects a colour for drawing, e.g. INK 5
+   iii. PAPER selects a background colour e.g. PAPER 7
+   iv.  BORDER draws a border, e.g. BORDER 1,5
+
+7. REPeat name....END REPeat name.
+
+8. A REPeat loop terminates when an 'EXIT name' statement is executed.
+
+9. Loops in SuperBASIC have names so that it is possible to EXIT from
+   them in a straightforward way. It is not necessary to work out line
+   numbers in advance.
+
+
+CHECK YOUR SCORE
+
+11 to 13 is very good. Carry on reading.
+8 to 10  is good but re-read some parts of chapter three.
+6 or 7   is fair but re-read some parts of chapter three and do
+         the test again.
+Under 6. You should work carefully through chapter three again and
+         repeat the test.
+
+
+ANSWERS TO SELF TEST ON CHAPTER 4
+
+1. A character string is a sequence of characters such as letters,
+   digits or other symbols.
+
+2. The term, 'character string', is often abbreviated to 'string'.
+
+3. A string variable name always ends with $.
+
+4. Names such as word$ are sometimes pronounced 'worddollar'
+
+5. The keyword LEN will find the length or number of characters in
+   a string. For example, if the variable meat$ has the value 'steak'
+   then the statement:
+
+       PRINT LEN(meat$)
+
+   will output 5.
+
+6. The symbol for joining two strings is &.
+
+7. The limits of a string may be defined by quotes or apostrophes.
+
+8. The quotes are not part of the actual string and are not stored.
+
+9. The function is CHR$. You must use it with brackets as in CHR$(66)
+   or with brackets as in CHR$(RND(65 TO 67)).
+
+10.You generate random letters with statements like:
+
+       lettercode = RND(65 TO 90)
+       PRINT CHR$(lettercode)
+
+
+CHECK YOUR SCORE
+
+9 or 10  is very good. Carry on reading.
+7 or 8   is good but re-read some parts of chapter four
+5 or 6   is fair but re-read some parts of chapter four and do the
+         test again.
+Under 5  You should work carefully through chapter four again and
+         repeat the test.
+
+
+
+ANSWERS TO SELF TEST ON CHAPTER 5
+
+1. Lower case letters for variable names or loop names contrast with
+   the keywords which are at least partly displayed in upper case.
+
+2. Indenting reveals clearly what is the extent and content of loops
+   (and other structures).
+
+3. Identifiers (names) should normally be chosen so that they mean
+   something, for example, count or word$ rather than C or W$
+
+4. You can edit a stored program by:
+
+       replacing a line
+       inserting a line
+       deleting a line    (three points)
+
+5. The ENTER key must be used to enter a command or program line.
+
+6. The word NEW will wipe out the previous SuperBASIC program in the
+   QL and will ensure that a new program which you enter will not be
+   merged with an old one.
+
+7. If you wish a line to be stored as part of a program then you must
+   use a line number.
+
+8. The word RUN followed by [ENTER] will cause a program to execute.
+
+9. The word REMark enables you to put into a program information which
+   is ignored at execution time.
+
+10.The keywords SAVE and LOAD enable programs to be stored on and
+   retrieved from cartridges. (two points).
+
+
+CHECK YOUR SCORE
+
+12 to 14  is very good. Carry on reading.
+10 or 11  is good but re-read some parts of chapter five.
+8 or 9    is fair but re-read some parts of chapter five and do
+          the test again.
+Under 8   You should re-read chapter five carefully and do the test
+          again.
+
+
+ANSWERS TO SELF TEST ON CHAPTER 6
+
+1. It is not easy to think of many different variable names for
+   storing the data. If you can think of enough names, every one has
+   to be written in a LET statement or a READ statement if you do
+   not use arrays.
+
+2. A number called the subscript, is part of an array variable name.
+   All the variables in an array share one name but each has a
+   different subscript.
+
+3. You must 'declare' an array giving its size (dimension) in a DIM
+   statement usually placed near the beginning of a program before
+   the declared array is used.
+
+4. The distinguishing number of an array variable is called the
+   subscript.
+
+5. Houses in a street share the same street name but each has its
+   own number.
+
+   Beds in a hospital ward may share the name of the ward but each
+   bed may be numbered.
+
+   Cells in a prison block may have a common block name but a
+   different number
+
+   Holes on a golf course, e.g. the fifth hole at Royal Birkdale.
+
+6. A FOR loop terminates when the process corresponding to the last
+   value of the loop variable has been completed.
+
+7. A FOR loop's name is also the name of the variable which controls
+   the loop.
+
+8. The two phrases for this variable are 'loop variable' or
+   'control variable'.
+
+9. The values of a loop variable may be used as subscripts for
+   array variable names. Thus, as the loop proceeds, each array
+   variable is 'visited' once.
+
+10. Both FOR loops and REPeat loops:
+
+    a. have an opening keyword:
+
+       REPeat , FOR
+
+    b. have a closing statement:
+
+       END REPeat name, END FOR name
+
+    c have a loop name.
+
+    Only the FOR loop has
+
+    d. a loop variable or control variable.          (four points)
+
+
+CHECK YOUR SCORE
+
+This test is more searching than the previous ones.
+
+15 or 16 is excellent. Carry on reading.
+13 or 14 is very good but think a bit more about some of the ideas.
+         Look at programs to see how they work.
+11 or 12 is good but re-read some parts of chapter six.
+8 to 10  is fair but re-read some parts of chapter six and do the
+         test again.
+Under 8  You should re-read chapter six carefully and do the test again.
+
+
+ANSWERS TO SELF TEST ON CHAPTER 7
+
+1. We normally break down large or complex jobs into smaller tasks
+   until they are small enough to be completed.
+
+2. This principle can be applied in programming by breaking the
+   total job down and writing a procedure for each task.
+
+3. A simple procedure is:
+
+       a separate block of code
+       properly named. (two points)
+
+4. A procedure call ensures that:
+
+       the procedure is activated
+       control returns to just after the calling point. (two points)
+
+5. Procedure names can be used in a main program before the procedures
+   have been written. This enables you to think about the whole job and
+   get an overview without worrying about the detail.
+
+6. If you write a procedure definition before using its name you can
+   test it and then when it works properly forget the details. You
+   need only remember its name and roughly what it does.
+
+7. A programmer who can write up to thirty line programs can break down
+   a complex task into procedures in such a way that none is more than
+   thirty lines and most are much less. In this way he need only worry
+   about one bit of the job at a time.
+
+8. The use of a procedure would save memory space if it is necessary
+   to call it more than once from different parts of a program. The
+   definition of a procedure only occurs once but it can be called as
+   often as necessary.
+
+9. A main program can place information in 'pigeon-holes' by means of
+   LET or READ statements. These 'pigeon holes' can be accessed by
+   the procedure. Thus the procedure uses information originally set
+   up by the main program.
+
+   A second method is to use parameters in the procedure call. These
+   values are passed to variables in the procedure definition which
+   then uses them as necessary.
+
+10.An actual parameter is the actual value passed from a procedure
+   call in a main program to a procedure.
+
+11. A formal parameter is a variable in a procedure definition
+    which receives the value passed to the procedure by the main
+    program.
+
+
+CHECK YOUR SCORE
+
+This is a searching test. You may need more experience of using procedures
+before the ideas can be fully appreciated. But they are very powerful and,
+when understood, extremely helpful ideas. They are worth whatever effort is
+necessary
+
+12 to 14 excellent. Read on with confidence.
+
+10 or 11 very good. Just check again on certain points.
+
+8 or 9   good but re-read some parts of chapter seven.
+
+6 or 7   fair but re-read some parts of chapter seven. Work
+         carefully through the programs writing down all changes
+         in variable values. Then do the test again.
+
+Under 6  read chapter seven again. Take it slowly working all the
+         programs. These ideas may not be easy but they are worth
+         the effort. When you are ready, take the test again.
+
+

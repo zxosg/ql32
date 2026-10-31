@@ -1,0 +1,372 @@
+CHAPTER 6
+---------
+
+ARRAYS AND FOR LOOPS
+
+
+WHAT IS AN ARRAY
+
+You know that numbers or character strings can become values of variables.
+You can picture this as numbers or words going into internal pigeon holes
+or houses. Suppose for example that four employees of a company are to be
+sent to a small village, perhaps because oil has been discovered. The
+village is one of the few places where the houses only have names and there
+are four available for rent. All the house names end with a dollar symbol.
+
+    Westlea$ Lakeside$ Roselawn$ Oaktree$
+
+The four employees are called
+
+    +-----+    +-----+    +-----+    +-----+
+    | VAL |    | HAL |    | MEL |    | DEL |
+    +-----+    +-----+    +-----+    +-----+
+
+They can be placed in the houses by one of two methods.
+
+
+Program 1:
+
+100 LET westlea$ = "VAL"
+110 LET lakeside$ = "HAL"
+120 LET roselawn$ = "MEL"
+130 LET oaktree$ = "DEL"
+140 PRINT ! westlea$ ! lakeside$ ! roselawn$ ! oaktree$
+
+
+Program 2:
+
+100 READ westlea$, lakeside$, roselawn$, oaktree$
+110 PRINT ! westlea$ ! lakeside$ ! roselawn$ ! oaktree$
+120 DATA "VAL", "HAL", "MEL", "DEL"
+
+    westlea$    lakeside$    roselawn$    oaktree$
+        |            |           |            |
+        |            |           |            |
+        v            v           v            v
+       VAL          HAL         MEL          DEL
+
+
+As the amount of data gets larger the advantages of READ and DATA over LET
+become greater. But when the data gets really numerous the problem of
+finding names for houses gets as difficult as finding vacant houses in a
+small village.
+
+The solution to this and many other problems of handling data lies in a new
+type of pigeon hole or variable in which many may share a single name.
+However, they must be distinct so each variable also has a number like
+numbered houses in the same street. Suppose that you need four vacant
+houses in High Street numbered 1 to 4. In SuperBASIC we say there is an
+array of four houses. The name of the array is high_st$ and the four houses
+are to be numbered 1 to 4.
+
+But you cannot just use these array variables as you can ordinary (simple)
+variables. You have to declare the dimensions (or size) of the array first.
+The computer allocates space internally and it needs to know how many
+string variables there are in the array and also the maximum length of each
+string variable. You use a DIM statement thus:
+DIM high_st$(4, 3)
+             |  |
+             |  +------ maximum length of string
+             |
+             +--------- number of string variables
+
+
+After the DIM statement has been executed the variables are available for
+use. It is as though the houses have been built but are still empty. The
+four 'houses' share a common name, high_st$, but each has its own number
+and each can hold up to three characters.
+
+
+    +--+            -------        -------        -------        -------
+    |  |          /    1    \    /    2    \    /    3    \    /    4    \
++----------+     +-----------+  +-----------+  +-----------+  +-----------+
+| high_st$   >   | ++     ++ |  | ++     ++ |  | ++     ++ |  | ++     ++ |
++----------+     | ++ +-+ ++ |  | ++ +-+ ++ |  | ++ +-+ ++ |  | ++ +-+ ++ |
+    |  |         |    | |    |  |    | |    |  |    | |    |  |    | |    |
+    |  |         +----+-+----+  +----+-+----+  +----+-+----+  +----+-+----+
+    |  |
+    |  |
+
+
+There are five programs below which all do the same thing: they cause the
+four 'houses' to be 'occupied' and they PRINT to show that the 'occupation'
+has really worked. The final method uses only four lines but the other four
+lead up to it in a way which moves all the time from known ideas to new
+ones or new uses of old ones. The movement is also towards greater economy.
+
+If you understand the first two or three methods perfectly well you may
+prefer to move straight onto methods 4 and 5. But if you are in any doubt,
+methods 1, 2 and 3 will help to clarify things.
+
+
+Program 1:
+
+100 DIM high_st$(4,3)
+110 LET high_st$(l) = "VAL"
+120 LET high_st$(2) = "HAL"
+130 LET high_st$(3) = "MEL"
+140 LET high st$(4) = "DEL"
+150 PRINT ! high_st$(1) ! high st$(2) !
+160 PRINT ! high_st$(3) ! high-st$(4) !
+
+
+Program 2:
+
+100 DIM high st$(4,3)
+110 READ high_st$(1),high_st$(2),high_st$(3),high_st$(4)
+120 PRINT ! high_st$(1) ! high_st$(2) !
+130 PRINT ! high_st$(3) ! high_st(4) !
+140 DATA "VAL","HAL","MEL","DEL"
+
+
+This shows how to economise on variable names but the constant repeating of
+high_st$ is both tedious and the cause of the cluttered appearance of the
+programs. We can, again, use a known technique - the REPeat loop to improve
+things further. We set up a counter, "number", which increases by one as
+the REPeat loop proceeds.
+
+
+Program 3:
+
+100 RESTORE 190
+110 DIM high_st$(4,3)
+120 LET number = 0
+130 REPeat houses
+140   LET number = number + 1
+150   READ high_st$(number)
+160   IF num = 4 THEN EXIT houses
+170 END REPeat houses
+180 PRINT high_st$(1) ! high_st$(2) ! high_st$(3) ! high_st$(4)
+190 DATA "VAL","HAL","MEL","DEL"
+
+This special type of loop, in which something has to be done a certain
+number of times, is well known. A special structure, called a FOR loop, has
+been invented for it. In such a loop the count from 1 to 4 is handled
+automatically. So is the exit when all four items have been handled
+
+
+Program 4:
+
+100 RESTORE 160
+110 DIM high_st$(4,3)
+120 FOR number = 1 TO 4
+130   READ high_st$(number)
+140   PRINT ! high_st$(number) !
+150 END FOR number
+160 DATA "VAL","HAL","MEL","DEL"
+
+
+The output from all four programs is the same:
+
+    VAL HAL MEL DEL
+
+Which proves that the data is properly stored internally in the four array
+variables:
+
+
+               +-----+    +-----+    +-----+    +-----+
+    high_st$   |  1  |    |  2  |    |  3  |    |  4  |
+               +-----+    +-----+    +-----+    +-----+
+
+
+Method 4 is clearly the best so far because it can deal equally well with 4
+or 40 or 400 items by just changing the number 4 and adding more DATA
+items. You can use as many DATA statements as you need.
+
+In its simplest form the FOR loop is rather like the simplest form of
+REPeat loop. The two can be compared:
+
+100 REPeat greeting         100 FOR greeting = 1 TO 40
+110   PRINT 'Hello"         110   PRINT 'Hello"
+120 END REPeat greeting     120 END FOR greeting
+
+Both these loops would work. The REPeat loop would print 'Hello' endlessly
+(stop it with the BREAK sequence) and the FOR loop would print 'Hello' just
+forty times.
+
+Notice that the name of the FOR loop is also a variable, "greeting", whose
+value varies from 1 to 40 in the course of running the program. This
+variable is sometimes called the loop variable or the control variable of
+the loop.
+
+Note the structure of both loops takes the form:
+
+    Opening statement
+      Content
+    Closing statement
+
+However certain structures have allowable short forms for use when there
+are only one or a few statements in the content of the loop. Short forms of
+the FOR loop are allowed so we could write the program in the most
+economical form of all:
+
+
+Program 5:
+
+100 RESTORE 140 : CLS
+110 DIM high st$(4,3)
+120 FOR number = 1 TO 4 : READ high_st$(number)
+130 FOR number = 1 TO 4 : PRINT ! high_st$(number) !
+140 DATA "VAL", "HAL", "MEL", "DEL"
+
+Colons serve as end of statement symbols instead of ENTER and the ENTER
+symbols of lines 120 and 130 serve as END FOR statements.
+
+There is an even shorter way of writing the above program. To print out the
+contents of the array high_st$ we can replace line 130 by:
+
+130 PRINT ! high_st$ !
+
+This uses an array slicer which we will discuss later in chapter 13.
+
+We have introduced the concept of an array of string variables so that the
+only numbers involved would be the subscripts in each variable name. Arrays
+may be string or numeric, and the following examples illustrate the numeric
+array.
+
+
+Program 1:
+
+Simulate the throwing of a pair of dice four hundred times. Keep a record
+of the number of occurrences of each possible score from 2 to 12.
+
+100 REMark DICE1
+110 LET two = 0: three = 0: four = 0: five = 0: six = 0
+120 LET seven = 0: eight = 0: nine = 0: ten = 0: eleven = 0: twelve = 0
+130 FOR throw = 1 TO 400
+140   LET die1 = RND(l TO 6)
+150   LET die2 = RND(l TO 6)
+160   LET score = diel + die2
+170   IF score =  2 THEN LET two = two + 1
+180   IF score =  3 THEN LET three = three + 1
+190   IF score =  4 THEN LET four = four + 1
+200   IF score =  5 THEN LET five = five + 1
+21O   IF score =  6 THEN LET six = six + 1
+220   IF score =  7 THEN LET seven = seven + 1
+230   IF score =  8 THEN LET eight = eight + 1
+240   IF score =  9 THEN LET nine = nine + 1
+250   IF score = 10 THEN LET ten = ten + 1
+26O   IF score = 11 THEN LET eleven = eleven + 1
+270   IF score = 12 THEN LET twelve = twelve + 1
+280 END FOR throw
+290 PRINT ! two ! three ! four ! five ! six
+300 PRINT ! seven ! eight ! nine ! ten ! eleven ! twelve
+
+In the above program we establish eleven simple variables to store the
+tally of the scores. If you plot the tallies printed at the end you find
+that the bar chart is roughly triangular. The higher tallies are for scores
+six, seven, eight and the lower tallies are for 2 and 12. As every dice
+player knows, the reflects the frequency of the middle range of scores
+(six,seven,eight) and the rarity of twos or twelves.
+
+100 REMark Dice2
+110 DIM tally(12)
+120 FOR throw = 1 TO 400
+130   LET die_1 = RND(1 TO 6)
+140   LET die_2 = RND(1 TO 6)
+150   LET score = die_1 + die_2
+160   LET tally(score) = tally(score) + 1
+170 END FOR throw
+180 FOR number = 2 TO 12 : PRINT tally(number)
+
+In the first FOR loop, using "throw", the subscript of the array variable
+is "score". This means that the correct array subscript is automatically
+chosen for an increase in the tally after each throw. You can think of the
+array, "tally", as a set of pigeon-holes numbered 2 to 12. Each time a
+particular score occurs the tally of that score is increased by throwing a
+stone into the corresponding pigeon hole.
+
+In the second (short form) FOR loop, the subscript is "number". As the
+value of "number" changes from 2 to 12 all the values of the tallies are
+printed.
+
+Notice that in the DIM statement for a numeric array you need only declare
+the number of variables required. There is no question of maximum length as
+there is in a string array.
+
+If you have used other versions of BASIC you may wonder what has happened
+to the NEXT statement. All SuperBASIC structures end with END something.
+That is consistent and sensible but the NEXT statement has a part to play
+as you will see in later chapters.
+
+
+SELF TEST ON CHAPTER 6
+
+You can score a maximum of 16 points from the following test. Check your
+score with the answers on page 109.
+
+1. Mention two difficulties which arise when the data needed for a
+   program becomes numerous and you try to handle it without arrays
+   (two points).
+
+2. If, in an array, ten variables have the same name then how do you
+   know which is which?
+
+3. What must you do normally in a program, before you can use an
+   array variable?
+
+4. What is another word for the number which distinguishes a
+   particular variable of an array from the other variables which
+   share its name?
+
+5. Can you think of two ideas in ordinary life which correspond to
+   the concept of an array in programming? (two points)
+
+6. In a REPeat loop, the process ends when some condition causes an
+   EXIT statement to be executed. What causes the process in a FOR
+   loop to terminate?
+
+7. A REPeat loop needs a name so that you can EXIT to its END properly.
+   A FOR loop also has a name, but what other function does a FOR loop
+   name have?
+
+8. What are the two phrases which are used to describe the variable
+   which is also the name of a FOR loop? (two points)
+
+9. The values of a loop variable change automatically as a FOR loop
+   is executed. Name one possible important use of these values.
+
+10. Which of the following do the long form of REPeat loops and the
+    long form of FOR loops have in common? For each of the four
+    items either say that both have it or which type of loop has it.
+
+    a.    An opening keyword or statement.
+    b.    A closing keyword or statement.
+    c.    A loop name.
+    d.    A loop variable or control variable.
+
+
+
+PROBLEMS ON CHAPTER 6
+
+1. Use a FOR loop to place one of four numbers 1,2,3,4 randomly in
+   five array variables:
+
+       card(1), card(2), card(3), card(4), card(5)
+
+   It does not matter if some of the four numbers are repeated. Use
+   a second FOR loop to output the values of the five card variables.
+
+2. Imagine that the four numbers 1,2,3,4 represent 'Hearts', 'Clubs',
+   'Diamonds', 'Spades'. What extra program lines would need to be
+   inserted to get output in the form of these words instead of numbers?
+
+3. Use a FOR loop to place five random numbers in the range 1 to 13
+   in an array of five variables:
+
+       card(1), card(2) card(3), card(4) and card(5)
+
+   Use a second FOR loop to output the values of the five card variables.
+
+4. Imagine that the random numbers generated in problem 1 represent
+   cards. Write down the extra statements that would cause the
+   following output:
+
+   ------------------------------
+    Number     Output
+   ------------------------------
+    1          the word 'Ace'
+    2 to 10    the actual number
+    11         the word 'Jack'
+    12         the word 'Queen'
+    13         the word 'King'

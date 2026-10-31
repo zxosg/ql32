@@ -261,6 +261,18 @@ Definitions are program-level. A function is called in an expression and must re
 
 `DIM array%(upper)` and multidimensional variants are implemented. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. The host allocation limit is one million elements per array; board-specific limits remain to be measured. Dimensioned arrays can be passed to procedure/function parameters by reference.
 
+Scalar string variables support SuperBASIC-style, one-based inclusive
+slices: `text$(4 TO 8)`, `text$(TO 10)`, and `text$(10 TO)`. A single index
+selects one character, and an empty `text$()` selects the whole string. QL/32
+uses start 1 and the string length as the defaults for omitted bounds; an end
+past the length is clipped to the string length. Indices count UTF-8 code
+points. A start outside the string or a reversed range is a runtime error.
+This is a QL/32-defined subset: slice assignment and descriptors on string
+arrays are not yet supported, and SuperBASIC ROM variants differ in omitted
+bound behavior. `LEN(string$)` returns the number of UTF-8 code points in a
+string or string slice. Unlike the original QL ROM's coercion behavior, QL/32
+requires a string argument. See the [SuperBASIC string-slicing reference](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) and [`LEN` reference](https://superbasic-manual.readthedocs.io/en/latest/L/len.html).
+
 ## 8. Immediate mode, commands, and errors
 
 Immediate statements execute without changing stored program source. Entering a
@@ -277,17 +289,19 @@ variables and executes the stored lines; `NEW` clears the program and
 variables. Each numbered replacement is checked against a candidate program
 before the old line is replaced. Incomplete block prefixes are accepted so
 multi-line structures can be entered incrementally; unresolved procedure and
-function calls are bound when `RUN` compiles the complete program. Unnumbered statements execute immediately. A `.bas` file
-passed to the Linux CLI is a complete source unit executed in file order; it
-does not edit a persistent interactive program. `EDIT`, `LOAD`, `SAVE`, and
-`DIR` arrive with editor/filesystem work in M2. The target shell also has
-`STOP`, `MEM`, `HELP`, and later `CONT`.
+function calls are bound when `RUN` compiles the complete program. Unnumbered
+statements execute immediately. A `.bas` file passed to the Linux CLI is a
+complete source unit executed in file order; it does not edit a persistent
+interactive program. The Linux command loop provides `LOAD`, `SAVE`, and `DIR`.
+M2 also provides QL/32-specific `OPEN`, `READ$`, `EOF`, `WRITE`, and `CLOSE`
+file-channel calls; see [QL32-API-001](QL32-API-001.md). `EDIT` and the target
+shell's `STOP`, `MEM`, `HELP`, and later `CONT` remain future work.
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
 
 ## 9. UI boundary and deferrals
 
-OPL-inspired `ALERT` and `CONFIRM` are M2 native calls, drawing is M3, and declarative `DINIT`, `DEDIT`, `DINT`, `DIALOG`, `MINIT`, `MCARD`, and `MENU` are M4 native calls. They do not alter M1 parser grammar. See [QL32-UI-001](QL32-UI-001.md). These are class P, not OPL source-compatible.
+OPL-inspired `ALERT` and `CONFIRM` are M2 native calls, drawing is M3, and declarative `DINIT`, `DEDIT`, `DINT`, `DIALOG`, `MINIT`, `MCARD`, and `MENU` are M4 native calls. They do not alter M1 parser grammar. SuperBASIC remains the core language, including its loop forms; selected OPL-inspired refinements may be added when they simplify QL/32 without replacing that core. See [QL32-UI-001](QL32-UI-001.md). These are class P, not OPL source-compatible.
 
 Full historical numeric formats, third-party toolkit commands, `GO TO`/`GO SUB` compatibility, historical channel syntax, `WHEN ERRor`, `TRY/CATCH`, `IMPORT`, native plugins, and unrestricted hardware access are outside the first M1 slice.
 
@@ -301,7 +315,7 @@ Full historical numeric formats, third-party toolkit commands, `GO TO`/`GO SUB` 
 | 4 | Procedures, functions, locals, verified recursion limit, arrays, block `SELect ON` |
 | 5 | In-memory numbered lines; persistent terminal REPL; `LIST`, `RUN`, `NEW`, immediate statements; shared Linux conformance suite |
 
-The 30-case suite covers success cases, syntax/type failures, overflow,
+The 33-case suite covers success cases, syntax/type failures, overflow,
 division by zero, array bounds/allocation limits and parameter type/rank,
 stored-program validation, array references, source-order range evaluation,
 session isolation, REPL recovery, recursion limits, and cancellation. Expression and output

@@ -1,0 +1,594 @@
+CHAPTER 2
+---------
+
+INSTRUCTING THE COMPUTER
+
+Computers need to store data such as numbers. The storage can be imagined
+as pigeon holes.
+
+    +----+    +----+    +----+
+    |    |    |    |    |    |
+    |    |    |    |    |    |
+    |    |    |    |    |    |
+    +----+    +----+    +----+
+
+Though you cannot see them, you do need to give names to particular pigeon
+holes. Suppose you want to do the following simple calculation.
+
+A dog breeder has 9 dogs to feed for 28 days, each at the rate of one tin
+of 'Beefo' per day Make the computer print (display on the screen) the
+required number of tins.
+
+One way of solving this problem would require three pigeon holes for:
+
+    number of dogs
+    number of days
+    total number of tins
+
+SuperBASIC allows you to choose sensible names for pigeon holes and you may
+choose as shown:
+
+          +----+        +----+        +----+
+          |    |        |    |        |    |
+     dogs |    |   days |    |   tins |    |
+          |    |        |    |        |    |
+          +----+        +----+        +----+
+
+You can make the computer set up a pigeon hole, name it, and store a number
+in it with a single instruction or statement such as:
+
+    LET dogs = 9 [ENTER]
+
+This will set up an internal pigeon hole, named dogs, and place in it the
+number 9 thus:
+
+          +----+
+          |    |
+     Dogs |  9 |
+          |    |
+          +----+
+
+The word LET has a special meaning to SuperBASIC. It is called a keyword.
+SuperBASIC has many other keywords which you will see later. You must be
+careful about the space after LET and other keywords. Because SuperBASIC
+allows you to choose pigeon hole names with great freedom LETdogs would be
+a valid pigeon hole name.
+
+The LET keyword is optional In SuperBASIC and because of this statements
+like
+
+    LETdogs = 9 [ENTER]
+
+are valid. This would refer to a pigeon hole called LETdogs
+
+Just as in English, names, numbers and keywords should be separated from
+each other by spaces If they are not separated by special characters.
+
+Even if it were not necessary, a program line without proper spacing is bad
+style. Machines with small memory size may force programmers into it, but
+that is not a problem with the QL
+
+You can check that a pigeon hole exists internally by typing
+
+    PRINT dogs [ENTER]
+
+The screen should displav what is in the pigeon hole:
+
+    9
+
+Again be careful to put a space after PRINT.
+
+
+To solve the problem we can write a program which is a sequence of
+instructions or statements. You can now understand the first two:
+
+    LET dogs = 9 [ENTER]
+    LET days = 28 [ENTER]
+
+These cause two pigeon holes to be set up, named, and given numbers or
+values.
+
+The next instruction must perform a multiplication, for which the
+computer's symbol is *, and place the result in a new pigeon hole called
+"tins" thus:
+
+    LET tins = dogs * days [ENTER]
+
+1  The computer gets the values, 9 and 28, from the two pigeon holes
+   named "dogs" and "days"
+
+2  The number 9 is multiplied by 28.
+
+3  A new pigeon hole is set up and named "tins".
+
+4  The result of the multiplication becomes the value in the pigeon
+   hole named tins.
+
+All this may seem elaborate but you need to understand the ideas, which are
+very  Important.
+
+The only remaining task is to make the computer print the result which can
+be done by typing
+
+    PRINT tins [ENTER
+
+which will cause the output:
+
+    252
+
+to be displayed on the screen.
+
+In summary the program:
+
+    LET dogs = 9 [ENTER]
+    LET days = 28 [ENTER]
+    LET tins = dogs * days [ENTER]
+    PRINT tins [ENTER]
+
+causes the internal effects best imagined as three named pigeon holes
+containing  numbers:
+
+          +----+           +----+           +----+
+          |    |           |    |           |    |
+     dogs | 9  |    x days | 28 |    = tins | 252|
+          |    |           |    |           |    |
+          +----+           +----+           +----+
+
+and the output on the screen:
+
+    252
+
+Of course, you could achieve this result more easily with a calculator or a
+pencil and paper You could do it quickly with the QL by typing:
+
+    PRINT 9 * 28 [ENTER]
+
+which would give the answer on the screen. However the ideas we have
+discussed are the essential starting points of programming in SuperBASIC.
+They are so essential that they occur in many computer languages and have
+been given special names.
+
+1. Names such as "dogs", "days" and "tins" are called identifiers.
+
+2. A single instruction such as:
+
+       LET dogs = 9[ENTER
+
+   is called a "statement".
+
+3. The arrangement of name and associated pigeon hole is called a
+   "variable". The execution of the above statement stores the value
+   9 in the pigeon hole 'identified' by the Identifier "dogs".
+
+
+
+A statement such as:
+
+    LET dogs = 9 [ENTER]
+
+is an instruction for a highly dynamic internal process but the printed
+text is static and it uses the = sign borrowed from mathematics. It is
+better to think or say (but not type):
+
+    LET dogs become 9
+
+and to think of the process having a right to left direction (do not type
+this):
+
+    dogs <-- 9
+
+The use of = in a LET statement is not the same as the use of = in
+mathematics. For example, if another dog turns up you may wish to write:
+
+    LET dogs = dogs + 1[ENTER
+
+Mathematically this is not very sensible but in terms of computer
+operations it is simple. If the value of dogs before the operation was 9
+then the value after the operation would be 10. Test this by typing:
+
+
+    LET dogs = 9 [ENTER]
+    PRINT dogs [ENTER]
+    LET dogs = dogs + 1 [ENTER]
+    PRINT dogs [ENTER]
+
+The output should be:
+
+    9
+
+    10
+
+proving that the final value in the pigeon hole is as shown:
+
+          +----+
+          |    |
+     dogs | 10 |
+          |    |
+          +----+
+
+A good way to understand what is happening to the pigeon holes, or
+variables, is to do what is called a "dry run". You simply examine each
+instruction in turn and write down the values which result from each
+instruction to show how the pigeon holes are set up and given values, and
+how they retain their values as the program is executed.
+
+    LET dogs = 9 [ENTER]
+    LET days = 28 [ENTER]
+    LET tins = dogs * days [ENTER]
+    PRINT tins [ENTER]
+
+The output should be
+
+    252
+
+You may notice that so far a variable name has always been used first on
+the left hand side of a LET statement. Once the pigeon hole is set up and
+has a value, the corresponding variable name can be used on the right hand
+side of a LET statement.
+
+Now suppose you wish to encourage a small child to save money. You might
+give two bars of chocolate for every pound saved. Suppose you try to
+compute this as follows:
+
+    LET bars = pounds * 2 [ENTER]
+    PRINT bars [ENTER]
+
+You cannot do a dry run as the program stands because you do not know how
+many pounds have been saved.
+
+We have made a deliberate error here in using pounds on the right of a LET
+statement without it having been set up and given some value. Your QL will
+search internally for the variable "pounds". It will not find it, so it
+concludes that there is an error in the program and gives an error message.
+If we had tried to print out the value of "pounds", the QL would have
+printed a * to indicate that "pounds" was undefined. We say that the
+variable pounds has not been initialised (given an initial value). The
+program works properly if you do this first.
+
+                                    +--------+--------+
+                                    |  bars  | pounds |
+                                    +--------+--------+
+     LET pounds = 7 [ENTER]         |   7    |        |
+     LET bars = pounds * 2 [ENTER]  |   7    |   14   |
+                                    +--------+--------+
+
+
+The program works properly and gives the output:
+
+    14
+
+
+A STORED PROGRAM
+
+Typing statements without line numbers may produce the desired result but
+there are two reasons why this method, as used so far, is not satisfactory
+except as a first introduction
+
+1. The program can only execute as fast as you can type. This is not
+   very impressive for a machine that can do millions of operations
+   per second.
+
+2. The individual instructions are not stored after execution so you
+   cannot run the program again or correct an error without re-typing
+   the whole thing.
+
+Charles Babbage, a nineteenth century computer pioneer knew that a
+successful computer needed to store instructions as well as data in
+internal pigeon holes. These instructions would then be executed rapidly in
+sequence without further human intervention.
+
+The program instructions will be stored but not executed if you use line
+numbers. Try this:
+
+    10 LET price = 15 [ENTER]
+    20 LET pens = 7 [ENTER]
+    30 LET cost = price * pens [ENTER]
+    40 PRINT cost [ENTER]
+
+Nothing happens externally yet, but the whole program is stored internally.
+You make it work by typing:
+
+    RUN [ENTER]
+
+and the output:
+
+    105
+
+should appear.
+
+The advantage of this arrangement is that you can edit or add to the
+program with minimal extra typing.
+
+
+EDITING A PROGRAM
+
+Later you will see the full editing features of SuperBASIC but even at this
+early stage you can do three things easily:
+
+    replace a line
+    insert a new line
+    delete a line
+
+
+REPLACE A LINE
+
+Suppose you wish to alter the previous program because the price has
+changed to 20p for a pen. Simply re-type line 10.
+
+    10 LET price = 20 [ENTER]
+
+This line will replace the previous line 10. Assuming the other lines are
+still stored, test the program by typing:
+
+    RUN [ENTER]
+
+and the new answer, 140, should appear.
+
+
+INSERT A NEW LINE
+
+Suppose you wish to insert a line just before the last one, to print the
+words 'Total Cost:' This situation often arises so we usually choose line
+numbers 10, 20, 30 ... to allow space to insert extra lines.
+
+To put in the extra line type
+
+    35 PRINT "Total Cost" [ENTER]
+
+and it will be inserted just before line 40. The system allows line numbers
+in the range 1 to 32768 to allow plenty of flexibility in choosing them. It
+is difficult to be quite sure in advance what changes may be needed.
+
+Now type:
+
+    RUN [ENTER]
+
+and the new output should be:
+
+    Total cost     140
+
+
+DELETE LINE
+
+You can delete line 35 by typing:
+
+    35 [ENTER]
+
+It is as though an empty line has replaced the previous one.
+
+
+OUTPUT- PRINT
+
+Note how useful the PRINT statement is. You can PRINT text by using quotes
+or apostrophes:
+
+    PRINT "Chocolate bars" [ENTER]
+
+You can print the values of variables (contents of pigeon holes) by typing
+statements such as:
+
+    PRINT bars [ENTER]
+
+without using quotes.
+
+You will see later how very versatile the PRINT statement can be in
+SuperBASIC. It will enable you to place text or other output on the screen
+exactly where you want it. But for the present these two facilities are
+useful enough:
+
+    printing of text
+    printing values of variables (contents of pigeon holes).
+
+
+INPUT- INPUT, READ AND DATA
+
+A carpet-making machine needs wool as input. It then makes carpets
+according to the current design.
+
+
+--------------                      ------------------
+design        |                     program           |
+              v                                       v
+       +-------------+                          +------------+
+       |  Carpet     |                          |            |
+------>|    Machine  |-------->     ----------->|  Computer  |------------>
+wool   |             |carpets       input data  |            | output data
+       +-------------+                          +------------+
+
+
+If the wool is changed you may get a different carpet.
+
+The same sort of relations exist in a computer.
+
+However, if the data is input into pigeon holes by means of LET there are
+two disadvantages when you get beyond very trivial programs:
+
+    writing LET statements is laborious
+    changing such input is also laborious
+
+You can arrange for data to be given to a program as it runs. The INPUT
+statement will cause the program to pause and wait for you to type in
+something at the keyboard. First type:
+
+    NEW [ENTER]
+
+so that the previous stored program (if it is still there) will be erased
+ready for this new one. Now type:
+
+    10 LET price = 15 [ENTER]
+    20 PRINT "How many pens?" [ENTER]
+    30 INPUT pens [ENTER]
+    40 LET cost = price * pens [ENTER]
+    50 PRINT cost [ENTER]
+    RUN [ENTER]
+
+
+The program pauses at line 30 and you should type the number of pens you
+want, say:
+
+    4 [ENTER]
+
+Do not forget the ENTER key. The output will be:
+
+    60
+
+The INPUT statement needs a variable name so that the system knows where to
+put the data which comes in from your typing at the keyboard. The effect of
+line 30 with your typing is the same as a LET statement's effect. It is
+more convenient for some purposes when interaction between computer and
+user is desirable. However, the LET statement and the INPUT statement are
+useful only for modest amounts of data. We need something else to handle
+larger amounts of data without pauses in the execution of the program.
+
+SuperBASIC, like most BASICs, provides another method of input known as
+READing from DATA statements. We can retype the above program in a new form
+to give the same effects without any pauses. Try this:
+
+    NEW [ENTER]
+    10 READ price, pens
+    20 LET cost = price * pens [ENTER]
+    30 PRINT cost [ENTER]
+    40 DATA 15, 4 [ENTER]
+    RUN [ENTER]
+
+The output should be:
+
+    60
+
+as before.
+
+Each time the program is run, SuperBASIC needs to be told where to start
+reading DATA from. This can either be done by typing RESTORE followed by
+the DATA line number or by typing CLEAR. Both these commands can also be
+inserted at the start of the programs.
+
+When line 10 is executed the system searches the program for a DATA
+statement. It then uses the values in the DATA statement for the variables
+in the READ statement in exactly the same order. We usually place DATA
+statements at the end of a program. They are used by the program but they
+are not executed in the sense that every other line is executed in turn.
+DATA statements can go anywhere in a program but they are best at the end,
+out of the way. Think of them as necessary to, but not really part of, the
+active program. The rules about READ and DATA are as follows:
+
+1.  All DATA statements are considered to be a single long sequence
+    of items. So far these items have been numbers but they could be
+    words or letters.
+
+2.  Every time a READ statement is executed the necessary items are
+    copied from the DATA statement into the variables named in the
+    READ statement.
+
+The system keeps track of which items have been READ by means of an
+internal record. If a program attempts to READ more items than exist in all
+the DATA statements an error will be signalled.
+
+
+IDENTIFIERS (NAMES)
+
+You have used names for 'pigeon holes' such as "dogs", "bars". You may
+choose words like these according to certain rules:
+
+    A name cannot include spaces.
+
+    A name must start with a letter.
+
+    A name must be made up from letters, digits, $, %, _ (underscore)
+
+    The symbols $, % have special purposes, to be explained later, but
+    you can use the underscore to make names such as:
+
+        dog_food
+        month_wage_total
+
+    more readable.
+
+    SuperBASIC does not distinguish between upper and lower case
+    letters, so names like TINS and tins are the same.
+
+    The maximum number of characters in a name is 255.
+
+Names which are constructed according to these rules are called
+identifiers. Identifiers are used for other purposes in SuperBASIC and you
+need to understand them. The rules allow great freedom in choice of names
+so you can make your programs easier to understand. Names like "total",
+"count", "pens" are more helpful than names like Z, P, Q.
+
+
+SELF TEST ON CHAPTER 2
+
+You can score a maximum of 21 points from this test Check your score with
+the answers in "Answers To Self Test" section at the end of this Beginner's
+Guide.
+
+1. How should you imagine an internal number store?
+
+2. State two ways of storing a value in an internal 'pigeon hole'
+   to be created (two points)
+
+3. How can you find out the value of an internal 'pigeon hole'?
+
+4. What is the usual technical name for a 'pigeon hole'?
+
+5. When does a pigeon hole get its first value?
+
+6. A variable is so called because its value can vary as a program
+   is executed What is the usual way of causing such a change?
+
+7. The = sign in a LET statement does not mean 'equals' as in
+   mathematics. What does it mean?
+
+8. What happens when you ENTER an un-numbered statement?
+
+9. What happens when you ENTER a numbered statement?
+
+10. What is the purpose of quotes in a PRINT statement?
+
+11. What happens when you do not use quotes in a PRINT statement?
+
+12. What does an INPUT statement do which a LET statement does not?
+
+13. What type of program statement is never executed?
+
+14. What is the purpose of a DATA statement?
+
+15. What is another word for the name of a pigeon hole (or variable)?
+
+16. Write down three valid identifiers which use letters, letters
+    and digits, letters and underscore (three points)
+
+17. Why is the space bar especially important in SuperBASlC?
+
+18. Why are freely chosen identifiers important in programming?
+
+
+PROBLEMS ON CHAPTER 2
+
+1. Carry out a dry run to show the values of all variables as each line
+   of the following program is executed
+
+    10 LET hours = 40 [ENTER]
+    20 LET rate = 31 [ENTER]
+    30 LET wage = hours * rate [ENTER]
+    40 PRINT hours, rate, wage [ENTER]
+
+2. Write and test a program, similar to that of problem 1, which
+   computes the area of a carpet which is 3 metres in width and 4
+   metres in length. Use the variable names: "width", "length", "area".
+
+3. Re-write the program of problem 1 so that it uses two INPUT
+   statements instead of LET statements.
+
+4. Re write the program of problem 1 so that the input data (40 and
+   3) appears in a DATA statement instead of a LET statement.
+
+5. Re write the program of problem 2 using a different method of data
+   input. Use READ and DATA if you originally used LET and vice-versa.
+
+6. Bill and Ben agree to have a gamble. Each will take out of his
+   wallet all the pound notes and give them to the other. Write a
+   program to simulate this entirely with LET and PRINT statements.
+   Use a third person, Sue, to hold Bill's money while he accepts Ben's.
+
+7. Re-write the program of problem 6 so that a DATA statement holds
+   the two numbers to be exchanged.

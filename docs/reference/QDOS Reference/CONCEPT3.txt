@@ -1,0 +1,852 @@
+QDOS
+----
+
+Qdos is the QL Operating System and supervises:
+
+    Task Scheduling and resource allocation
+    Screen I/O (including windowing)
+    Microdrive I/O
+    Network and serial channel communication
+    Keyboard input
+    Memory management
+
+MEMORY MAP
+
+A full description of Qdos is beyond the scope of this guide but a brief
+description is included.
+
+The system RAM has an organisation imposed by the QDOS operating system and is
+defined as follows:
+
+      SV_RAMT-1
+                +---------------------+             QDOS MEMORY MAP
+                |                     | |
+                |       Resident      | |
+                |      Procedures     | |
+      SV_RESPR  |                     | v fills
+                +---------------------+
+                |                     | |
+                |      Transient      | |
+                |      Programs       | |
+      SV_TRNSP  |                     | v fills
+                +---------------------+
+                | SuperBASIC command  | |
+                |  interpreter data   | |
+                |         and         | |
+      SV_BASIC  | SuperBASIC programs | v fills
+                +---------------------+
+                |                     |
+                    Filing subsystem
+                      slave block
+      SV_FREE   |                     |
+                +---------------------+
+                |                     | ^
+                | Channels and other  | |
+                |     heap items      | |
+      SV_HEAP   |                     | | fills
+                +---------------------+
+                |                     |
+                |   System tables     |
+                |        and          |
+                |   System Variables  | 28000 Hex
+                +---------------------+
+                |                     |
+                |   Display memory    |
+                |                     |
+                |                     |
+
+The terms SV_RAMT, SV_RESPR, SV_TRNSP, SV_BASIC, SV_FREE, SV_HEAP are used to
+represent addresses inside the QL. These terms are not recognised by SuperBASIC
+or the QDOS operating system. Furthermore, the addresses represented are liable
+to change as the system is running.
+
+sv_ramt     RAM Top
+            This will vary according to the memory expansion boards attached
+            to the system.
+
+sv_respr    Resident Procedures
+            Resident procedures are loaded into the top of RAM. Space can be
+            allocated in the resident procedure area using the RESPR function,
+            but this space cannot be released except by resetting the QL.
+            Resident Procedures written in machine code can be added to the
+            SuperBASIC name list and so become extensions to the SuperBASIC
+            system.
+
+sv_trnsp    Transient Programs
+            Transient programs are loaded immediately below the resident
+            procedures. Each program must be self contained, i.e. it must
+            contain space for its own data and its own stack. It must be
+            position independent or must be loaded by a specially written
+            linking loader. A transient program is executed from BASIC by using
+            the EXEC command or from QDOS by activating it as a job.
+
+            The transient program area may be used for storing data only but
+            this data will still be treated by QDOS as a job and therefore must
+            not be activated.
+
+sv_basic    SuperBASIC Area
+            This area contains all loaded SuperBASIC programs and related data.
+            This area expands and contracts using up the free space as required.
+
+sv_free     Free Space
+            Free space is used by the Qdos file subsystem to create Microdrive
+            Slave Blocks, i.e. copies of Microdrive blocks which can be held in
+            RAM.
+
+sv_heap     System Heap
+            This is used by the system to store data channel definitions and
+            also provides working storage for the I/O subsystem. Transient
+            programs may allocate working space for themselves on the heap via
+            Qdos system calls.
+
+            System Tables/System Variables
+            This area is directly above the screen memory. The System Tables and
+            supervisor stack are resident above the system variables.
+
+SYSTEM CALLS
+
+System calls are processed by Qdos in 'supervisor mode'. When in supervisor
+mode, Qdos will not allow any other job to take over the processor. System calls
+processed in this way are said to be 'atomic', i.e. the system call will process
+to completion before relinquishing the processor. Some system calls are only
+partially atomic, i.e. once they have completed their primary function they will
+relinquish the processor if necessary. Unless specifically requested all the
+system calls are partially atomic.
+
+The standard mechanism for making a system call is by making a trap to one of
+the Qdos system vectors with appropriate parameters in the processor registers.
+The action taken by Qdos following a system call is dependent on the particular
+call and the overall state of the system at the time the call was made.
+
+INPUT/OUTPUT
+
+Qdos supports a multitasking environemtn and therefore a file can be accessed by
+more than one process at a time. The Qdos filing sub-system can handle files
+which have been opened as EXCLUSIVE files or as SHARED files. A shared file
+cannot be written to. QL devices are processed by the SERIAL I/O SYSTEM. As its
+name suggests any data output by this system can be redirected to any other
+device also supported by the redirectable I/O system.
+
+The device names required by Qdos are the same as the device names required by
+SuperBASIC and are discussed in the concept section DEVICES. The collection of
+standard devices supplied with the QL can be expanded.
+
+DEVICES
+
+The standard devices included in the system are discussed in this guide in the
+section DEVICES. Further devices may be added to the system, given a name (e.g.
+SER1, NET) and then accessed in the same way as any other QL device.
+
+MULTITASKING
+
+Jobs will be allowed a share of the CPU in line with their priority and
+competition with other jobs in the system. Jobs running under the control of
+Qdos can be in one of three states:
+
+active:     Capable of running and sharing system resources. A job in this
+            state may not be runnign continuously but will obtain a share
+            of the CPU in line with its priority.
+
+suspended:  The job is capable of running but is waiting for another job or I/O.
+            A job may be suspended indefinitely or for a specific period of
+            time.
+
+inactive:   The job is incapable of running, its priority is 0 and so it can
+            never obtain a share of the CPU
+
+Qdos will reschedule the system automatically at a rate related to the 50 Hz
+frame rate. The system will also be rescheduled after certain system calls.
+
+Example: This program generates an on-screen readout of the rel-time clock,
+running as an independent job.
+
+First RUN this program with a formatted cartridge in microdrive 2. This
+generates a machine code title called 'clock'. Wait for the microdrive to stop.
+Next, set the clock using the SDATE command.
+
+Then type:
+
+    EXEC mdv2_clock
+
+and a continuous time display will appear at the top right of the command
+window.
+
+100  c=RESPR(100)
+110  FOR i = 0 TO 68 STEP 2
+120    READ x:POKE_W i+c,x
+130  END FOR i
+140  SEXEC mdv2_clock,c,100,256
+1000 DATA 29439,29697,28683,20033,17402
+1010 DATA 48,13944,200,20115,12040
+1020 DATA 28691,20033,17402,74,-27698
+1030 DATA 13944,236,20115,8279,-11314
+1040 DATA 13944,208,20115,16961,16962
+1050 DATA 30463,28688,20035,24794
+1060 DATA 0,7,240,10,272,200
+
+N.B. Line 1060 governs the position and colour of the clock window - the data
+terms are, in order:
+
+border colour/width, paper/ink colour, window width, height, x-origin, y-origin
+
+These are pairs of bytes, entered by POKE_W as words.
+
+The x-origin and the y-origin (the last data item) should be 272 and 202 in
+monitor mode, or 240 and 216 in TV mode.
+
+Generate the paper and ink word, for example, as 256*paper+ink. Thus white
+paper, red ink is 256*7 + 2 = 1794
+
+
+REPETITION
+----------
+
+Repetition in SuperBASIC is controlled by two basic program constructs. Each
+construct must be identified to SuperBASIC:
+
+    REPeat identifier           FOR identifier = range
+      statements                  statements
+    END REPeat identifier       END FOR identifier
+
+These two constructs are used in conjunction with two other SuperBASIC
+statements:
+
+    NEXT identifier             EXIT identifier
+
+Processing a NEXT statement will either pass control to the statement following
+the appropriate FOR or REPeat statement, or if a FOR range has been exhausted,
+to the statement folliwng the NEXT.
+
+Prcoessing an EXIT will pass control to the statement after the END FOR or END
+REPeat selected by the EXIT statement. EXIT can be used to exit through many
+levels of nested repeat structures. EXIT should always be used in REPeat loops
+to terminate the loop on some condition.
+
+A combination of NEXT,EXIT and END statements allows FOR and REPeat loops to
+have a loop EPILOGUE added. A loop epilogue is a series of SuperBASIC statements
+which are executed on some special condition arising within the loop:
+
+    FOR identifier = for_list
+      statements   <-------------|     exit--
+    NEXT identifier --next-------|           |
+      epilogue                               |
+    END FOR identifier   <-------------------
+
+The loop epilogue is only processed if the FOR loop terminates normally. If the
+loop terminates via an EXIT statement then processing will continue at the END
+FOR and the epilogue will not be processed.
+
+It is possible to have a similar construction in a REPeat loop:
+
+    REPeat identifier   <-----------------
+      statements                          |
+    IF condition THEN NEXT identifier ----
+      epilogue
+    END REPeat identifier
+
+This time entry into the loop epilogue is controlled by the IF statement. The
+epilogue will or will not be processed depending on the condition in the IF
+statement. A SELect statement can also be used to control entry into the
+epilogue.
+
+
+ROM CARTRIDGE SLOT
+------------------
+
+Allows software to be used in the QL system from a Sinclair QL ROM Cartridge.
+The ROM Cartrdge can contain software to directly change the behaviour of the
+SuperBASIC system. The cartridge can contain:
+
+i. Software to be used instead of or with the SuperBASIC system. For example:
+
+       assemblers
+       compilers
+       debuggers
+       application software
+       etc
+
+ii.Software to expand the SuperBASIC system. FOr example:
+
+       special procedures
+       etc
+
+It is not possible to use ZX ROM Cartridges on the QL.
+
+PIN OUT
+
+        +------------+
+      _ |  a   1  b  | VDD
+    A12 |  a   2  b  | A14
+     A7 |  a   3  b  | A13
+     A6 |  a   4  b  | A8
+     A5 |  a   5  b  | A9
+   SLOT  | a   6  b |  SLOT
+     A4 |  a   7  b  | A11
+     A3 |  a   8  b  | ROMOEH
+     A2 |  a   9  b  | A10
+     A1 |  a  10  b  | A15
+     A0 |  a  11  b  | D7
+     D0 |  a  12  b  | D6
+     D1 |  a  13  b  | D5
+     D2 |  a  14  b  | D4
+    GND |  a  15  b  | D3
+        +------------+
+
+Side b is the upper side of the connector; side a is the lower.
+
+    -------------------------------------
+      Signal          Function
+    -------------------------------------
+      A0..A15         Address lines
+      D0..D7          Data lines
+      ROMOEH          ROM Output Enable
+      VDD             5V
+      GND             Ground
+    -------------------------------------
+
+WARNING: Never plug or unplug a ROM cartridge while the QL power is on.
+
+
+SCREEN
+------
+
+512 MODE
+
+The screen is 512 pixels across and 256 pixels deep. Only the solid colours
+black, red, green and white can be displayed in this mode.
+
+256 MODE
+
+Low resolution mode also has a hardware flash. The screen is 256 pixels across
+and 256 pixels deep. The full set of solid colours is available in this mode:
+black, blue, red, magenta, green, cyan, yellow and white
+
+WARNING: A domestic television is not capable of displaying the complete QL
+screen. Portions of the screen at the top and the sides will not be reproduced.
+The default initial window will take account of this and will reduce the
+effective picture size. The full size can be restored with the WINDOW command.
+
+------------------------------
+  Command    Function
+------------------------------
+  MODE       set screen mode
+------------------------------
+
+
+SLICING
+-------
+
+Under certain circumstances it is possible to refer to more than one element in
+an array i.e. slice the array The array slice can be thought of as defining
+a subarray or a series of subarrays to SuperBASIC. Each slice can define a
+continuous sequence of elements belonging to a particular dimension of the
+original array. The term array in this context can include a numeric array,
+a string array or a simple string.
+
+It is not necessary to specify an index for the full number of dimensions of an
+array. If a dimension is omitted then slices are added which will select the
+full range of elements for that particular dimension, i.e. the slice (0 TO ).
+SuperBASIC can only add slices to the end of a list of array indices.
+
+syntax:    index: = | numeric_exp                     {single element}
+                    | numeric_exp TO numeric_exp   {range of elements}
+                    | numeric_exp TO                    {range to end}
+                    | TO numeric_expression     {range from beginning}
+
+           array_reference: = | variable
+                              | variable ( | index * |,index| * | )
+
+An array slice can be used to specify a source or a destination subarray for
+an assignment statement.
+
+example:    i .  PRINT data array
+            ii.  PRINT letters$(1 TO 15)
+            iii. PRINT two_d_array (3) (2 TO 4)
+
+String slicing is performed in the same way as slicing numeric or string arrays.
+Thus
+
+    a$(n)       will select the nth character.
+    a$(n TO m)  will select all characters from the nth to the mth, inclusively
+    a$(n TO)    will select from a character n to the end, inclusively
+    a$(1 TO m)  will select from the beginning to the nth character inclusively
+    a$          will select the entire contents of a a$
+
+Some forms of BASIC have functions called LEFT$, MID$, RIGHTS. These are not
+necessary in SuperBASIC. Their equivalents are specified below:
+
+-------------------------------------------
+  SuperBASIC    Other BASIC
+-------------------------------------------
+  a$(n)         MID$(a$,n,1)
+  a$(n TO m)    MID$ (a$,n,m+1-n)
+  a$(1 TO n)    LEFT$ (a$,n)
+  a$(n TO)      RIGHTS (a$,LEN(a$)+1-n)
+
+
+WARNING: Assigning data to a sliced string array or string variable may not have
+the desired effect. Assignments made in this way will not update the length of
+the string. The length of a string array or string variable is only updated
+when an assignment is made to the whole string.
+
+
+START UP
+--------
+
+Immediately after switch on (or reset) the QL will perform a RAM test which
+will give a spurious pattern on the display. If the RAM test is passed then
+the screen will be cleared and the copyright screen displayed.
+
+
+        +----------------------------------------+
+        |                                        |
+        |                                        |
+        |                                        |
+        |                                        |
+        |                                        |
+        |                                        |
+        |                                        |
+        |                                        |
+        |                                        |
+        |            F1 ... monitor              |
+        |            F2 ... TV                   |
+        |                                        |
+        |      1983 Sinclair Research Ltd.      |
+        |                                        |
+        +----------------------------------------+
+
+
+After start up, the QL displays the copyright message and asks whether it is
+being used on a television or a monitor. The QL will set different initial
+screen modes and window sizes depending on the answer.
+
+Press F1 if you are using a monitor and F2 if you are using a television set.
+
+The QL has the ability to 'boot' itself up from programs contained in either
+the ROM cartridge slot or in Microdrive 1. If the ROM cartridge slot contains a
+self starting program then start up will continue under the control of the
+program in the ROM cartridge. 
+If nothing suitable is found then the QL will check Microdrive 1 for a
+cartridge. If a cartridge is found and if it contains a file called
+BOOT it is loaded and run.
+
+DEFAULT SCREEN
+
+The QL has three default channels which are linked to three default windows.
+
++----------+----------+         +---------------------+
+|          |          |         |  -----------------  |
+|          |          |         | |                 | |
+|          |          |         | |                 | |
+|    2     |     1    |         | |       1 & 2     | |
+|          |          |         | |                 | |
+|          |          |         | |                 | |
++----------+----------+         +-+-----------------+-+
+|                     |         |                     |
+|          0          |         |          0          |
++---------------------+         +---------------------+
+
+Channel 0 is used for listing commands and error messages, channel 1 for program
+and graphics output and channel 2 for program listings. The default channel can
+be modified using the optional channel specifier in the relevant command.
+
+It is important NOT to switch on the QL with a Microdrive cartridge in position
+If booting from a Microdrive cartridge is required then the cartridge must be
+inserted between switching on and pressing either F1 or F2.
+
+
+SOUND
+-----
+
+Sound on the QL is generated by the QL's second processor (an 8049) and is
+controlled by specifying:
+
+    up to two pitches
+
+    the rate at which the sound must move between the pitches, the ramp
+
+    how the sound is to behave after it has reached one of the specified
+    pitches, the wrap
+
+    if any randomness should be built into the sound, i.e. deviations from the
+    ramp
+
+    if any fuzziness should be built into the sound. i.e. deviations on every
+    cycle of the sound
+
+Fuzziness tends to result in buzzy sounds while randomness, depending on the
+other parameters, will result in 'melodic' sounds or noise.
+
+The complexity of the sound can be built up stage by stage gradually building
+more complex sounds. This is, in fact, the best way to master sound on the QL.
+
+Specify a duration and a single pitch. The specified pitch will be beeped for
+the specified time.
+
+LEVEL 1
+
+
+pitch  |
+       |
+       |
+       |  -----------------------------------------------------
+       |
+       |
+       |
+       |
+       +--------------------------------------------------------------
+                                                           time
+
+This is the simplest sound command, other than the command to stop the sound,
+on the QL.
+
+
+LEVEL 2
+
+A second pitch and a gradient can be added to the command. The sound will then
+'bounce' between the two pitches at the rate specified by the gradient.
+
+The sounds produced at this level can vary between: semi musical beeps, growls,
+zaps and moans. It is best to experiment.
+
+pitch  |
+       | ------- -- ---------- -- ---------- -- --------------- pitch2
+       |        |  |          |  |          |  |
+       |       -    -        -    -        -    -
+       |      |      |      |      |      |      |
+       |     -        -    -        -    -        -
+       |    |          |  |          |  |          |
+       | --- ---------- -- ---------- -- ---------- ----------- pitch1
+       |
+       +--------------------------------------------------------------
+                                                           time
+
+
+LEVEL3
+
+A parameter can be added which controls how the sound behaves when it becomes
+equal to one of the specified pitches. The sound can be made to 'bounce' or
+'wrap'.
+
+The number of wraps can be specified, including wrap forever. It is even more
+important to experiment.
+
+pitch  |
+       | ------- -- ---------- -- ---------- -- --------------- pitch2
+       |        |  |          |  |          |  |
+       |       -    -        -    -        -    -
+       |      |      |      |      |      |      |
+       |     -        -    -        -    -        -
+       |    |          |  |          |  |          |
+       | --- ---------- -- ---------- -- ---------- ----------- pitch1
+       |
+       +--------------------------------------------------------------
+                                                           time
+pitch  |
+       | ------- --- --- --- ---------------------------------- pitch2
+       |        |   |   |   |
+       |       -   -   -   -
+       |      |   |   |   |
+       |     -   -   -   -
+       |    |   |   |   |
+       | --- --- --- --- -------------------------------------- pitch1
+       |
+       +--------------------------------------------------------------
+                                                           time
+
+
+LEVEL4
+
+Randomness can be added to the sound. This is a deviation from the specified
+step or gradient.
+
+Depending on the amount of randomness added in relation to the pitches and
+the gradient, it will generate a very wide and unexpected range of sounds.
+
+pitch  |
+       | ------ --- ---------- -- ---------- -- --------------- pitch2
+       |       |   |          |  |          |  |
+       |      |    |          |   |        -    --
+       |     -      -        |     |      |       |
+       |    |        |     --       -    -        |
+       |    |         |   |          |  |          |
+       | --- ---------- -- ---------- -- ---------- ----------- pitch1
+       |
+       +--------------------------------------------------------------
+                                                           time
+
+
+LEVEL 5
+
+More variation can be added by specifying 'fuzziness'. Fuzziness adds a random
+factor to the pitch continuously Fuzziness tends to make the sound buzz.
+
+Combining all of the above effects can make a very wide range of sounds, many
+of them unexpected. QL sound is best explored through experiment. By specifying
+a time interval of zero the sound can be made to repeat forever and so a
+sequence of BEEP commands can be used until the sound generated is the sound
+which is required. A word of warning: slight changes in the value of a single
+parameter can have alarming results on the sound generated.
+
+
+STATEMENT
+
+A SuperBASIC statement is an instruction to the QL to perform a specific
+operation, for example:
+
+    LET a = 2
+
+will assign the value 2 to the variable identified by "a".
+
+More than one statement can be written on a single line by separating the
+individual statements from each other by a colon ( : ), for example:
+
+      LET a = a + 2 : PRINT a
+
+will add 2 to the value identified by the variable a and will store the result
+back in a. The answer will then be printed out
+
+If a line is not preceded by a line number then the line is a direct command
+and SuperBASIC processes the statement immediately. If the statement is
+preceded by a line number then the statement becomes part of a SuperBASIC
+program and is added into the SuperBASIC program area for later execution.
+
+Certain SuperBASIC statements can have an effect on the other statements over
+the rest of the logical line in which they appear i.e. IF, FOR, REPeat, REM,
+etc. It is meaningless to use certain SuperBASIC statements as direct commands.
+
+
+STRING ARRAYS, STRING VARIABLES
+-------------------------------
+
+String arrays and numeric arrays are essentially the same, however there are
+slight differences in treatment by SuperBASIC. The last dimension of a string
+array defines the maximum length of the strings within the array. String
+variables can be any length up to 32766. Both string arrays and string
+variables can be sliced.
+
+String lengths on either side of a string assignment need not be equal. If the
+sizes are not the same then either the right hand string is truncated to fit
+or the length of the left hand string is reduced to match. If an assignment
+is made to a sliced string then if necessary the 'hole' defined by the
+slice will be padded with spaces.
+
+It is not necessary to specify the final dimension of a string array. Not
+specifying the dimension selects the whole string while specifying a single
+element will pick out a single character and specifying a slice will
+define a sub string.
+
+COMMENT: Unlike many BASICs SuperBASIC does not treat string arrays as fixed
+length strings. If the data stored in a string array is less than the maximum
+size of the string array then the length of the string is reduced.
+
+WARNING: Assigning data to a sliced string array Or string variable may not
+have the desired effect. Assignments made in this way will not update the
+length of the string and so it is possible that the system will not recognise
+the assignment. The length of a string array or a string variable is only
+updated when an assignment is made to the whole string.
+
+----------------------------------------
+  Command  Function
+----------------------------------------
+  FILL$    generate a string
+  LEN      find the length of a string
+----------------------------------------
+
+
+STRING COMPARISON
+-----------------
+
+ORDER:
+
+  . (decimal point/full stop)
+  digits or numbers in numerical order
+  AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz
+  space ! " # $ % & ' ( ) * + , - . / : ; < = > ? @ [ | ] ^ _ / { | } ~ 
+  other non printing characters
+
+The relationship of one string to another may be:
+
+  equal:   All characters or numbers are the same or equivalent
+
+  lesser:  The first part of the string, which is different from the
+           corresponding character in the second string, is before it
+           in the defined order.
+
+  greater: The first part of the first string which is different from
+           the corresponding character in the second string, is after
+           it in the defined order.
+
+Note that a '.' may be treated as a decimal point in the case of string
+comparison which sorts numbers (such as SuperBASIC comparisons). Note also
+that comparison of strings containing non-printable characters may give
+unexpected results.
+
+
+TYPES OF COMPARISON
+
+type 0 case dependent   - character by character comparison
+
+type 1 case independent - character by character
+
+type 2 case dependent   - numbers are sorted in numerical order
+
+type 3 case independent - numbers are sorted in numerical order
+
+type 0 not normally used by the SuperBASIC system.
+
+USAGE
+
+type 1 File and variable comparison
+type 2 SuperBASIC <, <=, =, >= ,>, INSTR and <>
+type 3 SuperBASIC == (equivalence)
+
+
+SYNTAX DEFINITIONS
+
+SuperBASlC syntax is defined using a non-rigorous 'meta language' type notation.
+Four types of construction are used :
+
+| | Select one of
+[ ] Enclosed item(s) are optional
+* * Enclosed items are repeated
+
+..  Range
+
+{ } Comment
+
+e.g.   | A | B |    A or B
+       [ A ]        A is optional
+       * A *        A is repeated
+       A..Z         A, B, C, etc
+       {this is a comment}
+
+Consider a SuperBASIC identifier.
+
+A sequence of numbers, digits, underscores, starting with a letter and
+finishing with an optional % or $
+
+letter: | A..Z
+        | a..z
+             {a letter is one of: ABCDEFGHIJKLMNOPQRSTUVWXYZ}
+                              or  abcdefghijklmnopqrstuvwxyz
+
+digit: = | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+
+         {a digit is 0 or 1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9}
+
+underscore:= _
+           {an underscore is _ }
+
+identifier:= letter  *  [letter | digit | underscore ] * | % | $ |
+             --+---    ---------------+----------------
+               |                      |
+must start ----                       |
+with a letter                         |
+                                      |
+                            a sequence of letters
+                            digits and underscores
+                            i.e. repeat something
+                            which is optional
+
+
+TURTLE GRAPHICS
+---------------
+
+SuperBASIC has a set of turtle graphics commands:
+
+---------------------------------------
+  Command  Function
+---------------------------------------
+  PENUP    stop drawing
+  PENDOWN  start drawing
+  MOVE     move the turtle
+  TURN     turn the turtle
+  TURNTO   turn to a specific heading
+---------------------------------------
+
+The set of commands is the minimum and normally would be used within another
+procedure to expand on the commands. For example:
+
+      100 DEFine PROCedure forward(distance)
+      110    MOVE distance
+      120 END DEFine
+      130 DEFine PROCedure backwards(distance)
+      140    MOVE -distance
+      150 END DEFine
+      160 DEFine PROCedure left(angle)
+      170    TURN angle
+      180 END DEFine
+      190 DEFine PROCedure right(angle)
+      200    TURN -angle
+      210 END DEFine
+
+These will define some of the more famous turtle graphic commands.
+
+Initially the turtle's pen is up and the turtle is pointing at 0 degrees
+which is to the right hand side of the window.
+
+The FILL command will also work with figures drawn with turtle graphics. Also
+ordinary graphics and turtle graphics can be mixed, although the direction of
+the turtle is not modified by the ordinary graphics commands.
+
+
+WINDOWS
+-------
+
+Windows are areas of the screen which behave, in most respects, as though each
+individual window was a screen in its own right, i.e. the window will scroll
+when it has become filled by text, it can be cleared with the CLS command, etc.
+
+Windows can be specified and linked to a channel when the channel is opened.
+The current window shape can be changed with the WINDOW command and a border
+added to a window with the BORDER command. Output can be directed to a window
+by printing to the relevant channel. Input can be directed to have come from
+a particular window by inputting from the relevant channel If more than one
+channel is ready for input then input can be switched between the ready
+channels by pressing
+
+    [CTRL] C
+
+The cursor will flash in the selected window
+
+Windows can be used for graphics and non-graphic output at the same time. The
+non graphic output is relative to the current cursor position which can be
+positioned anywhere within the specified window with the CURSOR command and
+at any line-column boundary with the AT command. The graphics output is
+relative to a graphics cursor which can be positioned and manipulated with
+the graphics procedures.
+
+PARTS
+
+Certain commands (CLS, PAN etc.) will accept an optional parameter to define
+part of the current window for their operation. This parameter is as defined
+below:
+
+------------------------------------------------
+  part  description
+------------------------------------------------
+  0     whole screen
+  1     above and excluding cursor line
+  2     bottom of screen excluding cursor line
+  3     whole of cursor line
+  4     line right of and including cursor
+------------------------------------------------
+
+
+------------------------------------------------
+  Command Function
+------------------------------------------------
+  WINDOW  re-define a window
+  BORDER  take a border from a window
+  PAPER   define the paper colour for a window
+  INK     define the ink colour for a window
+  STRIP   define a strip colour for a window
+  PAN     pan a window's contents
+  SCROLL  scroll a window's contents
+  AT      position the print position
+  CLS     clear a window
+  CSIZE   set character size
+  FLASH   character flash
+  RECOL   recolour a window
+------------------------------------------------

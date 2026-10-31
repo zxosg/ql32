@@ -1,0 +1,580 @@
+CHAPTER 14
+----------
+
+PROGRAM STRUCTURE
+
+In this chapter we go again over the ground of program structure : loops
+and decisions or selection. We have tried to present things in as simple a
+way as possible but SuperBASIC is designed to cope properly with the simple
+and the complex and all levels in between. Some parts of this chapter are
+difficult and if you are new to programming you may wish to omit parts. The
+topics covered are:
+
+    Loops
+    Nested loops
+    Binary decisions
+    Multiple decisions
+
+The latter parts of the first section, Loops, get difficult as we show how
+SuperBASIC copes with problems that other languages simply ignore. Skip
+these parts if you feel so inclined but the other sections are more
+straightforward.
+
+
+LOOPS
+
+In this section we attempt to illustrate the well known problems of
+handling repetition with simulations of some Wild West scenes. The context
+may be contrived and trivial but it offers a simple basis for discussion
+and it illustrates difficulties which arise across the whole range of
+programming applications.
+
+
+EXAMPLE 1
+
+A bandit is holed up in the Old School House. The sheriff has six bullets
+in his gun. Simulate the firing of the six shots.
+
+
+Program 1
+
+    100 REMark Western FOR
+    110 FOR bullets = 1 TO 6
+    120   PRINT "Take aim"
+    130   PRINT "Fire shot"
+    140 END FOR bullets
+
+Program 2
+
+    100 REMark Western REPeat
+    110 LET bullets = 6
+    120 REPeat bandit
+    130   PRINT "Take aim"
+    140   PRINT "Fire shot"
+    150   LET bullets = bullets - 1
+    160   IF bullets = 0 THEN EXIT bandit
+    170 END REPeat bandit
+
+Both these programs produce the same output:
+
+    Take aim
+    Fire a shot
+
+is printed six times.
+
+If in each program the 6 is changed to any number down to 1 both programs
+still work as you would expect. But what if the gun is empty before any
+shots have been fired?
+
+
+EXAMPLE 2
+
+Suppose that someone has secretly taken all the bullets out of the
+sheriff's gun. What happens if you simply change the 6 to 0 in each
+program?
+
+
+Program 1
+
+    100 REMark Western FOR Zero Case
+    110 FOR bullets = 1 to 0
+    120   PRINT"Take aim"
+    130   PRINT "Fire a shot"
+    140 END FOR bullets
+
+This works correctly. There is no output. The 'zero case' behaves properly
+in SuperBASIC.
+
+
+Program 2
+
+    100 REMark Western REPeat Fails
+    110 LET bullets = 0
+    120 REPeat bandit
+    130   PRINT "Take aim"
+    140   PRINT "Fire shot"
+    150   LET bullets = bullets - 1
+    160   IF bullets = 0 THEN EXIT bandit
+    170 END REPeat bandit
+
+The program fails in two ways:
+
+    1. Take aim
+       Fire a shot
+
+       is printed though there were never any bullets.
+
+    2. By the time the variable, "bullets", is tested in line 160
+       it has the value -1 and it  never becomes zero afterwards.
+       The program loops indefinitely. You can cure the infinite
+       looping by re-writing line 160:
+
+           160 IF bullets < 1 THEN EXIT bandit
+
+There is an inherent fault in the programming which does not allow for the
+possible zero case. This can be corrected by placing the conditional EXIT
+before the PRINT statements.
+
+
+Program 3
+
+    100 REMark Western REPeat Zero Case
+    110 LET bullets = 0
+    120 REPeat Bandit
+    130   IF bullets = 0 THEN EXIT Bandit
+    140   PRINT "Take aim"
+    150   PRINT "Fire shot"
+    160   LET bullets = bullets - 1
+    170 END REPeat Bandit
+
+This program now works properly whatever the initial value of bullets as
+long as it is  a positive whole number or zero. Method 2 corresponds to the
+REPEAT... UNTIL loop of some languages. Method 3 corresponds to the
+WHILE....ENDWHILE loop of some languages. However the REPeat...END REPeat
+with EXIT is more flexible than either or the combination of both.
+
+If you have used other BASICs you may wonder what has happened to the NEXT
+statement. We will re-introduce it soon but you will see that both loops
+have a similar structure and both are named.
+
+    FOR name =           (opening keyword)            REPeat name
+      (statements)         (content)                    (statements)
+    END FOR name         (closing keyword)            END REPeat name
+
+In addition the REPeat loop must normally have an EXIT amongst the
+statements or it will never end.
+
+Note also that the EXIT statement causes control to go to the statement
+which is immediately after the END of the loop.
+
+A NEXT statement may be placed in a loop. It causes control to go to the
+statement which is just after the opening keyword FOR or REPeat. It should
+be considered as a kind of opposite to the EXIT statement. By a curious
+coincidence the two words, NEXT and EXIT, both contain EXT. Think of an
+EXTension to loops and:
+
+    N  means  "Now start again"
+    I  means  "It's ended"
+
+
+EXAMPLE 3
+
+The situation is the same as in example 1. The sheriff has a gun loaded
+with six bullets and he is to fire at the bandit but two more conditions
+apply:
+
+1.  If he hits the bandit he stops firing and returns to Dodge City
+
+2.  If he runs out of bullets before he hits the bandit, he tells
+    his partner to watch the bandit while he (sheriff) returns to
+    Dodge City
+
+
+Program 1
+
+    100 REMark Western FOR with Epilogue
+    110 FOR bullets = 1 TO 6
+    120   PRINT "Take aim"
+    130   PRINT "FIRE A SHOT"
+    140   LET hit = RND(9)
+    150   IF hit = 7 THEN EXIT bullets
+    160 NEXT bullets
+    170   PRINT "Watch Bandit"
+    180 END FOR bullets
+    190 PRINT "Return to Dodge City"
+
+In this case, the content between NEXT and END FOR is a kind of epilogue
+which is only executed if the FOR loop runs its full course. If there is a
+premature EXIT the epilogue is not executed.
+
+The same effect can be achieved with a REPeat loop though it is not
+necessarily the best way to do it. However it is worth looking at (perhaps
+at a second reading) if you want to understand structures which are simple
+enough to use in simple ways and powerful enough to cope with awkward
+situations when they arise.
+
+Program 2
+
+    100 REMark Western REPeat with Epilogue
+    110 LET bullets = 6
+    120 REPeat Bandit
+    130   PRINT "Take aim"
+    140   PRINT "Fire shot"
+    150   LET hit = RND(9)
+    160   IF hit = 7 THEN EXIT Bandit
+    170   LET bullets = bullets - 1
+    180   IF bullets <> 0 THEN NEXT Bandit
+    190   PRINT "Watch Bandit"
+    200 END REPeat Bandit
+    210 PRINT "Return to Dodge City"
+
+The program works properly as long as the sheriff has at least one bullet
+at the start. It fails if line 20 reads:
+
+    110 LET bullets = 0
+
+You might think that the sheriff would be a fool to start an enterprise of
+this kind if he had no bullets at all, and you would be right. We are now
+discussing how to preserve good structure in the most complex type of
+situation. We have at least kept the problem context simple: we know what
+we are trying to do. Complex structural problems usually arise in contexts
+more difficult than Wild West simulations. But if you really want a
+solution to the problem which caters for a possible hit, running out of
+bullets and an epilogue, and also the zero case then add the following line
+to the above program:
+
+    125 IF bullets = 0 THEN PRINT "Watch Bandit" : EXIT bandit
+
+We can conceive of no more complex type of problem than this with a single
+loop. SuperBASIC can easily handle it if you want it to.
+
+
+NESTED LOOPS
+
+Consider the following FOR loop which PLOTS a row of points of various
+randomly chosen colours (not black).
+
+    100 REMark Row of pixels
+    110 PAPER 0 : CLS
+    120 LET up = 50
+    130 FOR across = 20 TO 60
+    140   INK RND(2 TO 7)
+    150   POINT across,up
+    160 END FOR across
+
+This program plots a row of points thus:
+
+    ........................................
+
+If you want to get say 51 rows of points you must plot a row for values up
+from 30 to 80. But you must always observe the rule that a structure can go
+completely within another or it can go properly around it. It can also
+follow in sequence, but it cannot 'mesh' with another structure. Books
+about programming often show how FOR loops can be related with a diagram
+like:
+
+ ------------->         --------------->            ----------->
+|                      |                           |
+|   ---------->        |                           |
+|  |                   |                           |
+|  |                    ---------------         ---------------
+|  |                                           |   |
+|  |   Right            --------------->       |    ----------->
+|  |  (nested)         |                       |
+|   ----------         |       Right           |        Wrong
+|                      |     (sequence)        |       (Meshed)
+ -------------          ---------------         ---------------
+
+In SuperBASIC the rule applies to all structures. You can solve all
+problems using them properly We therefore treat the FOR loop as an entity
+and design a new program:
+
+    FOR up = 30 TO 80
+      +-----------------------+
+      | FOR across = 20 TO 60 |
+      |   INK RND(2 TO 7)     |
+      |   POINT across,up     |
+      | END FOR across        |
+      +-----------------------+
+    END FOR up
+
+When we translate this into a program we are entitled not only to expect it
+to work but to know what it will do. It will plot a rectangle made up of
+rows of pixels.
+
+    100 REMark Rows of pixels
+    110 PAPER 0 : CLS
+    120 FOR up = 30 TO 80
+    130   FOR across = 20 TO 60
+    140     INK RND(2 TO 7)
+    150     POINT across,up
+    160   END FOR across
+    170 END FOR up
+
+Different structures may be nested. Suppose we replace the inner FOR loop
+of the above program by a REPeat loop. We will terminate the REPeat loop
+when the zero colour code appears for a selection in the range 0 to 7.
+
+    100 REMark REPeat in FOR
+    110 PAPER 0 : CLS
+    120 FOR up = 30 TO 80
+    130   LET across = 19
+    140   REPeat dots
+    150     LET colour = RND(7)
+    160     INK colour
+    170     LET across = across + 1
+    180     POINT across,up
+    190     IF colour = 0 THEN EXIT dots
+    200   END REPeat dots
+    210 END FOR up
+
+Much of the wisdom about program control and structure can be expressed in
+two rules:
+
+1.  Construct your program using only the legitimate structures for
+    loops and decision making.
+
+2.  Each structure should be properly related in sequence or wholly
+    within another.
+
+
+BINARY DECISIONS
+
+The three types of binary decision can be illustrated easily in terms of
+what to do when it rains.
+
+i.   100 REMark Short form IF
+     110 LET rain = RND(0 TO 1)
+     120 IF rain THEN PRINT "Open brolly"
+
+ii.  100 REMark Long form IF. ..END IF
+     110 LET rain = RND(0 TO 1)
+     120 IF rain THEN
+     130   PRINT "Wear coat"
+     140   PRINT "Open brolly"
+     150   PRINT "Walk fast"
+     160 END IF
+
+iii. 100 REMark Long form IF ...ELSE...END IF
+     110 LET rain = RND(0 TO 1)
+     120 IF rain THEN
+     130   PRINT "Take a bus"
+     140 ELSE
+     150   PRINT "Walk"
+     160 END IF
+
+AII these are binary decisions. The first two examples are simple : either
+something happens or it does not. The third is a general binary decision
+with two distinct possible courses of action, both of which must be
+defined.
+
+You can omit THEN in the long forms if you wish. In the short form you can
+substitute : for THEN.
+
+
+EXAMPLE
+
+Consider a more complex example in which it seems natural to nest binary
+decisions. This type of nesting can be confusing and you should only do it
+if it seems the most natural thing to do. Careful attention to layout,
+particularly indenting, is especially important.
+
+Analyse a piece of text to count the number of vowels, consonants and other
+characters. Ignore spaces. For simplicity the text is all upper case.
+
+Data
+
+    "COMPUTER HISTORY WAS MADE IN 1984"
+
+Design
+
+Read in the data
+  FOR each character:
+    IF letter THEN
+      IF vowel
+        increase vowel count
+      ELSE
+        increase consonant count
+      END IF
+    ELSE
+      IF not space THEN increase other count
+    END IF
+  END FOR
+  PRINT results
+
+Program
+
+    100 REMark Character Counts
+    110 RESTORE 290
+    120 READ text$
+    130 LET vowels = 0 : cons = 0 : others = 0
+    140 FOR num = 1 TO LEN(text$)
+    150   LET ch$ = text$(num)
+    160   IF ch$ >= "A" AND ch$ <= 'Z'
+    170     IF ch$ INSTR "AEIOU"
+    180       LET vowels = vowels + 1
+    190     ELSE
+    200       LET cons = cons + 1
+    210     END IF
+    220   ELSE
+    230     IF ch$ <> " " THEN others = others + 1
+    240   END IF
+    250 END FOR num
+    260 PRINT "Vowel count is" ! vowels
+    270 PRINT "Consonant count is" ! cons
+    280 PRINT "Other count is" ! others
+    290 DATA "COMPUTER HISTORY WAS MADE IN 1984"
+
+Output
+
+    Vowel count is 9
+    Consonant count is 15
+    Other count is 4
+
+
+MULTIPLE  DECISIONS - SELect
+
+Where there are three or more possible actions and none is dependant on a
+previous choice the natural structure to use is SELect which enables
+selection from any number of possibilities.
+
+EXAMPLE
+
+A magic snake grows without limit by adding a section to its front. Each
+section may be up to twenty units long and may be a new colour or it may
+remain the same. Each new section must grow in one of the directions North,
+South, East, or West. The snake starts from the centre of the window.
+
+
+Method
+
+At any time while the snake is still on the screen you choose a random
+length and ink colour easily. The direction may be selected by a number
+1,2,3 or 4 as shown:
+
+               North 1
+
+                  |
+                  |
+                  |
+                  |
+ West 4 ----------+---------- East 2
+                  |
+                  |
+                  |
+                  |
+
+               South 3
+
+
+Design
+
+Select PAPER
+Set snake to centre of window
+REPeat
+  Choose direction, colour length of growth
+  FOR unit = 1 to growth
+    Make snake grow north, south, east or west
+    IF snake is off window THEN EXIT
+  END FOR
+END REpeat
+PRINT end message
+
+Program
+
+    100 REMark Magic Snake
+    110 PAPER 0 : CLS
+    120 LET across = 50 : up = 50
+    130 REPeat snake
+    140   LET direction = RND(l TO 4) : colour = RND(2 TO 7)
+    150   LET growth = RND(2 TO 20)
+    160   INK colour
+    170   FOR unit = 1 TO growth
+    180     SELect ON direction
+    190       ON direction = 1
+    200         LET up = up + 1
+    210       ON direction = 2
+    220         LET across = across + 1
+    230       ON direction = 3
+    240         LET up = up - 1
+    250       ON direction = 4
+    260         LET across = across - 1
+    270     END SELect
+    280     IF across < 1 OR across > 99 OR up < 1 OR up > 99 : EXIT snake
+    290     POINT across,up
+    300   END FOR unit
+    310 END REPeat snake
+    320 PRINT "Snake off edge"
+
+The syntax of the SELect ON structure also allows for the possibility of
+selecting on a list of values such as
+
+    5,6,8,10 TO 13
+
+It is also possible to allow for an action to be executed if none of the
+stated values is found. The full structure is of the form given below.
+
+
+LONG FORM
+
+    SELect ON num
+      ON num = list of values
+        statements
+      ON num = list of values
+        statements
+        -
+        -
+        -
+        -
+      ON num = REMAINDER
+        statements
+    END SELect
+
+where num is any numeric variable and the REMAINDER clause is optional.
+
+
+SHORT FORM
+
+There is a short form of the SELect structure. For example:
+
+    100 INPUT num
+    110 SELect ON num = 0 TO 9 : PRINT "digit"
+
+will perform as you would expect.
+
+
+PROBLEMS ON CHAPTER 14
+
+1.  Store 10 numbers in an array and perform a 'bubble-sort'. This is done
+by comparing the first pair and exchanging, if necessary the second pair
+(second and third numbers), up to the ninth pair (ninth and tenth numbers).
+The first run of nine comparisons and possible exchanges guarantees that
+the highest number will reach its correct position. Another eight runs will
+guarantee eight more correct positions leaving only the lowest number which
+must be in the only (correct) position left. The simplest form of 'bubble
+sort' of ten numbers requires nine runs of nine comparisons.
+
+2.  Consider ways of speeding up bubblesort, but do not expect that it will
+ever be very efficient.
+
+3.  An auctioneer wishes to sell an old clock and he has instructions to
+invite a first bid of `50. If no-one bids he can come down to `40, `30,
+`20, but no lower, in an effort to start the bidding. If no-one bids, the
+clock is withdrawn from the sale. When the bidding starts, he takes only `5
+increases until the final bid is made.  If the final bid is `35 (the
+'reserve price') or more, the clock is sold. Otherwise it is withdrawn.
+
+Simulate the auction using the equivalent of a six-sided die throw to start
+the bidding.  A 'six' at any of the starting prices will start it off.
+
+When the bidding has started there should be a three out of four chance of
+a higher bid at each invitation.
+
+4.  In a wild west shoot-out the Sheriff has no ammunition and wishes to
+arrest a gunman camped in a forest. He rides amongst the trees tempting the
+gunman to fire. He hopes that when six shots have been fired he can rush in
+and overpower the gunman as he tries to re-load. Simulate the encounter
+giving the gunman a one-twentieth chance of hitting the Sheriff with each
+shot. If the Sheriff has not been hit after six shots he will arrest the
+gunman.
+
+5.  The Sheriff's instructions to his Deputy are:
+
+        "If the gun is empty then re-load it and if it ain't then
+        keep on firing until you  hit the bandit or he surrenders.
+        If Mexico Pete turns up, get out fast."
+
+Write a program which caters properly for all these situations:
+
+    Whatever happens, return to Dodge City
+    If Mexico Pete turns up, return immediately
+    If the gun is empty reload it
+    If the gun is not empty ask the bandit to surrender.
+    If the bandit surrenders, arrest him.
+    If he doesn't surrender fire a shot.
+    If the bandit is hit, arrest him and fix his wound.
+
+Assume an unlimited supply of ammunition Use a simulated 'twenty-sided die'
+and let a seven mean 'surrender' and a 'thirteen' mean the bandit is hit.
+
+

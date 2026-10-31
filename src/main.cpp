@@ -1,8 +1,14 @@
 #include "ql32/interpreter.hpp"
+#include "ql32/platform/linux/directory_channels.hpp"
+#include "ql32/platform/linux/directory_storage.hpp"
+#include "ql32/platform/linux/console_ui.hpp"
+#include "ql32/platform/linux/svg_graphics.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
@@ -25,8 +31,16 @@ int main(int argc, char** argv) {
     } else {
 #if defined(__unix__) || defined(__APPLE__)
         if (::isatty(STDIN_FILENO)) {
-            ql32::Interpreter interpreter;
-            interpreter.runRepl(std::cin, std::cout, std::cerr, true);
+            auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(
+                std::filesystem::current_path());
+            auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
+                std::filesystem::current_path());
+            auto ui = std::make_shared<ql32::ui::QueuedService>();
+            auto graphics = std::make_shared<ql32::platform::linux_host::SvgGraphics>();
+            ql32::Interpreter interpreter(storage, channels, ui, graphics);
+            ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout);
+            interpreter.runRepl(std::cin, std::cout, std::cerr, true,
+                                [&] { return console.dispatchNext(); });
             return 0;
         }
 #endif
@@ -34,9 +48,24 @@ int main(int argc, char** argv) {
     }
 
     try {
-        ql32::Interpreter interpreter;
-        if (argc == 2) interpreter.execute(source, std::cout);
-        else interpreter.executeInteractive(source, std::cout);
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(
+            std::filesystem::current_path());
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
+            std::filesystem::current_path());
+        auto ui = std::make_shared<ql32::ui::QueuedService>();
+        auto graphics = std::make_shared<ql32::platform::linux_host::SvgGraphics>();
+        ql32::Interpreter interpreter(storage, channels, ui, graphics);
+        if (argc == 2) {
+            ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout);
+            auto status = interpreter.executeResumable(source, std::cout);
+            while (status == ql32::ExecutionStatus::Suspended) {
+                if (!console.dispatchNext())
+                    throw std::runtime_error("suspended UI request was not queued");
+                status = interpreter.resume(std::cout);
+            }
+        } else {
+            interpreter.executeInteractive(source, std::cout);
+        }
     } catch (const std::exception& error) {
         std::cerr << "ql32: " << error.what() << '\n';
         return 1;

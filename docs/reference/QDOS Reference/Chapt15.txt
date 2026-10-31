@@ -1,0 +1,653 @@
+CHAPTER 15
+----------
+
+PROCEDURES AND FUNCTIONS
+
+In the first part of this chapter we explain the more straightforward
+features of SuperBASIC's procedures and functions. We do this with very
+simple examples so that you can understand the working of each feature as
+it is described. Though the examples are simple and contrived you will
+appreciate that, once understood, the ideas can be applied in more complex
+situations where they really matter
+
+After the first part there is a discussion which attempts to explain 'Why
+procedures' . If you understand, more or less, up to that point you will be
+doing well and you should be able to use procedures and functions with
+increasing effectiveness.
+
+SuperBASIC first allows you to do the simpler things in simple ways and
+then offers you more if you want it. Extra facilities and some technical
+matters are explained in the second part of this chapter but you could omit
+these, certainly at a first reading, and still be in a stronger position
+than most users of older types of BASIC.
+
+VALUE PARAMETERS
+
+You have seen in previous chapters how a value can be passed to a
+procedure. Here is another example.
+
+EXAMPLE
+
+In "Chan's Chinese Take-Away" there are just six items on the menu.
+
+----------------------------
+  Rice Dishes    Sweets
+----------------------------
+  1 prawns       4 ice
+  2 chicken      5 fritter
+  3 special      6 lychees
+----------------------------
+
+Chan has a simple way of computing prices. He works in pence and the prices
+are:
+
+    for a rice dish    300 + 10 times menu number
+    for a sweet        12 times menu number
+
+Thus a customer who ate special rice and an ice would pay:
+
+    300 + 10 * 3 + 12 * 4 = 378 pence
+
+A procedure, "item", accepts a menu number as a value parameter and prints
+the cost.
+
+
+Program
+
+    100 REMark Cost of Dish
+    110 item 3
+    120 item 4
+    130 DEFine PROCedure item(num)
+    140   IF num <= 3 THEN LET price = 300 + 10*num
+    150   IF num >= 4 THEN LET price = 12*num
+    160   PRINT ! price !
+    170 END DEFine
+
+Output
+    330 48
+
+In the main program actual parameters 3 and 4 are used. The procedure
+definition has a formal parameter num, which takes the value passed to it
+from the main program. Note that the formal parameters must be in brackets,
+but that actual parameters need not be.
+
+EXAMPLE
+
+Now suppose the working variable, "price", was also used in the main
+program, meaning  something else, say the price of a glass of lager 70p.
+The following program fails to give the desired result.
+
+Program
+
+    100 REMark Global price
+    110 LET price = 70
+    120 item 3
+    130 item 4
+    140 PRINT ! price !
+    150 DEFine PROCedure item(num)
+    160   IF num <= 3 THEN LET price = 300 + 10*num
+    170   IF num >= 4 THEN LET price = 12*num
+    180   PRINT ! price !
+    190 END DEFine
+
+Output
+
+    330 48 48
+
+The price of the lager has been altered by the procedure. We say that the
+variable, price, is global because it can be used anywhere in the program.
+
+EXAMPLE
+
+Make the procedure variable, "price", LOCAL to the procedure. This means
+that SuperBASIC will treat it as a special variable accessible only within
+the procedure. The variable, "price", in the main program will be a
+different thing even though it has the same name.
+
+Program
+    100 REMark LOCAL price
+    110 LET price = 70
+    120 item 3
+    130 item 4
+    140 PRINT ! price !
+    150 DEFine PROCedure item(num)
+    160   LOCaL price
+    170   IF num <= 3 THEN LET price = 300 + 10*num
+    180   IF num >= 4 THEN LET price = 12*num
+    190   PRINT ! price !
+    200 END DEFine
+
+Output
+
+    330 48 70
+
+This time everything works properly. Line 70 causes the procedure variable,
+"price" to be internally marked as 'belonging' only to the procedure,
+"item". The other variable, "price" is not affected. You can see that local
+variables are useful things.
+
+EXAMPLE
+
+Local variables are so useful that we automatically make procedure formal
+parameters local. Though we have not mentioned it before parameters such as
+"num" in the above programs cannot interfere with main program variables.
+To prove this we drop the LOCAL statement from the above program and use
+"num" for the price of lager. Because "num" in the procedure is local
+everything works.
+
+Program
+
+    100 REMark LOCAL parameter
+    110 LET num = 70
+    120 item 3
+    130 item 4
+    140 PRINT ! num !
+    150 DEFine PROCedure item(num)
+    160   IF num <= 3 THEN LET price = 300 + 10*num
+    170   IF num >= 4 THEN LET price = 12*num
+    180   PRINT ! price !
+    190 END DEFine
+
+Output
+
+    330 48 70
+
+
+VARIABLE PARAMETERS
+
+So far we have only used procedure parameters for passing values to the
+procedure. But suppose the main program wants the cost of an item to be
+passed back so that it can compute the total bill. We can do this easily by
+providing another parameter in the procedure call. This must be a variable
+because it has to receive a value from the procedure. We therefore call it
+a variable parameter and it must be matched by a corresponding variable
+parameter in the procedure definition.
+
+
+EXAMPLE
+
+Use actual variable parameters, cost_1 and cost_2 to receive the values of
+the variable price from the procedure. Make the main program compute and
+print the total bill.
+
+Program
+
+    100 REMark Variable parameter
+    110 LET num = 70
+    120 item 3,cost_1
+    130 item 4,cost_2
+    140 LET bill = num + cost_1 + cost_2
+    150 PRINT bill
+    160 DEFine PROCedure item(num,price)
+    170   IF num <= 3 THEN LET price = 300 + 10*num
+    180   IF num >= 4 THEN LET price = 12*num
+    190 END DEFine
+
+Output
+
+    448
+
+The parameters num and price are both automatically local so there can be
+no problems. The diagrams show how information passes from main program to
+procedure and back
+
+
+    +-----------+      Menu numbers     +-----------+
+    |           | --------------------> |           |
+    | Main      |                       | Procedure |
+    | Program   |                       | Item      |
+    |           | <-------------------- |           |
+    +-----------+         prices        +-----------+
+
+
+That is enough about procedures and parameters for the present.
+
+
+FUNCTIONS
+
+You already know how a system function works. For example the function:
+
+    SQRT(9)
+
+computes the value, 3, which is the square root of 9. We say the function
+returns the value 3. A function, like a procedure, can have one or more
+parameters, but the distinguishing feature of a function is that it returns
+exactly one value. This means that you can use it in expressions that you
+already have. You can type:
+
+    PRINT 2*SQRT(9)
+
+and get the output 6. Thus a function behaves like a procedure with one or
+more value parameters and exactly one variable parameter holding the
+returned value: that variable parameter is the function name itself.
+
+The parameters need not be numeric.
+
+    LEN("string")
+
+has a string argument but it returns the numeric value 6.
+
+
+EXAMPLE
+
+Re write the program of the last section which used price as a variable
+parameter. Let price be the name of the function.
+
+The value to be returned is defined by the RETurn statement as shown.
+
+Program
+
+    100 REMark FuNction with RETurn
+    110 LET num = 70
+    120 LET bill = num + price(3) + price(4)
+    130 PRINT bill
+    140 DEFine FuNction price(num)
+    150   IF num <= 3 THEN RETurn 300 + 10*num
+    160   IF num >= 4 THEN RETurn 12*num
+    170 END DEFine
+
+Output
+
+    448
+
+Notice the simplification in the calling of functions as compared with
+procedure calls.
+
+
+WHY PROCEDURES?
+
+
+The ultimate concept of a procedure is that it should be a 'black box'
+which receives specific information from 'outside' and performs certain
+operations which may include sending specific information back to the
+'outside: The 'outside' may be the main program or another procedure.
+
+The term 'black box' implies that its internal workings are not important:
+you only think about what goes in and what comes out. If for example, a
+procedure uses a variable, count and changes its value, that might affect a
+variable of the same name in the main program. Think of a mail order
+company You send them an order and cash: they send you goods. Information
+is sent to a procedure and it sends back action and/or new information.
+
+                                       +-------------------+
+         Order by cash                 |                   |
+         ----------------------------> |  Mail             |
+                                       |  Order            |
+                                Goods  |  Company          |
+         <---------------------------- |                   |
+                                       +-------------------+
+
+                                       +-------------------+
+         Information                   |                   |
+         ----------------------------> |                   |
+                        Action and/or  |     Procedure     |
+                      new information  |                   |
+         <---------------------------- |                   |
+                                       +-------------------+
+
+You do not want the mail order company to use your name and address or
+other information for other purposes. That would be an unwanted
+side-effect. Similarly you do not want a procedure to cause unplanned
+changes to values of variables used in the main program.
+
+Of course you could make sure that there are no double uses of variable
+names in a  program. That will work up to a point but we have shown in this
+chapter how to avoid trouble even if you forget what variables have been
+used in any particular procedure.
+
+A second aim in using procedures is to make a program modular Rather than
+have one long main program you can break the job down into what Seymour
+Papert, the inventor of LOGO, calls 'Mind-sized bites'. These are the
+procedures, each one small enough to understand and control easily. They
+are linked together by the procedure calls in a sequence or hierarchy
+
+A third aim is to avoid writing the same code twice. Write it once as a
+procedure and call it twice if necessary. Functions and procedures written
+for one program can often be directly used, without change, by other
+programs, and one might create a library of commonly used procedures and
+functions.
+
+We give below another example which shows how procedures make a program
+modular.
+
+EXAMPLE
+
+An order is placed for six dishes at Chan's Take Away where the menu is:
+
+----------------------------------
+  Item Number    Dish      Price
+----------------------------------
+       1         Prawns    3.50
+       2         Chicken   2.80
+       3         Special   3.30
+----------------------------------
+
+Write procedures for the following tasks.
+
+1.  Set up two three-element arrays showing menu, dishes and
+    prices. Use a DATA statement.
+
+2.  Simulate an order for six randomly chosen dishes using a
+    procedure, choose, and make a tally of the number of times
+    each dish is chosen.
+
+3.  Pass the three numbers to a procedure, "waiter", which passes
+    back the cost of the order to the main program using a
+    parameter "cost". Procedure waiter calls two other procedures,
+    "compute" and "cook", which compute the cost and simulate
+    "cooking"
+
+4.  The procedure, "cook", simply prints the number required and
+    the name of each dish.
+
+The main program should call procedures as necessary, get the total cost
+from procedure, "waiter" add 10% for a tip, and print the amount of the
+total bill.
+
+
+Design
+
+This program illustrates parameter passing in a fairly complex way and we
+will explain the program step by step before putting it together.
+
+    100 REMark Procedures
+    110 RESTORE 490
+    120 DIM item$(3,7),price(3),dish(3)
+    130 REMark *** PROGRAM ***
+    140 LET tip = 0.1
+    150 set_up
+        -
+        -
+    210 DEFine PROCedure set_up
+    220   FOR k = 1 TO 3
+    230     READ item$(k)
+    240     READ price(k)
+    250   END FOR k
+    260 END DEFine
+        -
+        -
+        -
+    490 DATA "Prawns",3.5,"Chicken",2.8,"Special",3.3
+
+The names of menu items and their prices are placed in the arrays "item$"
+and "price".
+
+The next step is to choose a menu number for each of the six customers. The
+tally of the number of each dish required will be kept in the array "dish".
+
+    160 choose dish
+        -
+        -
+        -
+    270 DEFine PROCedure choose(dish)
+    280   FOR pick = 1 TO 6
+    290     LET number = RND(1 TO 3)
+    300     LET dish(number) = dish(number) + 1
+    310   END FOR pick
+    320 END DEFine
+
+Note that the formal parameter dish is both:
+
+    local to procedure choose
+    an array in main program
+
+The three values are passed back to the global array also called dish.
+These values are then passed to the procedure "waiter".
+
+    170 waiter dish,bill
+        -
+        -
+        -
+        -
+    330 DEFine PROCedure waiter(dish, cost)
+    340   compute dish,cost
+    350   cook dish
+    360 END DEFine
+
+The waiter passes the information about the number of each dish required to
+the procedure, "compute", which computes the cost and returns it.
+
+    370 DEFine PROCedure compute(dish, total)
+    380   LET total = 0
+    390   FOR k = 1 to 3
+    400     LET total = total + dish(k)*price(k)
+    410   END FOR k
+    420 END DEFine
+
+The waiter also passes information to the cook who simply prints the number
+required for each menu item.
+
+    430 DEFine PROCedure cook(dish)
+    440   FOR c = 1 TO 3
+    450     PRINT ! dish(c) ! item$(c) !
+    460   END FOR c
+    470 END DEFine
+
+Again, the array dish in the procedure "cook" is local. It receives the
+information which the procedure uses in its PRINT statement.
+
+The complete program is listed below
+
+Program
+
+100 REMark Procedures
+110 RESTORE 490
+120 DIM item$(3,7),price(3),dish(3)
+130 REMark *** PROGRAM ***
+140 LET tip = 0.1
+150 set_up
+160 choose dish
+170 waiter dish,bill
+180 LET bill = bill + tip*bill
+190 PRINT "Total cost is `" ; bill
+200 REMark *** PROCEDURE DEFINITIONS ***
+210 DEFine PROCedure set_up
+220   FOR k = 1 TO 3
+230     READ item$(k)
+240     READ price(k)
+250   END FOR k
+260 END DEFine
+270 DEFine PROCedure choose(dish)
+280   FOR pick = 1 TO 6
+290     LET number = RND(1 TO 3)
+300     LET dish(number) = dish(number) + 1
+310   END FOR pick
+320 END DEFine
+330 DEFine PROCedure waiter(dish,cost)
+340   compute dish,cost
+350   cook dish
+360 END DEFine
+370 DEFine PROCedure compute(dish,total)
+380   LET total = 0
+390   FOR k = 1 TO 3
+400     LET total = total + dish(k)*price(k)
+410   END FOR k
+420 END DEFine
+430 DEFine PROCedure cook(dish)
+440   FOR c = 1 TO 3
+450     PRINT ! dish(c) ! item$(c)
+460   END FOR c
+470 END DEFine
+480 REMark *** PROGRAM DATA ***
+490 DATA "Prawns",3.5,"Chicken",2.8,"Special",3.3
+
+Output
+
+The output depends on the random choice of dishes but the following choice
+illustrates the pattern, and gives a sample of output.
+
+    3 Prawns
+    1 Chicken
+    2 Special
+
+    Total cost is `20.40
+
+
+COMMENT
+
+Obviously the use of procedures and parameters in such a simple program is
+not necessary but imagine that each sub-task might be much more complex. In
+such a situation the use of procedures would allow a modular build-up of
+the program with testing at each stage. The above example merely
+illustrates the main notations and relationships of procedures.
+
+Similarly the next example illustrates the use of functions.
+
+Note that in the previous example the procedures "waiter" and "compute"
+both return exactly one value. Rewrite the procedures as functions and show
+any other changes necessary as a consequence.
+
+    DEFine FuNction waiter(dish)
+      cook dish
+      RETurn compute(dish)
+    END DEFine
+
+    DEFine FuNction compute(dish)
+      LET total = 0
+      FOR k = 1 TO 3
+        LET total = total + dish(k) * price(k)
+      END FOR k
+      RETurn total
+    END DEFine
+
+The function call to "waiter" also takes a different form
+
+    LET bill = waiter(dish)
+
+This program works as before. Notice that there are fewer parameters though
+the program structure is similar. That is because the function names are
+also serving as parameters retuning information to the source of the
+function call.
+
+EXAMPLE
+
+All the variables used as formal parameters in procedures or functions are
+'safe' because they are automatically local. Which variables used in the
+procedures or functions are not local? What additional statements would be
+needed to make them local?
+
+Program Changes
+
+The variables "k", "pick" and "num" are not local. The necessary changes to
+make them so are:
+
+    LOCAL k
+    LOCAL pick,num
+
+
+TYPELESS  PARAMETERS
+
+Formal parameters do not have any type. You may prefer that a variable
+which handles numbers has the appearance of a numeric variable and which
+handles strings looks like a string variable, but however you write your
+parameters they are typeless. To prove it, try the following program.
+
+Program
+
+    100 REMark Number or word
+    110 waiter 2
+    120 waiter "Chicken"
+    130 DEFine PROCedure waiter(item)
+    140   PRINT ! item !
+    150 END DEFine
+
+Output
+
+    2 Chicken
+
+The type of the parameter is determined only when the procedure is called
+and an actual parameter 'arrives'.
+
+
+SCOPE OF VARIABLES
+
+Consider the following program and try to consider what two numbers will be
+output.
+
+    100 REMark scope
+    110 LET number = 1
+    120 test
+    130 DEFine PROCedure test
+    140   LOCal number
+    150   LET number = 2
+    160   PRINT number
+    170   try
+    180 END DEFine
+    190 DEFine PROCedure try
+    200   PRINT number
+    210 END DEFine
+
+Obviously the first number to be printed will be 2 but is the variable
+number in line 200 global?
+
+The answer is that the value of "number" in line 160 will be carried into
+the procedure "try". A variable which is local to a procedure will be the
+same variable in a second procedure called by the first.
+
+Equally if the procedure "try" is called by the main program, the variable
+"number" will be the same number in both the main program and procedure,
+"try". The implications may seem strange at first but they are logical.
+
+1.  The variable "number" in line 110 is global.
+
+2.  The variable "number" in procedure "test" is definitely local to
+    the procedure.
+3.  The variable "number" in procedure "try" 'belongs' to the part
+    of the program which was the last call to it.
+
+We have covered many concepts in this chapter because SuperBASIC functions
+and procedures are very powerful. However you should not expect to use all
+these features immediately. Use procedures and functions in simple ways at
+first. They can be very effective and the power is there if you need it.
+
+1.  Six employees are identified by their surnames only. Each employee
+    has a particular pension fund rate expressed as a percentage. The
+    following data represent the total salaries and pension fund rates
+    of the six employees.
+
+        Benson         13,800    6.25
+        Hanson          8,700    6.00
+        Johnson        10,300    6.25
+        Robson         15,000    7.00
+        Thomson         6,200    6.00
+        Watson          5,100    5.75
+
+    Write procedures to:
+
+        input the data into arrays.
+        compute the actual pension fund contributions.
+        output the lists of names and computed contributions.
+
+    Link the procedures with a main program calling them in sequence.
+
+2.  Write a function "select" with two arguments "range" and "miss".
+    The function should return a random whole number in the given
+    "range" but it should not be the value of "miss".
+
+    Use the function in a program which chooses a random PAPER colour
+    and then draws random circles in random INK colours so that none
+    is in the colour of PAPER.
+
+3.  Re-write the solution to exercise 1 so that a function "pension"
+    takes salary and contribution rate as arguments and returns the
+    computed pension contribution. Use two procedures, one to input
+    the data and one to output the required information using the
+    function "pension".
+
+4.  Write the following:
+
+        a procedure which sets up a 'pack of cards'.
+
+        a procedure which shuffles the cards.
+
+        a function which takes a number as an argument and returns a
+        string value describing the card.
+
+        a procedure which 'deals' and displays four poker hands
+        of five cards each.
+
+        a main program which calls the above procedures.
+
+        (see chapter 16 for discussion of a similar problem)
+
+

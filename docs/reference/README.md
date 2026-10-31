@@ -20,8 +20,21 @@ These are the sources linked in the “QL32 Project Idea” chat and used to com
 
 ## Psion OPL
 
-- [Leigh Edwards, *Programming Psion Computers*](https://palmtop.cosi.com.pl/wp-content/uploads/2013/07/Programming-Psion-Computers.pdf). OPL Reference chapter 9: menus on PDF viewer pages 280–284 and dialogs on pages 286–298.
+- [Psion Series 3c, Series 5 and Siena OPL User Guide](PSION%203c%20Series5%20y%20Siena%20Programming%20Ref.pdf), supplied in `docs/reference`. Its Basics and Graphics & Friendlier Interaction sections cover OPL declarations, control flow, pixel windows, menus, and dialogs. OPL behavior varies by device generation; observe the Series 5/Series 3c markers.
+- [Leigh Edwards, *Programming Psion Computers*](Programming-Psion-Computers.pdf), supplied in `docs/reference`; see OPL Reference chapter 9 for menus and dialogs, and the application architecture discussions for broader UI context.
 - Its `dINIT`/`DIALOG` controls and `mINIT`/`mCARD`/`MENU` illustrate the UI model. OPL variants differ by device. QL/32 adopts the model with its own syntax and session ownership.
 
+The OPL manuals are design references for managed UI and selected language
+refinements, not a source-compatibility target. SuperBASIC remains the core
+language. The QL/32 M3 graphics contract selectively uses OPL's pixel-based
+window model; see [QL32-UI-001](../specification/QL32-UI-001.md). The manuals
+are copyrighted and must not be reproduced in project documentation.
+
 The external manuals remain reference material; do not copy their text, examples, or PDF files into this public repository without redistribution rights.
+
+## Hardware platform
+
+- [LILYGO VGA32 V1.4 product page](https://lilygo.cc/en-de/products/fabgl-vga32) for target module details.
+- [LILYGO VGA32/FabGL GPIO assignment](https://github.com/Xinyuan-LilyGO/VGA32/blob/master/fabgl%20GPIOs%20assignment.txt) for VGA, PS/2, audio, and SD pin mapping.
+- [FabGL v1.0.9](https://github.com/fdivitto/FabGL/releases/tag/v1.0.9) is the pinned graphics/PS/2 dependency. Its upstream project states the Arduino-ESP32 compatibility ceiling and GPL-3.0 license; see `boards/lilygo_vga32/README.md` before redistributing firmware.
 

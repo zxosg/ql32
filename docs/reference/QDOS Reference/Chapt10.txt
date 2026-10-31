@@ -1,0 +1,268 @@
+CHAPTER 10
+----------
+
+LOGIC
+
+If you have read previous chapters you will probably agree that repetition,
+decision making  and breaking tasks into sub-tasks are major concepts in
+problem analysis, program design  and encoding programs. Two of these
+concepts, repetition and decision making, need  logical expressions such as
+those in the following program lines
+
+    IF score = 7 THEN EXIT throws
+    IF suit = 3 THEN PRINT "spades"
+
+The first enables EXIT from a REPeat loop. The second is simply a decision
+to do something or not. A mathematical expression evaluates to one of
+millions of possible numeric values. Similarly a string expression can
+evaluate to millions of possible strings  of characters. You may find it
+strange that logical expressions, for which great importance is claimed,
+can evaluate to one of only two possible values: true or false.
+
+In the case of
+
+    score = 7
+
+this is obviously correct. Either score equals 7 or it doesn't! The
+expression must be true or false - assuming that it's not meaningless. It
+may be that you do not know the value at some time, but that will be put
+right in due course.
+
+You have to be a bit more careful of expressions involving words such as
+OR, AND, NOT but they are well worth investigating indeed, they are
+essential to good programming. They will become even more important with
+the trend towards other kinds of languages based more on precise
+descriptions of what you require rather than what the computer must do.
+
+
+AND
+
+The word AND in SuperBASIC is like the word 'and' in ordinary English.
+Consider the following program.
+
+100 REMark AND
+110 PRINT "Enter two values" \ "1 for TRUE or 0 for FALSE"
+120 INPUT raining, hole_in_roof
+130 IF raining AND hole_in_roof THEN PRINT "Get wet"
+
+ As in real life, you will only get wet if it is raining and there is a
+hole in the roof. If one (or both) of the simple logical variables
+
+    raining
+    hole_in_roof
+
+is false then the compound logical expression
+
+    raining AND hole in_roof
+
+is also false. It takes two true values to make the whole expression true.
+This can be seen from the rules below. Only when the compound expression is
+true do you get wet.
+
+-----------------------------------------------------------------
+  raining    hole_in_roof    raining AND hole_in_roof    effect
+-----------------------------------------------------------------
+
+  FALSE      FALSE           FALSE                       DRY
+  FALSE      TRUE            FALSE                       DRY
+  TRUE       FALSE           FALSE                       DRY
+  TRUE       TRUE            TRUE                        WET
+-----------------------------------------------------------------
+                                                    Rules for AND
+
+
+OR
+
+In everyday life the word 'or' is used in two ways. We can illustrate the
+inclusive use of OR by thinking of a cricket captain looking for players,
+He might ask "Can you bat or bowl?" He would be pleased if a player could
+do just one thing well but he would also be pleased if someone could do
+both. So it is in programming: a compound expression using OR is true if
+either or both of the simple statements or variables are true. Try the
+following program.
+
+    100 REMark OR test
+    110 PRINT "Enter two values" \ "1 for TRUE or 0 for FALSE"
+    120 INPUT "Can you bat?", batsman
+    130 INPUT "Can you bowl?", bowler
+    140 IF batsman OR bowler THEN PRINT "In the team"
+
+
+You can see the effects of different combinations of answers in the rules
+below:
+
+---------------------------------------------------------
+  batsman    bowler    batsman OR bowler    effect
+---------------------------------------------------------
+
+  FALSE      FALSE     FALSE                not in team
+  FALSE      TRUE      TRUE                 in the team
+  TRUE       FALSE     TRUE                 in the team
+  TRUE       TRUE      TRUE                 in the team
+---------------------------------------------------------
+                                             Rules for OR
+
+When the "inclusive OR" is used a true value in either of the simple
+statements will produce a true value in the compound expression. If Ian
+Botham, the England all rounder were to answer the questions both as a
+bowler and as a batsman, both simple statements would be true and so would
+the compound expression. He would be in the team.
+
+If you write 0 for false and 1 for true you will get all the possible
+combinations by counting in binary numbers:
+
+    00
+    01
+    10
+    11
+
+
+NOT
+
+The word NOT has the obvious meaning.
+
+    NOT true    is the same as false
+    NOT false   is the same as true
+
+However you need to be careful. Suppose you hold a red triangle and say
+that it is:
+
+    NOT red AND square
+
+In English this may be ambiguous.
+If you mean:
+
+    (NOT red) AND square
+
+then for a red triangle the expression is false.
+
+If you mean:
+
+    NOT (red AND square)
+
+then for a red triangle the whole expression is true. There must be a rule
+in programming to make it clear what is meant. The rule is that NOT takes
+precedence over AND so the interpretation:
+
+    (NOT red) AND square
+
+is the correct one This is the same as:
+
+    NOT red AND square
+
+To get the other interpretation you must use brackets. If you need to use a
+complex logical expression it is best to use brackets and NOT if their
+usage naturally reflects what you want. But you can if you wish always
+remove brackets by using the following laws (attributed to Augustus De
+Morgan)
+
+    NOT (a AND b)    is the same as    NOT a OR NOT b
+    NOT (a OR b)     is the same as    NOT a AND NOT b
+
+For example:
+
+    NOT (tall AND fair)        is the same as    NOT tall OR NOT fair
+
+    NOT (hungry OR thirsty)    is the same as    NOT hungry AND NOT thirsty
+
+
+Test this by entering
+
+    100 REMark NOT and brackets
+    110 PRINT "Enter two values"\"1 for TRUE or 0 for FALSE"
+    120 INPUT "tall "; tall
+    130 INPUT "fair "; fair
+    140 IF NOT (tall AND fair) THEN PRINT "FIRST"
+    150 IF NOT tall OR NOT fair THEN PRINT "SECOND"
+
+Whatever combination of numbers you give as input, the output will always
+be either two words or none, never one. This will suggest that the two
+compound logical expressions are equivalent.
+
+
+XOR-Exclusive OR
+
+Suppose a golf professional wanted an assistant who could either run the
+shop or give golf lessons. If an applicant turned up with both abilities he
+might not get the job because the golf professional might fear that such an
+able assistant would try to take over. He would accept a good golfer who
+could not run the shop. He would also accept a poor golfer who could run
+the shop. This is an exclusive OR situation: either is acceptable but not
+both. The following program would test applicants:
+
+    100 REMark XOR test
+    110 PRINT "Enter 1 for yes or 0 for no."
+    120 INPUT "Can you run a shop?", shop
+    130 INPUT "Can you teach golf?", golf
+    140 IF shop XOR golf THEN PRINT "Suitable"
+
+The only combinations of answers that will cause the output "Suitable" are
+(0 and 1) or (1 and 0). The rules for XOR are given below.
+
+---------------------------------------------------------------------------
+  Able to run shop    Able to teach    Shop XOR teach             effect
+---------------------------------------------------------------------------
+
+  FALSE               FALSE            FALSE                      no job
+  FALSE               TRUE             TRUE                    gets the job
+  TRUE                FALSE            TRUE                    gets the job
+  TRUE                TRUE             FALSE                      no job
+---------------------------------------------------------------------------
+                                                              rules for XOR
+
+PRIORITIES
+
+The order of priority for the logical operators is (highest first):
+
+    NOT
+    AND
+    OR,XOR
+
+For example the expression
+
+    rich OR tall AND fair
+
+means the same as:
+
+    rich OR (tall AND fair)
+
+The AND operation is performed first. To prove that the two logical
+expressions have identical effects run the following program:
+
+    100 REMark Priorities
+    110 PRINT "Enter three values"\"Type 1 for Yes and 0 for No"!
+    120 INPUT rich,tall,fair
+    130 IF rich OR tall AND fair THEN PRINT "YES"
+    140 IF rich OR (tall AND fair) THEN PRINT "AYE"
+
+Whatever combination of three zeroes or ones you input at line 120 the
+output will be either nothing or:
+
+    YES
+    AYE
+
+You can make sure that you test all possibilities by entering data which
+forms eight three digit binary numbers 000 to 111
+
+    000 001 010 011 100 101 110 111
+PROBLEMS ON CHAPTER 10
+
+1.  Place ten numbers in a DATA statement. READ each number and if
+    it is greater than 20 then print it.
+
+2.  Test all the numbers from 1 to 100 and print only those which
+    are perfect squares or divisible by 7
+
+3.  Toys are described as Safe (S), or Unsafe (U), Expensive (E) or
+    Cheap (C), and  either for Girls (G), Boys (B) or Anyone (A). A
+    trio of letters encodes the qualities of each toy. Place five
+    such trios in a DATA statement and then search it printing only
+    those which are safe and suitable for girls.
+
+4.  Modify program 3 to print those which are expensive and not
+    safe.
+
+5.  Modify program 3 to print those which are safe, not expensive
+    and suitable for anyone.
+
+

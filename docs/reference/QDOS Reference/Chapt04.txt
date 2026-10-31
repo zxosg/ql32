@@ -1,0 +1,364 @@
+CHAPTER 4
+---------
+
+CHARACTERS AND STRlNGS
+
+Teachers sometimes wish to assess the reading ability needed for particular
+books or classroom materials. Various tests are used and some of these
+compute the average lengths of words and sentences. We will introduce ideas
+about handling words or character strings by examining simple approaches to
+finding average word lengths.
+
+We are talking about sequences of letters, digits or other symbols which
+may or may not be words. That is why the term 'character string' has been
+invented. It is usually abbreviated to string. Strings are handled in ways
+similar to number handling but, of course, we do not do the same operations
+on them. We do not multiply or subtract strings. We join them, separate
+them, search them and generally manipulate them as we need.
+
+
+NAMES AND PIGEON HOLES FOR STRINGS
+
+You can create pigeon holes for strings. You can put character strings into
+pigeon holes and use the information just as you do with numbers. If you
+intend to store (not all at once) words such as:
+
+      FIRST SECOND THIRD
+             and
+    JANUARY FEBRUARY MARCH
+
+you may choose to name two pigeon holes:
+
+              +-----+              +-----+
+              |     |              |     |
+    weekday$  |     |      month$  |     |
+              |     |              |     |
+              +-----+              +-----+
+
+
+Notice the dollar sign. Pigeon holes for strings are internally different
+from those for numbers and SuperBASIC needs to know which is which. All
+names of string pigeon holes must end with $. Otherwise the rules for
+choosing names are the same as the rules for the names of numeric pigeon
+holes.
+
+You may pronounce:
+
+    "weekday$" as weekdaydollar
+    "month$" as monthdollar
+
+The LET statement works in the same way as for numbers. If you type:
+
+    LET weekday$ = "FIRST" [ENTER]
+
+an internal pigeon hole, named weekday$ will be set up with the value FIRST
+in it thus:
+
+              +-----+
+              |     |
+    weekday$  |FIRST|
+              |     |
+              +-----+
+
+
+The quote marks are not stored. They are used in the LET statement to make
+it absolutely clear what is to be stored in the pigeon hole. You can check
+by typing:
+    PRINT weekday$ [ENTER]
+
+and the screen should display what is in the pigeon hole:
+
+    FIRST
+
+You can use a pair of apostrophes instead of a pair of quote marks.
+
+
+LENGTHS OF STRINGS
+
+SuperBASIC makes it easy to find the length or number of characters of any
+string. You simply write, for example:
+
+    PRINT LEN(weekday$) [ENTER]
+
+If the pigeon hole, weekday$, contains FIRST the number 5 will be
+displayed. You can see the effect in a simple program:
+
+NEW [ENTER]
+10 LET weekday$ = "FIRST" [ENTER]
+20 PRINT LEN(weekday$) [ENTER]
+RUN [ENTER]
+
+The screen should display:
+
+    5
+
+LEN is a keyword of SuperBASIC
+
+An alternative method of achieving the same result uses both a string
+pigeon hole and a numeric pigeon hole.
+
+NEW [ENTER]
+10 LET weekday$ = "FIRST" [ENTER]
+20 LET length = LEN(weekday$) [ENTER]
+30 PRINT length [ENTER]
+RUN [ENTER]
+
+The screen should display:
+
+    5
+
+as before, and two internal pigeon holes contain the values shown:
+
+              +-----+              +-----+
+              |     |              |     |
+    weekday$  |FIRST|      length  |  5  |
+              |     |              |     |
+              +-----+              +-----+
+
+
+Let us return to the problem of average lengths of words.
+
+Write a program to find the average length of the three words:
+
+    FIRST, OF, FEBRUARY
+
+
+PROGRAM DESIGN
+
+When problems get beyond what you regard as very trivial, it is a good idea
+to construct a program design before writing the program itself
+
+
+    1. Store the three words in pigeon holes.
+    2. Compute the lengths and store them.
+    3. Compute the average.
+    4. Print the result.
+
+
+NEW [ENTER]
+10 LET weekday$ = "FIRST" [ENTER]
+20 LET word$ = "OF" [ENTER]
+30 LET month$ = "FEBRUARY" [ENTER]
+40 LET length1 = LEN (weekday$) [ENTER]
+50 LET length2 = LEN (word$) [ENTER]
+60 LET length3 = LEN (month$) [ENTER]
+70 LET sum = lengthl + length2 + length3 [ENTER]
+80 LET average = sum/3 [ENTER]
+90 PRINT average [ENTER]
+RUN [ENTER]
+
+
+The symbol / means "divided by". The output or result of running the
+program is simply:
+
+    5
+
+and there are eight internal pigeon holes involved:
+
+            +--------+                  +-----+
+            |        |                  |     |
+ weekday$   | FIRST  |         length1  |  5  |
+            |        |                  |     |
+            +--------+                  +-----+
+
+
+            +--------+                  +-----+
+            |        |                  |     |
+ word$      |   OF   |         length2  |  2  |
+            |        |                  |     |
+            +--------+                  +-----+
+
+
+            +--------+                  +-----+
+            |        |                  |     |
+ month$     |FEBRUARY|         length3  |  8  |
+            |        |                  |     |
+            +--------+                  +-----+
+
+
+                                        +-----+
+                                        |     |
+                               sum      |  15 |
+                                        |     |
+                                        +-----+
+
+
+                                        +-----+
+                                        |     |
+                               average  |  5  |
+                                        |     |
+                                        +-----+
+
+
+
+If you think that is a lot of fuss for a fairly simple problem you can
+certainly shorten it. The shortest version would be a single line but it
+would be less easy to read. A reasonable compromise uses the symbol "&"
+which stands for the operation:
+
+    Join two strings
+
+
+Now type:
+
+
+NEW [ENTER]
+10 LET weekday$ = "FIRST" [ENTER]
+20 LET word$ = "OF" [ENTER]
+30 LET month$ = "FEBRUARY" [ENTER]
+40 LET phrase$ = weekday$ & word$ & month$ [ENTER]
+50 LET length = LEN(phrase$) [ENTER]
+60 PRINT length/3 [ENTER]
+RUN [ENTER]
+
+The output is 5 as before but there are some different internal effects:
+
+           +-------------------+             +----+
+           |                   |             |    |
+ weekday$  |  FIRST            |     length  | 15 |
+           |                   |             |    |
+           +-------------------+             +----+
+
+           +-------------------+
+           |                   |
+ word$     |  OF               |
+           |                   |
+           +-------------------+
+
+           +-------------------+
+           |                   |
+ month     |  FEBRUARY         |
+           |                   |
+           +-------------------+
+
+           +-------------------+
+           |                   |
+ phrase$   |  FIRSTOFFEBRUARY  |
+           |                   |
+           +-------------------+
+
+
+There is one more reasonable simplification which is to use READ and DATA
+instead of the first three LET statements. Type:
+
+NEW [ENTER]
+10 READ weekday$, word$, month$ [ENTER]
+20 LET phrase$ = weekday$ & word$ & month$ [ENTER]
+30 LET length = LEN(phrase$) [ENTER]
+40 PRINT length/3 [ENTER]
+50 DATA "FIRST","OF","FEBRUARY" [ENTER]
+RUN [ENTER]
+
+The internal effects of this version are exactly the same as those of the
+previous one. READ causes the setting up of internal pigeon holes with
+values in them in a similar way to LET.
+
+
+IDENTIFIERS AND STRING VARIABLES
+
+Names of pigeon holes, such as:
+
+    weekday$
+    word$
+    month$
+    phrase$
+are called string identifiers. The dollar signs imply that the pigeon holes
+are for character strings. The dollar must always be at the end.
+
+Pigeon holes of this kind are called "string variables" because they
+contain only character strings which may vary as a program runs.
+
+The contents of such pigeon holes are called values. Thus words like
+'FIRST' and 'OF' may be values of string variables named weekday$ and
++word$
+
+
+RANDOM CHARACTERS
+
+You can use character codes (see Concept Reference Guide) to generate
+random letters. The upper case letters A to Z have the codes 65 to 90. The
+function CHR$ converts these codes into letters. The following program will
+print a letter B
+
+NEW [ENTER]
+10 LET lettercode = 66 [ENTER]
+20 PRINT CHR$ (lettercode) [ENTER]
+RUN [ENTER]
+
+The following program will generate trios of letters A, B, or C until the
+word CAB is spelled accidentally
+
+NEW [ENTER]
+10 REPeat taxi [ENTER]
+20   LET first$ = CHR$(RND(65 TO 67))    [ENTER]
+30   LET second$ = CHR$(RND(65 TO 67))    [ENTER]
+40   LET third$ = CHR$(RND(65 TO 67))    [ENTER]
+50   LET word$ = first$ & second$ & third$    [ENTER]
+60   PRINT ! word$ !    [ENTER]
+70   IF word$ = "CAB" THEN EXIT taxi    [ENTER]
+80 END REPeat taxi    [ENTER]
+
+Random characters, like random numbers or random points are useful for
+learning to program. You can easily get interesting effects for program
+examples and exercises.
+
+Note the effect the ! ... ! have on the spacing of the output.
+
+(From now on, we shall omit the [ENTER] key symbol at the end of each line
+of a program to be entered, on the assumption that you are by now familiar
+with the use of the ENTER key)
+
+
+SELF TEST ON CHAPTER 4
+
+You can score a maximum of 10 points from the following test. Check your
+score with the answers in the "Answers To Self Tests" section at the end of
+this Beginner's Guide.
+
+1. What is a character string?
+
+2. What is the usual abbreviation of the term, 'character string'?
+
+3. What distinguishes the name of a string variable?
+
+4. How do some people pronounce a word such as 'word$'?
+
+5. What keyword is used to find the number of characters in a string?
+
+6. What symbol is used to join two strings?
+
+7. Spaces can be part of a string. How are the limits of a string defined?
+8. When a statement such as:
+
+       LET meat$ = "steak"
+
+   is executed, are the quotes stored?
+
+9. What function will turn a suitable code number into a letter?
+
+10. How can you generate random upper case letters?
+
+
+PROBLEMS ON CHAPTER 4
+
+1. Store the words 'Good' and 'day' in two separate variables. Use a
+   LET statement to join the values of the two variables in a third
+   variable. Print the result.
+
+2. Store the following words in four separate pigeon holes:
+
+    light    let    be    there
+
+   Join the words to make a sentence adding spaces and a full stop.
+   Store the whole sentence in a variable, sent$, and print the sentence
+   and the total number of characters it contains.
+
+3. Write a program which uses the keywords:
+
+   CHR$ RND(65 TO 90))
+
+   to generate one hundred random three letter words. See if you have
+   accidentally generated any real English words. Test the effects of:
+
+       a) ; at the end of a PRINT statement.
+       b) ! on either side of item printed.

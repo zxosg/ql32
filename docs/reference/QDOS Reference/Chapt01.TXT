@@ -1,0 +1,279 @@
+THE QL BEGINNER'S GUIDE
+=======================
+
+CHAPTER 1
+---------
+
+STARTING COMPUTING
+
+
+THE SCREEN
+
+Your QL should be connected to a monitor screen or TV set and switched on.
+Press a few keys, say abc, and the screen should appear as shown below The
+small flashing light is called the cursor.
+
++----------+----------+      +---------------------+
+|          |          |      | +-----------------+ |
+|          |          |      | |                 | |
+|          |          |      | |                 | |
+|          |          |      | |                 | |
+|          |          |      | |                 | |
++----------+----------+      | +-----------------+ |
+|abc                  |      |  abc                |
+|                     |      |                     |
++---------------------+      +---------------------+
+(Monitor)                    (Television)
+
+If your screen does not look like this read the section entitled
+Introduction. This should enable you to solve any difficulties
+
+
+THE KEYBOARD
+
+The QL is a versatile and powerful computer so there are features of the
+keyboard which you do not need yet. For the present we will explain just
+those items which you need for this and the next six chapters.
+
+
+BREAK
+
+This enables you to 'break' out of situations you do not like. For example:
+
+    a line which you have decided to abandon
+    something wrong which you do not understand
+    a running program which has ceased to be of interest
+    any other problem
+
+Because BREAK is so powerful it has been made difficult to type
+accidentally
+
+    Hold down [CTRL] and then press [SPACE]
+
+If nothing was added or removed from a program while it was halted with
+BREAK then it can be restarted by typing:
+
+    CONTINUE
+
+
+RESET
+
+This is not a key but a small push button on the right hand side of the QL.
+It is placed here deliberately, out of the way, because its effects are
+more dramatic than the break keys If you cannot achieve what you need with
+the break keys then press the RESET Button. This is almost the same as
+switching the computer off and on again. You get a clean re-start
+
+
+SHIFT
+
+There are two SHIFT keys because they are used frequently and need to be
+available to either hand.
+
+    Hold down one SHIFT key and type some letter keys. You will get
+    upper case (capital) letters.
+
+    Hold down one SHIFT key and type some other key not a letter You
+    will get a symbol in an upper position on the key.
+
+    Without a SHIFT key you get lower case (small) letters or a symbol
+    in a lower position on a key.
+
+
+CAPITALS LOCK
+
+This key works like a switch Just press it once and only the letter keys
+will be 'locked' into a particular mode - upper case or lower case.
+
+    Type some letter keys
+    Type the CAPS LOCK key once
+    Type some letter keys.
+
+You will see that the mode changes and remains until you type the CAPS LOCK
+key again.
+
+
+SPACE BAR
+
+The long key at the bottom of the keyboard gives spaces. This is a very
+important key in SuperBASIC as you will see in chapter two.
+
+
+RUBBING OUT
+
+The left cursor together with the CTRL key acts like a rubber. You must
+hold down the CTRL key while you press the cursor key. Each time you then
+press both together the previous character is deleted.
+
+
+ENTER
+
+The system needs to know when you have typed a complete message or
+instruction. When you have typed something complete such as RUN you type
+the ENTER key to enter it into the system for action.
+
+Because this key is needed so often we have used a special symbol for it:
+
+    [ENTER]
+
+Where we use the [ENTER] symbol to represent a keystroke, we mean press the
+key labelled ENTER, not type in the letters e n t e r.
+
+We shall use this for convenience, better presentation, and to save space.
+Test the [ENTER] key by typing
+
+    PRINT "Correct" [ENTER]
+
+If you made no mistakes the system will respond with
+
+    Correct
+
+
+OTHER KEYBOARD SYMBOLS OF IMMEDIATE USE
+
+*    multiply                +    add
+
+_    underscore              =    becomes equal to (used in LET)
+
+"    quotes                  '    apostrophe
+
+,    comma                   !    exclamation
+
+;    semi colon              &    ampersand
+
+:    colon                   .    decimal point or full stop
+
+\    backslash               $    dollar
+
+(    left bracket            }    right bracket
+
+
+UPPER AND LOWER CASE
+
+SuperBASIC recognises commands (keywords) whether they are in upper or
+lower case. For example the SuperBASIC command to clear the screen is CLS
+and can be typed in as
+
+    CLS [ENTER]
+    cls [ENTER]
+    clS [ENTER]
+
+These are all correct and have the same effect. Some keywords are displayed
+partly. In upper case to show allowed abbreviations Where a keyword cannot
+be abbreviated it is displayed completely in upper case.
+
+
+USE OF QUOTES
+
+The usual use of quotes is to define a word or sentence - a string of
+characters. Try:
+
+    PRINT "This works" [ENTER]
+
+The computer will respond with:
+
+    This works
+
+
+The quotes are not printed but they indicate that some text is to be
+printed and they define exactly what it is - everything between the opening
+and closing quote marks. If you wish to use the quote symbol itself in a
+string of characters then the apostrophe symbol can be used instead. For
+example:
+
+    PRINT 'The quote symbol is "'
+
+will work and will print
+
+    The quote symbol is "
+
+
+COMMON TYPING ERRORS
+
+The zero key is with the other numeric digits at the top of the keyboard,
+and is slightly thinner.
+
+The letter 'O' key is amongst the other letters. Be careful to use the
+right symbol.
+
+Similarly avoid confusion between one, amongst the digits, and the letter
+'I' amongst the letters.
+
+When using a SHIFT key hold it down while you type the other key so that
+the SHIFT key makes contact before the other key and also remains in
+contact until after the other key has lifted.
+
+The same rule applies to the control CTRL and alternate ALT keys which are
+used in conjunction with others but you do not need those at present.
+
+Type the two simple instructions
+
+    CLS [ENTER]
+    PRINT 'Hello' [ENTER]
+
+Strictly speaking these constitute a computer program, however it is the
+"stored program" that is important in computing. The above instructions are
+executed instantly as you type [ENTER]
+
+Now type the program with line numbers:
+
+    10 CLS [ENTER]
+    20 PRINT 'HELLO' [ENTER]
+
+This time nothing happens externally except that the program appears in the
+upper part of the screen This means that it is accepted as correct grammar
+or syntax. It conforms to the rules of SuperBASIC, but it has not yet been
+executed, merely stored. To make it work, type:
+
+    RUN [ENTER]
+
+The distinction between direct commands for immediate action and a stored
+sequence of instructions is discussed in the next chapter. For the present
+you can experiment with the above ideas and two more:
+
+    LIST [ENTER]
+
+causes an internally stored program to be displayed (listed) on the screen
+or elsewhere.
+
+    NEW [ENTER]
+
+causes an internally stored program to be deleted so that you can type in a
+NEW one.
+
+
+SELF TEST ON CHAPTER 1
+
+You can score a maximum of 16 points from the following test. Check your
+score with the answers in the ANSWERS pages at the end of this Beginner's
+Guide.
+
+1.  In what circumstances might you use the BREAK sequence?
+
+2.  Where is the RESET button?
+
+3.  What is the effect of the RESET button?
+
+4.  Name two differences between a SHIFT key and the CAPS LOCK key.
+
+5.  How can you delete a wrong character which you have just typed?
+
+6.  What is the purpose of the ENTER key?
+
+7.  What symbol do we use for the ENTER key?
+
+
+What is the effect of the commands in questions 8 to 11
+
+8.  CLS [ENTER]
+
+9.  RUN [ENTER]
+
+10. LIST [ENTER]
+
+11. NEW [ENTER]
+
+12. Do keywords have the proper effect if you type them in lower case?
+
+13. What is the significance of the parts of keywords which the QL
+    displays in upper case?

@@ -1,0 +1,744 @@
+CHAPTER 8
+---------
+
+FROM BASIC TO SUPERBASIC
+
+If you are familiar with one of the earlier versions of BASIC you may find
+it possible to omit the first seven chapters and use this chapter instead
+as a bridge between what you know already and the remaining chapters. If
+you do this and still find areas of difficulty it may be helpful to
+backtrack a little into some of the earlier chapters.
+
+If you have worked through the earlier chapters this one should be easy
+reading. You may find that, as well as introducing some new ideas, it gives
+an interesting slant on the way BASIC is developing. Apart from its program
+structuring facilities SuperBASIC also pushes forward the frontiers of good
+screen presentation, editing, operating facilities and graphics. In short
+it is a combination of user-friendliness and computing power which has not
+existed before.
+
+So, when you make the transition from BASIC to SuperBASIC you are moving
+not only to a more powerful, more helpful language, you are also moving
+into a remarkably advanced computing environment.
+
+We will now discuss some of the main features of SuperBASIC and some of the
+features which distinguish it from other BASICs.
+
+
+ALPHABETIC COMPARISONS
+
+The usual simple arithmetic comparisons are possible. You can write:
+
+    LET pet1$ = "CAT"
+    LET pet2$ = "DOG"
+    IF pet1$ < pet2$ THEN PRINT "Meow"
+
+The output will be Meow because in this context the symbol < means:
+
+    earlier (nearer to A in the alphabet)
+
+SuperBASIC makes comparisons sensible. For example you would expect:
+
+    'cat' to come before 'DOG'
+
+and
+
+    'ERD98L' to come before 'ERD746L'
+
+A simplistic approach, blindly using internal character coding, would give
+the 'wrong' result in both the above cases but try the following program
+which finds the 'earliest' of two character strings.
+
+100 INPUT item1$, item2$
+110 IF item1$ < item2$ THEN PRINT item1$
+120 IF item1$ = item2$ THEN PRINT "Equal"
+130 IF item1$ > item2$ THEN PRINT item2$
+
+------------------------------
+   INPUT            OUTPUT
+------------------------------
+cat    dog          cat
+cat    DOG          cat
+ERD98L ERD746L      ERD98L
+ABC    abc          ABC
+
+The Concept Reference Guide section will give full details about the way
+comparisons of strings are made in SuperBASIC.
+VARIABLES AND NAMES - IDENTIFIERS
+
+Most BASICs have numeric and string variables. As in other BASICs the
+distinguishing feature of a string variable name in SuperBASIC is the
+dollar sign on the end. Thus:
+
+    numeric: count        string: word$
+             sum                  high_st$
+             total                day_of_week$
+
+You may not have met such meaningful variable names before though some of
+the more recent BASICs do allow them. The rules for identifiers in
+SuperBASIC are given in the Concept Reference Guide. The maximum length of
+an identifier is 255 characters. Your choice of identifiers is a personal
+one. Sometimes the longer ones are more helpful in conveying to the human
+reader what a program should do. But they have to be typed and, as in
+ordinary English, "spade" is more sensible than "horticultural
+earth-turning implement". Shorter words are preferred if they convey the
+meaning but very short words or single letters should be used sparingly
+Variable names like X, Z, P3, Q2 introduce a level of abstraction which
+most people find unhelpful.
+
+
+INTEGER VARIABLES
+
+SuperBASIC allows integer variables which take only whole-number values. We
+distinguish these with a percentage sign thus:
+
+    count%
+    number%
+    nearest_pound%
+
+There are now two kinds of numeric variable. We call the other type, which
+can take whole or fractional values, floating point. Thus you can write:
+
+    LET price = 9
+    LET cost = 7.31
+    LET count% = 13
+
+But if you write:
+
+    LET count% = 5.43
+
+the value of count% will become 5. On the other hand:
+
+    LET count% = 5.73
+
+will cause the value of count% to be 6. You can see that SuperBASIC does
+the best it can, rounding off to the nearest whole number.
+
+
+COERCION
+
+The principle of always trying to be intelligently helpful, rather than
+give an error message or do something obviously unwanted, is carried
+further. For example, if a string variable mark$ has the value
+
+    '64'
+
+then:
+
+    LET score = mark$
+
+will produce a numeric value of 64 for score. Other versions of BASIC would
+be likely to halt and say something like:
+
+    'Type mis-match'
+    or 'Nonsense in BASIC'
+
+If the string cannot be converted then an error is reported.
+
+
+LOGICAL VARIABLES AND SIMPLE PROCEDURES
+
+There is one other type of variable in SuperBASIC, or rather the SuperBASIC
+system makes it seem so. Consider the SuperBASIC statement:
+
+    IF windy THEN fly_kite
+
+In other BASICs you might write:
+
+    IF w=1 THEN GOSUB 300
+In this case w=1 is a condition or logical expression which is either true
+or false. If it is true then a subroutine starting at line 300 would be
+executed. This subroutine may deal with kite flying but you cannot tell
+from the above line. A careful programmer would write:
+
+IF w=1 THEN GOSUB 300 : REM fly_kite
+
+to make it more readable. But the SuperBASIC statement is readable as it
+stands. The identifier "windy" is interpreted as true or false though it is
+actually a floating point variable. A value of 1 or any non-zero value is
+taken as true. Zero is taken as false. Thus the single word, windy has the
+same effect as a condition of logical expression.
+
+The other word, "fly_kite", is a procedure. It does a job similar to, but
+rather better than, GOSUB 300.
+
+The following program will convey the idea of logical variables and the
+simplest type of named procedure
+
+    100 INPUT windy
+    110 IF windy THEN fly_kite
+    120 IF NOT windy THEN tidy_shed
+    130 DEFine PROCedure fly_kite
+    140   PRINT "See it in the air."
+    150 END DEFine
+    160 DEFine PROCedure tidy_shed
+    170   PRINT "Sort out rubbish."
+    180 END DEFine
+
+------------------------------
+INPUT    OUTPUT
+------------------------------
+ 0       Sort out rubbish.
+ 1       See it in the air
+ 2       See it in the air
+-2       See it in the air
+------------------------------
+
+You can see that only zero is taken as meaning false. You would not
+normally write procedures with only one action statement, but the program
+illustrates the idea and syntax in a very simple context More is said about
+procedures later in this chapter.
+
+
+LET STATEMENTS
+
+In SuperBASIC LET is optional but we use it in this manual so that there
+will be less chance of confusion caused by the two possible uses of =. The
+meanings of = in:
+
+    LET count = 3
+
+and in
+
+    IF count = 3 THEN EXIT
+
+are different and the LET helps to emphasise this. However if there are two
+or a few LET statements doing some simple job such as setting initial
+values, an exception may be made
+
+For example:
+
+    100 LET first = 0
+    110 LET second = 0
+    120 LET third = 0
+
+may be re-written as
+
+    100 LET first = 0 : second = 0 : third = 0
+
+without loss of clarity or style. It is also consistent with the general
+concept of allowing short forms of other constructions where they are used
+in simple ways.
+
+The colon : is a valid statement terminator and may be used with other
+statements besides LET.
+
+
+THE BASIC SCREEN
+
+In a later chapter we will explain how other graphics facilities, such as
+drawing circles, can be handled but here we outline the pixel-oriented
+features. There are two modes which may be activated by any of the
+following:
+
+-------------------------------    ------------
+  Low resolution                     MODE 256
+  8 Colour Mode                      MODE 8
+  256 pixels across, 256 down
+-------------------------------    ------------
+
+-------------------------------    ------------
+  High resolution                    MODE 512
+  4 Colour Mode                      MODE 4
+  512 pixels across, 256 down
+-------------------------------    ------------
+
+In both modes pixels are addressed by the range of numbers:
+
+        0 - 511 across
+    and 0 - 255 down
+
+Since mode 8 has only half the number of pixels across the screen as mode
+4, mode 8 pixels are twice as wide as mode 4 pixels and so in mode 8 each
+pixel can be specified bv two coordinates. For example:
+
+    0 or 1        2 or 3        510 or 511
+
+It also means that you use the same range of numbers for addressing pixels
+irrespective of the mode. Always think 0-511 across and 0-255 down.
+
+If you are using a television then not all the pixels may be visible.
+
+
+COLOURS
+
+The colours available are:
+
+----------------------------------------
+  MODE 256        Code        MODE 512
+----------------------------------------
+  black            0          black
+  blue             1
+  red              2          red
+  magenta          3
+  green            4          green
+  cyan             5
+  yellow           6          white
+  white            7
+----------------------------------------
+
+
+You may find the following mnemonic helpful in remembering the codes:
+
+Bonny Babies Really Make Good Children, You Wonder
+
+In the "high resolution" mode each colour can be selected by one of two
+codes. You will see later how a startling range of colour and stipple
+(texture) effects can be produced if you have a good quality colour
+monitor.
+
+Some of the screen presentation keywords are as follows:
+
+    INK colour                                   foreground colour
+
+    BORDER width, colour                         draw border at edge of
+                                                 screen or window
+
+    PAPER colour                                 background colour
+
+    BLOCK width, height, across, down, colour    colour a rectangle which
+                                                 has its top left hand
+                                                 corner at position
+                                                 across, down
+
+
+SCREEN ORGANISATION
+
+When you switch on your QL the screen display is split into three areas
+called "windows" as shown below. Note that in order to fit these windows
+into the area covered by a television screen, some pixels around the border
+are not used in Television mode.
+
+      ---------- 0 to 511 ---------->       ------------ 0 to 511 -------->
+
+  |   +-----------------------------+   |   +-----------------------------+
+  |   |              |              |   |   |                             |
+  |   |              |              |   |   |                             |
+  |   |              |              |   |   |                             |
+  |   |      #2      |      #1      |   |   |           #1 and #2         |
+  0   |              |              |   0   |                             |
+ to   |              |              |  to   |                             |
+ 255  |              |              |  255  |                             |
+  |   |              |              |   |   |                             |
+  |   |              |              |   |   |                             |
+  |   +--------------+--------------+   |   +-----------------------------+
+  |   |             #0              |   |   |             #0              |
+  |   |                             |   |   |                             |
+  v   +-----------------------------+   v   +-----------------------------+
+       Monitor                               Television
+
+This windows are indentified by #0, #1 and #2 so that you can relate
+various effects to particular windows. For example:
+
+    CLS
+
+will clear window #1 (the system chooses) so if you want the left hand area
+cleared you must type:
+
+    CLS #2
+
+If you want a different paper (background colour) type for green:
+
+    PAPER 4 : CLS
+
+or
+
+    PAPER #2,4 : CLS #2
+If you want to clear window #2 to the background colour green.
+
+The numbers #0, #1 and #2 are called "channel numbers". In this particular
+case they enable you to direct certain effects to the window of your
+choice. You will discover later that channel numbers have many other uses
+but for the moment note that all of the following statements may have a
+channel number. The third column shows the default channel - the one chosen
+by the system if you do not specify one.
+
+Note that windows may overlap. If you use a TV screen the system
+automatically overlaps windows #1 and #2 so that more character positions
+per line are available for program listings.
+
+
+-------------------------------------------------------------------------
+    KEYWORD            EFFECT                                 DEFAULT
+-------------------------------------------------------------------------
+    AT                 Character position                     #1
+    BLOCK              Draws block                            #1
+    BORDER             Draw border                            #1
+    CLS                Clear screen                           #1
+    CSIZE              Character size                         #1
+    CURSOR             Position cursor                        #1
+    FLASH              Causes/cancels flashing                #1
+    INK                Foreground colour                      #1
+    OVER               Effect of printing and graphics        #1
+    PAN                Moves screen sideways                  #1
+    PAPER              Background colour                      #1
+    RECOL              Changes colour                         #1
+    SCROLL             Moves screen vertically                #1
+    STRIP              Background for printing                #1
+    UNDER              Underlines                             #1
+    WINDOW             Changes existing window                #1
+    LIST               Lists program                          #2
+    DIR                Lists directory                        #1
+    PRINT              Prints characters                      #1
+    INPUT              Takes keyboard input                   #1
+-------------------------------------------------------------------------
+Statements or direct commands appear in window #0.
+
+For more details about the syntax or use of these keywords see other parts
+of the manual.
+
+
+RECTANGLES AND LINES
+
+The program below draws a green rectangle in 256 mode on red paper with a
+yellow border one pixel wide. The rectangle has its top left corner at
+pixel co-ordinates 100,100 (see QL Concepts). Its width is 80 units across
+(40 pixels) and its height is 20 units down (20 pixels).
+
+    100 REMark Rectangle
+    110 MODE 256
+    120 BORDER 1,6
+    130 PAPER 2 : CLS
+    140 BLOCK 80,20,100,100,4
+
+You have to be a bit careful in mode 256 because across values range from 0
+to 511 even though there are only 256 pixels. We cannot say that the block
+produced by the above program is 80 pixels wide so we say 80 units.
+
+
+INPUT AND OUTPUT
+
+SuperBASIC has the usual LET, INPUT, READ and DATA statements for input.
+The PRINT statement handles most text output in the usual way with the
+separators:
+
+    ,  tabulates output
+
+    ;  just separates - no formatting effect
+
+    \  forces new line
+
+    !  normally provides a space but not at the start of line. If an item
+       will not fit at the end of a line it performs a new line operation.
+
+    TO Allows tabulation to a designated column position.
+
+
+LOOPS
+
+You will be familiar with two types of repetitive loop exemplified as
+follows:
+
+(a) Simulate 6 throws of an ordinary six-sided die
+
+    100 FOR throw = 1 TO 6
+    110 PRINT RND(1 TO 6)
+    120 NEXT throw
+
+(b) Simulate throws of a die until a six appears.
+
+    100 die = RND(1 TO 6)
+    110 PRINT die
+    120 IF die <> 6 THEN GOTO 10
+
+Both of these programs will work in SuperBASIC but we recommend the
+following instead They do exactly the same jobs. Although program (b) is a
+little more complex there are good reasons for preferring it.
+
+(a) 100 FOR throw = 1 TO 6
+    110 PRINT RND(1 TO 6)
+    120 END FOR throw
+
+(b) 100 REPeat throws
+    110   die = RND(1 TO 6)
+    120   PRINT die
+    130   IF die = 6 THEN EXIT throws
+    140 END REPeat throws
+
+It is logical to provide a structure for a loop which terminates on a
+condition (REPeat loops) as well as those which are controlled by a count.
+
+The fundamental REPeat structure is:
+
+    REPeat identifier
+      statements
+    END REPeat identifier
+
+The EXIT statement can be placed anywhere in the structure but it must be
+followed by an identifier to tell SuperBASIC which loop to exit; for
+example:
+
+    EXIT throws
+
+would transfer control to the statement after
+
+    END REPeat throws.
+
+This may seem like a using a sledgehammer to crack the nut of the simple
+problem illustrated. However the REPeat structure is very powerful. It will
+take you a long way.
+
+If you know other languages you may see that it will do the jobs of both
+REPEAT and WHILE structures and also cope with other more awkward,
+situations.
+
+The SuperBASIC REPeat loop is named so that a correct clear exit is made.
+The FOR loop, like all SuperBASIC structures, ends with END, and its name
+is given for reasons which will become clear later.
+
+You will also see later how these loop structures can be used in simple or
+complex situations to match exactly what you need to do. We will mention
+only three more features of loops at this stage. They will be familiar if
+you are an experienced user of BASIC.
+
+The increment of the control variable of a FOR loop is normally 1 but you
+can make it other values by using the STEP keyword. As the examples show.
+
+i.  100 FOR even = 2 TO 10 STEP 2
+    110 PRINT ! even !
+    120 END FOR even
+
+    output is 2 4 6 8 10
+
+ii. 100 FOR backwards = 9 TO 1 STEP -1
+    110 PRINT ! backwards !
+    120 END FOR backwards
+
+    output is 9 8 7 6 5 4 3 2 1
+
+The second feature is that loops can be nested. You may be familiar with
+nested FOR loops. For example the following program outputs four rows of
+ten crosses.
+
+    100 REMark Crosses
+    110 FOR row = 1 TO 4
+    120   PRINT 'Row number' ! row
+    130   FOR cross = 1 TO 10
+    140     PRINT ! 'X' !
+    150   END FOR cross
+    160   PRINT
+    170   PRINT \ 'End of row number' ! row
+    180 END FOR row
+
+    output is:
+
+    Row number 1
+    X X X X X X X X X X
+    End of row number 1
+    Row number 2
+    X X X X X X X X X X
+    End of row number 2
+    Row number 3
+    X X X X X X X X X X
+    End of row number 3
+    Row number 4
+    X X X X X X X X X X
+    End of row number 4
+
+A big advantage of SuperBASIC is that it has structures for all purposes,
+not just FOR loops, and they can all be nested one inside the other
+reflecting the needs of a task. We can put a REPeat loop in a FOR loop. The
+program below produces scores of two dice in each row until a seven occurs,
+instead of crosses.
+
+    100 REMark Dice rows
+    110 FOR row = 1 TO 4
+    120   PRINT 'Row number '! row
+    130   REPeat throws
+    140     LET die1 = RND(1 TO 6)
+    150     LET die2 = RND(1 TO 6)
+    160     LET score = die1 + die2
+    170     PRINT ! score !
+    180     IF score = 7 THEN EXIT throws
+    190   END REPeat throws
+    200   PRINT \'End of row '! row
+    210 END FOR row
+
+
+    sample output:
+
+    Row number 1
+    8 11 6 3 7
+    End of row number 1
+    Row number 2
+    4 6 2 9 4 5 12 7
+    End of row number 2
+    Row number 3
+    7
+    End of row number 3
+    Row number 4
+    6 2 4 9 9 7
+    End of row number 4
+
+The third feature of loops in SuperBASIC allows more flexibility in
+providing the range of values in a FOR loop. The following program
+illustrates this by printing all the divisible numbers from 1 to 20. (A
+divisible number is divisible evenly by a number other than itself or 1.)
+
+    100 REMark Divisible numbers
+    110 FOR num = 4,6,8, TO 10,12,14 TO 16,18, 20
+    120   PRINT ! num !
+    130 END FOR num
+
+More will be said about handling repetition in a later chapter but the
+features described above will handle all but a few uncommon or advanced
+situations.
+
+
+DECISION MAKING
+
+You will have noticed the simple type of decision:
+
+    IF die = 6 THEN EXIT throws
+
+This is available in most BASICs but SuperBASIC offers extensions of this
+structure and a completely new one for handling situations with more than
+two alternative courses of action.
+
+However, you may find the following long forms of IF ... THEN useful. They
+should explain themselves.
+
+i.  100 REMark Long form IF. ..END IF
+    110 LET sunny = RND(0 TO 1)
+    120 IF sunny THEN
+    130   PRINT 'Wear sunglasses'
+    140   PRINT 'Go for walk'
+    150 END IF
+
+ii. 100 REMark Long form IF...ELSE...END IF
+    110 LET sunny = RND(0 TO 1)
+    120 IF sunny THEN
+    130   PRINT 'Wear sunglasses'
+    140   PRINT 'Go for walk'
+    150 ELSE
+    160   PRINT 'Wear coat'
+    170   PRINT 'Go to cinema'
+    180 END IF
+
+The separator THEN, is optional in long forms or it can be replaced by a
+colon in short forms. The long decision structures have the same status as
+loops. You can nest them or put other structures into them. When a single
+variable appears where you expect a condition the value zero will be taken
+as false and other values as true.
+
+
+SUBROUTINES AND PROCEDURES
+
+Most BASICs have a GOSUB statement which may be used to activate particular
+blocks of code called subroutines. The GOSUB statement is unsatisfactory in
+a number of ways and SuperBASIC offers properly named procedures with some
+very useful features.
+
+Consider the following programs both of which draw a green 'square' of side
+length 50 pixel screen units at a position 200 across 100 down on a red
+background.
+
+
+(a) Using GOSUB
+
+    100 LET colour = 4 : background = 2
+    110 LET across = 20
+    120 LET down = 100
+    130 LET side = 50
+    140 GOSUB 170
+    150 PRINT 'END'
+    160 STOP
+    170 REMark Subroutine to draw square
+    180 PAPER background : CLS
+    190 BLOCK side, side, across, down, colour
+    200 RETurn
+
+(b) Using a procedure with parameters
+
+    100 square 4, 50, 20, 100, 2
+    110 PRINT 'END'
+    120 DEFine PROCedure square(colour,side,across,down,background)
+    130   PAPER background : CLS
+    140   BLOCK side, side, across, down, colour
+    150 END DEFine
+
+In the first program the values of "colour", "across", "down", "side" are
+fixed by LET statements before the GOSUB statement activates lines 180 and
+190 Control is then sent back by the RETURN statement.
+
+In the second program the values are given in the first line as parameters
+in the procedure call, square, which activates the procedure and at the
+same time provides the values it needs.
+
+In its simplest form a procedure has no parameters. It merely separates a
+particular piece of code, though even in this simpler use the procedure has
+the advantage over GOSUB because it is properly named and properly isolated
+into a self contained unit.
+
+The power and simplifying effects of procedures are more obvious as
+programs get larger What procedures do as programs get larger is not so
+much make programming easier as prevent it from getting harder with
+increasing program size. The above example just illustrates the way they
+work in a simple context
+
+
+Examples
+
+The following examples indicate the range of vocabulary and syntax of
+SuperBASIC which has been covered in this and earlier chapters, and will
+form a foundation on which the second part of this manual will build.
+
+The letters of a palindrome are given as single items in DATA statements
+The terminating item is an asterisk and you assume no knowledge of the
+number of letters in the palindrome. READ the letters into an array and
+print them backwards. Some palindromes such as "MADAM I'M ADAM" only work
+if spaces and punctuation are ignored. The one used here works properly.
+
+100 REMark Palindromes
+110 DIM text$(30)
+120 LET text$ = FILL$ (' ',30)
+130 LET count = 30
+140 REPeat get_letters
+150 READ character$
+160 IF character$ = '*' THEN EXIT get_letters
+170 LET count = count-1
+180 LET text$(count) = character$
+190 END REPeat get_letters
+200 PRINT text$
+210 DATA 'A','B','L','E','W','A','S','I','E','R'
+220 DATA 'E','I','S','A','W','E','L','B','A','*'
+
+The following program accepts as input numbers in the range 1 to 3999 and
+converts them into the equivalent In Roman numerals It does not generate
+the most elegant form. It produces IIII rather than
+IV.
+
+100 REMark Roman numbers
+110 INPUT number
+120 RESTORE 210
+130 FOR type = 1 TO 7
+140   READ letter$, vaLue
+150   REPeat output
+160     IF number < value : EXIT output
+170     PRINT letter$;
+180     LET number = number - value
+190   END REPeat output
+200 END FOR type
+210 DATA 'M',1000,'D',500,'C',100,'L',50,'X',10,'V',5,'I',1
+
+You should study the above examples carefully using dry runs if necessary
+until you are sure that you understand them.
+
+
+CONCLUSION
+
+In SuperBASIC full structuring features are provided so that program
+elements either follow in sequence or fit into one another neatly. All
+structures must be identified to the system and named. There are many
+unifying and simplifying features and many extra facilities.
+
+Most of these are explained and illustrated in the remaining chapters of
+this manual, which should be easier to read than the Keyword and Concept
+Reference sections. However, it is easier to read because it does not give
+every technical detail and exhaust every topic which it treats. There may,
+therefore, be a few occasions when you need to consult the reference
+sections. On the other hand some major advances are discussed in the
+following chapters. Few readers will need to use all of them and you may
+find it helpful to omit certain parts, at least on first reading.
+
+

@@ -1,0 +1,808 @@
+CHAPTER 16
+----------
+
+SOME TECHNIQUES
+
+In this final chapter we present some applications of concepts and
+facilities already discussed and we show how some further ideas may be
+applied.
+
+SIMULATION OF CARD PLAYING
+
+It is easy to store and manipulate "playing cards" by representing them
+with the numbers 1 to 52. This is how you might convert such a number to
+the equivalent card. Suppose, for example, that the number 29 appears. You
+may decide that:
+
+    cards  1-13 are hearts
+    cards 14-26 are clubs
+    cards 27-39 are diamonds
+    cards 40 52 are spades
+
+and you will know that 29 means that you have a "diamond". You can program
+the QL to do this with:
+
+    LET suit = (card-1) DIV 13
+
+This will produce a value in the range 0 to 3 which you can use to cause
+the appropriate suit to be printed. The value can be reduced to the range 1
+to 13 by writing:
+
+    LET value = card MOD 13
+    IF value = 0 THEN LET value = 13
+
+Program
+
+The numbers 1 to 13 can be made to print Ace, 2, 3... Jack, Queen, King, or
+if you prefer it, such phrases as "two of hearts" can be printed. The
+following program will print the name of the card corresponding to your
+input number.
+
+    100 REMark Cards
+    110 DIM suitname$(4,8),cardval$(13,5)
+    120 LET f$ = " of"
+    130 set_up
+    140 REPeat cards
+    150   INPUT "Enter a card number 1-52:" ! card
+    160   IF card <1 OR card> 52 THEN EXIT cards
+    170   LET suit = (card-1) DIV 13
+    180   LET value = card MOD 13
+    190   IF value = 0 THEN LET value = 13
+    200   PRINT cardval$(value) ! f$ ! suitname$(suit)
+    210 END REPeat cards
+    220 DEFine PROCedure set_up
+    230   FOR s = 1 TO 4 : READ suitname$(s)
+    240   FOR v = 1 TO 13 : READ cardval$(v)
+    250 END DEFine
+    260 DATA "hearts","clubs","diamonds","spades"
+    270 DATA "Ace","Two","Three","Four","Five","Six","Seven"
+    280 DATA "Eight","Nine","Ten","Jack","Queen","King"
+
+
+Input and Output
+
+    13
+    King of hearts
+    49
+    Ten of spades
+    27
+    Ace of diamonds
+    0
+
+
+COMMENT
+
+Notice the use of DATA statements to hold a permanent file of data whIch
+the program always uses. The other data which changes each time the program
+runs is entered through an INPUT statement. If the input data was known
+before running the program it would be equally correct to use another READ
+and more DATA statements. This would give better control.
+
+
+SEQUENTIAL DATA FILES
+
+Numeric File
+
+The following program will establish a file of one hundred numbers.
+
+    100 REMark Number File
+    110 OPEN NEW #6,mdv1_numbers
+    120 FOR num = 1 TO 100
+    130   PRINT #6,num
+    140 END FOR num
+    150 CLOSE #6
+
+After running the program check that the filename 'numbers' is in the
+directory by typing:
+
+    DIR mdv1_numbers
+
+You can get a view of the file without any special formatting by copying
+from Microdrive to screen:
+
+    COPY mdv1_numbers to scr
+
+You can also use the following program to read the file and display its
+records on the screen.
+
+    100 REMark Read File
+    110 OPEN_IN #6,mdv1_numbers
+    120 FOR num = 1 TO 100
+    130   INPUT #6,item
+    140 PRINT ! item !
+    150 END FOR num
+    160 CLOSE #6
+
+
+If you wish you can alter the program to get the output in a different
+form.
+
+Character file.
+
+In a similar fashion the following programs will set up a file of one
+hundred randomly selected letters and read them back.
+
+    100 REMark Letter File
+    110 OPEN NEW #6,mdv1_chfile
+    120 FOR num = 1 TO 100
+    130   LET ch$ = CHR$(RND(65 TO 90))
+    140   PRINT #6,ch$
+    150 END FOR num
+    160 CLOSE #6
+
+    100 REMark Get Letters
+    110 OPEN IN #6,mdv1_chfile
+    120 FOR num = 1 TO 100
+    130   INPUT #6,item$
+    140   PRINT ! item$ !
+    150 END FOR num
+    160 CLOSE #6
+
+
+SETTING UP A DATA FILE
+
+Suppose that you wish to set up a simple file of names and telephone
+numbers.
+
+    RON    678462
+    GEOFF  896487
+    ZOE    249386
+    BEN    584621
+    MEG    482349
+    CATH   438975
+    WENDY  982387
+
+The following program will do it.
+
+    100 REMark Phone numbers
+    110 OPEN NEW #6,mdv1_phone
+    120 FOR record = 1 TO 7
+    130 INPUT name$,num$
+    140 PRINT #6;name$;num$
+    150 END FOR record
+    160 CLOSE #6
+
+Type RUN and enter a name followed by the ENTER key and a number followed
+by the ENTER key. Repeat this seven times.
+
+Notice that the data is 'buffered'. It is stored internally until the
+system is ready to transfer a batch to the Microdrive. The Microdrive is
+only accessed once, as you can tell from looking and listening.
+
+
+COPY A FILE
+
+Once a file is established, it should be copied immediately as a back-up.
+To do this type:
+
+    COPY mdv1_phone TO mdv2_phone
+
+READ A FILE
+
+You need to be certain that the file exists in a correct form so you should
+read it back from a Microdrive and display it on the screen. You can do
+this easily using:
+
+    COPY mdv2_phone TO scr
+
+The output to the screen will not provide spaces automatically between the
+name and the number but it will provide a 'newline' at the end of each
+record. The output will be:
+
+    RON678462
+    GEOFF896487
+    ZOE249386
+    BEN584621
+    MEG482349
+    CATH438975
+    WENDY982387
+You can get a more controlled presentation of the data with the following
+program.
+
+    100 REMark Read Phone Numbers
+    110 OPEN_IN #5,mdv1_phone
+    120 FOR record = 1 TO 7
+    130   INPUT #5,rec$
+    140   PRINT,rec$
+    150 END FOR record
+    160 CLOSE #5
+
+The data is printed, as before, but this time each pair of fields is held
+in the variable rec$ before being printed on the screen. You have the
+opportunity to manipulate it into any desired form.
+
+Note that more than one string variable may be used at the file creation
+stage with INPUT and PRINT but the whole record so created may be retrieved
+from the Microdrive file with a single string variable (rec$ in the above
+example).
+
+
+AN INSERTION SORT
+
+The following colours are available in the low resolution screen mode (in
+code number order 0-7).
+
+    black  blue  red  magenta  green  cyan  yellow  white
+
+EXAMPLE
+
+Write a program to sort the colours into alphabetical order using an
+"insertion" sort. We place the eight colours in an array "colour$" which we
+divide into two parts:
+
+               +-----------------------+
+               |                       |
+               v                       |
++-----+-----+-----+-----+- - -+     +-----+-----+-----+-----+
+|     |     |  ---|-->  |     :     |     |     |     |     |
+|     |     |     |     |     :     |     |     |     |     |
++-----+-----+-----+-----+- - -+     +-----+-----+-----+-----+
+
+      SORTED PART                         UNSORTED PART
+
+We take the leftmost item of the unsorted part and compare it with each
+item, from right to left, in the sorted part until we find its right place.
+As we compare we shuffle the sorted items to the right so that when we find
+the right place to insert we can do so immediately without further
+shuffling.
+
+Suppose we have reached the point where four items are sorted and we now
+focus on green, the leftmost item in the unsorted part.
+
+                                    |
+    1        2        3        4    |    5        6        7        8
+  black     blue   magenta    red   | green     cyan    yellow   white
+             sorted part            |           unsorted part
+                                    |  ^
+                                       |
+
+1. We place green in the variable, comp$ and set a variable, p, to 5.
+2. The variable, p, will eventually indicate where we think green
+   should go. When we know that green should move left, then we
+   decrease the value of p.
+3. We compare green with red. If green is greater than (nearer to Z)
+   or equal to red we exit and green stays where it is.
+   Otherwise we copy red in to position 5 thus and decrease the value
+   of p thus:
+
+                                    |
+    1        2        3        4    |    5        6        7        8
+  black     blue   magenta    red   |   red      cyan    yellow   white
+                                    |
+                               ^    |
+                               |
+
+4. We now repeat the process but this time we are comparing green with
+magenta and we get:
+
+                                             |
+    1        2        3        4        5    |    6        7        8
+  black     blue   magenta  magenta    red   |   cyan    yellow   white
+                                             |
+                      ^                      |
+                      |
+
+5. Finally we move left again comparing green with blue. This time there is
+no need to move or change anything. We exit from the loop and place green
+in position 3. We are then ready to focus on the sixth item, cyan.
+
+                                             |
+    1        2        3        4        5    |    6        7        8
+  black     blue    green   magenta    red   |   cyan    yellow   white
+                                             |
+                                             |    ^
+                                                  |
+
+PROBLEM ANALYSIS
+
+1. We will first store the colour$ in an array colour$(8) and use:
+
+   comp$    the current colour being compared
+   p        to point at the position where we think the colour in
+            comp$ might go.
+
+2. A FOR loop will focus attention on positions 2 to 8 in turn (a
+   single item is already  sorted).
+
+3. A REPeat loop will allow comparisons until we find where the comp$
+   value actually goes.
+
+       REPeat compare
+         IF comp$ need go no further left EXIT
+         copy a colour into the position on its right
+         and decrease p
+       END REPeat compare
+
+4. After EXIT from the REPeat loop the colour in comp$ is placed
+   in position p and the FOR loop continues.
+
+
+
+
+
+Program Design
+
+1    Declare array colour$
+2    Read colours into the array
+3    FOR item = 2 TO 8
+       LET p = item
+       LET comp$ = colour$(p)
+       REPEAT compare
+         IF comp$ > = colour$(p-1) : EXIT compare
+         LET colour$(p) = colour$(p-1)
+         LET p = p - 1
+       END REPeat compare
+       LET colour$(p) = comp$
+     END FOR item
+4    PRINT sorted array colour$
+5    DATA
+
+Further testing reveals a fault. It arises very easily if we have data in
+which the first item is not in its correct position at the start. A simple
+change of initial data to:
+
+    red  black  blue  magenta  green  cyan  yellow  white
+
+reveals the problem. We compare black with red and decrease p to the value,
+1. We  come round again and try to compare black with a variable
+colour$(p-1) which is colour$(0) which does not exist.
+
+This is a well-known problem in computing and the solution is to "post a
+sentinel" on the end of the array. Just before entering the REPeat loop we
+need:
+
+    LET colour$(0) = comp$
+
+Fortunately SuperBASIC allows zero subscripts, otherwise the problem would
+have to be solved at the expense of readability.
+
+
+MODIFIED PROGRAM
+
+    100 REM Insertion Sort
+    110 DIM colour$(8,7)
+    120 FOR item = 1 TO 8 : READ colour$(item)
+    130 FOR item = 2 TO 8
+    140   LET p=item
+    150   LET comp$ = colour$(p)
+    160   LET colour$(0) = comp$
+    170   REPeat compare
+    180     IF comp$ >= colour$(p-1) : EXIT compare
+    190     LET colour$(p) = colour$(p-1)
+    200     LET p = p-1
+    210   END REPeat compare
+    220   LET colour$(p) = comp$
+    230 END FOR item
+    240 PRINT"Sorted..." ! colour$
+    250 DATA "black","blue","magenta","red"
+    260 DATA "green","cyan","yellow","white"
+
+COMMENT
+
+1. The program works well. It has been tested with awkward data:
+
+       A A A A A A A
+       B A B A B A B
+       A B A B A B A
+       B C D E F G H
+       G F E D C B A
+
+2. An insertion sort is not particularly fast, but it can be useful
+   for adding a few items  to an already sorted list. It is
+   sometimes convenient to allow modest amounts of time frequently
+   to keep items in order rather than a substantial amount of time
+   less frequently to do a complete re-sorting.
+
+You now have enough background knowledge to follow a development of the
+handling  of the file of seven names and telephone numbers.
+
+
+SORTING A MICRODRIVE FILE
+
+In order to sort the file 'phone' into alphabetical order of names we must
+read it into an internal array, sort it, and then create a new file which
+will be in alphabetical order of names.
+
+It is never good practice to delete a file before its replacement is
+clearly established and proven correct. You should therefore copy the file
+first, as security using a different name. The required processes are as
+follows:
+
+    1. Copy the file 'phone' to 'phone_temp'
+    2. Read the file 'phone' into an array
+    3. Sort the array.
+    4. Pause to check that everything is in order
+    5. Delete file 'phone'.
+    6. Create new file 'phone'.
+
+This is all the program needs to do but the new file should be immediately
+checked using:
+
+    COPY mdv1_phone TO scr
+
+Any further necessary checks should be carried out then:
+
+    DELETE mdv2 phone
+    COPY mdv1_phone TO mdv2_phone
+    COPY mdv1_phone TO scr
+    DELETE mdv1_phone_temp
+
+The above operations complete the process of substituting a sorted file for
+the original unsorted one in both master and back-up files.
+
+
+ARRAY PARAMETERS
+
+In the following program we illustrate the passing of complete arrays
+between main program and procedure. The data passes in both directions.
+
+In line 40 the array "row" holding the numbers 1,2,3 is passed to the
+procedure, "addsix". The parameter "come", receives the incoming data and
+the procedure adds six to each element. The array parameter, "send", at
+this point holds the numbers 7,8,9.
+
+These numbers are passed back to the main program to become the values of
+array, "black". The values are printed to prove that the data has moved as
+required.
+
+                   +----------------------------------+
+                   |                                  |
+    MAIN           |                                  |         Screen
+    PROGRAM        |      row                back     | ------- Output
+                   |       |                   ^      |
+                   +------ | ----------------- | -----+
+                           |                   |
+                           |                   |
+                           |                   |
+                   +------ | ----------------- | -----+
+                   |       |                   |      |
+    PROCEDURE      |      come ----> +6 ----> send    |
+    addsix         |                                  |
+                   |                                  |
+                   +----------------------------------+
+Program
+
+    100 REMark Pass Arrays
+    110 DIM row(3),back(3)
+    120 FOR k = 1 TO 3 : LET row(k) = k
+    130 addsix row,back
+    140 FOR k = 1 TO 3 : PRINT ! back(k) !
+    150 DEFine PROCedure addsix(come,send)
+    160   FOR k = 1 TO 3 : LET send(k) = come(k) + 6
+    170 END DEFine
+
+Output
+
+    7 8 9
+
+The following procedure receives an array containing data to be sorted. The
+zero element will contain the number of items. Note that it does not matter
+whether the array is numeric or string. The principle of coercion will
+change string to numeric data if necessary.
+
+
+A second point of interest is that the array element, come(0), is used for
+two purposes:
+
+    it carries the number of items to be sorted
+    it is used to hold the item currently being placed.
+
+    100 DEFine PROCedure sort(come,send)
+    110   LET num = come(0)
+    120   FOR item = 2 TO num
+    130     LET p = item
+    140     LET come(0) = come(p)
+    150     REPeat compare
+    160       IF come(0) >= come(p-1) : EXIT compare
+    170       LET come(p) = come(p-1)
+    180       LET p = p - 1
+    190     END REPeat compare
+    200     LET come(p) = come(0)
+    210   END FOR item
+    220   FOR k = 1 TO 7 : send(k) = come(k)
+    230 END DEFine
+
+The following additional lines will test the sort procedure. First type
+AUTO 10 to start the line numbers from 10 onwards.
+
+    10 REMark Test Sort
+    20 DIM row$(7,3),back$(7,3)
+    30 LET row$(0) = 7
+    40 FOR k = 1 TO 7 : READ row$(k)
+    50 sort row$,back$
+    60 PRINT ! back$ !
+    70 DATA "EEL","DOG","ANT","GNU","CAT","BUG","FOX"
+
+
+Output
+
+    ANT BUG CAT DOG EEL FOX GNU
+
+
+COMMENT
+
+This program illustrates how easily you can handle arrays in SuperBASIC.
+All you have to do is use the array names for passing them as parameters or
+for printing the whole array. Once the procedure is saved you can use MERGE
+mdv1_sort to add it to a program in main memory.
+
+You now have enough understanding of techniques and syntax to handle a more
+complex screen layout. Suppose you wish to represent the hands of four card
+players. A hand can be represented by something like:
+
+    H: A  3 7 Q
+    C: 5  9 J
+    D: 6 10 K
+    S: 2  4 Q
+
+To help the presentation the Hearts and Diamonds will be printed in red and
+the Clubs and Spades in black. A suitable STRIP colour might be white. The
+general background could be green and a table may be a colour obtained by
+mixing two colours.
+
+METHOD
+
+Since a substantial amount of character printing is involved it is best to
+start planning in terms of the pixel screen. You can see that you need to
+provide for twelve lines of characters with some space between lines and a
+total screen height of 256 pixels.
+
+         +------------------------------------------+
+         |                                          |
+         |               XXXXXXXXXX                 |
+         |               XXXXXXXX                   |
+         |               XXXXXXXXX                  |
+         |               XXXXXXXX                   |
+         |                                          |
+         |              +-----------+               |
+         |              |           |               |
+         |  XXXXXXX     |           |  XXXXXXXXXX   |
+         |  XXXXXXXXX   |           |  XXXXXX       |
+         |  XXXXXXX     |           |  XXXXXXXXX    |
+         |  XXXXXXXX    |           |  XXXXXXX      |
+         |              |           |               |
+         |              +-----------+               |
+         |                                          |
+         |              XXXXXXXXXXX                 |
+         |              XXXXXXX                     |
+         |              XXXXXXXX                    |
+         |              XXXXXXXXXX                  |
+         |                                          |
+         +------------------------------------------+
+
+It is useful to recall that the possible character heights are 10 pixels or
+20 pixels. It is obvious that the 10 pixel height must be used to allow
+space for a proper layout.
+
+The number of character positions across the screen must be estimated. If
+we adopt the convention of "T" for ten instead of "10" all card values can
+be represented as a single character. Suppose that we also allow a maximum
+of eight cards of the same suit as a first approach. We can reconsider the
+problem again if necessary That would require a total of 10 characters for
+each hand. The across requirement is therefore:
+
+    west hand + table width + east hand
+
+Allowing a space between characters that would be:
+
+    20 + table width + 20
+
+The decision now depends on which screen mode you choose. The 256 mode will
+cope with the problem, as you will see later, but first we will work in 512
+pixel mode. The smallest character width is six pixels which would give a
+total of 240 pixels + table width. The diagram will have some balance if we
+have a table width of about half of 240.
+We should therefore experiment with a table width of about 120 pixels which
+may be adjusted. A little testing produced the layout shown.
+         +------------------------------------------------+
+         |  +------------------------------------------+  |
+         |  |                                          |  |
+         |  |               H: 5 9 K                   |  |
+         |  |               C: A Q                     |  |
+         |  |               D: A 4 6 J                 |  |
+         |  |               S: A 2 3 T                 |  |
+         |  |                                          |  |
+         |  |              +-----------+               |  |
+         |  |              |           |               |  |
+         |  | H: A         |           |  H: 6 8 T Q   |  |
+         |  | C: 7 J K     |           |  C: 2 4 5 6 8 |  |
+         |  | D: 5 8 9 K   |           |  D: 7 T Q     |  |
+         |  | S: 4 5 7 J K |           |  S: 6         |  |
+         |  |              |           |               |  |
+         |  |              +-----------+               |  |
+         |  |                                          |  |
+         |  |              H: 2 3 4 7 J                |  |
+         |  |              C: 3 9 T                    |  |
+         |  |              D: 2 3                      |  |
+         |  |              S: 8 9 Q                    |  |
+         |  |                                          |  |
+         |  +------------------------------------------+  |
+         |                                                |
+         +------------------------------------------------+
+
+
+WINDOW    440 x 220 at 35,15
+          Green with black border of 10 units
+
+TABLE     100 x 60 at 150,60
+          Chequerboard stipple of red and green
+
+HANDS     Room for at least eight card symbols
+          Initial cursor positions are:
+
+          north 150,10
+          east 260,60
+          south 150,130
+          west 30,60
+
+CHARACTER SlZE      Standard for 512 mode
+NUMBER OF PIXELS    between lines is 12
+
+CHARACTER COLOUR    White
+CHARACTER STRIP     Red for Hearts and Diamonds
+                    Black for Clubs and Spades
+VARIABLES
+
+card(52)      stores card numbers
+sort(13)      used to sort each hand
+tok$(4,2)     stores tokens H:, C:, D:, S:
+kmcmh         working loop variables
+ran           random position for card exchange
+temp          used in card exchange
+item          card to be inserted in sort
+dart          pointer to find position in sort
+comp          hold card number in sort
+inc           pixel increment in card rows
+seat          current 'deal' position
+ac,dn         cursor position for characters
+row           current row for characters
+lin$          builds up row of characters
+max           highest card number
+p             points to card position
+n             current number of card
+
+
+PROCEDURES
+
+shuffle       shuffles 52 cards
+split         splits cards into four hands and calls sortem to
+              sort each hand
+sortem        sorts 13 cards in ascending order
+layout        provides background colour border and table
+printem       prints each line of card symbols
+getline       gets one row of cards and converts numbers into the
+              symbols A,2,3,4,5,6,7,8,9,T,J,Q,K
+
+
+PROGRAM DESIGN OUTLINE
+
+1.   Declare arrays, pick up 'tokens' and place 52 numbers in array
+     'card'.
+2.   Shuffle cards.
+3.   Split into 4 hands and sort each.
+4.   OPEN screen window.
+5.   Fix the screen layout.
+6.   Print the four hands.
+7.   CLOSE the screen window.
+
+    100 DIM card(52),sort(13),tok$(4,2)
+    110 FOR k = 1 TO 4 : READ tok$(k)
+    120 FOR k = 1 TO 52 : LET card(k) = k
+    130 shuffle
+    140 split
+    150 OPEN #6,scr_440x220a35x15
+    160 layout
+    170 printem
+    180 CLOSE #6
+    190 DEFine PROCedure shuffle
+    200 FOR c = 52 TO 3 STEP -1
+    210 LET ran = RND(1 to c-1)
+    220 LET temp = card(c)
+    230 LET card(c) = card(ran)
+    240 LET card(ran) = temp
+    250 END FOR c
+    260 END DEFine
+    270 DEFine PROCedure split
+    280 FOR h = 1 TO 4
+    290 FOR c = 1 TO 13
+    300 LET sort(c) = card((h-1)*13+c)
+    310 END FOR c
+    320 sortem
+    330 FOR c = 1 TO 13
+    340 LET card((h-1)*13+c) = sort(c)
+    350 END FOR c
+    360 END FOR h
+    370 END DEFine
+    380 DEFine PROCedure sortem
+    390 FOR item = 2 TO 13
+    400 LET dart = item
+    410 LET comp = sort(dart)
+    420 LET sort(0) = comp
+    430 REPeat compare
+    440 IF comp >= sort(dart-1) : EXIT compare
+    450 LET sort(dart) = sort(dart-1)
+    460 LET dart = dart - 1
+    470 END REPeat compare
+    480 LET sort(dart) = comp
+    490 END FOR item
+    500 END DEFine
+    510 DEFine PROCedure layout
+    520 PAPER #6,4 : CLS #6
+    530 BORDER #6,10,0
+    540 BLOCK #6,100,60,150,60,2,4
+    550 END DEFine
+    560 DEFine PROCedure printem
+    570 LET inc = 12 : INK #6,7
+    580 LET p = 0
+    590 FOR seat = 1 TO 4
+    600 READ ac,dn
+    610 FOR row = 1 TO 4
+    620 getline
+    630 CURSOR #6,ac,dn
+    640 PRINT #6,1in$
+    650 LET dn = dn + inc
+    660 END FOR row
+    670 END FOR seat
+    680 END DEFine
+    690 DEFine PROCedure getline
+    700 IF row MOD 2 = 0 THEN STRIP #6,0
+    710 IF row MOD 2 = 1 THEN STRIP #6,2
+    720 LET lin$ = tok$(row)
+    730 LET max = row*13
+    740 REPeat one_suit
+    750 LET p = p + 1
+    760 LET n = card(p)
+    770 IF n >max THEN p = p-1 : EXIT one_suit
+    780 LET n = n MOD 13
+    790 IF n = 0 THEN n = 13
+    800 IF n = 1 : LET ch$ = "A"
+    810 IF n >= 2 AND n <= 9 : LET ch$ = n
+    820 IF n = 10 : LET ch$ = "T"
+    830 IF n = 11 : LET ch$ = "J"
+    840 IF n = 12 : LET ch$ = "Q"
+    850 IF n = 13 : LET ch$ = "K"
+    860 LET lin$ = lin$ & " " & ch$
+    870 IF p = 52 : EXIT one_suit
+    880 IF card(p)>card(p+1) : EXIT one_suit
+    890 END REPeat one_suit
+    900 END DEFine
+    910 DATA "H:","C:","D:","S:"
+    920 DATA 150,10,260,60,150,130,30,60
+
+
+COMMENT
+
+The program works in the 256 mode. But the various lines of card symbols
+may overlap the "table" or overflow at the edge of the window. A simple
+change in procedure "getline" from:
+
+    860 LET lin$ = lin$ & " " & ch$
+
+to
+
+    860 LET lin$ = lin$ & ch$
+
+will correct this. The spaces between characters disappear but the larger
+sized characters enable the rows to be easily readable. The program thus
+works well in either graphics mode.
+
+
+CONCLUSION
+
+We have tried to show how you can use SuperBASIC to solve problems. We have
+shown how simple tasks can be performed in simple ways. When the task is
+inherently complex, like manipulating arrays or designing screen graphics,
+SuperBASIC enables it to be handled efficiently with maximum possible
+clarity.
+
+If you were a beginner and you have worked through a fair proportion of
+this guide you will have started well on the road to good programming. If
+you were already experienced, we hope that you will appreciate and exploit
+the extra features offered by SuperBASIC.
+
+So enormous is the range of tasks which can be done with SuperBASIC that we
+have only been able to touch a fraction of them in this guide. We cannot
+guess at which of the thousands of possibilities you will attempt, but we
+hope that you will find them fruitful, stimulating and fun.
+
+

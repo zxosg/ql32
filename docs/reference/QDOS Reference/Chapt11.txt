@@ -1,0 +1,373 @@
+CHAPTER 11
+----------
+
+HANDLING TEXT STRINGS
+
+You have used string variables to store character strings and you know that
+the rules for manipulating string variables or string constants are not the
+same as those for numeric variables or numeric constants. SuperBASIC offers
+a full range of facilities for manipulating character strings effectively.
+In particular the concept of string-slicing both extends and simplifies the
+business of handling substrings or slices of a string.
+
+ASSIGNING STRINGS
+
+Storage for string variables is allocated as it is required by a program.
+For example, the lines:
+
+    100 LET words$ = "LONG"
+    110 LET words$ = "LONGER"
+    120 PRINT words$
+
+would cause the six letter word, LONGER, to be printed. The first line
+would cause space  for four letters to be allocated but this allocation
+would be overruled by the second line which requires space for six
+characters.
+
+It is, however, possible to dimension (i.e. reserve space for) a string
+variable, in which case the maximum length becomes defined, and the
+variable behaves as an array.
+
+
+JOINING STRINGS
+
+You may wish to construct records in data processing from a number of
+sources. Suppose, for example, that you are a teacher and you want to store
+a set of three marks for each student in Literature, History and Geography
+The marks are held in variables as shown:
+
+         +------+          +------+          +------+
+         |      |          |      |          |      |
+    lit$ |  62  |    hist$ |  56  |    geog$ |  71  |
+         |      |          |      |          |      |
+         +------+          +------+          +------+
+
+As part of student record keeping you may wish to combine the three string
+values into one six-character string called mark$. You simply write:
+
+    LET mark$ = lit$ & hist$ & geog$
+
+You have created a further variable as shown:
+
+          +--------+
+          |        |
+    mark$ | 625671 |
+          |        |
+          +--------+
+
+But remember that you are dealing with a character string which happens to
+contain  number characters rather than an actual number. Note that in
+SuperBASIC the & symbol is used to join strings together whereas in some
+other BASICs, the + symbol is used for that purpose.
+
+
+COPY A STRING  SLICE
+
+A string slice is part of a string. It may be anything from a single
+character to the whole  string. In order to identify the string slice you
+need to know the positions of the required characters.
+
+Suppose you are constructing a children's game in which they have to
+recognise a word  hidden in a jumble of letters. Each letter has an
+internal number - an index - corresponding to its position in the string.
+Suppose the whole string is stored in the variable jumble$ and the clue is
+Big cat.
+
+                               :               :
+                               : string slice  :
+           +---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+    jumble$| A | P | Q | O | L | L | I | O | N | A | T | S | U | Z |
+           +---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+             1   2   3   4   5   6   7   8   9  10  11  12  13  14
+
+You can see that the answer is defined by the numbers 6 to 9 which indicate
+where it is. You can abstract the answer as shown :
+
+    100 jumble$ = "APQOLLIONATSUZ"
+    110 LET an$ = jumble$(6 TO 9)
+    120 PRINT an$
+
+
+REPLACE A STRING SLICE
+
+Now suppose that you wish to change the hidden animal into a bull. You can
+write two  extra lines:
+
+    130 LET jumble$(6 TO 9) = "BULL"
+    140 PRINT jumble$
+
+The output from the whole five-line program is:
+
+    LION
+    APQOLBULLATSUZ
+
+All string variables are initially empty, they have length zero. If you
+attempt to copy a string into a string-slice which has insufficient length
+then the assignment may not be recognised by SuperBASIC.
+
+If you wish to copy a string into a string-slice then it is best to ensure
+the destination string is long enough by padding it first with spaces.
+
+    100 LET subject$ = "ENGLISH MATHS COMPUTING"
+    110 LET student$ = "             "
+    120 LET student$(9 TO 13) = subject$(9 TO 13)
+
+We say that "BULL" is a slice of the string "APQOLBULLATSUZ". The defining
+phrase:
+
+    (6 TO 9)
+
+is called a slicer. It has other uses. Notice how the same notation may be
+used on both sides of the LET statement. If you want to refer to a single
+character it would be clumsy to write:
+
+    jumble$(6 TO 6)
+
+just to pick out the "B" (possibly as a clue) so you can write instead:
+
+    jumble$(6)
+
+to refer to a single character
+
+
+COERCION
+
+Suppose you have a variable, mark$ holding a record of examination marks.
+The slice giving the history mark may be extracted and scaled up, perhaps
+because the history teacher has been too strict in the marking. The
+following lines will extract the history mark:
+
+    100 LET mark$ = "625671"
+    110 LET hist$ = mark$(3 TO 4)
+
+The problem now is that the value "56" of the variable, hist$ is a string
+of characters not numeric data. If you want to scale it up by multiplying
+by say 1.125, the value of hist$ must be converted to numeric data first,
+SuperBASIC will do this conversion automatically when we type:
+
+    120 LET num = 1 .125 * hist$
+
+Line 120 converts the string "56" to the number 56 and multiplies it by
+1.125 giving 63.
+
+Now we should replace the old mark by the new mark but now the new mark is
+still the number 63 and before it can be inserted back into the original
+string it must be converted back to the string '63'. Again SuperBASIC will
+convert the number automatically when we type:
+
+    130 LET mark$(3 TO 4) = num
+    140 PRINT mark$
+
+The output from the whole program is:
+
+    626371
+
+which shows the history mark increased to 63.
+
+Strictly speaking it is illegal to mix data types in a LET statement. It
+would be silly to write:
+
+    LET num = "LION"
+
+and you would get an error message if you tried, but if you write:
+
+    LET num = "65"
+
+the system will conclude that you want the number 65 to become the value of
+num and do that. The complete program is:
+
+    100 LET mark$ = "625671"
+    110 LET hist$ = mark$(3 TO 4)
+    120 LET num = 1.125 * hist$
+    130 LET mark$(3 TO 4) = num
+    140 PRINT mark$
+
+Again the output is the same!
+
+In line 120 a string value was converted into numeric form so that it could
+be multiplied;  In line 130 a number was converted into string form. This
+converting of data types is known as type coercion.
+
+You can write the program more economically if you understand both
+string-slicing and coercion now:
+
+    100 LET mark$ = "625671"
+    110 LET mark$(3 TO 4) = 1 .125 * mark$(3 TO 4)
+    120 PRINT mark$
+
+If you have worked with other BASICs you will appreciate the simplicity and
+power of string-slicing and coercion.
+
+
+SEARCHING A STRING
+
+You can search a string for a given substring. The following program
+displays a jumble of letters and invites you to spot the animal.
+
+    100 REM Animal Spotting
+    110 LET jumble$ = "SYNDICATE"
+    120 PRINT jumble$
+    130 INPUT "What is the animal?" ! an$
+    140 IF an$ INSTR jumble$ AND an$(1) = "C"
+    150   PRINT "Correct"
+    160 ELSE
+    170   PRINT "Not correct"
+    180 END IF
+
+The operator INSTR, returns zero if the guess is incorrect. If the guess is
+correct INSTR returns the number which is the starting position of the
+string-slice, in this case 6.
+
+Because the expression:
+
+    an$ INSTR iumble$
+
+can be treated as a logical expression the position of the string in a
+successful search can be regarded as true, while in an unsuccessful search
+it can be regarded as false.
+
+
+OTHER STRING  FUNCTIONS
+
+You have already met LEN which returns the length (number of characters) of
+a string.
+
+You may wish to repeat a particular string or character several times. For
+example, if you wish to output a row of asterisks, rather than actually
+enter forty asterisks in a PRINT statement or organise a loop you can
+simply write:
+
+    PRINT FILL$ ("*",40)
+
+Finally it is possible to use the function CHR$ to convert internal codes
+into string characters. For example:
+
+    PRINT CHR$(65)
+
+would output A.
+
+
+COMPARING STRINGS
+
+A great deal of computing is concerned with organising data so that it can
+be searched quickly. Sometimes it is necessary to sort it in to
+alphabetical order. The basis of various sorting processes is the facility
+for comparing two strings to see which comes first. Because the letters
+A,B,C ... are internally coded as 65,66,67 ... it is natural to regard as
+correct the following statements:
+
+    A is less than B
+    B is less than C
+
+and because internal character by character comparison is automatically
+provided:
+
+    CAT is less than DOG
+    CAN is less than CAT
+
+You can write, for example:
+
+    IF "CAT" < "DOG" THEN PRINT "MEOW"
+
+and the output would be:
+
+    MEOW
+
+Similarly:
+
+    IF "DOG" > "CAT" THEN PRINT "WOOF"
+
+would give the output:
+
+    WOOF
+
+We use the comparison symbols of mathematics for string comparisons. All
+the following logical statements expressions are both permissible and true.
+
+    "ALF" < "BEN"
+    "KIT" > "BEN"
+    "KIT" <= "LEN"
+    "KIT" >= "KIT"
+    "PAT" >= "LEN"
+    "LEN" <= "LEN"
+    "PAT" <> "PET"
+
+So far comparisons based simply on internal codes make sense, but data is
+not always  conveniently restricted to upper case letters. We would like,
+for example:
+
+        Cat to be less than COT
+    and K2N to be less than K27N
+
+A simple character by character comparison based on internal codes would
+not give these results, so SuperBASIC behaves in a more intelligent way.
+The following program, with suggested input and the output that will
+result, illustrates the rules for comparison of strings.
+
+    100 REMark comparisons
+    110 REPeat comp
+    120   INPUT "input a string" ! first$
+    130   INPUT "input another string" ! second$
+    140   IF first$ < second$ THEN PRINT "Less"
+    150   IF first$ > second$ THEN PRINT "Greater"
+    160   IF first$ = second$ THEN PRINT "Equal"
+    170 END REPeat comp
+
+----------------------------
+    input           output
+----------------------------
+  CAT  COT         Greater
+  CAT  CAT          Equal
+  PET  PETE         Less
+  K6   K7           Less
+  K66  K7          Greater
+  K12N K6N         Greater
+----------------------------
+
+
+>   Greater than - Case dependent comparision, numbers compared
+    in numerical order
+
+<   Less than - Case dependent, numbers compared in numerical order
+
+=   Equals - Case dependent, strings must be the same
+
+==  Equivalent - String must be 'almost' the same, Case independent,
+    numbers compared in numerical order
+
+>=  Greater than or equal to - Case dependent, numbers compared
+    in numerical order
+
+<=  Less than or equal to Case dependent, numbers compared in
+    numerical order
+
+
+PROBLEMS ON CHAPTER 11
+
+1.  Place 12 letters, all different, in a string variable and another
+    six letters in a second string variable. Search the first string
+    for each of the six letters in turn saying in each case whether
+    it is found or not found.
+
+2.  Repeat using single character arrays instead of strings. Place
+    twenty random upper case letters in a string and list those which
+    are repeated.
+
+3.  Write a program to read a sample of text all in upper case
+    letters. Count the frequency of each letter and print the results.
+
+        "GOVERNMENT IS A TRUST, AND THE OFFICERS OF THE GOVERNMENT
+        ARE TRUSTEES; AND BOTH THE TRUST AND THE TRUSTEES ARE CREATED
+        FOR THE BENEFIT OF THE PEOPLE. HENRY CLAY 1829."
+
+4.  Write a program to count the number of words in the following text.
+    A word is recognised because it starts with a letter and is followed
+    by a space, full stop or other punctuation character.
+
+        "THE REPORTS OF MY DEATH ARE GREATLY EXAGGERATED. CABLE FROM
+        MARK TWAIN TO THE ASSOCIATED PRESS, LONDON 1896."
+
+5.  Rewrite the last program illustrating the use of logical variables
+    and procedures.
+
+

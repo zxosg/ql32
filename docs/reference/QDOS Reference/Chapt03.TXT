@@ -1,0 +1,327 @@
+CHAPTER 3
+---------
+
+DRAWING ON THE SCREEN
+
+In order to use either a television set or monitor with the QL, two
+different screen modes are available. MODE 8 permits eight colour displays
+with a graphics resolution of 256 by 256 pixels and large characters for
+display on a television set. MODE 4 allows four colours with a resolution
+of 512 by 256 pixels and a maximum of eighty character lines for which a
+monitor must be used for successful display. However, it would be
+unfortunate if a program was written to draw circles or squares in one mode
+and produced ellipses or rectangles in another mode (as some systems do).
+We therefore provide a system of scale graphics which avoids these
+problems. You simply choose a vertical scale and work to it. The other type
+of graphics (pixel oriented) is also available and is described fully in a
+later chapter
+
+Suppose, for example, that we choose a vertical scale of 100 and we wish to
+draw a line from position (50,60) to position (70,80).
+
+(This diagram is Chapt3A_pic in the file compilations)
+
+    100 |
+        |
+        |              / (70 across, 80 up)
+        |             /
+        |            /
+        |           / (50 across, 60 up)
+        |
+        |
+        |
+        |
+      0 +--------------------------------------
+                                  Scale Graphics
+
+
+
+A COLOURED LINE
+
+We need to specify three things:
+
+    PAPER (background colour)
+    INK   (drawing colour)
+    LINE  (start and end points)
+
+The following program will draw a line as shown in the above figure in red
+(colour code 2) on a white (colour code 7) background.
+
+    NEW [ENTER]
+
+    10 PAPER 7 : CLS [ENTER]
+    20 INK 2 [ENTER]
+    30 LINE 50,60 TO 70,80 [ENTER]
+
+    RUN [ENTER]
+
+In line 10 the paper colour is selected first but it only comes into effect
+with a further command, such as CLS, meaning clear the screen to the
+current paper colour.
+
+
+MODES AND COLOURS
+
+So far it does not matter which screen mode you are using but the range of
+colours is affected by the choice of mode.
+
+    MODE 8 allows eight basic colours
+    MODE 4 allows four basic colours
+
+Colours have codes as described below.
+
+---------------------------
+Code                 Effect
+---------------------------
+      8 colour    4 colour
+    -----------------------
+0     black       black
+1     blue        black
+2     red         red
+3     magenta     red
+4     green       green
+5     cyan        green
+6     yellow      white
+7     white       white
+
+
+
+
+RANDOM EFFECTS
+
+For example, INK 3 would give magenta in MODE 8 and red in MODE 4.
+
+We will explain in a later chapter how the basic colours can be 'mixed' in
+various ways to produce a startling range of colours, shades and textures.
+
+
+RANDOM EFFECTS
+
+You can get some interesting effects with random numbers which can be
+generated with the RND function. For example:
+
+PRINT RND (1 TO 6) [ENTER]
+
+will print a whole number in the range 1 to 6, like throwing an ordinary
+six-sided dice. The following program will illustrate this:
+
+NEW [ENTER]
+
+10 LET die = RND(l TO 6) [ENTER]
+20 PRINT die [ENTER]
+
+RUN [ENTER]
+
+If you run the program several times you will get different numbers.
+
+You can get random whole numbers in any range you like. For example:
+
+RND(0 TO 100)
+
+will produce a number which can be used in scale graphics. You can re-write
+the line program so that it produces a random colour. Where the range of
+random numbers starts from zero you can omit the first number and write:
+
+RND(100)
+
+NEW [ENTER]
+
+10 PAPER 7 : CLS [ENTER]
+20 INK RND(5) [ENTER]
+30 LINE 50,60 TO RND(100),RND(100) [ENTER]
+
+RUN [ENTER]
+
+This produces a line starting somewhere near the centre of the screen and
+finishing at some random point. The range of possible colours depends on
+which mode is selected. You will find that a range of numbers 'something TO
+something' occurs often in SuperBASIC.
+
+
+BORDERS
+
+The part of the screen in which you have drawn lines and create other
+output is called a window. Later you will see how you can change the size
+and position of a window or create other windows. For the present we shall
+be content to draw a border round the current window. The smallest area of
+light or colour you can plot on the screen is called a pixel. In mode 8,
+called low resolution mode, there are 256 possible pixel positions across
+the screen and 256 down. In mode 4, called high resolution mode, there are
+512 pixels across the screen and 256 down. Thus the size of a pixel depends
+on the mode.
+
+You can make a border round the inside edge of a window by typing for
+example:
+
+BORDER 4,2 [ENTER]
+
+This will create a border 4 pixels wide in colour red (code 2). The
+effective size of the window is reduced by the border. This means that any
+subsequent printing or graphics will automatically fit within the new
+window size. The only exception to this is a further border which will
+overwrite the existing one.
+
+
+A SIMPLE LOOP
+
+Computers can do things very quickly but it would not be possible to
+exploit this great power if every action had to be written as an
+instruction. A building foreman has a similar problem. If he wants a
+workman to lay a hundred paving stones that is roughly what he says. He
+does not give a hundred separate instructions.
+
+A traditional way of achieving looping or repetition in BASIC is to use a
+GO TO (or GOTO, they are the same) statement as follows.
+
+NEW [ENTER]
+
+10 PAPER 6 : CLS [ENTER]
+20 BORDER 1,2 [ENTER]
+30 INK RND(5) [ENTER]
+40 LINE 50,60 TO RND(100),RND(100) [ENTER]
+50 GOTO 0 [ENTER]
+
+RUN [ENTER]
+
+
+You may prefer not to type in this program because SuperBASIC allows a
+better way of doing repetition. Note certain things about each line.
+
+10 Fixed part - not repeated
+20
+
+30 Changeable part - repeated
+40
+
+50 Controls program
+
+You can re-write the above program by omitting the GOTO statement and,
+instead, putting REPeat and END REPeat around the part to be repeated.
+
+NEW [ENTER]
+
+10 PAPER 6 : CLS [ENTER]
+20 BORDER 1,2 [ENTER]
+30 REPEAT star [ENTER]
+40   INK RND(5) [ENTER]
+50   LINE 50,60 TO RND(100),RND(100) [ENTER]
+60 END REPEAT star [ENTER]
+
+RUN [ENTER]
+
+We have give the repeat structure a name, star The structure consists of
+the two lines:
+
+
+REPeat star
+END REPeat star
+
+and what lies between them is called the content of the structure. The use
+of upper case letters indicates that REP is a valid abbreviation of REPeat.
+
+This program should produce coloured lines indefinitely to make a star.
+(diagram of random length lines emanating from a central point like a
+broken pane of glass - Chapt3B_pic - caption: "The STAR program")
+
+You can stop it by pressing the break keys:
+
+Hold down [CTRL] and then press [SPACE]
+
+SuperBASIC provides a consistent and versatile method of stopping
+repetitive processes. Imagine running round and round inside the program
+activating statements. How can you escape? The answer is to use an EXIT
+statement. But there must be some reason for escaping. You might extend the
+choice of line colours by typing as an amendment to the program (do not
+type NEW):
+
+40 INK RND (0 TO 6) [ENTER]
+
+so that if RND produces 6 the ink is the same colour as the paper and you
+will not see it. This could be the reason for terminating the repetition.
+We can re-arrange the program as follows:
+
+NEW [ENTER]
+
+10 PAPER 6 : CLS [ENTER]
+20 BORDER 1 ,2 [ENTER]
+30 REPeat star [ENTER]
+40   LET colour = RND(6) [ENTER]
+50   IF colour = 6 THEN EXIT star [ENTER]
+60   INK colour [ENTER]
+70   LINE 50,60 TO RND(100),RND(100) [ENTER]
+80 END REPeat star [ENTER]
+
+The important thing to note here is that the program continues until
+"colour" becomes 6. Control then escapes from the loop to the point just
+after line 80. Since there are no program lines after 80 the program stops.
+
+Another important concept has been introduced. It is the idea of a
+decision.
+
+IF colour = 6 THEN EXIT star
+
+This is another very useful structure because it is a choice of doing
+something or not; we call it a simple binary decision. Its general form is:
+
+IF condition THEN statement(s)
+
+You will see later how the two concepts of repetition (or looping) and
+decision-making (or selection) are the main structures for program control.
+You can stop the program by pressing the break keys: hold down CTRL and
+then press the space bar.
+
+
+SELF TEST ON CHAPTER 3
+
+You can score a maximum of 13 points from the following test. Check your
+score with the answers in the "Answers to self test" section at the end of
+this Beginner's Guide.
+
+1. What is a pixel?
+
+2. How many pixels fit across the screen in the low resolution mode?
+
+3. How many pixels fit from bottom to top in low resolution mode?
+
+4. What are the two numbers which determine the 'address' or position of
+   a graphics point on the screen?
+
+5. How many colours are available in the low resolution mode?
+
+6. Name the keywords which do the following:
+
+    i   draw a line
+    ii  select a colour for drawing
+    iii select a background colour
+    iv draw a border (5 points)
+
+7. What are the statements which open and close the REPeat loop?
+
+8. When does an executing REPeat loop terminate?
+
+9. Why do loops in SuperBASIC have names?
+
+
+PROBLEMS ON CHAPTER 3
+
+1. Write a program to draw straight lines all over the screen. The
+   lines should be of random length and direction. Each should start
+   where the previous one finished and each should have a randomly
+   chosen colour.
+
+2. Write a program to draw lines randomly with the restriction that
+   each line has a random start on the left hand edge of the screen.
+
+3. Write a program to draw lines randomly with the restriction that
+   the lines start at the same point on the bottom edge of the screen.
+
+4. Write a program to produce lines of random length, starting points
+   and colour. All lines must be horizontal.
+
+5. As problem 4 but make the lines vertical.
+
+6. Write a program to produce a square 'spiral' in such a way that
+   each line makes a random colour
+
+HINT: First find the co-ordinates of some of the corners, then put them in
+groups of four. You should discover a pattern.

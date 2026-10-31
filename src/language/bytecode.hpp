@@ -14,7 +14,7 @@ enum class Op {
     Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     And, Or, Xor, Negate, Not, Print, PrintSeparator, PrintEnd, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
-    DimArray, ArrayGet, ArraySet, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd
+    DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd
 };
 
 struct ForItemSpec {
@@ -49,11 +49,15 @@ struct Instruction {
     bool clearTarget = false;
     std::size_t argCount = 0;
     bool expectsValue = false;
+    bool builtin = false;
     std::vector<std::string> parameters;
     std::vector<std::string> localNames;
     std::vector<ArrayArgumentCandidate> arrayArgumentCandidates;
     std::string ownerDefinition;
     std::size_t rank = 0;
+    bool sliceHasStart = false;
+    bool sliceHasEnd = false;
+    bool sliceSingle = false;
     std::vector<SelectItemSpec> selectItems;
 };
 

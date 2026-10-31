@@ -1,0 +1,372 @@
+CHAPTER 7
+---------
+
+SIMPLE PROCEDURES
+
+If you were to try to write computer programs to solve complex problems you
+might find it difficult to keep track of things. A methodical problem
+solver therefore divides a large or complex job into smaller sections or
+tasks, and then divides these tasks again into smaller tasks, and so on
+until each can be be easily tackled.
+
+This is similar to the arrangement of complex human affairs. Successful
+government depends on a delegation of responsibility. The Prime Minister
+divides the work amongst ministers, who divide it further through the Civil
+Service until tasks can be done by individuals without further division.
+There are complicating features such as common services and interplay
+between the same and different levels, but the hierarchical structure is
+the dominant one.
+
+A good programmer will also work in this way and a modern language like
+SuperBASIC which allows properly named, well defined procedures will be
+much more helpful than older versions which do not have such features.
+
+The idea is that a separately named block of code should be written for a
+particular task. It doesn't matter where the block of code is in the
+program. If it is there somewhere, the use of its name will:
+
+    activate the code
+    return control to the point in the program immediately after that use.
+
+If a procedure, "square", draws a square the scheme is as shown below:
+
+         procedure definition                          procedure call
+    +---------------------------------+
+    |    DEFine PROCedure square      |
+    |    REMark code to draw square   |  <--------------- square
+    |    END DEFine                   |
+    +---------------------------------+
+                      |
+                      |
+                      v
+                draws a square
+
+In practice the separate tasks within a job can be identified and named
+before the definition code is written. The name is all that is needed in
+calling the procedure so the main outline of the program can be written
+before all the tasks are defined.
+
+Alternatively if it is preferred, the tasks can be written first and
+tested. If it works you can then forget the details and just remember the
+name and what the procedure does.
+
+
+Example
+
+The following example could quite easily be written without procedures but
+it shows how they can be used in a reasonably simple context. Almost any
+task can be broken down in a similar fashion which means that you never
+have to worry about more than, say five to thirty lines at any one time. If
+you can write thirty-line programs well and handle procedures, then you
+have the capability to write three-hundred-line programs.
+
+You can produce ready made buzz phrases for politicians or others who wish
+to give an impression of technological fluency without actually knowing
+anything. Store the following words in three arrays and then produce ten
+random buzz phrases.
+---------------------------------------------------------------------
+  adjec1$                 adjec2$                  noun$
+---------------------------------------------------------------------
+
+  Full                    fifth-generation         systems
+  Systematic              knowledge-based          machines
+  Intelligent             compatible               computers
+  Controlled              cybernetic               feedback
+  Automated               user-friendly            transputers
+  Synchronised            parallel                 micro-chips
+  Functional              learning                 capability
+  Optional                adaptable                programming
+  Positive                modular                  packages
+  Balanced                structured               databases
+  Integrated              logic-oriented           spreadsheets
+  Coordinated             file-oriented            word-processors
+  Sophisticated           standardised             objectives
+ANALYSIS
+
+We will write a program to produce ten buzzword phrases. The stages of the
+program are:
+
+1. Store the words in three string arrays.
+2. Choose three random numbers which will be the subscripts of
+   the array variables.
+3. Print the phrase.
+4. Repeat 2 and 3 ten times.
+
+
+DESIGN
+
+
+VARIABLES
+
+We identify three arrays of which the first two will contain adjectives or
+words used as adjectives - describing words. The third array will hold the
+nouns. There are 13 words in each section and the longest word has 16
+characters including a hyphen.
+
+--------------------------------------------
+  Array              Purpose
+--------------------------------------------
+  adjec1$(13,12)     first adjectives
+  adjec2$(13,16)     second adjectives
+  noun$(13,15)       nouns
+
+
+PROCEDURES
+
+We use three procedures to match the jobs identified.
+
+    store_data    stores the three sets of thirteen words.
+    get_random    gets three random numbers in range 1 to 13.
+    make_phrase   prints a phrase.
+
+
+MAIN PROGRAM
+
+This is very simple because the main work is done by the procedures.
+
+    Declare (DIM) the arrays
+    Store_data
+    FOR ten phrases
+    get_random
+    make_phrase
+    END
+
+
+Program
+
+100 REMark ************
+110 REMark * Buzzword *
+120 REMark ************
+130 DIM adjec1$(13,12), adjec2$(13,16), noun$(13,15)
+140 store_data
+150 FOR phrase = 1 TO 10
+160   get_random
+170   make_phrase
+180 END FOR phrase
+190 REMark **************************
+200 REMark * Procedure Definitions  *
+210 REMark **************************
+220 DEFine PROCedure store_data
+230   REMark *** procedureto store the buzzword data ***
+240   RESTORE 420
+250   FOR item = 1 TO 13
+260     READ adjec1$(item), adjec2$(item), noun$(item)
+270   END FOR item
+280 END DEFine
+290 DEFine PROCedure get_random
+300   REMark *** procedure to seLect the phrase ***
+310   LET ad1 = RND(1 TO 13)
+320   LET ad2 = RND(1 TO 13)
+330   LET n = RND(1 TO 13)
+340 END DEFine
+350 DEFine PROCedure make_phrase
+360   REMark *** procedure to print out the phrase ***
+370   PRINT ! adjec!$(ad1) ! adjec2$(ad2) ! noun$(n)
+380 END DEFine
+390 REMark ****************
+400 REMark * Program Data *
+410 REMark ****************
+420 DATA "Full", "fifth-generation", "systems"
+430 DATA "Systematic", "knowledge-based", "machines"
+440 DATA 'Intelligent","compatible", "computers"
+450 DATA "Controlled", "cybernetic", "feedback"
+460 DATA "Automated", "user-friendly", "transputers"
+470 DATA "Synchronised", "parallel", "micro-chips"
+480 DATA "Functional", "Learning", "capability'
+490 DATA "Optional", "adaptable", "programming"
+500 DATA "Positive" , "modular" , "packages"
+510 DATA "Balanced" , "structured", "databases"
+520 DATA "Integrated", "logic-oriented", "spreadsheets"
+530 DATA "Coordinated", "file-oriented", "word-processors"
+540 DATA "Sophisticated", "standardised", "objectives"
+
+Automated fifth-generation capability
+FunctionaL learning packages
+Full parallel objectives
+Positive user-friendly spreadsheets
+Intelligent file-oriented capability
+Synchronised cybernetic transputers
+FunctionaL logic-oriented micro-chips
+Positive parallel feedback
+Balanced learning databases
+Controlled cybernetic objectives
+
+
+PASSING INFORMATION TO PROCEDURES
+
+Suppose we wish to draw squares of various sizes and various colours in
+various positions on the scale graphics screen.
+
+If we define a procedure, "square", to do this it will require four items
+of information:
+
+    length of one side
+    colour (colour code)
+    position (across and up)
+
+The square's position is determined by giving two values, across and up,
+which fix the bottom left hand corner of the square as shown below
+
+               ac,up+side  +--------+  ac+side,up+side
+                           |        |
+                           |        |
+                           |        |
+                           |        |
+                           +--------+  ac+side,up
+                           ^
+                       up  |
+                           |
+                           |
+ac                         |
+-------------------------->|
+                           |
+                           |
+
+
+The colour of the square is easily fixed but the square itself uses the
+values of "side" and "ac" and "up" as follows.
+
+200 DEFine PROCedure square(side,ac,up)
+210   LINE ac,up TO ac+side,up
+220   LINE TO ac+side,up+side
+230   LINE TO ac,up+side TO ac,up
+240 END DEFine
+
+In order to make this procedure work values of "side","ac" and "up" must be
+provided. These values are provided when the procedure is called. For
+example you could add the following main program to get one green square of
+side 20.
+
+
+100 PAPER 7:CLS
+110 INK 4
+120 square 20,50,50
+
+The numbers 20,50,50 are called parameters and they are passed to the
+variables named in the procedure definition thus:
+
+                      square 20, 50, 50
+                             |   |   |
+                             |   |   |
+                             v   v   v
+    DEFine PROCedure square(side,ac,up)
+
+The numbers 20,50,50 are called actual parameters. They are numbers in this
+case but they could be variables or expressions. The variables side,ac,up
+are called formal parameters. They must be variables because they 'receive'
+values.
+
+A more interesting main program uses the same procedure to create a random
+pattern of coloured pairs of squares. Each pair of squares is obtained by
+offsetting the second one across and up by one-fifth of the side length
+thus:
+
+
+            +--------+
+          +-|------+ |
+          | |      | |
+          | |      | |
+          | +--------+
+          +--------+
+
+
+Assuming that the procedure square is still present at line 200 then the
+following program will have the classical effect.
+
+100 REMark Squares Pattern
+110 PAPER 7 : CLS
+120 FOR pair = 1 TO 20
+130   INK RND(5)
+140   LET side = RND(10 TO 20)
+150   LET ac = RND(50) : up = RND(70)
+160   square side,ac,up
+170   LET ac=ac+side/5 : up = up+side/5
+180   square side,ac,up
+190 END FOR pair
+
+The advantages of procedures are:
+
+1. You can use the same code more than once in the same program
+   or in others.
+
+2. You can break down a task into sub-tasks and write procedures
+   for each sub-task. This helps the analysis and design.
+
+3. Procedures can be tested separately. This helps the testing
+   and debugging.
+
+4. Meaningful procedure names and clearly defined beginnings and ends
+   help to make a program readable.
+
+When you get used to properly named procedures with good parameter
+facilities, you should find that your problem-solving and programming
+powers are greatly enhanced.
+
+
+
+SELF TESTON CHAPTER 7
+
+You can score a maximum of 14 points from the following test. Check your
+score with the "Answers To Self Tests" section at the back of this
+Beginner's Guide.
+
+1. How do we normally tackle the problem of great size and complexity
+   in human affairs?
+
+2. How can this principle be applied in programming?
+
+3. What are the two most obvious features of a simple procedure
+   definition? (two points)
+
+4. What are the two main effects of using a procedure name to 'call'
+   the procedure? (two points)
+
+5. What is the advantage of using procedure names in a main program
+   before the procedure definitions are written?
+
+6. What is the advantage of writing a procedure definition before using
+   its name in a main program?
+
+7 How can the use of procedures help a 'thirty-line-programmer' to
+  write much bigger programs?
+
+8. Some programs use more memory in defining procedures, but in
+   what circumstances do procedures save memory space?
+
+9. Name two ways by which information can be passed from a main program
+   to a procedure. (two points)
+
+10. What is an actual parameter?
+
+11. What is a formal parameter?
+
+
+PROBLEMS ON CHAPTER 7
+
+1. Write a procedure which outputs one of the four suits : 'Hearts'
+   'Clubs: 'Diamonds' or 'Spades'. Call the procedure five times
+   to get five random suits.
+
+2. Write another program for problem 1 using a number in the range
+   1 to 4 as a parameter to determine the output word. If you have
+   already done this, then try writing the program without parameters.
+
+3. Write a procedure which will output the value of a card that is a number
+   in the range 2 to 10 or one of the words 'Ace', 'Jack' 'Queen', 'King'.
+
+4. Write a program which calls this procedure five times so that
+   five random values are output.
+
+5. Write the program of problem 3 again using a number in the range 1
+   to 13 as a parameter to be passed to the procedure. If this was
+   the method you used first time, then try writing the program
+   without parameters.
+
+6. Write the most elegant program you can, using procedures, to output
+   four hands of five cards each. Do not worry about duplicate cards.
+   You can take elegance to mean an appropriate mixture of readability
+   shortness and efficiency Different people andlor different circumstances
+   will place different importance on these three qualities which
+   sometimes work against each other
+
+

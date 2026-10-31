@@ -1,0 +1,988 @@
+QL CONCEPTS MANUAL
+==================
+
+ARRAYS
+------
+
+Arrays must be DIMensioned before they are used. When an array is dimensioned
+the value of each of its elements is set to zero or a zero length string if it
+is a string array. An array dimension runs from zero up to the specified value.
+There is no limits to the number of dimensions which can be defined other than
+the total memory capacity of the computer. An array of data is stored such that
+the last index defined cycles round most rapidly:
+
+the array defined by
+
+    DIM array(2,4)
+
+will be stored as
+
+    0,0    low address
+    0,1
+    0,2
+    0,3
+    0,4
+    1,0
+    1,1
+    1,3
+    1,4
+    2,0
+    2,1
+    2,2
+    2,3
+    2,4    high address
+
+The element referred to by array(a,b,c) is equivalent to the element referred to
+by array(a)(b)(c)
+
+    ----------------------------------------------------------
+      Command      Function
+    ----------------------------------------------------------
+      DIM          dimension an array
+      DIMN         find out about the dimensions of an array
+    ----------------------------------------------------------
+
+
+BASIC
+-----
+
+SuperBASIC includes most of the functions, procedures and constructs found in
+other dialects of BASIC. Many of these functions are superfluous in SuperBASIC
+but are included for compatibility reasons:
+
+    --------------------------------------
+      GOTO          use IF, REPEAT, etc
+      GOSUB         use DEFine PROCedure
+      ON...GOTO     use SELect
+      ON...GOSUB    use SELect
+    --------------------------------------
+
+Some commands appear not to be present. They can always be obtained by using a
+more general function. For example, there are no LPRINT or LLIST statements in
+SuperBASIC but output can be directed to a printer by opening the relevant
+channel and using PRINT or LIST.
+
+    ---------------------------------------------------
+      LPRINT        use PRINT #
+      LLIST         use LIST #
+      VAL           not required in SuperBASIC
+      STR$          not required in SuperBASIC
+      IN            not applicable to 68008 processor
+      OUT           not applicable to 68008 processor
+    ---------------------------------------------------
+
+Almost all forms of BASIC require the VAL(x$) and STR$(x) functions in order to
+be able to convert the internal codified form of the value of a string
+expression to or from the internal codified form of the value of a numeric
+expression.
+
+These functions are redundant in SuperBASIC because of the provision of a unique
+facility referred to as "coercion". The VAL and STR$ functions are therefore not
+provided.
+
+
+BREAK
+-----
+
+If at any time the computer fails to respond or you wish to stop a SuperBASIC
+program or command then
+
+    hold down
+
+    [CTRL]
+
+    and then press
+
+    [SPACE]
+
+    keys
+
+A program broken into in this way can be restarted by using the CONTINUE
+command.
+
+
+CHANNELS
+--------
+
+A channel is a means by which data can be output to or input from a QL device.
+Before a channel can be used it must first be activated (or opened) with the
+OPEN command. Certain channels should always be kept open: these are the default
+channels and allow simple communication with the QL via the keyboard and screen.
+When a channel is no longer in use it can be deactivated (closed) with the CLOSE
+command.
+
+A channel is identified by a channel number. A channel number is a numeric
+expression preceded by a #. When the channel is opened a device is linked to a
+channel number and the channel is initialised. Thereafter the channel is
+identified only by its channel number. For example:
+
+    OPEN #5,SER1
+
+Will link serial port 1 to the channel number 5. When a channel is closed only
+the channel number need be specified. For example:
+
+    CLOSE #5
+
+Opening a channel requires that the device driver for that channel be activated.
+Usually there is more than one way in which the device driver can be activated,
+for example the network requires a station number. This extra information is
+appended to the device name and passed to the OPEN command as a parameter. See
+concepts DEVICE and PERIPHERAL EXPANSION.
+
+Data can be output to a channel by PRINTing to that channel; this is the same
+mechanism by which output appears on the QL screen. PRINT without a parameter
+outputs to the default channel #1. For example:
+
+    10 OPEN #5,mdv1_test_file
+    20 PRINT #5,"this text is in file test_file"
+    30 CLOSE #5
+
+will output the text "this text is in file test_file" to the file test_file. It
+is important to close the file after all the accesses have been completed to
+ensure that all the data is written.
+
+Data can be input from a file in an analogous way using INPUT. Data can be input
+from a channel a character at a time using INKEY$
+
+A channel can be opened as a console channel; output is directed to a specified
+window on the QL screen and input is taken from the QL keyboard. When a console
+channel is opened the size and shape of the initial window is specified. If more
+than one console channel is active then it is possible for more than one channel
+to be requesting input at the same time. In this case, the required channel can
+be selected by pressing CTRL C to cycle round the waiting channels. The cursor
+in the window of the selected channel will flash.
+
+The QL has three default channels which are opened automatically. Each of these
+channels is linked to a window on the QL screen.
+
+    channel 0 - command and error channel
+    channel 1 - output and graphics channel
+    channel 2 - program listing channel
+
++----------+----------+          +---------------------+
+|          |          |          |  +---------------+  |
+|          |          |          |  |               |  |
+|    2     |    1     |          |  |     1 & 2     |  |
+|          |          |          |  |               |  |
+|          |          |          |  |               |  |
++----------+----------+          |  +---------------+  |
+|                     |          |  |               |  |
+|          0          |          |  |       0       |  |
++---------------------+          +--+---------------+--+
+Monitor                          Television
+
+    --------------------------------------------
+    Command    Function
+    --------------------------------------------
+    OPEN       open a channel for I/O
+    CLOSE      close a previously opened channel
+    PRINT      output to a channel
+    INPUT      input from a channel
+    INKEY$     input a character from a channel
+    --------------------------------------------
+
+
+CHARACTER SET AND KEYS
+----------------------
+
+The cursorncontrols are not built in to the operating system: however, if these
+functions are to be provided by applications software, they should use the keys
+specified; also the specified keys should not normally be used for any other
+purpose.
+
+--------------------------------------------------------------------------------
+Decimal   Hex  Keying                  Display/Function
+--------------------------------------------------------------------------------
+
+   0      00   CTRL `                  NULL
+   1      01   CTRL A         
+   2      02   CTRL B         
+   3      03   CTRL C                  Change input channel (see note)
+   4      04   CTRL D         
+   5      05   CTRL E         
+   6      06   CTRL F         
+   7      07   CTRL G         
+   8      08   CTRL H         
+   9      09   TAB (CTRL I)            Next field
+  10      0A   ENTER (CTRL J)          New line / Command entry
+  11      0B   CTRL K         
+  12      0C   CTRL L         
+  13      0D   CTRL M                  Enter
+  14      0E   CTRL N         
+  15      0F   CTRL O         
+  16      10   CTRL P         
+  17      11   CTRL Q         
+  18      12   CTRL R         
+  19      13   CTRL S         
+  20      14   CTRL T         
+  21      15   CTRL U         
+  22      16   CTRL V         
+  23      17   CTRL W         
+  24      18   CTRL X         
+  25      19   CTRL Y         
+  26      1A   CTRL Z         
+  27      1B   ESC (CTRL SHIFT |)      Abort current level of command
+  28      1C   CTRL SHIFT \
+  29      1D   CTRL SHIFT ]
+  30      1E   CTRL SHIFT `
+  31      1F   CTRL SHIFT ESC
+  32      20   SPACE
+  33      21   SHIFT 1                !
+  34      22   SHIFT '                "
+  35      23   SHIFT 3                #
+  36      24   SHIFT 4                $
+  37      25   SHIFT 5                %
+  38      26   SHIFT 7                &
+  39      27   '                      '
+  40      28   SHIFT 9                (
+  41      29   SHIFT 0                )
+  42      2A   SHIFT 8                *
+  43      2B   SHIFT =                +
+  44      2C   ,                      ,
+  45      2D   -                      -
+  46      2E   .                      .
+  47      2F   /                      /
+  48      30   0                      0
+  49      31   1                      1
+  50      32   2                      2
+  51      33   3                      3
+  52      34   4                      4
+  53      35   5                      5
+  54      36   6                      6
+  55      37   7                      7
+  56      38   8                      8
+  57      39   9                      9
+  58      3A   SHIFT ;                :
+  59      3B   ;                      ;
+  60      3C   SHIFT .                  <
+  61      3D   =                      =
+  62      3E   SHIFT ??                 >
+  63      3F   SHIFT /                ?
+  64      40   SHIFT 2                @
+  65      41   SHIFT A                A
+  66      42   SHIFT B                B
+  67      43   SHIFT C                C
+  68      44   SHIFT D                D
+  69      45   SHIFT E                E
+  70      46   SHIFT F                F
+  71      47   SHIFT G                G
+  72      48   SHIFT H                H
+  73      49   SHIFT I                I
+  74      4A   SHIFT J                J
+  75      4B   SHIFT K                K
+  76      4C   SHIFT L                L
+  77      4D   SHIFT M                M
+  78      4E   SHIFT N                N
+  79      4F   SHIFT O                O
+  80      50   SHIFT P                P
+  81      51   SHIFT Q                Q
+  82      52   SHIFT R                R
+  83      53   SHIFT S                S
+  84      54   SHIFT T                T
+  85      55   SHIFT U                U
+  86      56   SHIFT V                V
+  87      57   SHIFT W                W
+  88      58   SHIFT X                X
+  89      59   SHIFT Y                Y
+  90      5A   SHIFT Z                Z
+  91      5B   [                      [
+  92      5C   \                      \
+  93      5D   ]                      ]
+  94      5E   SHIFT 6                ^
+  95      5F   SHIFT -                _
+  96      60   `                      `
+  97      61   A                      a
+  98      62   B                      b
+  99      63   C                      c
+  100     64   D                      d
+  101     65   E                      e
+  102     66   F                      f
+  103     67   G                      g
+  104     68   H                      h
+  105     69   I                      i
+  106     6A   J                      j
+  107     6B   K                      k
+  108     6C   L                      l
+  109     6D   M                      m
+  110     6E   N                      n
+  111     6F   O                      o
+  112     70   P                      p
+  113     71   Q                      q
+  114     72   R                      r
+  115     73   S                      s
+  116     74   T                      t
+  117     75   U                      u
+  118     76   V                      v
+  119     77   W                      w
+  120     78   X                      x
+  121     79   Y                      y
+  122     7A   Z                      z
+  123     7B   SHIFT [                {
+  124     7C   SHIFT \                |
+  125     7D   SHIFT ]                }
+  126     7E   SHIFT `                ~
+  127     7F   SHIFT ESC              
+  128     80   CTRL ESC               €
+  129     81   CTRL SHIFT 1           
+  130     82   CTRL SHIFT '           ‚
+  131     83   CTRL SHIFT 3           ƒ
+  132     84   CTRL SHIFT 4           „
+  133     85   CTRL SHIFT 5           …
+  134     86   CTRL SHIFT 7           †
+  135     87   CTRL '                 ‡
+  136     88   CTRL SHIFT 9           ˆ
+  137     89   CTRL SHIFT 0           ‰
+  138     8A   CTRL SHIFT 8           Š
+  139     8B   CTRL SHIFT =           ‹
+  140     8C   CTRL ,                 Œ
+  141     8D   CTRL _                 
+  142     8E   CTRL .                 Ž
+  143     8F   CTRL /                 
+  144     90   CTRL 0                 
+  145     91   CTRL 1                 ‘
+  146     92   CTRL 2                 ’
+  147     93   CTRL 3                 “
+  148     94   CTRL 4                 ”
+  149     95   CTRL 5                 •
+  150     96   CTRL 6                 –
+  151     97   CTRL 7                 —
+  152     98   CTRL 8                 ˜
+  153     99   CTRL 9                 ™
+  154     9A   CTRL SHIFT ;           š
+  155     9B   CTRL ;                 ›
+  156     9C   CTRL SHIFT ,           œ
+  157     9D   CTRL =                 
+  158     9E   CTRL SHIFT .           ž
+  159     9F   CTRL SHIFT /           Ÿ
+  160     A0   CTRL SHIFT 2            
+  161     A1   CTRL SHIFT A           ¡
+  162     A2   CTRL SHIFT B           ¢
+  163     A3   CTRL SHIFT C           £
+  164     A4   CTRL SHIFT D           ¤
+  165     A5   CTRL SHIFT E           ¥
+  166     A6   CTRL SHIFT F           ¦
+  167     A7   CTRL SHIFT G           §
+  168     A8   CTRL SHIFT H           ¨
+  169     A9   CTRL SHIFT I           ©
+  170     AA   CTRL SHIFT J           ª
+  171     AB   CTRL SHIFT K           «
+  172     AC   CTRL SHIFT L           ¬
+  173     AD   CTRL SHIFT M           ­
+  174     AE   CTRL SHIFT N           ®
+  175     AF   CTRL SHIFT O           ¯
+  176     B0   CTRL SHIFT P           °
+  177     B1   CTRL SHIFT Q           ±
+  178     B2   CTRL SHIFT R           ²
+  179     B3   CTRL SHIFT S           ³
+  180     B4   CTRL SHIFT T           ´
+  181     B5   CTRL SHIFT U           µ
+  182     B6   CTRL SHIFT V           ¶
+  183     B7   CTRL SHIFT W           ·
+  184     B8   CTRL SHIFT X           ¸
+  185     B9   CTRL SHIFT Y           ¹
+  186     BA   CTRL SHIFT Z           º
+  187     BB   CTRL [                 »
+  188     BC   CTRL \                 ¼
+  189     BD   CTRL ]                 ½
+  190     BE   CTRL SHIFT 6           ¾
+  191     BF   CTRL SHIFT _           ¿
+  192     C0   Left                   Cursor left one character
+  193     C1   ALT Left               Cursor to start of line
+  194     C2   CTRL Left              Delete left one character
+  195     C3   CTRL ALT Left          Delete line
+  196     C4   SHIFT Left             Cursor left one word
+  197     C5   SHIFT ALT Left         Pan left
+  198     C6   SHIFT CTRL Left        Delete left one word
+  199     C7   SHIFT CTRL ALT Left
+  200     C8   Right                  Cursor right one character
+  201     C9   ALT Right              Cursor to end of line
+  202     CA   CTRL Right             Delete character under cursor
+  203     CB   CTRL ALT Right         Delete to end of line
+  204     CC   SHIFT Right            Cursor right one word
+  205     CD   SHIFT ALT Right        Pan right
+  206     CE   SHIFT CTRL Right       Delete word under & right of cursor
+  207     CF   SHIFT CTRL ALT Right
+  208     D0   Up                     Cursor right
+  209     D1   ALT Up                 Scroll up
+  210     D2   CTRL Up                Search backward
+  211     D3   ALT CTRL Up
+  212     D4   SHIFT Up               Top of screen
+  213     D5   SHIFT ALT Up
+  214     D6   SHIFT CTRL Up
+  215     D7   SHIFT CTRL ALT Up
+  216     D8   Down                   Cursor down
+  217     D9   ALT Down               Scroll down
+  218     DA   CTRL Down              Search forwards
+  219     DB   ALT CTRL Down
+  220     DC   SHIFT Down             Bottom of screen
+  221     DD   SHIFT ALT Down
+  222     DE   SHIFT CTRL Down
+  223     DF   SHIFT CTRL ALT Down
+  224     E0   CAPS LOCK              Toggle CAPS LOCK function
+  225     E1   ALT CAPS LOCK
+  226     E2   CTRL CAPS LOCK
+  227     E3   ALT CTRL CAPS LOCK
+  228     E4   SHIFT CAPS LOCK
+  229     E5   SHIFT ALT CAPS LOCK
+  230     E6   SHIFT CTRL CAPS LOCK
+  231     E7   SHIFT CTRL ALT CAPS LOCK
+  232     E8   F1
+  233     E9   CTRL F1
+  234     EA   SHIFT F1
+  235     EB   CTRL SHIFT F1
+  236     EC   F2
+  237     ED   CTRL F2
+  238     EE   SHIFT F2
+  239     EF   CTRL SHIFT F2
+  240     F0   F3
+  241     F1   CTRL F3
+  242     F2   SHIFT F3
+  243     F3   CTRL SHIFT F3
+  244     F4   F4
+  245     F5   CTRL F4
+  246     F6   SHIFT F4
+  247     F7   CTRL SHIFT F4
+  248     F8   F5
+  249     F9   CTRL F5
+  250     FA   SHIFT F5
+  251     FB   CTRL SHIFT F5
+  252     FC   SHIFT space            "Special" space
+  253     FD   SHIFT TAB              Back tab (CTRL ignored)
+  254     FE   SHIFT ENTER            "Special" newline (CTRL ignored)
+  255     FF   See below
+--------------------------------------------------------------------------------
+
+Codes up to 20 hex are either control characters or non-printing characters.
+Alternative keyings are shown in brackets after the main keying.
+
+Note that CTRL-C is trapped by Qdos and cannot be detected without changes to
+the system variables.
+
+Note that codes C0-DF are cursor control commands.
+
+The ALT key depressed with any key combination other than cursor keys or CAPS
+LOCK generates the code FF, followed by a byte indicating what the keycode would
+have been if ALT had not been depressed.
+
+Note that CAPS LOCK and CTRL-F5 are trapped by Qdos and cannot be detected
+without special software.
+
+
+CLOCK
+-----
+
+The QL contains a real time clock which runs when the computer is switched on.
+
+The format used for the date and time is standard ISO format.
+
+    1983 JAN 01 12:09:10
+
+Individual year, month, day and time can all be obtained by assigning the string
+returned by DATE to a string variable and slicing it. The clock will run from
+1961 JAN 01 00:00:00
+
+For a description of the format, see BS5249: Part 1: 1976 and as modified in
+Appendix D.2.1 Table 5 Serial 5 and Appendix E.2 Table 6 Serials 1 and 2.
+
+-------------------------------------
+Command   Function
+-------------------------------------
+SDATE     set the clock
+ADATE     adjust the clock
+DATE      return the date as a number
+DATE$     return the date as a string
+DAY$      return day of the week
+-------------------------------------
+
+
+COERCION
+--------
+If necessary SuperBASIC will convert the type of unsuitable data to a type which
+will allow the specified operation to proceed.
+
+The operators used determine the conversion required. For example, if an
+operation requires a string parameter and a numeric parameter is supplied then
+SuperBASIC will first convert the parameter to type string. It is not always
+possible to convert data to the required form and if the data cannot be
+converted an error is reported.
+
+The type of a function or procedure parameter can also be converted to the
+correct type. For example, the SuperBASIC LOAD command requires a parameter of
+type NAME but can accept a parameter of type STRING and which will be converted
+to the correct type by the procedure itself. Coercion of this form is always
+dependent on the way the function or procedure was implemented.
+
+There is a natural ordering of data types on the QL, see figure below. String is
+the most general type since it can represent integer data (almost exactly). The
+figure below shows the ordering diagramatically. Data can always be converted
+moving up the diagram but it is not always possible moving down.
+
++------------------------------------------------------------------------------+
+|                                                                              |
+|     not always                    string                             ^       |
+|      possible                       /\                               |       |
+|         |                          /  \                              |       |
+|         |                         /    \                             |       |
+|         |                        /      \                            |       |
+|         |                       /       name                         |       |
+|         |                      /                                     |       |
+|         |             floating point                                 |       |
+|         |                    |                                       |       |
+|         |                    |                                       |       |
+|         |                    |                               always possible |
+|         |                 integer                                            |
+|         v                                                                    |
+|                                                                              |
++------------------------------------------------------------------------------+
+
+EXAMPLE
+
+a = b + c         (no conversion is necessary before performing the addition.
+                  Conversion is not necessary before assigning the result to a)
+
+a% = b + c        (no conversion is necessary before performing the addition but
+                  the result is converted to integer before assigning)
+
+a$ = b$ + c$      (b$ and c$ are converted to floating point,if possible,before
+                  being added together. The result is converted to string before
+                  assigning)
+
+LOAD "mdv1_data"  (the string "mdv1_data" is converted to type name by the LOAD
+                  procedure before it is used)
+
+Statements can be written in SuperBASIC which would generate errors in most
+other computer languages. In general, it is possible to mix data types in a very
+flexible manner:
+
+    i.      PRINT "1" + 2 + "3"
+    ii.     LET a$ = 1 + 2 + a$ + "4"
+
+
+COLOUR
+------
+
+Colours on the QL can be either a SOLID colour or a STIPPLE - a mixture of two
+colours to some predefined pattern. Colour specification on the QL can be up to
+three items: a colour, a contrast colour and a stipple pattern.
+
+i.      Single:
+        The single argument specifies the three parts of the colour
+        specification. The main colour is contained in the bottom three bits
+        of the colour byte. The next three bits contain the exclusive or (XOR)
+        of the main colour and the contrast colour. The top two bits indicate
+        the stipple pattern.
+
+                +----------------------- stipple
+                |
+                |          +------------ contrast XOR main (mix)
+                |          |
+                |          |          +- colour
+                |          |          |
+           +--------+------------+------------+
+           |::::::::|XXXXXXXXXXXX|************|
+           |::::::::|XXXXXXXXXXXX|************|
+           |::::::::|XXXXXXXXXXXX|************|
+           +--------+------------+------------+
+        bit   7   6    5   4   3    2   1   0
+
+        By specifying only the bottom three bits (i.e. the required colour) no
+        stipple will be requested and a single solid colour will be used for
+        display.
+
+ii.     Double
+        colour: = background, contrast
+
+        The colour is a stipple of the two specified colours. The default
+        checkerboard stipple is assumed (stipple 3)
+
+iii.    Triple
+        colour: = background, contrast, stipple
+
+        Background and contrast colours and stipple are each defined separately.
+
+COLOURS
+
+The codes for colour selection depend on the screen mode in use:
+
+----------------------------------------------------------------------------
+code    bit pattern     composition                     colour
+----------------------------------------------------------------------------
+                                                        8 colour  4 colour
+                                                      ----------------------
+0       0 0 0                                           black     black
+1       0 0 1                         blue              blue      black
+2       0 1 0                   red                     red       red
+3       0 1 1                   red + blue              magenta   red
+4       1 0 0           green                           green     green
+5       1 0 1           green +       blue              cyan      green
+6       1 1 0           green + red                     yellow    white
+7       1 1 1           green + red + blue              white     white
+----------------------------------------------------------------------------
+Colour Composition and Codes
+
+
+STIPPLES
+
+Stipples mix a background and a contrast colour in a fine stipple pattern.
+Stipples can be used on the QL in the same manner as ordinary solid colours
+although stipples may not be reproduced correctly on an ordinary domestic
+television. There are four stipple patterns:
+
+        XO             XX             OX             OX
+        XX             OO             OX             XO
+        Stipple 0      Stipple 1      Stipple 2      Stipple 3
+
+Stipple 3 is the default.
+
+example:        i.   PAPER 255 : CLS
+                ii.  PAPER 2,4 : CLS
+                iii. PAPER 0,2,0 : CLS
+
+warning:        Stipples may not reproduce correctly on a domestic television
+                set which is fed via the UHF socket.
+
+
+COMMUNICATIONS RS-232-C
+-----------------------
+
+The QL has two serial ports (called SER1 and SER2) for connecting it to
+equipment which uses serial communications obeying EIA standard RS-232-C or a
+compatible standard.
+
+The RS-232-C 'standard' was originally designed to enable computers to send and
+receive data via telephone lines using a modem. However, it is now frequently
+used to connect computers directly with each other and to various items of
+peripheral equipment, e.g. printers, plotters, etc.
+
+As the RS-232-C 'standard' manifests itself in many different forms on different
+pieces of equipment, it can be an extremely difficult job, even for an expert to
+connect together for the first time two pieces of supposedly standard RS-232-C
+equipment. This section will attempt to cover most of the basic problems that
+you may encounter.
+
+The RS-232-C 'standard' refers to two types of equipment:
+
+    1. Data Terminal Equipment (DTE)
+    2. Data Communication Equipment (DCE)
+
+The standard envisaged that the terminal (usually the DTE) and the modem
+(usually the DCE) would both have the same type of connector.
+
++---------+                             +---------+
+|         |                             |         |
+|         |                             |         |
+|       2 | ---- TxD (output) --------> | 2       |
+|         |                             |         |
+|         |                             |         |
+|       3 | <--- RxD (input) ---------- | 3       |
+|         |                             |         |
+|         |                             |         |
+|       7 | <--- GND (ground) --------> | 7       |
+|         |                             |         |
+|   DTE   |                             |   DCE   |
++---------+                             +---------+
+
+The diagram above illustrates how the DTE transmits data on pin 2 whilst the DCE
+must receive data on its pin 2 (which is still called transmit data!). Likewise,
+the DTE receives data on pin 3 whilst the DCE must transmit data on its pin 3
+(which is still called receive data!). Although this is confusing in itself, it
+can lead to far greater problems when there is disagreement as to whether a
+certain device should be configured as DCE or DTE.
+
+Unfortunately, some people decide that their computers should be configured as
+DCE devices whilst others configure equivalent computers as DTE devices. This
+obviously leads to difficulties in the configuration of the serial ports on each
+piece of equipment.
+
+SER1 on the QL is configured as DCE, while SER2 is configurd as DTE. Therefore,
+it should be possible to connect at least one of the serial ports to a given
+device simply by using whichever port is wired the 'correct' way. The pin-out
+for the serial ports is given below. A cable for connecting the QL to a standard
+25-way 'D' type connector is available from Sinclair Research Limited.
+
+----------------------------------     ---------------------------------
+              SER1                                    SER2
+----------------------------------     ---------------------------------
+  pin      name    function              pin     name    function
+----------------------------------     ---------------------------------
+   1       GND     signal ground          1      GND     signal ground
+   2       TxD     input                  2      TxD     output
+   3       RxD     output                 3      RxD     input
+   4       DTR     ready input            4      DTR     ready output
+   5       CTS     ready output           5      CTS     ready input
+   6               +12V                   6               +12V
+----------------------------------     ---------------------------------
+TxD  Transmit Data                     DTR  Data Terminal Ready
+RxD  Receive Data                      CTS  Clear To Send
+
+Once the equipment has been connected to the 'correct' port, the baud rate (the
+speed of transmission of data) must be set so that the baud rates for both the
+QL and the connected equipment are the same. The QL can be set to operate at:
+
+       75
+      300
+      600
+     1200
+     2400
+     4800
+     9600
+    19200 (transmit only) baud
+
+The QL baud rate is set by the BAUD command and is set for both channels. The
+baud rates cannot be set independently.
+
+The parity to be used by the QL must also be set to match that expected by the
+peripheral equipment. Parity is usually used to detect simple transmission
+errors and may be set to be even, odd, mark, space or no parity, i.e. all 8 bits
+of the byte are used for data.
+
+Stop bits mark the end of transmission of a byte or character. The QL will
+receive data with one, one and a half, or two stop bits, and will always
+transmit data with at least two stop bits. Note that if the QL is set up to 9600
+baud it will not receive data with only one stop bit: at least one and a half
+stop bits are required.
+
+The may be necessary to connect the handshake lines between the QL and a piece
+of equipment connected to it. This allows the QL and its peripheral to monitor
+and control their rate of communication. They may need to do this if one of them
+cannot cope with the speed at which data is being transmitted. The QL uses two
+handshaking lines:
+
+    CTS    Clear to Send
+    DTR    Data Terminal Ready
+
+If DTE cannot cope with the rate of transmission of data then it can negate the
+DTR line which tells the DCE to stop sending data. Obviously, when the DTE has
+caught up it tells the DCE, via the DTR line, to start transmitting again. In
+the same way, the DCE can stop the DTE sending data by negating the CTS line. If
+additional control signals are required they can be wired up using the 12V
+supply available on both serial ports.
+
+ALTHOUGH TRANSMISSION FROMT HE QL IS OFTEN POSSIBLE WITHOUT ANY HANDSHAKING AT
+ALL, THE QL WILL NOT RECEIVE CORRECTLY UNDER ANY CIRCUMSTANCES WITHOUT THE USE
+OF CTS ON SER1 AND DTR ON SER2.
+
+Communications on the QL are 'full duplex', that is both receive and transmit
+can operate concurrently.
+
+The parity and handshaking are selected when the serial channel is opened.
+
+    ------------------------------------------------
+        command          function
+    ------------------------------------------------
+        BAUD             set transmission speed
+        OPEN             open serial channels  *
+        CLOSE            close serial channels
+    ------------------------------------------------
+    *  see concept 'DEVICE' for a full specification
+
+
+DATA TYPES - VARIABLES
+----------------------
+
+INTEGER
+
+Integers are whole numbers in the range -32768 to +32767. Variables are assumed
+to be integer if the variable identifier is suffixed with a percent %. There
+are no integer constants in SuperBASIC, so all constants are stored as floating
+point numbers.
+
+syntax:    identifier%
+
+example:   i.    counter%
+           ii.   size_limit%
+           iii.  this_is_an_integer_variable%
+
+FLOATING POINT
+
+Floating point numbers are in the range +/- (10^-615 to 10^615), with 8
+signiflcant digits. Floating point is the default data type in SuperBASIC.
+All constants are held in floating point form and can be entered
+using exponent notation.
+
+syntax:    identifier | constant
+
+example:   i.    current  accumuLation
+           ii.   76.2356
+           iii.  354E25
+
+STRING
+
+A string is a sequence of characters up to 32766 characters long. Variables
+are assumed to be type string if the variable name is suffixed by a $.
+String data is represented by enclosing the required characters in either
+single or double quotation marks.
+
+syntax:    identifier$ | "text"
+
+example:   i.    string_variables$
+           ii.   "this is string data"
+           iii.  "this is another string"
+
+Type name has the same form as a standard SuperBASIC identifier and is used by
+the name system to name Microdrive files etc.
+
+syntax:    identifier
+
+example:   i.    mdv1_data_file
+           ii.   ser1e
+
+
+DEVICES
+-------
+
+A device is a piece of equipment on the QL to which data can be sent (input)
+and from which data can be output.
+
+Since the system makes no assumptions about the ultimate I/O (input/output)
+device which will be used, the I/O device can be easily changed and the
+data diverted between devices. For example, a program may have to output
+to a printer at some point during its run. If the printer is not available
+then the output can be diverted to a Microdrive file and stored.
+The file can then be printed at a later date. I/O on the QL can be thought of as being written to and read from a logical file which is in
+a standard device-independent form.
+
+All device specific operations are performed by individual device drivers
+specially written for each device on the QL. The system can automatically
+find and include drivers for peripheral devices which are fitted. These
+should be written in the standard QL device driver format; see the
+concept 'peripheral expansion'.
+
+When a device is activated a channel is opened and linked to the device.
+To correctly open a channel device basic information must sometimes be
+supplied. This extra information is appended to the device name.
+
+The file name should conform to the rules for a SuperBASIC type name though
+it is also possible to build up the file name (device name) as a SuperBASIC
+string expression.
+
+In summary the general form of a file name is:
+
+    identifier [information]
+
+where the complete file name (including the extra information) conforms to
+the rules for a SuperBASIC identifier.
+
+Each logical device on the system requires its own particular 'extra
+information' although default parameters will be assumed in each case
+where possible.
+
+DEFINE    device: = name
+
+where the form of the device name is outlined below.
+
+EXAMPLE for console device
+
+  -------------- Select Console Device
+ |
+ |  ------------ Underscore
+ | |
+ | | ----------- Window Width
+ | ||
+ | || ---------- Separator
+ | |||
+ | ||| --------- Height
+ | ||||
+ | |||| -------- Separator - read as AT
+ | |||||
+ | ||||| ------- Window X coordinate
+ | ||||||
+ | |||||| ------ Separator
+ | |||||||
+ | ||||||| ----- Window Y coordinate
+ | ||||||||
+ | |||||||| ---- Separator
+ | |||||||||
+ | ||||||||| --- length of keyboard type ahead buffer
+ | ||||||||||
+ | ||||||||||
+con_wXhaxXy_k
+
+CON wXhaxXy_k    Console I/O
+                 |wXh|    - window, wldth, height
+                 |AxXy|   - wIndow X,Y coordinate of upper left-hand corner
+                 |k|      - keyboard type ahead buffer length (bytes)
+
+                 default:     con_448x180a32x16_128
+
+                 example:     OPEN #4,con_20x50a0x0_32
+                              OPEN #8,con_20x50
+                              OPEN #7,con_20x50a10x10
+
+SCR_wXhaxXy      Screen Output
+                 [wXh] - window, width, height
+                 [AxXy] - window X, Y coordinate
+                 default:    scr_448x180a32x16
+
+xample:          PEN #4, scr _0x10a20x50
+                 OPEN #5, scr_10x10
+
+SERnphz          Serial (RS-232-C)
+                 n port number (1 or 2)
+                 [p] parity        [h] handshaking     [z] protocol
+                 e - even          i - ignore          r - raw data no EOF
+                 o - odd           h - handshake       z - control Z is EOF
+                 m - mark                              c - as z but converts
+                 s - space                                 ASCII 10 (Qdos
+                                                           newline character)
+                                                           to ASCII 13
+                                                           <CR>)
+                 default:    ser1rh (8 bit no parity with handshake)
+                 example:    OPEN #3, serle
+                             OPEN #4, serc
+                             COPY mdv1_test_file TO ser1c
+
+NETd_s           Serial Network I/O
+                 [d] indicates direction    [s] station number
+                     i - input                  0 - for broadcast
+                     o - output                 own station - for general listen
+                                                              (input only)
+
+                 default:    no default
+                 example:    OPEN #7, neti_32
+                             OPEN #4, neto_0
+                             COPY ser1 TO neto_21
+
+MDVn_name        Microdrive File Access
+
+                 n    - Microdrive number
+                 name - Microdrive file name
+
+                 default:    no default
+                 example:    OPEN #9, mdv1_data_file
+                             OPEN #9, mdv1_test_program
+                             COPY mdv1_test_file TO scr_
+
+---------------------------------------------------------
+Keyword    Function
+---------------------------------------------------------
+OPEN       initialise a device and activate it for use
+
+CLOSE      deactivate a device
+
+COPY       copy data between devices
+COPY_N     copy data between devices, but do
+           not copy a file's header information
+
+EOF        test for end of file
+
+WIDTH      set width
+---------------------------------------------------------
+
+
+DIRECT COMMAND
+--------------
+
+SuperBASIC makes a distinction between a statement typed in preceded by a
+line number and a statement typed in without a line nurnber. Without a
+line number the statement is a direct command and is processed immediately
+by the SuperBASIC command interpreter. For example, RUN is typed in on the
+command line and is processed, the effect being that the program starts
+to run. If a statement is typed in with a line number then the syntax of
+the line is checked and any detectable syntax errors reported. A correct
+line is entered into the SuperBASIC program and stored. These statements
+constitute a SuperBASIC program and will only be executed when the
+program is started with the RUN or GOTO command.
+
+Not alI SuperBASIC statements make sense when entered as a direct command, for
+example, END FOR, END DEFine, etc

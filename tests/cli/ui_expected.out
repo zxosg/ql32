@@ -1,0 +1,18 @@
+
+Profile
+Edit the profile
+Name [Ada]: Age [36]: Score [1.5]: Color
+  1) Red
+  2) Green [current]
+  3) Blue
+Select [2]: Active [Y/n]: Apply / Cancel [Apply]: Name: Grace
+Age: 42
+Score: 2.75
+Color option: 3
+Active: 0
+
+Main menu
+  1) Open [O]
+  2) Save [S]
+  3) Exit [X]
+Select item or shortcut (Enter cancels): Selected command: 90

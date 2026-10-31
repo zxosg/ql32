@@ -6,6 +6,12 @@ option(QL32_BUILD_TESTS "Build QL/32 host tests" ON)
 
 add_library(ql32_core
   src/language/interpreter.cpp
+  src/platform/linux/directory_channels.cpp
+  src/platform/linux/directory_storage.cpp
+  src/platform/linux/console_ui.cpp
+  src/platform/linux/system_clock.cpp
+  src/platform/linux/svg_graphics.cpp
+  src/runtime/ui_service.cpp
   src/vm/interpreter.cpp
 )
 target_include_directories(ql32_core PUBLIC include)
@@ -54,9 +60,49 @@ if(QL32_BUILD_TESTS)
   add_cli_conformance_test(cli_abbreviations 0)
   add_cli_conformance_test(cli_array_by_reference 0)
   add_cli_conformance_test(cli_select_edges 0)
+  add_test(
+    NAME cli_ui_dialog_menu
+    COMMAND ${CMAKE_COMMAND}
+      -DQL32_EXECUTABLE=$<TARGET_FILE:ql32>
+      -DSOURCE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/examples/ui.bas
+      -DINPUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/cli/ui_input.txt
+      -DEXPECTED_STDOUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/cli/ui_expected.out
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_ui_test.cmake
+  )
   add_executable(ql32_runtime_tests tests/runtime_tests.cpp)
   target_link_libraries(ql32_runtime_tests PRIVATE ql32_core)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
+  add_executable(ql32_storage_tests tests/storage_tests.cpp)
+  target_link_libraries(ql32_storage_tests PRIVATE ql32_core)
+  add_test(NAME ql32_storage_tests COMMAND ql32_storage_tests)
+  add_executable(ql32_channel_tests tests/channel_tests.cpp)
+  target_link_libraries(ql32_channel_tests PRIVATE ql32_core)
+  add_test(NAME ql32_channel_tests COMMAND ql32_channel_tests)
+  add_executable(ql32_ui_service_tests tests/ui_service_tests.cpp)
+  target_link_libraries(ql32_ui_service_tests PRIVATE ql32_core)
+  add_test(NAME ql32_ui_service_tests COMMAND ql32_ui_service_tests)
+  add_executable(ql32_graphics_tests tests/graphics_tests.cpp)
+  target_link_libraries(ql32_graphics_tests PRIVATE ql32_core)
+  add_test(NAME ql32_graphics_tests COMMAND ql32_graphics_tests)
+  add_executable(ql32_capabilities_tests tests/capabilities_tests.cpp)
+  target_link_libraries(ql32_capabilities_tests PRIVATE ql32_core)
+  add_test(NAME ql32_capabilities_tests COMMAND ql32_capabilities_tests)
+  add_executable(ql32_clock_service_tests tests/clock_service_tests.cpp)
+  target_link_libraries(ql32_clock_service_tests PRIVATE ql32_core)
+  add_test(NAME ql32_clock_service_tests COMMAND ql32_clock_service_tests)
+  add_executable(ql32_lilygo_vga32_profile_tests tests/lilygo_vga32_profile_tests.cpp)
+  target_include_directories(ql32_lilygo_vga32_profile_tests PRIVATE boards/lilygo_vga32 include)
+  add_test(NAME ql32_lilygo_vga32_profile_tests COMMAND ql32_lilygo_vga32_profile_tests)
+  add_executable(ql32_linux_graphics_tests tests/linux_graphics_tests.cpp)
+  target_link_libraries(ql32_linux_graphics_tests PRIVATE ql32_core)
+  add_test(NAME ql32_linux_graphics_tests COMMAND ql32_linux_graphics_tests)
+  add_executable(ql32_fabgl_graphics_tests
+    tests/fabgl_graphics_tests.cpp
+    src/platform/fabgl_vga/graphics.cpp
+  )
+  target_include_directories(ql32_fabgl_graphics_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_fabgl_graphics_tests PRIVATE cxx_std_20)
+  add_test(NAME ql32_fabgl_graphics_tests COMMAND ql32_fabgl_graphics_tests)
   add_cli_conformance_test(cli_mixed_type_error 1)
   add_cli_conformance_test(cli_div_overflow 1)
   add_cli_conformance_test(cli_invalid_power 1)

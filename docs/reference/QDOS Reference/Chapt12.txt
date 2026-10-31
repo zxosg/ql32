@@ -1,0 +1,909 @@
+CHAPTER 12
+
+SCREEN OUTPUT
+
+
+SuperBASIC has so extended the scope and variety of facilities for screen
+presentation that we describe the features in two sections: "Simple
+Printing" and "Screen".
+
+The first section describes the output of ordinary text. Here we explain
+the minimal well established methods of displaying messages, text, or
+numerical output. Even in this mundane section there is innovation in the
+concept of the 'intelligent' space an example of combining ease of use with
+very useful effects.
+
+The second section is much bigger because it has a great deal to say. The
+wide range of features actually makes things easier For example, you can
+draw a circle by simply writing the word CIRCLE followed by a few details
+to define such things as its position and size. Many other systems require
+you to understand some geometry and trigonometry in order to do what is, in
+concept, simple.
+
+Each keyword has been carefully chosen to relect the effect it causes.
+WINDOW defines an area of the screen: BORDER puts a border round it; PAPER
+defines the background colour; INK determines the colour of what you put on
+the paper.
+
+If you work through this chapter and get a little practice you will easily
+remember which keyword causes which effect. You will add that extra quality
+to your programming fairly easily. With experience you may see why computer
+graphics is becoming a new art form.
+
+
+SIMPLE PRINTING
+
+The keyword PRINT can be followed by a sequence of print items. A print
+item may be any of:
+
+    text such as        :  "This is text"
+    variables such as   :  num, word$
+    expressions such as :  3 * num, day$ & week$
+
+Print items may be mixed in any print statement but there must be one or
+more print separators between each pair. Print separators may be any of:
+
+;    No effect - it just separates print items.
+
+!    Normally inserts a space between output items. If an item will
+     not fit on the current line it behaves as a new line symbol.
+     If the item is at the start of line a space is not generated.
+
+,    A tabulator causes the output to be tabulated in columns of 8
+     characters
+
+\    A new line symbol will force a new line.
+
+TO   Allows tabbing.
+
+
+The numbers 1,2,3 are legitimate print items and are convenient for
+illustrating the effects of print separators
+
+------------------------------------------------------------
+    Statement                     Effect
+------------------------------------------------------------
+    100 PRINT 1, 2, 3             1        2        3
+    100 print 1 ! 2 ! 3 !         1 2 3
+
+    100 PRINT 1 \ 2 \ 3           1
+                                  2
+                                  3
+
+    100 PRINT 1;2;3               123
+
+    100 PRINT "This is text"      This is text
+
+    100 LET word$ = " "           moves print position
+    110 PRINT word$
+
+    100 LET num = 13              13
+    110 PRINT num
+
+    100 LET an$ = "yes"
+    110 PRINT "I say" ! an$       I say yes
+
+    110 PRINT "Sum is" ! 4 + 2    Sum is 6
+------------------------------------------------------------
+
+
+You can position print output anywhere on the screen with the AT command.
+
+For example:
+
+    AT 10,15 : PRINT "This is on row 10 at column 15"
+
+The CURSOR command can be used to position the print output anywhere on the
+screen's scale system. For example:
+
+    CURSOR 100,150 : PRINT "this is 100 pixel grid units across and
+                     150 down"
+
+If you read the Keyword Reference Guide you may find it difficult to
+reconcile the section on PRINT with the above description. Two of the
+difficulties disappear if you understand that:
+
+    Text in quotes, variables and numbers are all strictly
+    speaking, expressions: they are the simplest (degenerate)
+    forms of expressions.
+
+    Print separators are strictly classified as print items.
+
+
+SCREEN
+
+This section introduces general effects which apply whether you wish to
+output text or graphics. The statement:
+
+    MODE 8 or MODE 256
+
+will select MODE 8 in which there are:
+
+    256 pixels across numbered 0 511 (two numbers per pixel)
+    256 pixels down numbered 0-255
+    8 colours
+
+A pixel is the smallest area of colour which can be displayed. We use the
+term, "solid colour" because these start with ordinary solid-looking
+colours of which there are only eight. However, by using various effects a
+variety of shades and textures can be achieved. If you are using your QL
+with an ordinary television set then the television set will not  be able
+to reproduce any of these extra effects.
+
+The statement:
+
+    MODE 4 or MODE 512
+
+will select MODE 4 in which there are:
+
+    512 pixels across numbered 0 to 511
+    256 pixels down numbered 0 to 255
+    4 colours
+
+
+COLOUR
+
+You can select a colour by using the following code in combination with
+suitable keywords such as PAPER, INK etc. Note that the numbers by
+themselves mean nothing. The numbers are only interpreted as colours when
+they are used with PAPER and INK, etc.
+
+--------------------------------------------
+    8 Colour Mode    Code    4 Colour Mode
+--------------------------------------------
+        black         0          black
+        blue          1          black
+        red           2          red
+        magenta       3          red
+        green         4          green
+        cyan          5          green
+        yellow        6          white
+        white         7          white
+--------------------------------------------
+                                Colour Codes
+
+For example INK 3 would give magenta in MODE 8.
+
+
+STIPPLES
+
+You can if you wish specify two colours in a suitable statement. For
+example 2,4 would give a chequerboard stipple as shown. In each group of
+four pixels two would be red (code 2) corresponding to the colour selected
+first. The other two pixels would be a contrast It is not really possible
+to display this effect on a domestic television set.
+
+           +----+----+
+           |CCCC|RRRR|
+           |CCCC|RRRR|
+           |CCCC|RRRR|
+           +----+----+
+           |RRRR|CCCC|
+    red--> |RRRR|CCCC| <--contrast
+           |RRRR|CCCC|
+           +----+----+
+
+If you write:
+
+    INK 2,4
+
+the mix colour is formed from the two codes 2 and 4. We will call these
+choices colour and contrast!
+
+    INK colour, contrast
+
+You can find out what the stipple effects are by trying them but we give
+more technical details below.
+
+    100 REMark Colour/Contrast
+    110 FOR colour = 0 TO 7 STEP 2
+    120   PAPER colour : CLS
+    140   FOR contrast = 0 TO 7 STEP 2
+    150     BLOCK 100,50,40,50,colour,contrast
+    160     PAUSE 50
+    170   END FOR contrast
+    180 END FOR colour
+
+If you wish to try different stipples you can add a third code number to
+the colour specification. For example:
+
+    INK 2,4,1
+
+would specify a red and green horizontal stripe effect. A block of four
+pixels would be:
+
+
+           +----+----+
+           |RRRR|RRRR|
+           |RRRR|RRRR|
+           |RRRR|RRRR|
+           +----+----+
+           |CCCC|CCCC|
+           |CCCC|CCCC|
+           |CCCC|CCCC|
+           +----+----+
+
+The possible effects are shown using red [R] and contrast [C]
+
+
+------------------------------------------------------------
+    Code      Name                               Effect
+------------------------------------------------------------
+
+    0         Single pixel of contrast           RC
+                                                 RR
+
+    1         Horizontal Stripes                 RR
+                                                 CC
+
+    2         Vertical Stripes                   CR
+                                                 CR
+
+    3         Chequerboard                       CC
+                                                 RC
+------------------------------------------------------------
+                                            Stipple Patterns
+
+
+
+COLOUR PARAMETERS
+
+You can specify a colour/stipple effect as described above by using three
+numbers. For example:
+
+    INK colour, contrast, stipple
+
+could be used with :
+
+    colour in range 0 to 7
+    contrast in range 0 to 7
+    stipple in range 0 to 3
+
+You could achieve the same effect with a single number if you wish though
+it is not so easy to construct. See the Concept Reference Guide - colour.
+
+The following program will display all the possible colour effects:
+
+    100 REMark Colour Effects
+    110 FOR num = 0 TO 255
+    120   BLOCK 100,50,40,50,num
+    130   PAUSE 50
+    140 END FOR num
+
+
+PAPER
+
+PAPER followed by one, two or three numbers specifies the background. For
+example:
+
+    PAPER 2        {red]
+    PAPER 2,4      {red/green chequerboard}
+    PAPER 2,4,1    {red/green horizontal stripes}
+
+The colour will not be visible until something else is done, for example,
+the screen is cleared by typing CLS.
+
+
+INK
+
+INK followed by one, two or three numbers specifies the colour for printing
+characters, lines or other graphics. The colour and stipple effects are the
+same as for PAPER. For example:
+
+    INK 2          {red ink}
+    INK 2,4        {red/green chequerboard ink 3}
+    INK 2,4,1      {red/green horizontal striped ink}
+
+The ink will be changed for all subsequent output.
+
+
+CLS
+
+CLS means clear the window to the current paper colour - like a teacher
+cleaning a blackboard, except that it is electronic and multi-coloured.
+
+
+FLASHING
+
+You can make the ink colour flash in mode 8 only. To turn flash on you
+might type:
+
+    FLASH 1
+
+and to turn it off:
+
+    FLASH 0
+
+Allowing flashing characters to overlap can produce alarming results.
+
+
+FILES
+
+You will have used Microdrives for storing programs and you will have used
+the commands LOAD and SAVE. Cartridges can be used for storing data as well
+as programs. The word file usually means a sequence of data records, a
+record being some set of related information such as name, address and
+telephone number.
+
+Two of the most widely used types of file are serial and direct access
+files. Items in a serial file are usually read in sequence starting with
+the first. If you want the fiftieth record you have to read the first
+forty-nine in order to find it. On the other hand the fiftieth record in a
+direct access file can be found quickly because the system does not need to
+work through the earlier records to get it. Pop music on a cassette is like
+a serial file but eight pieces on a long playing record form a direct
+access file. You can move the pick up arm directly onto any of the eight
+tracks.
+
+The simplest possible type of file is just a sequence of numbers. To
+illustrate the idea we will place the numbers 1 to 100 in a file called
+numbers. However the complete file name is made up of two parts:
+
+    device name
+    appended information
+
+Suppose that we wish to create the file, "numbers", on a cartridge in
+Microdrive 1. The device name is:
+
+    mdv1_
+
+and the appended information is just the name of the file:
+
+    numbers
+
+So the complete file name is:
+
+    mdv1_numbers
+
+
+CHANNELS
+
+It is possible for a program to use several files at once, but it is more
+convenient to refer to a file by an associated channel number This can be
+any integer in the range 0 to 15. A file is associated with a channel
+number by using the OPEN statement or, if it is a new file, OPEN NEW. For
+example you may choose channel 7 for the numbers file and write:
+
+    OPEN_NEW #7,mdv1_numbers
+       ^     ^   ^      ^
+       |     |   |      |
+       |     |   |      +---- file
+       |     |   |
+       |     |   +----------- device
+       |     |
+       |     +--------------- channel number
+       |
+       +--------------------- keyword
+
+You can now refer to the file just by quoting the number #7. The complete
+program is:
+
+    100 REMark Simple file
+    110 OPEN NEW #7,mdv1_numbers
+    120 FOR number = 1 to 100
+    130   PRINT #7,number
+    140 END FOR number
+    150 CLOSE #7
+
+The PRINT statement causes the numbers to be 'printed' on the cartridge
+file because #7 has been associated with it. The CLOSE #7 statement is
+necessary because the system has some internal work to do when the file has
+been used. It also releases channel 7 for other possible uses. After the
+program has executed type
+
+    DIR mdv1_
+
+and the directory should show that the file numbers exists on the cartridge
+in Microdrive mdv1_
+
+You also need to know that the file is correct and you can only be certain
+of this if the file is read and checked. The necessary keyword is OPEN_IN,
+otherwise the program for reading data from a file is similar to the
+previous one.
+
+    100 REMark Reading a file
+    110 OPEN IN #6, mdv1_numbers
+    120 FOR item = 1 TO 100
+    130   INPUT #6, number
+    140   PRINT ! number !
+    150 END FOR item
+    160 CLOSE #6
+
+The program should output the numbers 1 to 100, but only if the cartridge
+containing the file "numbers" is still in Microdrive mdv1_.
+
+
+DEVICES AND CHANNELS
+
+You have seen one example of a device, a file of data on a Microdrive. We
+may say loosely that a file has been opened but strictly we mean that a
+device has been associated with a particular channel Any further necessary
+information has also been provided.  Certain devices have channels
+permanently associated with them by the system:
+
+    --------------------------------------
+      channel                    use
+    --------------------------------------
+        #0       OUTPUT - command window
+                 INPUT - keyboard
+        #1       OUTPUT - print window
+        #2       LIST - list output
+    --------------------------------------
+
+
+WINDOWS
+
+You can create a window of any size anywhere on the screen. The device name
+for a window is:
+
+    scr
+
+and the appended information is, for example:
+
+    scr_360x50a80x40
+         |   |  |  |
+         |   |  |  +---- down value
+         |   |  |
+         |   |  +------- across value
+         |   |
+         |   +---------- height
+         |
+         +-------------- width
+
+The following program creates a window with the channel number 5 and fills
+it with green (code 4) and then closes it:
+
+    100 REMark Create a window
+    110 OPEN #5, scr_400x200a20x50
+    120 PAPER #5,4 : CLS #5
+    130 CLOSE #5
+
+Notice that each window can have its own features such as paper ink, etc.
+The fact that a window has been opened does not mean that it is the current
+default window.
+
+You can change the position or shape of an opened window without closing it
+and reopening it. Try adding two lines to the previous program:
+
+    124 WINDOW #5,300,100,110,65
+    126 PAPER #5,2 : CLS #5
+
+Re-run the program and you will find a red window within the original green
+one. This red window is now the one associated with channel 5, see figure.
+
+    +--------------------------------------+
+    |                                      |
+    |  +--------------------------------+  |
+    |  |GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG|  |
+    |  |GG+--------------------------+GG|  |
+    |  |GG|RRRRRRRRRRRRRRRRRRRRRRRRRR|GG|  |
+    |  |GG|RRRRRRRRRRRRRRRRRRRRRRRRRR|GG|  |
+    |  |GG|RRRRRRRRRRRRRRRRRRRRRRRRRR|GG|  |
+    |  |GG|RRRRRRRRRRRRRRRRRRRRRRRRRR|GG|  |
+    |  |GG+--------------------------+GG|  |
+    |  |GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG|  |
+    |  +--------------------------------+  |
+    |                                      |
+    +--------------------------------------+
+
+
+BORDER
+
+You can place a border round the edge of the screen or a window. For
+example:
+
+    BORDER #5,6
+
+would create a border round the channel #5 window. It would be 6 units
+thick and the size of the window would be correspondingly reduced. The
+border would be transparent, protecting anything that was under it. You can
+specify a coloured border by the usual method.
+
+    BORDER #5,6,2
+
+would produce a red border. You can make a border of other colours and
+textures by the usual methods. For example,
+
+    BORDER 10
+
+will add a 10 pixel thick transparent border to the current window
+(transparent because no colour was specified) and
+
+    BORDER 2,0,7,0
+
+will add a 2 pixel thick black and white stipple border.
+
+
+BLOCK
+
+You can specify a block's size, position and colour with a single
+statement. It is placed in the pixel co-ordinate system relative to the
+current window or screen. For example:
+
+    BLOCK #5,10,20,50,100,2
+
+would create a block in the # 5 window at a position 50 units across and
+100 units down. It would be 10 units wide and 20 units high. Its colour
+would be red.
+
+It is worth noting that WINDOW and BLOCK statements work without alteration
+in 4 and 8 colour mode (though the colours may vary) because the across
+values are always on a 0 to 511 scale and there are always 256 pixel
+positions down.
+
+
+SPECIAL PRINTING
+
+CSIZE
+
+You can alter the size of characters. For example:
+
+    CSIZE 3,1
+
+will give the largest possible characters and:
+
+    CSIZE 0,0
+
+will give the smallest. The first number must be 0,1,2 or 3 and determines
+the width. The second must be 0 or 1 and determines the height. The normal
+sizes are:
+
+    MODE 4    CSIZE 0,0
+    MODE 8    CSIZE 2,0
+
+The number of lines and columns available for each character size is
+dependent on whether the output is viewed on a monitor or on a television
+set: the row and column sizes given are for a monitor; those for a
+television set will be smaller and also will vary between different
+televisions.
+
+If you are using low resolution mode the QL will not allow you to select a
+character size  smaller than default size.
+
+
+STRIP
+
+You can provide a special background for characters to make them stand out.
+For example:
+
+    STRIP 7
+
+will give a white strip while
+
+    STRIP 2,4,2
+
+will give a red/green vertical striped strip. All the normal colour
+combinations are possible.
+
+
+OVER
+
+Normally printing occurs on the current paper colour. You can alter this by
+using strip.
+
+You can make further effects by using:
+
+    OVER  1     1 prints in ink on a transparent strip
+    OVER -1    -1 prints in ink over existing display on screen
+
+To revert to normal printing on current strip use:
+
+    OVER 0
+
+
+UNDER
+You can underline characters.
+
+    UNDER 1    underlines all subsequent output in the current ink
+    UNDER 0    switches off underling.
+
+
+SCALE GRAPHICS
+
+If you wish to draw reasonably true geometric figures on a TV or video
+screen you cannot easily use a pixel-based system. If you use scale
+graphics then the system will do the necessary work to ensure that you can
+fairly easily draw reasonable circles, squares and other shapes.
+
+The default scale of the graphics coordinate system is 100 in the vertical
+direction and whatever is needed in the across direction to ensure that
+shapes drawn with the special graphics keywords (PLOT, DRAW, CIRCLE,) are
+true.
+
+The "graphics origin" is not the same as the pixel origin which is used to
+define the position of windows and blocks. The graphics origin is at the
+bottom left hand corner of the current screen or window.
+
+
+POINTS AND LINES
+
+It is easy to draw points and lines using scale graphics. Using a vertical
+scale of 100 a point near the centre of the window can be plotted with:
+
+    POINT 60,50
+
+The point (60 units across and 50 units up) will be plotted in the current
+ink colour.
+
+Similarly a line may be drawn with the statement:
+
+    LINE 60,50 TO 80,90
+
+Further elements can be added. For example, the following will draw a
+square:
+
+    LINE 60,50 TO 70,50 TO 70,60 TO 60,60 TO 60,50
+
+    |
+    |
+    |                 +---+
+    |  60 across      |   |
+    | ............... +---+
+    |                 :
+    |                 :
+    |                 : 50 up
+    |                 :
+    +-----------------------------
+
+
+RELATIVE MODE
+
+Pair of coordinates such as:
+
+    across, up
+
+normally define a point relative to the origin 0,0 in the bottom left hand
+corner of a window (or elsewhere if you choose). It is sometimes more
+convenient to define points relative to the current cursor position. For
+example the square above may be plotted in another way using the LINE_R
+statement which means:
+
+    "Make all pairs of coordinates relative to the current
+    cursor position."
+
+    POINT 60,50
+    LINE_R 0,0 TO 10,0 TO 0,10 TO -10,0 TO 0,-10
+
+First the point 60,50 becomes the origin, then, as lines are drawn, the end
+of a line becomes the origin for the next one.
+
+The following program will plot a pattern of randomly placed coloured
+squares.
+
+    100 REMark Coloured Squares
+    110 PAPER 7 : CLS
+    120 FOR sq = 1 TO 100
+    130   INK RND(1 TO 6)
+    140   POINT RND(90),RND(90)
+    150   LINE R 0,0 TO 10,0 TO 0,10 TO -10,0 TO 0,-10
+    160 END FOR sq
+
+The same result could be achieved entirely with absolute graphics but it
+would require a little more effort.
+
+
+CIRCLES AND ELLIPSES
+
+If you want to draw a circle you need to specify:
+
+    position say 50,50
+    radius say 40
+
+The statement
+
+    CIRCLE 50,50,40
+
+will draw a circle with the centre at position 50,50 and radius (or height)
+40 units, see figure (due to the limitations of ASCII characters, this is
+the best possible representation, or see Chapt11e_PIC):
+
+
+|
+|
+|        -------
+|      /    |    \
+|     |     |40   |
+|.....|.....|     | <--(50,50)
+|     |     :     |
+|      \    :    /
+|        -------
+|           :       A circle
++---------------------------
+
+
+If you add two more parameters:
+
+    e.g.  CIRCLE 50,50,40,.5
+
+You will get an ellipse. The keywords CIRCLE and ELLIPSE are
+interchangeable. (Chapt11f_PIC)
+
+|
+|
+|        ---
+|      /  |  \
+|     |   |40 |
+|.....|...|   | <--(50,50)
+|     |   :   |
+|      \  :  /
+|        ---
+|         :       An ellipse
++---------------------------
+
+The height of the ellipse is 40 as before but the horizontal 'radius' is
+now only 0.5 of the height. The number 0.5 is called the eccentricity. If
+the eccentricity is 1 you get a circle if it is less than 1 and greater
+than zero you get an ellipse. If you want to tilt an ellipse you can change
+the fith parameter, for example:
+
+    CIRCLE 50,50,40,.5,1
+
+This will tilt the ellipse anti-clockwise by one radian, about 57 degrees,
+as shown in figure (or in Chapt11g_PIC)
+
+|
+|      --
+|    / \   \
+|   |   \40  \
+|    \   \    \
+|.....\...\    | <--(50,50)
+|      \  :    /
+|        -: _/
+|         :
+|         :   Ellipse at angle one radian
++----------------------------------------
+
+A straight angle is 180 degrees or PI radians, so you can make a pattern of
+ellipses with the program:
+
+    100 FOR rot = 0 TO 2*PI STEP PI/6
+    110   CIRCLE 50,50,40,0.5,rot
+    120 END FOR rot
+
+The order of the parameters for a circle or ellipse is:
+
+    centre _across, centre_up, height [eccentricity, angle]
+
+The last two parameters are optional and this is indicated by putting them
+inside square  brackets ( [ ] ).
+
+Example
+
+Write a program which does the following:
+
+1.  Open a window 100x100 at (100,50)
+2.  Scale 100 in mode 8
+3.  Select black paper and clear window
+4.  Make green border 2 units wide
+5.  Draw a pattern of six coloured circles.
+6.  Close the window
+
+    100 REMark pattern
+    110 MODE 8
+    120 OPEN #7,scr_100x100a100x50
+    130 SCALE #7,100,0,0
+    140 PAPER #7,0 : CLS #7
+    150 BORDER #7,2,4
+    160 FOR colour = 1 TO 6
+    170   INK #7,colour
+    180   LET rot = 2*PI/colour
+    190   CIRCLE #7,50,50,30,0.5,rot
+    200 END FOR colour
+    210 CLOSE #7
+You can get some interesting effects by altering the program. For example
+try the amendments:
+
+    160 FOR colour = 1 TO 100
+    180 LET rot = colour*PI/50
+
+
+ARCS
+
+If you want to draw an arc you need to decide:
+
+    starting point
+    end point
+    amount of curvature
+
+The first two items are straightforward but the amount of curvature is not
+so easy. You can do it by drawing accurately or by trial and error but you
+must decide what angle the arc subtends and then specify the angle in
+radians. An angle of 1.5 radians would give a sharp bend and a small angle
+would give a very gentle curvature. Try for example:
+
+    ARC 10,50 TO 50,90,1
+
+which gives a moderate curvature in the current INK colour. (Chapt12h_PIC)
+
+|
+|
+|  .......| (50,90)
+|  :      |
+|  :angle /
+|  :    /
+|  ___/
+|  (10,50)
+|
+|                           Arc
++------------------------------
+
+
+FILL
+
+You can fill a closed shape with the current INK colour by simply writing:
+
+    FILL 1
+
+before the shape is drawn. The following program produces a green circle.
+
+    INK 4
+    FILL 1
+    CIRCLE 50,50,30
+
+The FILL command works by drawing touching horizontal lines between
+suitable points.
+
+The statement:
+
+    FILL0
+
+will turn off the FILL effect.
+
+
+SCROLLING AND PANNING
+
+You can scroll or pan the display in a window like a film cameraman. You
+arrange scrolling in terms of pixels. A positive number of pixels indicates
+upwards scrolling, thus
+
+    SCROLL 10
+
+moves the display in the current window or screen 10 pixels downwards.
+
+    SCROLL -8
+
+Moves the display 8 pixels up. You can add a second parameter to induce
+part-scrolling.
+
+    SCROLL -8, 1
+
+will scroll the part above (not including) the cursor line and:
+
+    SCROLL -8, 2
+
+will scroll the part below (not including) the cursor line.
+
+ As scrolling occurs, the space left by movement of the display is filled
+with the current paper colour. A second parameter 0 has no effect.
+
+You can PAN the display in the current window left or right. The PAN
+statement works  in a similar manner to SCROLL but
+
+    PAN 40 moves display right
+    PAN -40 moves display left
+
+A second parameter gives a partial PAN
+
+    0 - whole screen
+    3 - the whole of the line occupied by the cursor
+    4 - the right hand side of the line occupied by the cursor
+        The area of the cursor is also included.
+
+If you are using stipples or are in 8 colour mode then windows must be
+panned or scrolled in multiples of 2 pixels.
+
+
+PROBLEMS ON CHAPTER 12
+
+1. Write a program which draws a 'Snakes and Ladders' grid of ten
+   rows of ten squares.
+
+2. Place the numbers 1 to 100 in the squares starting at the bottom
+   left and place F for finish in the last square.
+
+3. Draw a dartboard on the screen. It should consist of an outer ring
+   which could hold numbers. A 'doubles' ring and 'triples' ring as
+   shown and a centre consisting of a 'bull's eye' and a ring around
+   it.
+
+

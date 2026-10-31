@@ -1,0 +1,1069 @@
+ERROR HANDLING
+--------------
+
+Errors are reported by SuperBASIC in a standard form:
+
+    At line  line_number  error_text
+
+Where the line number is the number of the line where the error was detected and
+the error text is listed below.
+
+(1)  Not complete
+     An operation has been prematurely terminated (or break has been pressed).
+
+(2)  Invalid job
+     An error return from Qdos relating to system calls controlling multitasking
+     or I/O.
+
+(3)  Out of memory
+     Qdos and/or SuperBASIC has insufficient free memory.
+
+(4)  Out of range
+     Usually results from attempts to write outside a window or an incorrect
+     array index.
+
+(5)  Buffer full
+     An I/O operation to fetch a buffer full of characters filled the buffer
+     before a record terminator was found.
+
+(6)  Channel not open
+     Attempt to read, write or close a channel which has not been opened.
+     Can also occur if an attempt to open a channel fails.
+
+(7)  Not found
+     File system, device, medium or file cannot be found.
+     SuperBASIC cannot find an identifier. This can result from incorrectly
+     nested structures.
+
+(8)  Already exists
+     The file system has found an already existing file with the same name
+     as a new file to be opened for writing.
+
+(9)  In use
+     The file system has found that a file or device is already exclusively
+     used.
+
+(10) End of file
+     End of file detected during input.
+
+(11) Drive full
+     A device has been filled (usually Microdrive).
+
+(12) Bad name
+     The file system has recognised the name but there is a syntax or parameter
+     value error.
+     In SuperBASIC it means a name has been used out of context. For example, a
+     variable has been used as a procedure.
+
+(13) Xmit error .
+     RS-232-C parity error
+
+(14) Format failed
+     Attempted format operation has failed, the medium is possibly faulty
+     (usually a Microdrive cartridge).
+
+(15) Bad parameter
+     There is an error in the parameter list of a system or SuperBASIC
+     procedure or function call.
+     An attempt was made to read data from a write only device.
+
+(16) Bad or changed medium
+     The medium (usually a Microdrive cartridge) is possibly faulty
+
+(17) Error in expression
+     An error was detected while evaluating an expression.
+
+(18) Overflow
+     Arithmetic overflow division by zero, square root of a negative number,
+     etc.
+
+(19) Not Implemented
+
+(2O) Read only
+     There has been an attempt to write data to a shared file.
+
+(21) Bad line
+     A SuperBASIC syntax error has occurred.
+
+(22) PROC/FN cleared
+     This is a message which is for information only and is not reporting an
+     error. It is reporting that the program has been stopped and subsequently
+     changed forcing SuperBASIC to reset its internal state to the outer
+     program level and so losing any procedure environment which may have
+     been in effect.
+
+ERROR RECOVERY
+
+After an error has occurred the program can be restarted at the nextstatement by typing
+
+    CONTINUE
+
+If the error condition can be corrected, without changing the program, the
+program can be restarted at the statement which triggered the error. Type
+
+    RETRY
+
+
+EXPRESSIONS
+-----------
+
+SuperBASIC expressions can be string, numeric, logical or a mixture: unsuitable
+data types are automatically converted to a suitable form by the system wherever
+this is possible.
+
+monop: = | +
+         | -
+         | NOT
+
+expression: = | [monop]  expression  operator  expression
+              | (expression)
+              | atom
+
+              atom: = | variable
+                      | constant
+                      | function | (expression *|, expression *)
+                      | array_element
+
+                      variable: = | identifier
+                                  | identifier%
+                                  | identifier$
+
+                      function: = | identifier
+                                  | identifier%
+                                  | identifier$
+
+                      constant: = | digit * [digit] *
+                                  | *[digit] *, *[digit]*
+                                  | *[digit] * |,| *[digit]* E *[digit]*
+
+The final value returned by the evaluation of the expression can be integer
+giving an "integer_expression", string giving a "string_expression" or floating
+point giving a "floating expression". Often floating point and integer
+expressions are equivalent and the term "numeric_expression" is then used.
+
+Logical operators can be included in an expression. If the specified operation
+is true then a one is returned as the value of the operation. If the operation
+is false then a zero is returned. Though logical operators can be used in any
+expression they are usually used in the expression part of an IF statement.
+
+example:        i.    test_data + 23.3 + 5
+                ii.   "abcdefghijklmnopqrstuvwxyz"(2 TO 4)
+                iii.  32.1 * (colour = 1)
+                iv.   count = -limit
+
+FILE TYPES - FILES
+------------------
+
+All I/O on the QL is to or from a 'logical file'. Various file types exist.
+
+DATA - SuperBASIC programs, text files. Created using PRINT, SAVE, accessed
+       using INPUT, INKEY$, LOAD etc.
+
+EXEC - An executable transient program. Saved using SEXEC, loaded using EXEC,
+       EXEC_W etc.
+
+CODE - Raw memory data, screen images, etc. Saved using SBYTES, loaded using
+       LBYTES.
+
+
+FUNCTIONS AND PROCEDURES
+------------------------
+
+SuperBASIC functions and procedures are defined with the DEFine FuNction and
+DEFine PROCedure statements. A function is activated (or called) by typing its
+name at the appropriate point in a SuperBASIC expression. The function must be
+included in an expression because it is returning a value and the value must be
+used. A procedure is activated (or called) by typing its name as the first item
+in a SuperBASIC statement.
+
+Data can be passed into a function or procedure by appending a list of actual
+parameters after the function or procedure name. This list is compared to a
+similar list appended after te name of the function or procedure when it was
+defined. This second list is called the "formal parameters" of the function or
+procedure. The formal parameters must be SuperBASIC variables. The actual
+parameters must be an array, an array slice or a SuperBASIC expression of which
+a single variable or constant is the simplest form.
+
+Since the actual parameters are actual expressions, they must have an actual
+type associated with them. The formal parameters are merely used to indicate how
+the actual parameters must be processed and so have no type associated with
+them. The items in each list of parameters are paired off in order when the
+function or procedure is called and the formal parameters become equivalent to
+the actual parameters. There are three distinct ways of using parameters.
+
+If the actual parameter is a single variable and if data is assigned to the
+formal parameter in the function or procedure then the data is also assigned to
+the corresponding actual parameter.
+
+If the actual parameter is an expression then assigning data to the
+corresponding formal parameter will have no effect outside the procedure. Note
+that a variable can be turned into an expression by enclosing it within
+brackets.
+
+if the actual parameter is a variable but has not previously been set then
+assigning data to the corresponding formal parameter will set the variable
+specified as the actual parameter.
+
+Variables can be defined to be local to a function or procedure with the LOCal
+statement. Local variables have no effect on similarly named variables outside
+the function or procedure in which they are defned and so allow greater freedom
+in choosing sensible variable names without the risk of corrupting external
+variables. A local variable is available to any inside function or procedure
+called from the procedure function in which it is declared to be local unless
+the function or procedure called contains a further local declaration of the
+same variable name.
+
+Functions and procedures in SuperBASIC can be used recursively. That is a
+function or procedure can call itself either directly or indirectly.
+
+-------------------------------------------------------------
+  Command                Function
+-------------------------------------------------------------
+  DEFine FuNction        define a function
+  DEFine PROCedure       define a procedure
+  RETurn                 leave a function or procedure
+                         (return data from a function)
+  LOCal                  define local data in a function or
+                         procedure
+-------------------------------------------------------------
+
+
+GRAPHICS
+--------
+
+It is important to realise that the QL screen has non-square pixels and that
+changing screen mode will change the shape of the pixels. Thus if the grapics
+procedures were simply pixel based they would draw different shapes in the two
+modes. For example, in one mode we would have a circle while the same figure in
+the other mode would be an ellipse.
+
+The graphics procedures ensure that whatever screen mode is in use, consistent
+figures are produced. It is not possible to use a simple pixel count to indicate
+sizes of figures, so instead the graphics procedures use an arbitrary scale and
+coordinate system to specify sizes and positions of figures.
+
+The graphics procedures use the Graphics Co-ordinate System, i.e. draw relative
+to the Graphics Origin which is in the bottom left hand corner of the specified
+or default window. Note that this is not the same as the Pixel Origin used to
+define the position of Windows and Blocks etc. The graphics origin allows a
+standard Cartesian coordinate system to be used. A graphics cursor is updated
+after each graphics operation: subsequent operations can either be relative to
+this cursor or can be absolute, i.e. relative to the graphics origin.
+
+        +----------------------------------------------------------+
+        |                                                          |
+        |   ^ 100                                                 |
+        |   |                                                      |
+        |   |                                                      |
+        |   | y                                                    |
+        |   |                                                      |
+        |   |                                                      |
+        |   |                                                      |
+        |   |                                                      |
+        |   |                                                      |
+        |   |                                                      |
+        |   |                                                      |
+        |   |                                                      |
+        |   | (0,0)                                      x         |
+        |    -------------------------------------------------->   |
+        |                                                          |
+        +----------------------------------------------------------+
+                                     The Graphics Coordinate System
+
+The scaling factor is such that the full distance in the vertical direction in
+the specified or default window has length 100 by default and can be changed
+with the SCALE command. The scale in the x direction is equal to the scale in
+the y direction. However, the length of line which can be drawn in the x
+direction is dependent on the shape of the window. Increasing the scale factor
+increases the maximum size of the figure which can be drawn before the window
+size is exceeded. If the graphics output is switched to a different size of
+window then the subsequent size of the output is adjusted to fit the new window.
+If the figure exceeds its output window then the figure is clipped.
+
+It is useful to consider the window to be a window onto a larger graphics space
+in which the figures are drawn. The SCALE command allows the graphics origin to
+be set so allowing the window to be moved around the graphics space.
+
+The graphics procedures are output to the window attached to the specified or
+default channel and the output is drawn in the INK colour for that channel.
+
+--------------------------------------------------------------------------------
+Command         Function
+--------------------------------------------------------------------------------
+CIRCLE          draw an ellipse or a circle        }
+LINE            draw a line                        }  absolute
+ARC             draw an arc of a circle            }
+POINT           plot a point                       }
+--------------------------------------------------------------------------------
+CIRCLE_R        draw an ellipse or a circle        }
+LINE_R          draw a line                        }
+ARC_R           draw an arc of a circle            }  relative
+POINT_R         plot a point                       }
+--------------------------------------------------------------------------------
+SCALE           set scale and move origin
+FILL            fill in a shape
+CURSOR          position text
+--------------------------------------------------------------------------------
+
+GRAPHICS FILL
+
+Figures drawn with the graphics and turtle graphics procedures can be optionally
+'filled' with a specified stipple or colour. If FILL is selected then the figure
+is filled as it is drawn.
+
+The FILL algorithm stores a list of points to plot rather than actually plotting
+them. When the figure closes there are two points on the same horizontal line.
+These two points are connected by a line in the current INK colour and the
+process repeats. Fill must always be reselected before drawing a new figure to
+ensure that the buffer used to store the list of points is reset.
+
+The following diagram illustrates FILL:
+
+        +----------------------------------------------------------+
+        |                                                          |
+        |                                                          |
+        |             (75,50)                                      |
+        |                                                          |
+        |            /\                                            |
+        |           /   \                                          |
+        |          /      \                                        |
+        |         /         \                                      |
+        |        /            \                                    |
+        |      .----------------                                   |
+        |     .                  . (50,80)                         |
+        |    .              .                                      |
+        |   .         .                                            |
+        |  .    .                                                  |
+        | .                                                        |
+        |  (10,20)          FILL 1:LINE 10,20 TO 75,50 TO 50,80    |
+        +----------------------------------------------------------+
+
+WARNING: There is an implementation restriction on FILL. FILL must not be used
+for re-entrant shapes (i.e. a shape which is concave). Re-entrant shapes must be
+split into smaller shapes which are not re-entrant and each sub-shape filled
+independently.
+
+
+IDENTIFIER
+----------
+
+A SuperBASIC identifier is a sequence of letters, numbers and underscores.
+
+define:   letter:= | a..Z
+                   | A..Z
+
+          number:= | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 0 |
+
+          identifier:= letter * || letter | number | _ | | *
+
+example:  i.    a
+          ii.   limit_1
+          iii.  current_guess
+          iv.   counter
+
+An identifier must begin with a letter followed by a sequence of letters,
+numbers and underscores and can be up to 255 characters long. Upper and lower
+case characters are equivalent.
+
+Identifiers are used in the SuperBASIC system to identify Variables, Procedures,
+Functions, Repetition loops, etc.
+
+WARNING: NO meaning can be attributed to an identifier other than its ability to
+identify constructs to SuperBASIC. SuperBASIC cannot infer the intended use of
+an identifier from the identifier's name!
+
+
+JOYSTICK
+--------
+
+The joystick ports marked CTL1 and CTL2, allow two joysticks to be attached to
+the QL.
+
+The joysticks are arranged to generate specific key depressions when moved in a
+specific way and any program which uses a joystick must be able to adapt to
+these keys. The QL keyboard can be read directly using the KEYROW function.
+
+-----------------------------
+        CTL1            CTL2
+-----------------------------
+moe     key             key
+-----------------------------
+up      cursor up       F4
+down    cursor down     F2
+left    cursor left     F1
+right   cursor right    F3
+fire    space           F5
+-----------------------------
+
+The joystick ports can be used for adding other more general purpose control
+devices to the QL.
+
+Joysticks for other computers using a 9-way 'D' connector require an adaptor to
+be used with the QL. Such an adaptor is available from Sinclair Research.
+
+
+KEYWORD
+-------
+
+SuperBASIC keywords are identifiers which are defined in the SuperBASIC Keyword
+Reference Guide. Keywords have the same form as a SuperBASIC standard
+identifier. The case of the keyword is not significant. Keywords are echoed as a
+mixture of upper and lower case letters and are always reproduced in full. The
+upper case portion indicates the minimum required to be typed in for SuperBASIC
+to recognise the keyword.
+
+The set of SuperBASIC keywords may be extended by adding PROCEDURES to the QL.
+It is a good idea to define these with their names in upper case and this will
+indicate their special function in the SuperBASIC system. Conversely, ordinary
+procedures should be defined with their names in lower case.
+
+WARNING: Existing keywords cannot be used as ordinary identifiers within a
+SuperBASIC program. SuperBASIC keywords are:
+
+--------------------------------------------------------------------------------
+List of Keywords
+--------------------------------------------------------------------------------
+ABS                 DEFine PROCedure    LEN                 RANDOMISE
+ACOS,ASIN           END DEFine          LET                 RND
+ACOT,ATAN           DEG                 LIST                RECOL
+ADATE               DELETE              LOAD                REMark
+ARC,ARC_R           DIM                 LOCal               RENUM
+AT                  DIMN                LN,LOG10            REPeat
+AUTO                DIR                 LRUN                END REPeat
+BAUD                DIV                 MERGE               RESPR
+BEEP                DLINE               MOD                 RETurn
+BEEPING             EDIT                MODE                RETRY
+BLOCK               ELLIPSE             MOVE                RUN
+BORDER              ELLIPSE_R           MRUN                SAVE
+CALL                EOF                 NET                 SIN
+CHR$                EXEC,EXEC_W         NEW                 SCALE
+CIRCLE              EXIT                NEXT                SCROLL
+CIRCLE_R            EXP                 ON GO TO            SDATE
+CLEAR               FILL                ON GO SUB           SELect
+CLOSE               FILL$               OPEN,OPEN_IN        END SELect
+CLS                 FLASH               OPEN_NEW            SEXEC
+CODE                FOR                 OVER                SQRT
+CONTINUE            END FOR             PAN                 STOP
+RETRY               FORMAT              PAPER               STRIP
+COPY,COPY_N         GO SUB              PAUSE               TAN
+COS                 GO TO               PEEK,PEEK_W         TO
+COT                 IF,THEN,ELSE        PEEK_L              TURN
+CSIZE               END IF              PENUP               TURN TO
+CURSOR              INK                 PENDOWN             UNDER
+DATA,READ           INKEY$              PI                  VER$
+RESTORE             INPUT               POINT,POINT_R       WIDTH
+DATE$,DATE          INSTR               POKE,POKE_W         WINDOW
+DAY$                INT                 POKE_L
+DEFine FuNction     KEYROW              PRINT
+END DEFine          LBYTES              RAD
+--------------------------------------------------------------------------------
+
+
+MATHS FUNCTIONS
+---------------
+
+SuperBASIC has the standard trigonometrical and mathematical functions.
+
+-----------------------------------------------
+Function     Name
+-----------------------------------------------
+COS          cosine
+SIN          sin
+TAN          tangent
+
+ATAN         arctangent
+ACOT         arcotangent
+
+ACOS         arcosine
+ASIN         arcsine
+
+COT          cotangent
+EXP          exponential
+LN           natural logarithm
+LOG10        common logarithm
+
+INT          integer
+ABS          absolute value
+
+RAD          convert to radians
+DEG          convert to degrees
+
+PI           return the value of pi ±
+
+RND          generate a random number
+RANDOMISE    reseed the random number generator
+-----------------------------------------------
+
+
+MEMORY MAP
+----------
+
+The QL contains a Motorola 68008 microprocessor, which can address 1 Megabyte of
+memory, i.e. from 00000 to FFFFF Hex. The use of addresses within this range are
+defined by Sinclair Research to be as follows:
+
+FFFFF +----------------------+
+      |      ----------      |
+      |       RESERVED       | expansion I/O
+      |      ----------      |
+C0000 +----------------------+
+      |      ----------      |
+      |       RESERVED       | add on RAM
+      |      ----------      |
+40000 +----------------------+
+      |         RAM          |
+      |           96 Kbytes  | main RAM
+      |                      |
+28000 +----------------------+
+      |         RAM          |
+      |           32 Kbytes  | screen RAM
+      |                      |
+20000 +----------------------+
+      |                      |
+      |         I/O          | QL I/O
+      |                      |
+18000 +----------------------+
+      |         ROM          |
+      |           16 Kbytes  | plug in ROM
+      |                      |
+0C000 +----------------------+
+      |         ROM          |
+      |           48 Kbytes  | system ROM
+      |                      |
+00000 +----------------------+
+                              Physical Memory Map
+
+The screen RAM is organised as a series of sixteen bit words starting at address
+Hex 20000 and progressing in the order of the raster scan, i.e. from left to
+right with each display line and then from the top to the bottom of the picture.
+The bits within eachbword are organised so that a pixel to the left is always
+more significant than a pixel to the right (i.e. the pixel pattern on the screen
+looks the same as the binary pattern). However, the organisation of the colour
+information in the two screen modes is different:
+
+          +-----------+-----------+---------------------+
+          | high byte | low  byte |         mode        |
+          |   A0=0    |   A0=1    |                     |
+          +-----------+-----------+---------------------+
+          |           |           |                     |
+          | GGGGGGGG  | RRRRRRRR  | 512 mode (high res) |
+          +-----------+-----------+---------------------+
+          |           |           |                     |
+          | GFGFGFGF  | RBRBRBRB  | 256 mode (low res)  |
+          +-----------+-----------+---------------------+
+             G-Green     B-Blue     R-Red     F-Flash
+
+Setting the Flash bit toggles the flash state and freezes the background colour
+for the flash to the value given by R, G and B for that pixel. Flashing is
+always reset at the beginning of each display line.
+
+In high resolution mode, red and green specified together is interpreted by the
+hardware as white.
+
+WARNING: Use of reserved areas in the memory map may cause incompatibility with
+future Sinclair products. Spurious output to addresses defined to be peripheral
+I/O addresses can cause unpredictable behaviour. It is recommended that these
+areas are NOT written to and not used for any other purpose. Poking areas in use
+as Microdrive buffers can corrupt Microdrive data and can result in a loss of
+information. Pokng areas in use such as system tables can cause the system to
+crash and can result in the loss of data and programs.
+
+All I/O should be performed using either the relevant SuperBASIC commands or the
+QDOS Operating System traps.
+
+
+MICRODRIVES
+-----------
+
+Microdrives provide the main permanent storage on the QL. Each Microdrive
+cartridge has a capacity of at least 100Kbytes. Available free memory space is
+allocated by QDOS as Microdrive buffers when necessary to improve performance.
+
+Each blank cartridge must be formatted before use and can hold up to 255 sectors
+of 512 bytes per sector. QDOS keeps a directory of files stored on the
+cartridge. Each microdrive file is identified using a standard SuperBASIC file
+or device name.
+
+A cartridge can be write protected be removing the small lug on the right hand
+sie.
+
+On receiving new blank microdrive cartridges, format them a few times to
+condition the tape.
+
+GENERAL CARE
+
+Physically each Microdrive cartridge contains a 200 inch loop of high quality
+video tape which is moved at 28 inches per second. The tape completes one
+circuit every 7.5 seconds.
+
+NEVER  touch the tape with your fingers or insert anything into the cartridge
+
+NEVER  turn the computer on or off with cartridges in place
+
+ALWAYS store cartridges in their sleeves when not in use
+
+ALWAYS insert or remove cartridges from the Microdrive slowly and carefully
+
+ALWAYS ensure the cartridge is firmly installed before starting the microdrive
+
+NEVER  move the QL with cartridges installed - even if not in operation
+
+NEVER  touch the cartridge while the Microdrive is in operation
+
+DO NOT repeatedly insert and remove the cartridge without running the Microdrive
+
+
+TAPE LOOPS: If a tape loop appears at either of the two places shown in figure 1
+then gently ease it back into the cartridge. Use a non-fibrous instrument for
+this, e.g. the side of a pen or pencil. NEVER tocuh the tape with your fingers
+for this or any reason.
+
+    ---------------
+   |               |
+   |               v
+   |       +--------------------+
+ tape      |    \  **  /        |
+ loop      |      ----          |
+   |       |\                   |
+   |       |*|                  | <----- write protect lug
+    -----> | |                  |
+           |/                   |
+           |  ----------------  |
+           | |                | |
+           | |                | |
+           | |           <-------------- label
+           | |                | |
+           | |                | |
+           | |                | |
+           |  ----------------  |
+          +----------------------+
+          |======================|
+          |======================|  A Microdrive Cartridge
+          +----------------------+
+                      ^
+                      |
+      label ----------
+
+          -------------------------------------------
+            Command   Function
+          -------------------------------------------
+            FORMAT    prepare a new cartridge for use
+
+            DELETE    delete a file from a cartridge
+
+            DIR       list the files on a cartridge
+
+            SAVE
+            SBYTES    saves data from a cartridge
+            SEXEC
+
+            LOAD
+            LBYTES
+            EXEC      loads data from a cartridge
+            MERGE
+
+            OPEN_IN
+            OPEN_NEW
+            OPEN      opens and closes files
+            CLOSE
+
+            PRINT
+            INPUT     SuperBASIC file I/O
+            INKEY$
+          ---------------------------------------------
+
+WARNING: If you attempt to write to a cartridge which is write protected then
+the QL will repeatedly attempt to write the data but will eventually give up and
+give a "bad medium" error.
+
+
+MONITOR
+-------
+
+A monitor may be connected to the QL via the RGB socket on the back of the
+computer. Connection is via an 8-way DIN plug plus cable for colour monitors, or
+a 3-way DIN plug plus cable for monochrome. The RGB socket connections are as in
+the following table, and the column indicating wire colour refers to the colour
+coding used on the 8-way cable and connector available from Sinclair Research
+Limited. Pin designation is as shown in the diagram below.
+
+--------------------------------------------------------------------------------
+                                                               sleeve colour
+   pin       function  signal                                  on QL RGB
+                                                               colour lead
+--------------------------------------------------------------------------------
+    1        PAL       composite PAL                 (4)       orange
+    2        GND       ground                                  green
+    3        VIDEO     composite monochrome video    (3)       brown
+    4        CSYNC     composite sync                (2)       yellow
+    5        VSYNC     vertical sync                 (1)       blue
+    6        GREEN     green                         (1)       red
+    7        RED       red                           (1)       white
+    8        BLUE      blue                          (1)       purple
+--------------------------------------------------------------------------------
+
+A monochrome monitor can be connected using a screened lead with a 3-way or an
+8-way DIN plug at the QL end. Only pins 2 (ground) and 3 (composite video) need
+to be connected via the cable to the monitor. The connection at the monitor end
+will vary according to the monitor but is usually a phono plug. The monitor must
+have a  75 ohm 1V pk-pk composite video non-inverting input (which is the
+industry standard). Both 3-way DIN plugs and phono plugs are available from
+audio shops.
+
+-------------------------------------------------------------------------------
+                                      RGB CONNECTOR
+
+                                         8(blue)
+
+  POWER CONNECTOR                         -| |-
+------------------------------ 7(red)   /  +-+  \ -----------------------------
+  +-------------+                      /         \  6(green)
+  |             |                     /  7     6  \
+  |             |                    /             \
+  |   -------   |        3(composite | 3    8    1 | 1(composite PAL)
+  | /         \ |        monochrome) |             |
+  ||           ||                    \   5     4   /
+  ||  .  .  .  ||   5(vertical synch) \           / 4(composite synch)
+  ||           ||                      \    2    /
+  |+-----------+|                       \       /
+  +-------------+                         -----
+
+                                        2(ground)
+
+-------------------------------------------------------------------------------
+Diagram of Monitor Connector as viewed from rear of QL, showing pin numbers and
+functions.
+
+An RGB (colour) monitor can be connected using a lead with an 8 way DIN plug at
+the QL end. The connection at the monitor end will vary according to the monitor
+(there is no industry standard) and will often be supplied with it. A suitable
+cable with an 8-way DIN plug at one end and bare wires at the other end is
+available from Sinclair Research Limited.
+
+A composite PAL monitor, or the composite video input on some VCRs may work
+witht he QL. Only pins 2 (ground) and 1 (composite PAL) need to be connected via
+a cable to the monitor or VCR.
+
+
+NETWORK
+-------
+
+The QL can be connected with up to 63 other QLs. If there are more than 2
+computers on the network then each computer (or station) must be assigned a
+unique station number. On the QL this can be done using the NET command.
+
+Information is transmitted over the network in blocks. For normal communication
+between two stations the receiving station must acknowledge correct reception of
+the block. If a block is corrupted then the receving station will request
+retransmission.
+
+Using a network station number of zero has a special meaning. Sending to neto_0
+is called broadcasting: any message sent in this way can be read by any station
+which is listening to neti_0. Note that the normal verification that a message
+has been received is disabled for broadcasts, so that broadcasting messages of
+length more than one block (255 bytes) s unreliable.
+
+A network station which listens to its own station number (e.g. NET3:LOAD
+neti_3) can receive data from any station sending to it.
+
+          ---------------------------------------------
+            Command   Function
+          ---------------------------------------------
+            NET       assign a network station number
+
+            OPEN      open a network channel
+            CLOSE     close a network channel
+
+            PRINT
+            INPUT     network I/O
+            INKEY$
+
+            LOAD
+            SAVE
+            LBYTES
+            SBYTES
+            EXEC      load and save via network
+            SEXEC
+            LRUN
+            MRUN
+            MERGE
+          ---------------------------------------------
+
+If you are planning to connect several QLs on the network, or use a long piece
+of cable then you should wire it up with low capacitance twin core cable such as
+3 amp light flex or bell wire. Take care to connect the centres of each jack to
+each other, and the outsides to each other. You will find that although the
+software can handle 63 stations, the hardware will not drive more than about
+100m of cable, depending on what type it is.
+
+If you are only connecting a few machines with the lads supplied, you need not
+worry.
+
+
+OPERATORS
+---------
+
+---------------------------------------------------------------------------
+  Operator  Type                Function
+---------------------------------------------------------------------------
+  =         floating string     logical type 2 comparison
+  ==        numeric string      almost equal ** (type 3 comparison)
+  +         numeric             addition
+  -         numeric             subtraction
+  /         numeric             division
+  *         numeric             multiplication
+  <         numeric string      less than (type 2 comparison)
+  >         numeric string      greater than (type 2 comparison)
+  <=        numeric string      less than or equal to (type 2 comparison)
+  >=        numeric string      greater than or equal (type 2 comparison)
+  <>        numeric string      not equal to (type 3 comparison)
+  &         string              concatenation
+  &&        bitwise             AND
+  ||        bitwise             OR
+  ^^        bitwise             XOR
+  ~         bitwise             NOT
+  OR        logical             OR
+  AND       logical             AND
+  XOR       logical             XOR
+  NOT       logical             NOT
+  MOD       integer             modulus
+  DIV       integer             divide
+  INSTR     string              type 1 string comparison
+  ^         floating            raise to the power
+  -         floating            unary minus
+  +         floating            unary plus
+---------------------------------------------------------------------------
+**almost equal - equal to 1 part in 10^7
+
+If the specified logical operation is true then a value not equal to zero will
+be returned. If the operation is false then a value of zero will be returned.
+
+The precedence of SuperBASIC operators is defined in the table above. If the
+order of evaluation in an expression cannot be deduced from this table then the
+relevant operations are performed from left to right. The inbuilt precedence of
+SuperBASIC operators can be overriden by enclosing the relevant sections of the
+expression in parentheses.
+
+HIGHEST   unary plus and minus
+          string concatenation
+          INSTR
+          exponentiation
+          multiply, divide, modulus and integer divide
+          add and subtract
+          logical comparison
+          NOT (bitwise or logical)
+          AND (bitwise or logical)
+LOWEST    OR and XOR (bitwise or logical)
+
+
+PERIPHERAL EXPANSION
+--------------------
+
+The expansion connector allows extra peripherals to be plugged into the QL. The
+connections available at the connector are:
+
+          +----------+
+          |         *|
+      GND | a   1  b | GND
+       D3 | a   2  b | D2
+       D4 | a   3  b | D1
+       D5 | a   4  b | D0
+       D6 | a   5  b | ASL
+       D7 | a   6  b | DSL
+      A19 | a   7  b | RDWL
+      A18 | a   8  b | DTACKL
+      A17 | a   9  b | BGL
+      A16 | a  10  b | BRL
+   CLKCPU | a  11  b | A15
+      RED | a  12  b | RESEYCPUL
+      A14 | a  13  b | CSYNCL
+      A13 | a  14  b | E
+      A12 | a  15  b | VSYNCH
+      A11 | a  16  b | VPAL
+      A10 | a  17  b | GREEN
+       A9 | a  18  b | BLUE
+       A8 | a  19  b | FC2
+       A7 | a  20  b | FC1
+       A6 | a  21  b | FC0
+       A5 | a  22  b | A0
+       A4 | a  23  b | ROMOEH
+       A3 | a  24  b | A1
+     DBGL | a  25  b | A2
+      SP2 | a  26  b | SP3
+    DSMCL | a  27  b | IPLOL
+      SP1 | a  28  b | BERRL
+      SP0 | a  29  b | IPL1L
+     VP12 | a  30  b | EXTINTL
+     VM12 | a  31  b | VIN
+      VIN | a  32  b | VIN
+          |         *|
+          +----------+
+
+The connector on the QL is a 64 way (male) DIN-41612 indirect edge connector.
+
+An 'L' appended to a signal name indicates that the signal is active low.
+
+
+----------------------------------------
+Signal    Function
+----------------------------------------
+A0-A19    68008 address lines
+RDWL      Read / Write
+ASL       Address Strobe
+DSL       Data Strobe
+BGL       Bus Grant
+DSMCL     Data Strobe - Master Chip
+CLKCPU    CPU Clock
+E         6800 peripherals clock
+RED       Red
+BLUE      Blue
+GREEN     Green
+CSYNCL    Composite Sync
+VSYNCH    Vertical Sync
+ROMOEH    ROM Output Enable
+FC0       Processor status
+FC1       Processor status
+FC2       Processor status
+RESETCPUL Reset CPU
+----------------------------------------
+QL Peripheral Output Signals
+
+
+
+
+----------------------------------------
+Signal    Function
+----------------------------------------
+DTACKL    Data acknowledge
+BRL       Bus request
+VPAL      Valid Peripheral Address
+IPL0L     Interrupt Priority Level 5
+IPL1L     Interrupt Priority Level 2
+BERRL     Bus Error
+EXTINTL   External Interrupt
+DBGL      Data bus grab
+----------------------------------------
+QL Peripheral Input Signals
+
+
+
+
+----------------------------------------
+Signal    Function
+----------------------------------------
+D0..D7    Data Lines
+----------------------------------------
+QL Peripheral Bi-directional Signals
+
+
+
+
+----------------------------------------
+Signal    Functional
+----------------------------------------
+SP0..SP3  Select peripheral 0 to 3
+VIN       9V DC (nominal) - 500mA max.
+VM12      -12V
+VP12      +12V
+GND       ground
+----------------------------------------
+Miscellaneous
+
+
+It is not intended that the following description of the QL peripheral expansion
+mechanism be sufficient to implement an actual expansion device, but rather be
+read to gain a basic understanding of the expansion mechanism.
+
+Single or multiple peripherals may be added to the QL up to a maximum of 16
+devices. A single peripheral can be plugged directly into the QL Expansion Slot
+while multiple peripherals must be plugged into the QL Expansion Module, which
+in turn is plugged into the QL Expansion Slot via a buffer card.
+
+In this context the term 'device' also includes expansion memory. Although the
+areas of the QL memory map allocated to expansion memory are different from
+those allocate to expansion devices, the basic mechanism is the same. Only one
+expansion memory peripheral can be plugged into the QL at any one time. The
+address space allocated for peripheral expansion in the QL Physical memory map
+allows 16 Kbytes per peripheral. This area must contain the memory mapped I/O
+required for the driver and the code for the driver itself.
+
+QDOS includes facilities for queue management and simple serial I/O which may be
+of use when writing device drivers.
+
+The position of each peripheral device in the overall memory map of the QL is
+determined by the select peripheral lines: SP0, SP1, SP2 and SP3. These select
+lines generate a signal corresponding to the slot position in the QL expansion
+module, thus for a device to be selected the address input from address lines:
+A14, A15, A16 and A17 must be the same as the signals from SP0, SP1, SP2 and SP3
+respectively.
+
+
+PIXEL COORDINATE SYSTEM
+-----------------------
+
+The pixel coordinate system is used to defien the positions and sizes of
+windows, blocks and cursor positions on the QL screen. The coordinate system has
+its origin in the top left hand corner of the default window (or screen) and
+always assumes that positions are specified as though the screen were in 512
+mode (high resolution mode). The system will use the nearest pixel available for
+the particular mode set making the coordinate system independent of the screen
+mode in use.
+
+Some commands are always relative to the default window origin, e.g. WINDOW,
+while some are always relative to the current window origin, e.g. BLOCK
+
+          +--------------------------------------+
+          |                                      |
+          |   -------------------------------->  |
+          |  |(0,0)                     (0,512)  |
+          |  |                                   |
+          |  |                                   |
+          |  |                                   |
+          |  |                                   |
+          |  |y                                  |
+          |  |                                   |
+          |  |                                   |
+          |  v(256,0)                            |
+          |                                      |
+          +--------------------------------------+
+                       The Pixel Coordinate System
+
+
+PROGRAM
+-------
+
+A SuperBASIC program consists of a sequence of SuperBASIC statements, where each
+statement is preceded by a line number. Line numbers are in the range of 1 to
+32767.
+
+----------------------------------------------------
+  Command             Function
+----------------------------------------------------
+  RUN                 start a loaded program
+
+  LRUN                load a program from a device
+                      and start it
+
+  [CTRL] [SPACE]      force a program to stop
+----------------------------------------------------
+
+syntax:   line_number:= *[digit]* [range 1,32767]
+          *[line_number statement *[:statement]*]*
+
+example:  i.        100 PRINT "This is a valid line number"
+                    RUN
+
+          ii.       100 REMark a small program
+                    110 FOR foreground = 0 TO 7
+                    120   FOR contrast = 0 TO 7
+                    130     FOR stipple = 0 TO 3
+                    140       PAPER foreground, contrast, stipple
+                    150       CURSOR 0,70
+                    160       FOR n = 0 TO 2
+                    170         SCROLL 2,1
+                    180         SCROLL -2,2
+                    190       END FOR n
+                    200     END FOR stipple
+                    210   END FOR contrast
+                    220 END FOR foreground
+                    RUN

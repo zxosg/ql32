@@ -1,0 +1,330 @@
+CHAPTER 5
+---------
+
+KNOWN GOOD PRACTlCE
+
+You have already begun to work effectively with short programs. You may
+have found the following practices are helpful:
+
+1. Use of lower case for identifiers: names of variables (pigeon
+   holes) or repeat structures, etc.
+
+2. Indenting of statements to show the content of a repeat structure.
+
+3. Well chosen identifiers reflecting what a variable or repeat
+   structure is used for.
+
+4. Editing a program by:
+
+       replacing a line
+       inserting a line
+       deleting a line
+
+
+PROGRAMS AS EXAMPLES
+
+You have reached the stage where it is helpful to be able to study programs
+to learn from them and to try to understand what they do. The mechanics of
+actually running them should now be well understood and in the following
+chapters we will dispense with the constant repetition of:
+
+    NEW before each program
+    [ENTER] at the end of each line
+    RUN to start each program
+
+You will understand that you should use all these features when you wish to
+enter and run a program. But their omission in the text will enable you to
+see the other details more clearly as you try to imagine what the program
+will do when it runs.
+
+If we dispense with the above details we may use and understand programs
+more easily without the technical clutter. For example, the following
+program generates random upper case letters until a Z appears. It does not
+show the words NEW or RUN or the ENTER symbol but you still need to use
+these.
+
+10 REPeat letters
+20   LET lettercode = RND(65 TO 90)
+30   cap$ = CHR$(lettercode)
+40   PRINT cap$
+50   IF cap$ = "Z" THEN EXIT letters
+60 END REPeat letters
+
+In this and subsequent chapters programs will be shown without ENTER
+symbols. Direct commands will also be shown without ENTER symbols. But you
+must use these keys as usual. You must also remember to use NEW and RUN as
+necessary
+
+
+AUTOMATIC LINE NUMBERING
+
+It is tedious to enter line numbers manually. Instead you can type:
+
+    AUTO
+
+before you start programming and the QL will reply with a line number:
+
+    100
+
+Continue typing lines until you have finished your program when the screen
+will show:
+
+100 PRINT "First"
+110 PRINT "Second"
+120 PRINT "End"
+
+To finish the automatic production of line numbers use the BREAK sequence:
+
+    Hold down the CTRL and press the SPACE bar. This will produce the
+    message:
+
+        130 not compLete
+
+and line 130 will not be included in your program.
+
+If you make a mistake which does not cause a break from automatic
+numbering, you can continue and EDIT the line later. If you want to start
+at some particular line number say 600, and use an increment other than 10
+you can type, for an increment of 5:
+
+    AUTO 600,5
+
+Lines will then be numbered 600, 605, 610, etc.
+
+To cancel AUTO, press CTRL and the SPACE bar at the same time.
+
+
+EDITING A LINE
+
+To edit a line simply type EDIT followed by the line number for example:
+
+    EDIT 110
+
+The line will then be displayed with the cursor at the end thus:
+
+    110 PRINT "Second"
+
+You can move the cursor using:
+
+    <--    (left arrow key)     one place left
+    -->    (right arrow key)    one place right
+
+To delete a character to the left use:
+
+    CTRL with <--    (CTRL and left arrow keys)
+
+To delete the character in the cursor position type:
+
+    CTRL with -->    (CTRL and right arrow keys)
+
+and the character to the right of the cursor will move up to close the gap.
+
+
+USING MICRODRIVE CARTRIDGES
+
+Before using a new Microdrive cartridge it must be formatted. Follow the
+instructions in the "Introduction". The choice of name for the cartridge
+follows the same rules as SuperBASIC identifers, etc. but limited to only
+10 characters. It is a good idea to write the name of the cartridge on the
+cartridge itself using one of the supplied sticky labels.
+
+You should always keep at least one back-up copy of any program or data.
+Follow the instructions in the Information section of the User Guide.
+    *****************************************************************
+    *                                                               *
+    *                      **  WARNING  **                          *
+    *                                                               *
+    *  If you FORMAT a cartridge which holds programs and/or data,  *
+    *         ALL the programs and/or data will be lost.            *
+    *                                                               *
+    *****************************************************************
+
+
+SAVING PROGRAMS
+
+The following program sets borders, 8 pixels wide, in red (code 2), in
+three windows designated #0, #1, #2.
+
+100 REMark Border
+110 FOR k = 0 TO 2 : BORDER #k,8,2
+
+You can save it on a microdrive by inserting a cartridge and typing:
+
+    SAVE mdv1_bord
+
+The program will be saved in a Microdrive file called "bord".
+
+
+CHECKING A CARTRIDGE
+
+If you want to know what programs or data files are on a particular
+cartridge place it in Microdrive 1 and type:
+
+    DIR mdv1_
+
+The directory will be displayed on the screen. If the cartridge is in
+Microdrive 2 then type instead:
+
+    DIR mdv2_
+
+
+COPYING PROGRAMS AND FILES
+
+Once a program is stored as a file on a Microdrive cartridge it can be
+copied to other files. This is one way of making a backup copy of a
+Microdrive cartridge. You might copy all the previous programs, and similar
+commands for other programs, onto another cartridge in Microdrive 2 by
+typing:
+
+    COPY mdv1_bord TO mdv2_bord
+
+
+DELETING A CARTRIDGE FILE
+
+A file is anything, such as a program or data, stored on a cartridge. To
+delete a program called "prog" you type:
+
+    DELETE mdv1_prog
+
+
+LOADING PROGRAMS
+
+A program can be loaded from a Microdrive cartridge by typing:
+
+    LOAD mdv2_bord
+
+If the program loads correctly it will prove that both copies are good. You
+can test the program by using:
+
+    LIST to list it.
+    RUN to run it.
+
+Instead of using LOAD followed by RUN you can combine the two operations in
+one command.
+
+    LRUN mdv2_bord
+
+The program will load and execute immediately.
+
+
+MERGING PROGRAMS
+
+Suppose that you have two programs saved on Microdrive 1 as "prog1" and
+"prog2".
+
+    100 PRINT "First"
+    110 PRINT "Second"
+
+If you type:
+
+    LOAD mdv1_prog1
+
+followed by:
+
+    MERGE mdv1_prog2
+
+The two programs will be merged into one. To verify this, type LIST and you
+should see:
+
+    100 PRINT "First"
+    110 PRINT "Second"
+
+If you MERGE a program make sure that all its line numbers are different
+from the program already in main memory. Otherwise it will overwrite some
+of the lines of the first program. This facility becomes very valuable as
+you become proficient in handling procedures. It is then quite natural to
+build a program up by adding procedures or functions to it.
+
+
+GENERAL
+
+Be careful and methodical with cartridges. Always keep one back-up copy and
+if you suspect any problem with a cartridge or microdrive keep a second
+back-up copy. Computer professionals very rarely lose data. They know that
+even with the best machines or devices there will be occasional faults and
+they allow for this.
+
+If you want to call a program by a particular name, say, "square", it may
+be a good idea to use names like "sq1", "sq2"... for preliminary versions.
+When the program is in its final form take at least two copies called
+square and the others may be deleted by re-formatting or by some more
+selective method.
+
+
+
+SELF TEST ON CHAPTER 5
+
+You can score a maximum of 14 points from the following test. Check your
+score with the answers in the "Answers To Self Tests" section at the back
+of this Beginner's Guide.
+
+1. Why are lower case letters preferred for program words which you
+   choose?
+
+2. What is the purpose of indenting?
+3. What should normally guide your choice of identifiers for variables
+   and loops?
+
+4. Name three ways of editing a program in the computer's main memory
+   (three points).
+
+5. What should you remember to type at the end of every command or
+   program line when you enter it?
+
+6. What should you normally type before you enter a program at
+   the keyboard?
+
+7 What must be at the beginning of every line to be stored as part
+  of a program?
+
+8. What must you remember to type to make a program execute?
+
+9. What keyword enables you to put into a program information which
+   has no effect on the execution?
+
+10.Which two keywords help you to store programs on and retrieve
+   from cartridges? (two points).
+
+
+PROBLEMS ON CHAPTER 5
+
+1. Re-write the following program using lower case letters to give a
+   better presentation. Add the words NEW and RUN. Use line numbers and
+   the ENTER symbol just as you would to enter and run a program. Use
+   REMark to give the program a name.
+
+       LET TWO$ = "TWO"
+       LET FOUR$ = "FOUR"
+       LET SIX$ = TWO$ & FOUR$
+       PRINT LEN(six$)
+
+   Explain how two and four can produce 7.
+
+2. Use indenting, lower case letters, NEW, RUN, line numbers and the
+   ENTER symbol to show how you would actually enter and run the
+   following program:
+
+       REPEAT LOOP
+       LETTER_CODE = RND(65 TO 90)
+       LET LETTERS$ = CHR$(LETTER_CODE)
+       PRINT LETTER$
+       IF LETTER$ = 'Z' THEN EXIT LOOP
+       END REPEAT LOOP
+
+3. Re-write the following program in better style using meaningful
+   variable names and good presentation. Write the program as you
+   would enter it:
+
+       LET S = O
+       REPeat TOTAL
+       LET N = RND(1 TO 6)
+       PRINT ! N !
+       LET S = S + N
+       IF n = 6 THEN EXIT TOTAL
+       END REPeat TOTAL
+       PRINT S
+
+   Decide what the program does and then enter and run it to check
+   your decision.
+
+
