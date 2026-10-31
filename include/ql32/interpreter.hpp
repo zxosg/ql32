@@ -6,9 +6,9 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <stop_token>
 #include <unordered_map>
 #include <variant>
+#include "ql32/runtime/cancellation.hpp"
 #include "ql32/runtime/channel.hpp"
 #include "ql32/runtime/storage.hpp"
 #include "ql32/graphics/service.hpp"
@@ -30,10 +30,11 @@ public:
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
-    void execute(const std::string& source, std::ostream& output, std::stop_token stop = {});
+    void execute(const std::string& source, std::ostream& output,
+                 runtime::CancellationToken stop = {});
     ExecutionStatus executeResumable(const std::string& source, std::ostream& output,
-                                     std::stop_token stop = {});
-    ExecutionStatus resume(std::ostream& output, std::stop_token stop = {});
+                                     runtime::CancellationToken stop = {});
+    ExecutionStatus resume(std::ostream& output, runtime::CancellationToken stop = {});
     void executeInteractive(const std::string& source, std::ostream& output);
     void runRepl(std::istream& input, std::ostream& output, std::ostream& diagnostics,
                  bool showPrompt = false,
@@ -41,7 +42,7 @@ public:
     void clear();
 
 private:
-    ExecutionStatus runExecution(std::ostream& output, std::stop_token stop);
+    ExecutionStatus runExecution(std::ostream& output, runtime::CancellationToken stop);
     std::unordered_map<std::string, Value> variables_;
     std::size_t output_column_ = 0;
     std::map<int, std::string> program_;

@@ -1,9 +1,47 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <string>
 
 namespace fabgl {
+
+enum VirtualKey {
+    VK_NONE, VK_RETURN, VK_KP_ENTER, VK_ESCAPE, VK_BACKSPACE, VK_TAB,
+    VK_INSERT, VK_KP_INSERT, VK_DELETE, VK_KP_DELETE, VK_HOME, VK_KP_HOME,
+    VK_END, VK_KP_END, VK_PAGEUP, VK_KP_PAGEUP, VK_PAGEDOWN, VK_KP_PAGEDOWN,
+    VK_LEFT, VK_KP_LEFT, VK_RIGHT, VK_KP_RIGHT, VK_UP, VK_KP_UP,
+    VK_DOWN, VK_KP_DOWN, VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6,
+    VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12, VK_a
+};
+
+struct VirtualKeyItem {
+    VirtualKey vk = VK_NONE;
+    bool down = false;
+    std::uint8_t ASCII = 0;
+    bool SHIFT = false;
+    bool CTRL = false;
+    bool LALT = false;
+    bool RALT = false;
+    bool CAPSLOCK = false;
+};
+
+class Keyboard {
+public:
+    void push(VirtualKey key, bool down, std::uint8_t ascii,
+              bool shift, bool control, bool alt, bool capsLock) {
+        queue.push_back({key, down, ascii, shift, control, alt, false, capsLock});
+    }
+    bool getNextVirtualKey(VirtualKeyItem* item, int) {
+        if (queue.empty()) return false;
+        *item = queue.front();
+        queue.pop_front();
+        return true;
+    }
+
+private:
+    std::deque<VirtualKeyItem> queue;
+};
 
 class Canvas {
 public:

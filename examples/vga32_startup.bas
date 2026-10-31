@@ -1,0 +1,3 @@
+INK(7)
+TEXT(8,112,"BASIC VM ready")
+PRINT "QL/32 BASIC VM running"

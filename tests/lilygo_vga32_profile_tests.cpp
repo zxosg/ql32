@@ -24,6 +24,10 @@ int main() {
     static_assert(profile.display->pixelFormat == ql32::platform::PixelFormat::Indexed3);
     assert(profile.valid());
     assert(profile.has(ql32::platform::ServiceKind::Display));
+    assert(profile.has(ql32::platform::ServiceKind::Clock));
+    assert(profile.has(ql32::platform::ServiceKind::Input));
+    assert(profile.has(ql32::platform::ServiceKind::Storage));
+    assert(profile.has(ql32::platform::ServiceKind::Channels));
     assert(profile.has(ql32::platform::InputKind::Ps2));
     assert(!profile.has(ql32::platform::InputKind::Touch));
 }

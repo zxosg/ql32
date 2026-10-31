@@ -12,7 +12,10 @@ constexpr platform::Capabilities capabilities() {
             platform::Orientation::Landscape, 1.0F, 1.0F
         },
         platform::capabilityBit(platform::ServiceKind::Display) |
-            platform::capabilityBit(platform::ServiceKind::Input),
+            platform::capabilityBit(platform::ServiceKind::Input) |
+            platform::capabilityBit(platform::ServiceKind::Storage) |
+            platform::capabilityBit(platform::ServiceKind::Clock) |
+            platform::capabilityBit(platform::ServiceKind::Channels),
         platform::inputBit(platform::InputKind::Ps2)
     };
 }

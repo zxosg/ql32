@@ -15,7 +15,7 @@ add_library(ql32_core
   src/vm/interpreter.cpp
 )
 target_include_directories(ql32_core PUBLIC include)
-target_compile_features(ql32_core PUBLIC cxx_std_20)
+target_compile_features(ql32_core PUBLIC cxx_std_17)
 
 add_executable(ql32 src/main.cpp)
 target_link_libraries(ql32 PRIVATE ql32_core)
@@ -40,6 +40,7 @@ if(QL32_BUILD_TESTS)
   add_cli_conformance_test(cli_file 0)
   add_cli_conformance_test(cli_language_slice 0)
   add_cli_conformance_test(cli_expression_rules 0)
+  add_cli_conformance_test(cli_numeric_portable 0)
   add_cli_conformance_test(cli_print_separators 0)
   add_cli_conformance_test(cli_block_if 0)
   add_cli_conformance_test(cli_if_type_error 1)
@@ -90,9 +91,57 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_clock_service_tests tests/clock_service_tests.cpp)
   target_link_libraries(ql32_clock_service_tests PRIVATE ql32_core)
   add_test(NAME ql32_clock_service_tests COMMAND ql32_clock_service_tests)
+  add_executable(ql32_esp32_clock_tests
+    tests/esp32_clock_tests.cpp
+    src/platform/esp32/clock.cpp
+  )
+  target_include_directories(ql32_esp32_clock_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_esp32_clock_tests PRIVATE cxx_std_20)
+  add_test(NAME ql32_esp32_clock_tests COMMAND ql32_esp32_clock_tests)
+  add_executable(ql32_esp32_storage_tests
+    tests/esp32_storage_tests.cpp
+    src/platform/esp32/sd_storage.cpp
+  )
+  target_include_directories(ql32_esp32_storage_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_esp32_storage_tests PRIVATE cxx_std_20)
+  add_test(NAME ql32_esp32_storage_tests COMMAND ql32_esp32_storage_tests)
+
+  add_executable(ql32_esp32_channels_tests
+    tests/esp32_channels_tests.cpp
+    src/platform/esp32/sd_channels.cpp
+  )
+  target_include_directories(ql32_esp32_channels_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_esp32_channels_tests PRIVATE cxx_std_20)
+  add_test(NAME ql32_esp32_channels_tests COMMAND ql32_esp32_channels_tests)
   add_executable(ql32_lilygo_vga32_profile_tests tests/lilygo_vga32_profile_tests.cpp)
   target_include_directories(ql32_lilygo_vga32_profile_tests PRIVATE boards/lilygo_vga32 include)
   add_test(NAME ql32_lilygo_vga32_profile_tests COMMAND ql32_lilygo_vga32_profile_tests)
+
+  add_executable(ql32_esp32_2432s028_profile_tests
+    tests/esp32_2432s028_profile_tests.cpp
+  )
+  target_include_directories(ql32_esp32_2432s028_profile_tests PRIVATE
+    boards/esp32_2432s028 include)
+  target_compile_features(ql32_esp32_2432s028_profile_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_esp32_2432s028_profile_tests COMMAND ql32_esp32_2432s028_profile_tests)
+
+  add_executable(ql32_esp32_cyd_graphics_tests
+    tests/esp32_cyd_graphics_tests.cpp
+    src/platform/esp32_cyd/graphics.cpp
+  )
+  target_include_directories(ql32_esp32_cyd_graphics_tests PRIVATE
+    tests/fakes include)
+  target_compile_features(ql32_esp32_cyd_graphics_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_esp32_cyd_graphics_tests COMMAND ql32_esp32_cyd_graphics_tests)
+
+  add_executable(ql32_esp32_cyd_console_tests
+    tests/esp32_cyd_console_tests.cpp
+    src/platform/esp32_cyd/text_console.cpp
+  )
+  target_include_directories(ql32_esp32_cyd_console_tests PRIVATE
+    tests/fakes include)
+  target_compile_features(ql32_esp32_cyd_console_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_esp32_cyd_console_tests COMMAND ql32_esp32_cyd_console_tests)
   add_executable(ql32_linux_graphics_tests tests/linux_graphics_tests.cpp)
   target_link_libraries(ql32_linux_graphics_tests PRIVATE ql32_core)
   add_test(NAME ql32_linux_graphics_tests COMMAND ql32_linux_graphics_tests)
@@ -103,6 +152,13 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_fabgl_graphics_tests PRIVATE tests/fakes include)
   target_compile_features(ql32_fabgl_graphics_tests PRIVATE cxx_std_20)
   add_test(NAME ql32_fabgl_graphics_tests COMMAND ql32_fabgl_graphics_tests)
+  add_executable(ql32_fabgl_keyboard_tests
+    tests/fabgl_keyboard_tests.cpp
+    src/platform/fabgl_vga/keyboard.cpp
+  )
+  target_include_directories(ql32_fabgl_keyboard_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_fabgl_keyboard_tests PRIVATE cxx_std_20)
+  add_test(NAME ql32_fabgl_keyboard_tests COMMAND ql32_fabgl_keyboard_tests)
   add_cli_conformance_test(cli_mixed_type_error 1)
   add_cli_conformance_test(cli_div_overflow 1)
   add_cli_conformance_test(cli_invalid_power 1)

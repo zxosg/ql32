@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <cerrno>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <istream>
 #include <ostream>
@@ -206,9 +208,11 @@ private:
             while (std::isdigit(static_cast<unsigned char>(peek()))) advance();
         }
         const std::string text(source_.substr(start, offset_ - start));
-        double value = 0;
-        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-        if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+        errno = 0;
+        char* parsedEnd = nullptr;
+        const double value = std::strtod(text.c_str(), &parsedEnd);
+        if (errno == ERANGE || parsedEnd != text.c_str() + text.size() ||
+            !std::isfinite(value))
             fail("invalid number");
         return {Kind::Number, text, value, line_, column};
     }
@@ -646,7 +650,7 @@ private:
         const Token keyword = advance();
         if (!check(Kind::Identifier)) error(peek(), "expected array name after DIM");
         const Token name = advance();
-        if (arrays_.contains(name.text)) error(name, "array is already dimensioned");
+        if (arrays_.find(name.text) != arrays_.end()) error(name, "array is already dimensioned");
         const std::size_t rank = callArguments();
         if (rank == 0) error(name, "array needs at least one dimension");
         arrays_[name.text] = rank;
@@ -761,7 +765,7 @@ private:
             if (!match(Kind::RightParen)) error(peek(), "expected ')' after parameters");
         }
 
-        if (definitions_.contains(name.text) || isBuiltinName(name.text))
+        if (definitions_.find(name.text) != definitions_.end() || isBuiltinName(name.text))
             error(name, "duplicate or reserved definition name");
         const std::size_t skipIndex = code_.size();
         emit(Op::Jump, defineKeyword);
@@ -966,11 +970,11 @@ private:
             emitExit(keyword, name);
             return;
         }
-        if (check(Kind::Identifier) && (arrays_.contains(peek().text) || isCurrentParameter(peek().text)) &&
+        if (check(Kind::Identifier) && (arrays_.find(peek().text) != arrays_.end() || isCurrentParameter(peek().text)) &&
             current_ + 1 < tokens_.size() && tokens_[current_ + 1].kind == Kind::LeftParen) {
             const Token name = advance();
             const std::size_t rank = callArguments();
-            if (arrays_.contains(name.text) && rank != arrays_.at(name.text))
+            if (arrays_.find(name.text) != arrays_.end() && rank != arrays_.at(name.text))
                 error(name, "incorrect array rank");
             if (!match(Kind::Equal)) error(peek(), "expected '=' after array index");
             expression();
@@ -1143,7 +1147,8 @@ private:
             const Token t = previous();
             const bool scalarStringSyntax = !isBuiltinName(t.text) && !t.text.empty() &&
                 t.text.back() == '$' &&
-                !arrays_.contains(t.text) && !declaredFunctions_.contains(t.text) &&
+                arrays_.find(t.text) == arrays_.end() &&
+                declaredFunctions_.find(t.text) == declaredFunctions_.end() &&
                 check(Kind::LeftParen);
             if (scalarStringSyntax ||
                 (!isBuiltinName(t.text) && !t.text.empty() && t.text.back() == '$' &&

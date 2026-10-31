@@ -4,8 +4,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <charconv>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <deque>
 #include <limits>
@@ -270,15 +271,44 @@ void writeText(const std::string& text, std::ostream& output, std::size_t& colum
     column += utf8Length(text);
 }
 
+std::string formatNumber(double number) {
+    char buffer[400];
+    std::string fixed;
+    for (int precision = 0; precision <= 340; ++precision) {
+        const int length = std::snprintf(buffer, sizeof(buffer), "%.*f", precision, number);
+        if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(buffer)) break;
+        char* parsedEnd = nullptr;
+        if (std::strtod(buffer, &parsedEnd) == number && parsedEnd == buffer + length) {
+            fixed.assign(buffer, static_cast<std::size_t>(length));
+            break;
+        }
+    }
+
+    std::string scientific;
+    for (int precision = 1; precision <= std::numeric_limits<double>::max_digits10;
+         ++precision) {
+        const int length = std::snprintf(buffer, sizeof(buffer), "%.*g", precision, number);
+        if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(buffer)) break;
+        char* parsedEnd = nullptr;
+        if (std::strtod(buffer, &parsedEnd) == number && parsedEnd == buffer + length) {
+            scientific.assign(buffer, static_cast<std::size_t>(length));
+            break;
+        }
+    }
+
+    if (fixed.empty() && scientific.empty())
+        throw std::runtime_error("numeric formatting failed");
+    if (fixed.empty()) return scientific;
+    if (scientific.empty() || fixed.size() <= scientific.size()) return fixed;
+    return scientific;
+}
+
 void printValue(const Value& value, std::ostream& output, std::size_t& column) {
     if (const auto* number = std::get_if<double>(&value)) {
         if (*number == 0) {
             writeText("0", output, column);
         } else {
-            char buffer[64];
-            const auto converted = std::to_chars(buffer, buffer + sizeof(buffer), *number);
-            if (converted.ec != std::errc{}) throw std::runtime_error("numeric formatting failed");
-            writeText(std::string(buffer, converted.ptr), output, column);
+            writeText(formatNumber(*number), output, column);
         }
     } else {
         writeText(std::get<std::string>(value), output, column);
@@ -307,13 +337,14 @@ void printSeparator(PrintSeparator separator, std::ostream& output, std::size_t&
 
 } // namespace
 
-void Interpreter::execute(const std::string& source, std::ostream& output, std::stop_token stop) {
+void Interpreter::execute(const std::string& source, std::ostream& output,
+                          runtime::CancellationToken stop) {
     if (executeResumable(source, output, stop) == ExecutionStatus::Suspended)
         throw std::runtime_error("execution suspended; use executeResumable() and resume()");
 }
 
 ExecutionStatus Interpreter::executeResumable(const std::string& source, std::ostream& output,
-                                               std::stop_token stop) {
+                                               runtime::CancellationToken stop) {
     if (execution_) throw std::runtime_error("interpreter already has a suspended execution");
     execution_ = std::make_unique<detail::VMExecutionState>();
     try {
@@ -329,7 +360,7 @@ ExecutionStatus Interpreter::executeResumable(const std::string& source, std::os
     }
 }
 
-ExecutionStatus Interpreter::resume(std::ostream& output, std::stop_token stop) {
+ExecutionStatus Interpreter::resume(std::ostream& output, runtime::CancellationToken stop) {
     if (!execution_) throw std::runtime_error("interpreter has no suspended execution");
     try {
         const auto status = runExecution(output, stop);
@@ -342,7 +373,8 @@ ExecutionStatus Interpreter::resume(std::ostream& output, std::stop_token stop) 
     }
 }
 
-ExecutionStatus Interpreter::runExecution(std::ostream& output, std::stop_token stop) {
+ExecutionStatus Interpreter::runExecution(std::ostream& output,
+                                           runtime::CancellationToken stop) {
     auto& state = *execution_;
     auto& code = state.code;
     auto& stack = state.stack;
@@ -443,7 +475,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output, std::stop_token 
         state.pendingUiBuilderHandle = 0;
     }
     while (pc < code.size()) {
-        if (stop.stop_requested()) throw std::runtime_error("execution cancelled");
+        if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
         const auto& instruction = code[pc++];
         switch (instruction.op) {
         case Op::Call: {
@@ -744,7 +776,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output, std::stop_token 
                         const auto alias = callFrames.back().arrayAliases.find(actualName);
                         if (alias != callFrames.back().arrayAliases.end()) actualName = alias->second;
                     }
-                    if (!arrays.contains(actualName))
+                    if (arrays.find(actualName) == arrays.end())
                         runtimeError(instruction, "array argument is not dimensioned");
                     if ((!parameter.empty() && parameter.back() == '$') !=
                         (!actualName.empty() && actualName.back() == '$'))
@@ -757,7 +789,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output, std::stop_token 
                 }
             }
             for (const std::string& local : instruction.localNames) {
-                if (!frame.locals.contains(local)) {
+                if (frame.locals.find(local) == frame.locals.end()) {
                     if (!local.empty() && local.back() == '$') frame.locals[local] = std::string{};
                     else frame.locals[local] = 0.0;
                 }
@@ -1028,7 +1060,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output, std::stop_token 
                                                  ": Int32 value out of range");
                 }
             }
-            if (!callFrames.empty() && callFrames.back().locals.contains(instruction.name))
+            if (!callFrames.empty() &&
+                callFrames.back().locals.find(instruction.name) != callFrames.back().locals.end())
                 callFrames.back().locals[instruction.name] = std::move(value);
             else
                 variables_[instruction.name] = std::move(value);

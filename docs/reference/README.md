@@ -37,4 +37,6 @@ The external manuals remain reference material; do not copy their text, examples
 - [LILYGO VGA32 V1.4 product page](https://lilygo.cc/en-de/products/fabgl-vga32) for target module details.
 - [LILYGO VGA32/FabGL GPIO assignment](https://github.com/Xinyuan-LilyGO/VGA32/blob/master/fabgl%20GPIOs%20assignment.txt) for VGA, PS/2, audio, and SD pin mapping.
 - [FabGL v1.0.9](https://github.com/fdivitto/FabGL/releases/tag/v1.0.9) is the pinned graphics/PS/2 dependency. Its upstream project states the Arduino-ESP32 compatibility ceiling and GPL-3.0 license; see `boards/lilygo_vga32/README.md` before redistributing firmware.
+- [ESP32-2432S028R product specification](https://make.net.za/wp-content/datasheets/Shenzhen%20Jingcai%20Intelligent%20ESP32-2432S028R%20Product%20Spec.pdf) identifies the 2.8-inch ILI9341 panel and 320x240 resolution. [CYD pin reference](https://esp3d.io/esp3d-tft/version_1x/hardware/esp32/sunton-28-2432/) records the commonly used TFT and SD GPIO mapping; check board revisions before using it.
+- [Adafruit ILI9341 library](https://github.com/adafruit/Adafruit_ILI9341) and its [SPIClass constructor](https://github.com/adafruit/Adafruit_ILI9341/blob/master/Adafruit_ILI9341.h) are used by the CYD TFT adapter.
 

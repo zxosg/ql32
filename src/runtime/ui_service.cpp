@@ -11,7 +11,7 @@ RequestId QueuedService::begin(SessionId session, RequestKind kind, std::string 
                                std::vector<MenuItem> items, std::string acceptLabel,
                                std::string cancelLabel) {
     std::lock_guard lock(mutex_);
-    while (nextId_ == 0 || requests_.contains(nextId_)) {
+    while (nextId_ == 0 || requests_.find(nextId_) != requests_.end()) {
         ++nextId_;
         if (nextId_ == 0) ++nextId_;
     }

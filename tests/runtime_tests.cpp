@@ -4,7 +4,6 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
-#include <stop_token>
 #include <streambuf>
 #include <string>
 
@@ -12,21 +11,26 @@ namespace {
 
 class StopOnWriteBuffer final : public std::stringbuf {
 public:
-    explicit StopOnWriteBuffer(std::stop_source& source) : source_(source) {}
+    explicit StopOnWriteBuffer(ql32::runtime::CancellationSource& source) : source_(source) {}
 
 protected:
     std::streamsize xsputn(const char* data, std::streamsize size) override {
         const std::streamsize written = std::stringbuf::xsputn(data, size);
-        source_.request_stop();
+        source_.requestStop();
         return written;
     }
 
 private:
-    std::stop_source& source_;
+    ql32::runtime::CancellationSource& source_;
 };
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+bool endsWith(const std::string& value, const std::string& suffix) {
+    return value.size() >= suffix.size() &&
+        value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 void testInterpreterSessions() {
@@ -43,13 +47,13 @@ void testInterpreterSessions() {
 
 void testCancellation() {
     ql32::Interpreter interpreter;
-    std::stop_source source;
+    ql32::runtime::CancellationSource source;
     StopOnWriteBuffer buffer(source);
     std::ostream output(&buffer);
     bool cancelled = false;
     try {
         interpreter.execute("PRINT \"first\"\nPRINT \"second\"\n", output,
-                            source.get_token());
+                            source.token());
     } catch (const std::runtime_error& error) {
         cancelled = std::string(error.what()) == "execution cancelled";
     }
@@ -316,7 +320,7 @@ void testUiCallsSuspendAndResumePerSession() {
     ql32::platform::linux_host::ConsoleUi console(replService, replInput, replOutput);
     repl.runRepl(replInput, replOutput, replDiagnostics, false,
                  [&] { return console.dispatchNext(); });
-    require(replOutput.str().ends_with("1\n") && replDiagnostics.str().empty(),
+    require(endsWith(replOutput.str(), "1\n") && replDiagnostics.str().empty(),
             "REPL host presenter did not resume a stored program after confirmation");
 }
 
@@ -361,7 +365,7 @@ void testDialogMenuBasicCallsSuspendAndResume() {
             "BASIC menu builders did not produce stable menu command IDs");
     require(service->selectMenu(menu->id, 91), "presenter could not select BASIC menu item");
     require(interpreter.resume(output) == ql32::ExecutionStatus::Completed &&
-                output.str().ends_with("91\n"),
+                endsWith(output.str(), "91\n"),
             "BASIC MENU did not return the selected command ID");
 
     auto cancelService = std::make_shared<ql32::ui::QueuedService>();

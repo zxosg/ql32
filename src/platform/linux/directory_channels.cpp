@@ -81,7 +81,7 @@ runtime::ChannelId DirectoryChannels::open(runtime::SessionId session,
     }
 
     std::lock_guard lock(mutex_);
-    while (nextId_ == 0 || channels_.contains(nextId_)) ++nextId_;
+    while (nextId_ == 0 || channels_.find(nextId_) != channels_.end()) ++nextId_;
     const auto id = nextId_++;
     channels_.emplace(id, std::move(opened));
     return id;
