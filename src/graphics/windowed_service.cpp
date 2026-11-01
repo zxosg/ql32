@@ -31,6 +31,7 @@ WindowId WindowedService::ensureWindow(SessionId session) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
     const auto found = sessionWindows_.find(session);
     if (found != sessionWindows_.end()) return found->second;
+    discardPresentationBuffer();
     const auto id = manager_.create(session, {0, 0, manager_.screenWidth(),
                                               manager_.screenHeight()},
                                    PixelDepth::Four);
@@ -155,7 +156,20 @@ RgbColor WindowedService::paletteColor(SessionId session, std::uint16_t index) {
 }
 
 void WindowedService::setWindowBounds(SessionId session, Rect bounds) {
-    manager_.setBounds(ensureWindow(session), bounds);
+    const auto found = sessionWindows_.find(session);
+    if (found == sessionWindows_.end()) {
+        if (session == 0) throw std::invalid_argument("graphics session must be valid");
+        discardPresentationBuffer();
+        const auto id = manager_.create(session, bounds, PixelDepth::Four);
+        sessionWindows_.emplace(session, id);
+        presentIfConfigured();
+        return;
+    }
+    const auto id = found->second;
+    const auto current = manager_.windowState(id).bounds;
+    if (bounds.width != current.width || bounds.height != current.height)
+        discardPresentationBuffer();
+    manager_.setBounds(id, bounds);
     presentIfConfigured();
 }
 
@@ -184,6 +198,7 @@ void WindowedService::setRotation(SessionId session, std::uint16_t degrees) {
 }
 
 void WindowedService::setWindowPixelDepth(SessionId session, PixelDepth depth) {
+    discardPresentationBuffer();
     manager_.setPixelDepth(ensureWindow(session), depth);
     presentIfConfigured();
 }
@@ -205,12 +220,24 @@ void WindowedService::tileWindows() {
 
 void WindowedService::present() {
     if (!presenter_) return;
+    for (std::size_t index = 0; index < frame_.palette.size(); ++index)
+        frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
+    const auto width = manager_.screenWidth();
+    const auto height = manager_.screenHeight();
+    if (presenter_->presentRows(
+            width, height, frame_.palette,
+            [this](std::uint32_t y, std::vector<ColorIndex>& row) {
+                manager_.composeRowInto(y, row);
+            }))
+        return;
     frame_.width = manager_.screenWidth();
     frame_.height = manager_.screenHeight();
     manager_.composeInto(frame_.pixels);
-    for (std::size_t index = 0; index < frame_.palette.size(); ++index)
-        frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
     presenter_->present(frame_);
+}
+
+void WindowedService::discardPresentationBuffer() {
+    std::vector<ColorIndex>().swap(frame_.pixels);
 }
 
 void WindowedService::presentIfConfigured() {

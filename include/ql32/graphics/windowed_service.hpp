@@ -45,6 +45,7 @@ private:
     WindowId ensureWindow(SessionId session);
     IndexedCanvas& canvas(SessionId session);
     static RgbColor defaultPaletteColor(std::uint16_t index);
+    void discardPresentationBuffer();
     void presentIfConfigured();
 
     WindowManager manager_;

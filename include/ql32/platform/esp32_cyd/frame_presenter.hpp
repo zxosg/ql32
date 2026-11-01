@@ -15,6 +15,9 @@ public:
                           std::function<void()> rotationChanged);
 
     void present(const graphics::Frame& frame) override;
+    bool presentRows(std::uint32_t width, std::uint32_t height,
+                    const std::array<graphics::RgbColor, 256>& palette,
+                    const graphics::FramePresenter::RowProvider& rowProvider) override;
     graphics::WindowInfo setRotation(std::uint16_t degrees) override;
 
 private:
@@ -22,6 +25,7 @@ private:
     std::function<void()> restoreOverlay_;
     std::function<void()> rotationChanged_;
     std::vector<std::uint16_t> row_;
+    std::vector<graphics::ColorIndex> indexedRow_;
     std::uint16_t rotationDegrees_ = 0;
 };
 

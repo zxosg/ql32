@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "linux",
+      "displayName": "QL/32 Linux host",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/linux",
+      "cacheVariables": {
+        "QL32_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "macos",
+      "displayName": "QL/32 macOS host",
+      "inherits": "linux",
+      "binaryDir": "${sourceDir}/build/macos"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "linux",
+      "configurePreset": "linux"
+    },
+    {
+      "name": "macos",
+      "configurePreset": "macos"
+    }
+  ]
+}

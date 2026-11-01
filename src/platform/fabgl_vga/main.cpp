@@ -3,15 +3,18 @@
 #include <SPI.h>
 #include <driver/gpio.h>
 #include <fabgl.h>
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <ostream>
 #include <optional>
 #include <streambuf>
+#include <string_view>
+#include <utility>
 
 #include "capabilities.hpp"
 #include "pins.hpp"
-#include "ql32/interpreter.hpp"
+#include "ql32/vm/scheduler.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/line_ui_presenter.hpp"
@@ -54,12 +57,15 @@ ql32::platform::esp32::SdStorage sdStorage(SD);
 ql32::platform::esp32::SdChannels sdChannels(SD);
 SerialOutputBuffer serialBuffer;
 std::ostream serialOutput(&serialBuffer);
-std::unique_ptr<ql32::Interpreter> interpreter;
+std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
+ql32::vm::TaskId replTask = 0;
 std::shared_ptr<ql32::ui::QueuedService> uiService =
     std::make_shared<ql32::ui::QueuedService>();
 std::unique_ptr<ql32::platform::esp32::LineUiPresenter> uiPresenter;
 std::string inputLine;
 bool serialSawCarriageReturn = false;
+bool replReadyMessageShown = false;
+bool replPromptShown = false;
 
 void appendInputCharacter(char character) {
     if (inputLine.size() >= 256) return;
@@ -73,42 +79,16 @@ void eraseInputCharacter() {
     Serial.print("\b \b");
 }
 
-bool resumePendingExecution() {
-    try {
-        const auto status = interpreter->resume(serialOutput);
-        if (status == ql32::ExecutionStatus::Completed) return true;
-        if (uiPresenter->beginNext()) return false;
-        throw std::runtime_error("suspended VM has no queued UI request");
-    } catch (const std::exception& error) {
-        Serial.printf("%s\n", error.what());
-        return true;
-    }
-}
-
 void submitInputLine() {
     Serial.println();
-    bool showPrompt = true;
-    if (interpreter && (!inputLine.empty() || (uiPresenter && uiPresenter->active()))) {
-        try {
-            if (uiPresenter->active()) {
-                if (uiPresenter->consumeLine(inputLine))
-                    showPrompt = resumePendingExecution();
-                else
-                    showPrompt = false;
-            } else {
-                const auto status = interpreter->executeInteractiveResumable(
-                    inputLine + "\n", serialOutput);
-                if (status == ql32::ExecutionStatus::Suspended) {
-                    if (uiPresenter->beginNext()) showPrompt = false;
-                    else throw std::runtime_error("suspended VM has no queued UI request");
-                }
-            }
-        } catch (const std::exception& error) {
-            Serial.printf("%s\n", error.what());
-        }
+    if (uiPresenter && uiPresenter->active()) {
+        (void)uiPresenter->consumeLine(inputLine);
+    } else if (scheduler && !inputLine.empty() &&
+               !scheduler->submit(scheduler->focusedTask(), inputLine + "\n")) {
+        Serial.println("BASIC session is busy");
     }
     inputLine.clear();
-    if (showPrompt && (!uiPresenter || !uiPresenter->active())) Serial.print("> ");
+    replPromptShown = false;
 }
 
 void receiveSerialCharacter(char character) {
@@ -126,6 +106,52 @@ void receiveSerialCharacter(char character) {
         eraseInputCharacter();
     } else if (character >= 32 && character <= 126) {
         appendInputCharacter(character);
+    }
+}
+
+bool acceptsInput() {
+    if (uiPresenter && uiPresenter->active()) return true;
+    if (!scheduler) return false;
+    const auto state = scheduler->task(scheduler->focusedTask());
+    return state && state->status == ql32::vm::TaskStatus::WaitingInput;
+}
+
+void advanceScheduler() {
+    if (!scheduler) return;
+    (void)scheduler->tick();
+
+    const auto tasks = scheduler->tasks();
+    for (const auto& task : tasks) {
+        const std::string error = scheduler->takeError(task.id);
+        if (!error.empty())
+            Serial.printf("BASIC session %llu VM error: %s\n",
+                          static_cast<unsigned long long>(task.id), error.c_str());
+    }
+
+    const bool sessionWaitingForUi = std::any_of(tasks.begin(), tasks.end(),
+        [](const ql32::vm::TaskInfo& task) {
+            return task.status == ql32::vm::TaskStatus::WaitingUi;
+        });
+    if (uiPresenter && !uiPresenter->active() && !uiPresenter->beginNext() &&
+        sessionWaitingForUi)
+        Serial.println("suspended session has no queued UI request");
+
+    const auto focused = scheduler->focusedTask();
+    const auto state = scheduler->task(focused);
+    if (!state) return;
+    if (state->status == ql32::vm::TaskStatus::WaitingInput &&
+        (!uiPresenter || !uiPresenter->active())) {
+        if (!replReadyMessageShown) {
+            Serial.println("BASIC REPL ready (USB serial and PS/2 keyboard)");
+            replReadyMessageShown = true;
+        }
+        if (!replPromptShown) {
+            if (focused == replTask) Serial.print("> ");
+            else Serial.printf("task %llu> ", static_cast<unsigned long long>(focused));
+            replPromptShown = true;
+        }
+    } else {
+        replPromptShown = false;
     }
 }
 
@@ -177,19 +203,6 @@ void setup() {
     Serial.println(sdReady ? "SD storage ready" : "SD storage unavailable");
 
     auto graphicsService = std::static_pointer_cast<ql32::graphics::Service>(graphics);
-    auto storageService = std::shared_ptr<ql32::runtime::StorageService>(
-        &sdStorage, [](ql32::runtime::StorageService*) {});
-    auto channelService = std::shared_ptr<ql32::runtime::ChannelService>(
-        &sdChannels, [](ql32::runtime::ChannelService*) {});
-    auto networkService = std::shared_ptr<ql32::runtime::NetworkService>(
-        &boardNetwork, [](ql32::runtime::NetworkService*) {});
-    auto memoryService = std::shared_ptr<ql32::runtime::MemoryService>(
-        &boardMemory, [](ql32::runtime::MemoryService*) {});
-    uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
-        uiService, serialOutput);
-    interpreter = std::make_unique<ql32::Interpreter>(
-        storageService, channelService, uiService, graphicsService, networkService,
-        memoryService);
     std::string startupProgram =
         "INK 7\nTEXT 8,8,\"QL/32 VGA32 V1.4\"\n"
         "TEXT 8,24,\"FabGL VGA + PS/2 ready\"\n"
@@ -209,25 +222,34 @@ void setup() {
             Serial.println("SD:/startup.bas not found; running built-in demo");
         }
     }
-    try {
-        const auto status = interpreter->executeResumable(startupProgram, serialOutput);
-        if (status == ql32::ExecutionStatus::Suspended) {
-            if (!uiPresenter->beginNext())
-                throw std::runtime_error("suspended VM has no queued UI request");
-        }
-    } catch (const std::exception& error) {
-        Serial.printf("BASIC VM error: %s\n", error.what());
-    }
-    Serial.println("BASIC REPL ready (USB serial and PS/2 keyboard)");
-    if (!uiPresenter->active()) Serial.print("> ");
+
+    ql32::vm::Services services;
+    services.storage = std::shared_ptr<ql32::runtime::StorageService>(
+        &sdStorage, [](ql32::runtime::StorageService*) {});
+    auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
+        &sdChannels, [](ql32::runtime::ChannelService*) {});
+    services.channels = std::make_shared<ql32::runtime::ChannelRegistry>(
+        std::move(fileChannels), [](std::string_view bytes) {
+            Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+        });
+    services.ui = uiService;
+    services.graphics = graphicsService;
+    services.network = std::shared_ptr<ql32::runtime::NetworkService>(
+        &boardNetwork, [](ql32::runtime::NetworkService*) {});
+    services.memory = std::shared_ptr<ql32::runtime::MemoryService>(
+        &boardMemory, [](ql32::runtime::MemoryService*) {});
+    uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
+        uiService, serialOutput);
+    scheduler = std::make_unique<ql32::vm::SessionScheduler>(std::move(services), 128);
+    replTask = scheduler->launchInteractive(serialOutput, std::move(startupProgram));
 }
 
 void loop() {
-    while (Serial.available() > 0) {
+    while (acceptsInput() && Serial.available() > 0) {
         receiveSerialCharacter(static_cast<char>(Serial.read()));
     }
 
-    if (keyboardInput) {
+    if (acceptsInput() && keyboardInput) {
         const auto event = keyboardInput->poll();
         if (event && event->pressed) {
             if (event->key == ql32::input::Key::Character &&
@@ -240,5 +262,6 @@ void loop() {
             }
         }
     }
+    advanceScheduler();
     delay(1);
 }

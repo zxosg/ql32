@@ -12,6 +12,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <string_view>
 #if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
 #endif
@@ -37,8 +38,13 @@ int main(int argc, char** argv) {
         if (!consoleOnly && argc == 1 && ::isatty(STDIN_FILENO)) {
             auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(
                 std::filesystem::current_path());
-            auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
+            auto fileChannels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
                 std::filesystem::current_path());
+            auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(
+                fileChannels, [](std::string_view bytes) {
+                    std::cout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+                    std::cout.flush();
+                });
             auto ui = std::make_shared<ql32::ui::QueuedService>();
             auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
                 "ql32-screen.ppm");
@@ -58,8 +64,13 @@ int main(int argc, char** argv) {
     try {
         auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(
             std::filesystem::current_path());
-        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
+        auto fileChannels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
             std::filesystem::current_path());
+        auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(
+            fileChannels, [](std::string_view bytes) {
+                std::cout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+                std::cout.flush();
+            });
         auto ui = std::make_shared<ql32::ui::QueuedService>();
         auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
             "ql32-screen.ppm");

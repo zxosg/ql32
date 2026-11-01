@@ -4,26 +4,36 @@ project(ql32 VERSION 0.1.0 LANGUAGES CXX)
 
 option(QL32_BUILD_TESTS "Build QL/32 host tests" ON)
 
-add_library(ql32_core
+add_library(ql32_portable
   src/language/interpreter.cpp
+  src/graphics/window_manager.cpp
+  src/graphics/windowed_service.cpp
+  src/runtime/channel_registry.cpp
+  src/runtime/ui_service.cpp
+  src/vm/interpreter.cpp
+  src/vm/scheduler.cpp
+)
+target_include_directories(ql32_portable PUBLIC include)
+target_compile_features(ql32_portable PUBLIC cxx_std_17)
+
+add_library(ql32_host_adapters
   src/platform/linux/directory_channels.cpp
   src/platform/linux/directory_storage.cpp
   src/platform/linux/console_ui.cpp
   src/platform/linux/system_clock.cpp
   src/platform/linux/memory.cpp
   src/platform/linux/svg_graphics.cpp
-  src/graphics/window_manager.cpp
-  src/graphics/windowed_service.cpp
   src/platform/linux/ppm_presenter.cpp
-  src/runtime/ui_service.cpp
-  src/vm/interpreter.cpp
-  src/vm/scheduler.cpp
 )
-target_include_directories(ql32_core PUBLIC include)
-target_compile_features(ql32_core PUBLIC cxx_std_17)
+target_link_libraries(ql32_host_adapters PUBLIC ql32_portable)
+
+# Host applications and integration tests use the portable runtime plus its
+# host service adapters. Embedded builds link ql32_portable with board adapters.
+add_library(ql32_host INTERFACE)
+target_link_libraries(ql32_host INTERFACE ql32_portable ql32_host_adapters)
 
 add_executable(ql32 src/main.cpp)
-target_link_libraries(ql32 PRIVATE ql32_core)
+target_link_libraries(ql32 PRIVATE ql32_host)
 
 if(QL32_BUILD_TESTS)
   enable_testing()
@@ -76,28 +86,28 @@ if(QL32_BUILD_TESTS)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_ui_test.cmake
   )
   add_executable(ql32_runtime_tests tests/runtime_tests.cpp)
-  target_link_libraries(ql32_runtime_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_runtime_tests PRIVATE ql32_host)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
   add_executable(ql32_scheduler_tests tests/scheduler_tests.cpp)
-  target_link_libraries(ql32_scheduler_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_scheduler_tests PRIVATE ql32_host)
   add_test(NAME ql32_scheduler_tests COMMAND ql32_scheduler_tests)
   add_executable(ql32_storage_tests tests/storage_tests.cpp)
-  target_link_libraries(ql32_storage_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_storage_tests PRIVATE ql32_host)
   add_test(NAME ql32_storage_tests COMMAND ql32_storage_tests)
   add_executable(ql32_channel_tests tests/channel_tests.cpp)
-  target_link_libraries(ql32_channel_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_channel_tests PRIVATE ql32_host)
   add_test(NAME ql32_channel_tests COMMAND ql32_channel_tests)
   add_executable(ql32_ui_service_tests tests/ui_service_tests.cpp)
-  target_link_libraries(ql32_ui_service_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_ui_service_tests PRIVATE ql32_host)
   add_test(NAME ql32_ui_service_tests COMMAND ql32_ui_service_tests)
   add_executable(ql32_graphics_tests tests/graphics_tests.cpp)
-  target_link_libraries(ql32_graphics_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_graphics_tests PRIVATE ql32_host)
   add_test(NAME ql32_graphics_tests COMMAND ql32_graphics_tests)
   add_executable(ql32_capabilities_tests tests/capabilities_tests.cpp)
-  target_link_libraries(ql32_capabilities_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_capabilities_tests PRIVATE ql32_host)
   add_test(NAME ql32_capabilities_tests COMMAND ql32_capabilities_tests)
   add_executable(ql32_clock_service_tests tests/clock_service_tests.cpp)
-  target_link_libraries(ql32_clock_service_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_clock_service_tests PRIVATE ql32_host)
   add_test(NAME ql32_clock_service_tests COMMAND ql32_clock_service_tests)
   add_executable(ql32_esp32_clock_tests
     tests/esp32_clock_tests.cpp
@@ -114,10 +124,10 @@ if(QL32_BUILD_TESTS)
   target_compile_features(ql32_esp32_network_tests PRIVATE cxx_std_17)
   add_test(NAME ql32_esp32_network_tests COMMAND ql32_esp32_network_tests)
   add_executable(ql32_network_service_tests tests/network_service_tests.cpp)
-  target_link_libraries(ql32_network_service_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_network_service_tests PRIVATE ql32_host)
   add_test(NAME ql32_network_service_tests COMMAND ql32_network_service_tests)
   add_executable(ql32_include_tests tests/include_tests.cpp)
-  target_link_libraries(ql32_include_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_include_tests PRIVATE ql32_host)
   add_test(NAME ql32_include_tests COMMAND ql32_include_tests)
   add_executable(ql32_esp32_storage_tests
     tests/esp32_storage_tests.cpp
@@ -136,6 +146,7 @@ if(QL32_BUILD_TESTS)
   add_test(NAME ql32_esp32_channels_tests COMMAND ql32_esp32_channels_tests)
   add_executable(ql32_lilygo_vga32_profile_tests tests/lilygo_vga32_profile_tests.cpp)
   target_include_directories(ql32_lilygo_vga32_profile_tests PRIVATE boards/lilygo_vga32 include)
+  target_compile_features(ql32_lilygo_vga32_profile_tests PRIVATE cxx_std_17)
   add_test(NAME ql32_lilygo_vga32_profile_tests COMMAND ql32_lilygo_vga32_profile_tests)
 
   add_executable(ql32_esp32_2432s028_profile_tests
@@ -169,12 +180,12 @@ if(QL32_BUILD_TESTS)
     tests/line_ui_presenter_tests.cpp
     src/platform/esp32/line_ui_presenter.cpp
   )
-  target_link_libraries(ql32_line_ui_presenter_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_line_ui_presenter_tests PRIVATE ql32_host)
   target_include_directories(ql32_line_ui_presenter_tests PRIVATE include)
   target_compile_features(ql32_line_ui_presenter_tests PRIVATE cxx_std_17)
   add_test(NAME ql32_line_ui_presenter_tests COMMAND ql32_line_ui_presenter_tests)
   add_executable(ql32_linux_graphics_tests tests/linux_graphics_tests.cpp)
-  target_link_libraries(ql32_linux_graphics_tests PRIVATE ql32_core)
+  target_link_libraries(ql32_linux_graphics_tests PRIVATE ql32_host)
   add_test(NAME ql32_linux_graphics_tests COMMAND ql32_linux_graphics_tests)
   add_executable(ql32_fabgl_graphics_tests
     tests/fabgl_graphics_tests.cpp

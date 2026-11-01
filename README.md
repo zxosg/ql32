@@ -5,8 +5,8 @@ and Psion-style application interfaces. It is a native C++ implementation,
 not a QL emulator.
 
 The first hardware target is the LILYGO FabGL VGA32 (ESP32, VGA, PS/2), while
-the core is designed to support independent TFT firmware builds on newer ESP32
-chips. A Linux build is the primary development and test host.
+the core also supports an ESP32-2432S028 TFT build. Linux and macOS are host
+development and test targets.
 
 ## Repository map
 
@@ -15,14 +15,16 @@ chips. A Linux build is the primary development and test host.
 - `docs/reference/` — language manual links and provenance.
 - `src/language/` — lexer, parser, semantic analysis, and bytecode compiler.
 - `src/vm/` — bytecode execution and per-session VM state.
-- `src/runtime/`, `src/system/`, `src/ui/` — portable services.
-- `src/platform/` — Linux, FabGL VGA, and ESP LCD/TFT adapters.
+- `include/ql32/runtime/`, `include/ql32/ui/` — portable service contracts.
+- `src/runtime/`, `src/graphics/`, `src/vm/` — portable service and VM
+  implementations.
+- `src/platform/` — host, FabGL VGA, and ESP LCD/TFT adapters.
 - `boards/` — board-specific build profiles and pin/resource definitions.
 - `tests/` — host-side language, VM, and integration tests.
 
-## M1 status
+## Implemented software
 
-The Linux CLI includes expressions, structured blocks, procedures, functions,
+The host CLI includes expressions, structured blocks, procedures, functions,
 locals, arrays, `SELect ON`, numbered-line commands (`LIST`, `RUN`, `NEW`,
 `LOAD`, `SAVE`, and `DIR`), and a persistent terminal REPL. The M2 host slice
 also defines portable storage, session-owned text/binary file channels, line
@@ -32,59 +34,104 @@ interpreter sessions through the async service. The Linux console presenter
 supports alerts, confirmations, typed dialogs, and menus. BASIC exposes
 session-owned dialog and menu builders through `DINIT`/`DIALOG` and
 `MINIT`/`MENU`; [examples/ui.bas](examples/ui.bas) exercises typed results and
-stable menu IDs. Embedded ESP32 line presenters are integrated. See
+stable menu IDs. Embedded ESP32 line presenters are integrated. The embedded
+REPL can also launch and manage worker sessions with `SPAWN`,
+`TASKS`, `TASKCHANNELS`, `LOGON`, `LOGOFF`, and `CANCEL`; each session owns its
+BASIC state and channel handles while sharing the board's physical services.
+The [embedded supervisor demo](examples/supervisor/README.md) shows three
+workers in side-by-side display windows. See
 [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md).
 
 `INCLUDE "relative/path.bas"` at the start of a source module expands a BASIC
 library/header file before compilation. Included procedures and functions
 become part of that module. For example, run
-`./build/ql32 examples/include_demo.bas`; it includes
+`./build/linux/ql32 examples/include_demo.bas` (or
+`./build/macos/ql32 examples/include_demo.bas`); it includes
 `examples/lib/arithmetic.bas` and prints `42`. This is BASIC source inclusion,
 not C/C++ header or binary-library linking.
 
+### `PRINT` and `WRITE`
+
+Both commands can write a newline-terminated text line to an open channel.
+`WRITE` takes one channel handle and one string. `PRINT #channel` is more
+flexible: it can format multiple items with separators and normally adds a
+final line feed. A trailing backslash (`\`) emits a line feed explicitly; a
+trailing semicolon suppresses the automatic final line feed.
+
+```basic
+file = OPEN("messages.txt", "WRITE")
+WRITE file, "Written with WRITE"
+PRINT #file, "Written with PRINT"\
+CLOSE file
+```
+
+The file contains:
+
+```text
+Written with WRITE
+Written with PRINT
+```
+
 ## Build
 
+Build exactly one named target with the helper:
+
 ```bash
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
+tools/build-target.sh linux
+tools/build-target.sh mac
+tools/build-target.sh cyd
+tools/build-target.sh vga32
 ```
 
-The LILYGO VGA32 V1.4 PlatformIO environment pins Arduino-ESP32 2.0.17 and
-FabGL v1.0.9, and builds a hardware bring-up image:
+The host executables are `build/linux/ql32` and `build/macos/ql32`. Run the
+matching host test suite with `ctest --test-dir build/linux --output-on-failure`
+or `ctest --test-dir build/macos --output-on-failure`.
+
+PlatformIO's plain `pio run` builds both supported ESP32 profiles. Select one
+environment explicitly when uploading:
 
 ```bash
-pio run -e lilygo_vga32
 pio run -e lilygo_vga32 -t upload
+pio run -e esp32_2432s028 -t upload
 ```
 
-This image initializes VGA/PS/2 and exercises the portable graphics service
-through the FabGL adapter with text and primitive shapes. The pinned build has
-been verified with PlatformIO Core 6.2.0, Arduino-ESP32 2.0.17, and FabGL
-1.0.9. It still builds separately from the BASIC VM; physical-board testing is
-required. The ESP32-S3 TFT environment remains a backlog placeholder.
+The `lilygo_vga32` image includes the shared portable BASIC VM and its FabGL
+adapters. Its display, PS/2, clock, SD, and line-presenter behavior still needs
+physical-board verification. The CYD's TFT, serial REPL, BASIC loop, SD text
+round-trip, retained-compositor movement/resize/clipping, full-screen canvas,
+and all four rotations have been checked on hardware. CYD Wi-Fi association,
+status, address, signal, and disconnect are also verified; VGA32 Wi-Fi still
+needs a physical check. [`examples/cyd-rotation-memory.bas`](examples/cyd-rotation-memory.bas)
+prints free heap after each rotation. The pinned
+VGA32 build uses PlatformIO Core 6.2.0, Arduino-ESP32 2.0.17, and FabGL v1.0.9.
+The ESP32-S3 TFT profile remains backlog work.
 
-For Linux graphics testing, run `./build/ql32 examples/graphics.bas`. The CLI
+For host graphics testing, run `./build/linux/ql32 examples/graphics.bas` or
+`./build/macos/ql32 examples/graphics.bas`. The CLI
 composites drawing into retained 4-bit windows and writes the latest screen to
 `ql32-screen.ppm` in its current directory. Open the PPM image to inspect the
 composed frame.
 Unqualified `PRINT` and `PRINT #1` write text into the user window; `PRINT #0`
-writes to the terminal. Use `./build/ql32 --console program.bas` to run a
-program without graphics and send the default output to the terminal.
+writes to the terminal. Use `./build/linux/ql32 --console program.bas` or
+`./build/macos/ql32 --console program.bas` to run a program without graphics
+and send the default output to the terminal.
 
 To see a retained canvas move after it has been drawn, run
-`./build/ql32 examples/window-manager.bas`. The `WINDOW x,y,width,height`
+`./build/linux/ql32 examples/window-manager.bas` or
+`./build/macos/ql32 examples/window-manager.bas`. The `WINDOW x,y,width,height`
 command changes the current window's position and size; its drawing coordinates
 remain relative to the window. `GORIGINX()` and `GORIGINY()` return its absolute
 screen coordinates. The resulting composed frame is written to
 `ql32-screen.ppm`.
 
-In the interactive REPL, run `PRINT FREE()`, `CLOSEWINDOW`, then
-`PRINT FREE()` to compare available memory before and after releasing the
-current session's graphics canvas. A later graphics command recreates its
-default window.
+Start the interactive REPL with `./build/linux/ql32` or
+`./build/macos/ql32`. Enter `CHANNEL #0` to send unqualified output to the
+terminal, then run `PRINT FREE()`, `CLOSEWINDOW`, and `PRINT FREE()` to compare
+available memory before and after releasing the session's graphics canvas. A
+later graphics command recreates its default window. Press Ctrl-D to exit.
 
-For a manual dialog and menu test, run `./build/ql32 examples/ui.bas`. Enter
+For a manual dialog and menu test, run
+`./build/linux/ql32 examples/ui.bas` or `./build/macos/ql32 examples/ui.bas`. Enter
 values at the console prompts, accept or cancel the dialog, then select a menu
 item by number or shortcut. The example prints the submitted values and stable
 command ID.

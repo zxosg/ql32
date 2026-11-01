@@ -32,6 +32,33 @@ void Ili9341FramePresenter::present(const graphics::Frame& frame) {
     if (restoreOverlay_) restoreOverlay_();
 }
 
+bool Ili9341FramePresenter::presentRows(
+    std::uint32_t width, std::uint32_t height,
+    const std::array<graphics::RgbColor, 256>& palette,
+    const graphics::FramePresenter::RowProvider& rowProvider) {
+    if (width != static_cast<std::uint32_t>(display_.width()) ||
+        height != static_cast<std::uint32_t>(display_.height()))
+        throw std::invalid_argument("composed rows do not match CYD display geometry");
+    if (row_.size() < width) row_.resize(width);
+    if (indexedRow_.size() < width) indexedRow_.resize(width);
+    for (std::uint32_t y = 0; y < height; ++y) {
+        rowProvider(y, indexedRow_);
+        if (indexedRow_.size() != width)
+            throw std::invalid_argument("composed row does not match CYD display width");
+        for (std::uint32_t x = 0; x < width; ++x) {
+            const auto& color = palette[indexedRow_[x]];
+            row_[x] = static_cast<std::uint16_t>(
+                ((color.red & 0xF8u) << 8u) |
+                ((color.green & 0xFCu) << 3u) |
+                (color.blue >> 3u));
+        }
+        display_.drawRGBBitmap(0, static_cast<std::int16_t>(y), row_.data(),
+                               static_cast<std::int16_t>(width), 1);
+    }
+    if (restoreOverlay_) restoreOverlay_();
+    return true;
+}
+
 graphics::WindowInfo Ili9341FramePresenter::setRotation(std::uint16_t degrees) {
     if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270)
         throw std::invalid_argument("rotation must be 0, 90, 180, or 270 degrees");

@@ -13,6 +13,7 @@
 #include "ql32/runtime/storage.hpp"
 #include "ql32/runtime/network.hpp"
 #include "ql32/runtime/memory.hpp"
+#include "ql32/runtime/task_control.hpp"
 #include "ql32/graphics/service.hpp"
 #include "ql32/ui/service.hpp"
 
@@ -30,7 +31,8 @@ public:
                          std::shared_ptr<ui::Service> ui = {},
                          std::shared_ptr<graphics::Service> graphics = {},
                          std::shared_ptr<runtime::NetworkService> network = {},
-                         std::shared_ptr<runtime::MemoryService> memory = {});
+                         std::shared_ptr<runtime::MemoryService> memory = {},
+                         std::shared_ptr<runtime::TaskControlService> taskControl = {});
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -48,9 +50,13 @@ public:
     ExecutionStatus executeInteractiveResumable(
         const std::string& source, std::ostream& output,
         runtime::CancellationToken stop = {});
+    ExecutionStatus executeInteractiveSlice(
+        const std::string& source, std::ostream& output,
+        std::size_t instructionBudget, runtime::CancellationToken stop = {});
     void runRepl(std::istream& input, std::ostream& output, std::ostream& diagnostics,
                  bool showPrompt = false,
                  std::function<bool()> dispatchUiRequest = {});
+    std::vector<runtime::ChannelInfo> channelInventory() const;
     void clear();
 
 private:
@@ -75,6 +81,7 @@ private:
     std::shared_ptr<graphics::Service> graphics_;
     std::shared_ptr<runtime::NetworkService> network_;
     std::shared_ptr<runtime::MemoryService> memory_;
+    std::shared_ptr<runtime::TaskControlService> taskControl_;
     runtime::SessionId session_id_ = 0;
     std::unique_ptr<detail::VMExecutionState> execution_;
 };

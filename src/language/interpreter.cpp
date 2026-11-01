@@ -538,6 +538,9 @@ private:
                 if (instruction.name == "GETCHANNEL") {
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "GETCHANNEL expects one or two arguments");
+                } else if (instruction.name == "OPEN") {
+                    if (passedArguments < 1 || passedArguments > 3)
+                        error(instruction, "OPEN expects one to three arguments");
                 } else if (passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
@@ -1783,11 +1786,13 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<ui::Service> ui,
                          std::shared_ptr<graphics::Service> graphics,
                          std::shared_ptr<runtime::NetworkService> network,
-                         std::shared_ptr<runtime::MemoryService> memory)
+                         std::shared_ptr<runtime::MemoryService> memory,
+                         std::shared_ptr<runtime::TaskControlService> taskControl)
     : uiSession_(std::make_unique<detail::UISessionState>()),
       storage_(std::move(storage)), channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
+      taskControl_(std::move(taskControl)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)) {
     if (session_id_ == 0)
         session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
@@ -1797,6 +1802,21 @@ Interpreter::~Interpreter() {
     if (ui_) ui_->cancelSession(session_id_);
     if (channels_) channels_->closeSession(session_id_);
     if (graphics_) graphics_->closeSession(session_id_);
+}
+
+std::vector<runtime::ChannelInfo> Interpreter::channelInventory() const {
+    std::vector<runtime::ChannelInfo> result{
+        {0, runtime::ChannelType::Console},
+        {1, runtime::ChannelType::Window}
+    };
+    if (channels_) {
+        auto opened = channels_->listOpen(session_id_);
+        result.insert(result.end(), opened.begin(), opened.end());
+    }
+    std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+        return left.handle < right.handle;
+    });
+    return result;
 }
 
 bool Interpreter::channelIsOpen(runtime::ChannelId channel) const {
@@ -1882,6 +1902,15 @@ void Interpreter::executeInteractive(const std::string& source, std::ostream& ou
 
 ExecutionStatus Interpreter::executeInteractiveResumable(
     const std::string& source, std::ostream& output, runtime::CancellationToken stop) {
+    return executeInteractiveSlice(source, output,
+        std::numeric_limits<std::size_t>::max(), stop);
+}
+
+ExecutionStatus Interpreter::executeInteractiveSlice(
+    const std::string& source, std::ostream& output, std::size_t instructionBudget,
+    runtime::CancellationToken stop) {
+    if (instructionBudget == 0)
+        throw std::invalid_argument("interactive instruction budget must be positive");
     auto trim = [](std::string value) {
         const auto first = value.find_first_not_of(" \t\r");
         if (first == std::string::npos) return std::string{};
@@ -1975,13 +2004,19 @@ ExecutionStatus Interpreter::executeInteractiveResumable(
             word == "NEW" ||
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
             word.rfind("SAVE ", 0) == 0 || word == "DIR" ||
-            word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0) {
+            word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
+            word == "SPAWN" || word.rfind("SPAWN ", 0) == 0 ||
+            word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
+            word == "CANCEL" || word.rfind("CANCEL ", 0) == 0 ||
+            word == "LOGOFF" || word.rfind("LOGOFF ", 0) == 0 ||
+            word == "LOGON" || word.rfind("LOGON ", 0) == 0 ||
+            word == "TASKCHANNELS" || word.rfind("TASKCHANNELS ", 0) == 0) {
             commandMode = true;
             break;
         }
     }
     if (!commandMode) {
-        return executeResumable(source, output, stop);
+        return executeSlice(source, output, instructionBudget, stop);
     }
 
     std::istringstream input(source);
@@ -2020,9 +2055,9 @@ ExecutionStatus Interpreter::executeInteractiveResumable(
             clear();
         } else if (word == "RUN") {
             clear();
-            if (executeResumable(joinProgramLines(program_), output, stop) ==
-                ExecutionStatus::Suspended)
-                return ExecutionStatus::Suspended;
+            const auto status = executeSlice(joinProgramLines(program_), output,
+                                             instructionBudget, stop);
+            if (status != ExecutionStatus::Completed) return status;
         } else if (word == "LOAD" || word.rfind("LOAD ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
@@ -2078,10 +2113,101 @@ ExecutionStatus Interpreter::executeInteractiveResumable(
             for (const auto& entry : storage_->list(path))
                 listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
             writeChannelText(channel, listing);
+        } else if (word == "SPAWN" || word.rfind("SPAWN ", 0) == 0) {
+            if (!storage_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "storage service unavailable");
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const std::string path = parseQuotedPath(trim(normalizedLine.substr(5)), "SPAWN");
+            const std::string childSource = storage_->readText(path);
+            const auto id = taskControl_->spawn(childSource, output);
+            writeChannelText(0,
+                "Started session " + std::to_string(id) + "\n");
+        } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
+            if (!trim(normalizedLine.substr(5)).empty())
+                throw std::runtime_error("TASKS takes no arguments");
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const auto tasks = taskControl_->listTasks();
+            std::string listing;
+            for (const auto& task : tasks) {
+                listing += std::to_string(task.id) + " ";
+                if (task.supervisor) listing += "SUPERVISOR ";
+                else listing += "WORKER ";
+                listing += runtime::taskStateName(task.state);
+                if (!task.error.empty()) listing += " " + task.error;
+                listing += "\n";
+            }
+            if (listing.empty()) listing = "No sessions\n";
+            writeChannelText(0, listing);
+        } else if (word == "TASKCHANNELS" || word.rfind("TASKCHANNELS ", 0) == 0) {
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const std::string argument = trim(normalizedLine.substr(12));
+            std::uint64_t id = 0;
+            const auto parsed = std::from_chars(argument.data(),
+                                                argument.data() + argument.size(), id);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size())
+                throw std::runtime_error("TASKCHANNELS requires a session ID");
+            const auto channels = taskControl_->listChannels(id);
+            if (channels.empty())
+                throw std::runtime_error("session has no available channel information");
+            std::string listing = "Session " + std::to_string(id) + " channels\n";
+            for (const auto& channel : channels)
+                listing += "#" + std::to_string(channel.handle) + " " +
+                    runtime::channelTypeName(channel.type) + "\n";
+            writeChannelText(0, listing);
+        } else if (word == "CANCEL" || word.rfind("CANCEL ", 0) == 0) {
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const std::string argument = trim(normalizedLine.substr(6));
+            std::uint64_t id = 0;
+            const auto parsed = std::from_chars(argument.data(),
+                                                argument.data() + argument.size(), id);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size())
+                throw std::runtime_error("CANCEL requires a session ID");
+            if (taskControl_->focusedTask() == id)
+                throw std::runtime_error("LOGOFF before cancelling the attached session");
+            if (!taskControl_->cancelWorker(id))
+                throw std::runtime_error("no active worker session with that ID");
+            writeChannelText(0,
+                             "Cancelled session " + std::to_string(id) + "\n");
+        } else if (word == "LOGON" || word.rfind("LOGON ", 0) == 0) {
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const std::string argument = trim(normalizedLine.substr(5));
+            std::uint64_t id = 0;
+            const auto parsed = std::from_chars(argument.data(),
+                                                argument.data() + argument.size(), id);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size())
+                throw std::runtime_error("LOGON requires a session ID");
+            if (!taskControl_->logon(id))
+                throw std::runtime_error("session is not an idle worker");
+            writeChannelText(0,
+                             "Logged on to session " + std::to_string(id) + "\n");
+        } else if (word == "LOGOFF" || word.rfind("LOGOFF ", 0) == 0) {
+            if (!trim(normalizedLine.substr(6)).empty())
+                throw std::runtime_error("LOGOFF takes no arguments");
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const auto id = taskControl_->logoff();
+            writeChannelText(0,
+                             "Logged off; supervisor session " +
+                                 std::to_string(id) + "\n");
         } else {
-            if (executeResumable(line + "\n", output, stop) ==
-                ExecutionStatus::Suspended)
-                return ExecutionStatus::Suspended;
+            const auto status = executeSlice(line + "\n", output,
+                                             instructionBudget, stop);
+            if (status != ExecutionStatus::Completed) return status;
         }
     }
     return ExecutionStatus::Completed;

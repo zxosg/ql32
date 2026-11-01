@@ -14,12 +14,14 @@ namespace ql32::vm {
 
 using TaskId = std::uint64_t;
 
-enum class TaskStatus { Runnable, WaitingUi, Completed, Failed, Cancelled };
+enum class TaskStatus { Runnable, WaitingUi, WaitingInput, Completed, Failed, Cancelled };
 
 struct TaskInfo {
     TaskId id = 0;
     TaskStatus status = TaskStatus::Runnable;
     std::string error;
+    bool interactive = false;
+    bool supervisor = false;
 };
 
 struct Services {
@@ -28,6 +30,7 @@ struct Services {
     std::shared_ptr<ui::Service> ui;
     std::shared_ptr<graphics::Service> graphics;
     std::shared_ptr<runtime::NetworkService> network;
+    std::shared_ptr<runtime::MemoryService> memory;
 };
 
 // Cooperative, single-threaded round-robin scheduler. Each task owns one
@@ -42,16 +45,30 @@ public:
     SessionScheduler& operator=(const SessionScheduler&) = delete;
 
     TaskId launch(std::string source, std::ostream& output);
+    TaskId launchWorker(std::string source, std::ostream& output);
+    // Creates a persistent interactive session. An optional initial program
+    // runs as source before the session begins accepting REPL input.
+    TaskId launchInteractive(std::ostream& output, std::string initialProgram = {});
+    bool submit(TaskId id, std::string source);
+    bool logon(TaskId id);
+    TaskId logoff();
+    TaskId focusedTask() const noexcept;
+    std::vector<runtime::ChannelInfo> taskChannels(TaskId id) const;
+    std::string takeError(TaskId id);
     bool tick();
     bool cancel(TaskId id);
+    bool cancelWorker(TaskId id);
     std::optional<TaskInfo> task(TaskId id) const;
     std::vector<TaskInfo> tasks() const;
 
 private:
     struct Task;
     Services services_;
+    std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::size_t instructionBudget_;
     TaskId nextId_ = 1;
+    TaskId supervisorId_ = 0;
+    TaskId focusedTaskId_ = 0;
     std::size_t cursor_ = 0;
     std::vector<std::unique_ptr<Task>> tasks_;
 };

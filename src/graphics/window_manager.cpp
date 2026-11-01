@@ -384,6 +384,45 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
     if (width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
         height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()))
         throw std::out_of_range("canvas dimensions exceed supported coordinates");
+    if (width == width_ && height == height_) return;
+
+    const auto newBytes = checkedCanvasBytes(width, height, depth_);
+    if (newBytes <= pixels_.capacity()) {
+        const auto oldWidth = width_;
+        const auto oldHeight = height_;
+        const auto copyWidth = std::min(oldWidth, width);
+        const auto copyHeight = std::min(oldHeight, height);
+        if (newBytes > pixels_.size()) pixels_.resize(newBytes, 0);
+
+        // Move overlapping rows in the safe direction when the row stride
+        // changes. This lets orientation swaps reuse the existing canvas
+        // allocation instead of requiring a second full-size buffer.
+        if (width > oldWidth) {
+            for (std::uint32_t row = copyHeight; row > 0; --row)
+                for (std::uint32_t column = copyWidth; column > 0; --column) {
+                    const auto source = static_cast<std::size_t>(row - 1) * oldWidth + column - 1;
+                    const auto destination = static_cast<std::size_t>(row - 1) * width + column - 1;
+                    writePixel(destination, readPixel(source));
+                }
+        } else {
+            for (std::uint32_t row = 0; row < copyHeight; ++row)
+                for (std::uint32_t column = 0; column < copyWidth; ++column) {
+                    const auto source = static_cast<std::size_t>(row) * oldWidth + column;
+                    const auto destination = static_cast<std::size_t>(row) * width + column;
+                    writePixel(destination, readPixel(source));
+                }
+        }
+
+        width_ = width;
+        height_ = height;
+        for (std::uint32_t row = 0; row < height; ++row)
+            for (std::uint32_t column = 0; column < width; ++column)
+                if (row >= copyHeight || column >= copyWidth)
+                    writePixel(static_cast<std::size_t>(row) * width + column, paper_);
+        if (newBytes < pixels_.size()) pixels_.resize(newBytes);
+        return;
+    }
+
     IndexedCanvas resized(width, height, depth_);
     resized.setInk(ink_);
     resized.setPaper(paper_);
@@ -497,6 +536,10 @@ void WindowManager::setBounds(WindowId id, Rect bounds) {
             allocated += bytes;
         }
     }
+    if (bounds.width == entry.bounds.width && bounds.height == entry.bounds.height) {
+        entry.bounds = bounds;
+        return;
+    }
     entry.canvas.resize(bounds.width, bounds.height);
     entry.bounds = bounds;
 }
@@ -581,6 +624,31 @@ void WindowManager::composeInto(std::vector<ColorIndex>& frame,
                 frame[destinationOffset + column] =
                     source.pixel(sourceX + column, sourceY + row);
             }
+        }
+    }
+}
+
+void WindowManager::composeRowInto(std::uint32_t y,
+                                   std::vector<ColorIndex>& row,
+                                   ColorIndex desktopPaper) const {
+    if (y >= screenHeight_)
+        throw std::out_of_range("composed row is outside the screen");
+    row.resize(screenWidth_);
+    std::fill(row.begin(), row.end(), desktopPaper);
+    for (const auto& entry : windows_) {
+        if (!entry.visible) continue;
+        const Rect visible = clip(entry.bounds);
+        if (visible.width == 0 || visible.height == 0 ||
+            y < static_cast<std::uint32_t>(visible.y) ||
+            y >= static_cast<std::uint32_t>(visible.y) + visible.height)
+            continue;
+        const auto sourceX = static_cast<std::uint32_t>(
+            static_cast<std::int64_t>(visible.x) - entry.bounds.x);
+        const auto sourceY = static_cast<std::uint32_t>(
+            static_cast<std::int64_t>(y) - entry.bounds.y);
+        for (std::uint32_t column = 0; column < visible.width; ++column) {
+            const auto destinationX = static_cast<std::uint32_t>(visible.x) + column;
+            row[destinationX] = entry.canvas.pixel(sourceX + column, sourceY);
         }
     }
 }

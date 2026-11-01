@@ -363,9 +363,23 @@ function calls are bound when `RUN` compiles the complete program. Unnumbered
 statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
 interactive program. The Linux command loop provides `LOAD`, `SAVE`, and `DIR`.
+The scheduler-backed embedded REPL also provides `SPAWN "path.bas"`, `TASKS`,
+`TASKCHANNELS id`, `LOGON id`, `LOGOFF`, and `CANCEL id`. `SPAWN` reads source
+through the configured storage service and starts an independent worker
+session. When its startup source completes, the worker remains alive at its own
+interactive prompt with its variables, program, graphics window, and channels
+retained. `TASKS` lists session IDs, supervisor/worker kind, state, and errors;
+`TASKCHANNELS id` lists a session's reserved and opened handles with endpoint
+types. `LOGON id` routes embedded console input to an idle worker so immediate
+BASIC commands operate in that session; `LOGOFF` returns to the supervisor.
+The prompt includes the attached task ID. `CANCEL id` stops an active worker;
+log off before cancelling the currently attached session. These QL/32-specific
+commands are not available in the Linux command loop.
 M2 also provides QL/32-specific `OPEN`, `READ$`, `EOF`, `WRITE`, and `CLOSE`
-file-channel operations; value-returning operations use function syntax while
-`WRITE channel, text$` and `CLOSE channel` are statement commands. See
+channel operations. File endpoints support reads and writes; serial endpoints
+write to serial output, and null endpoints discard output. Value-returning
+operations use function syntax while `WRITE channel, text$` and `CLOSE channel`
+are statement commands. See
 [QL32-API-001](QL32-API-001.md). `EDIT` and the target
 shell's `STOP` and `HELP`, and later `CONT`, remain future work.
 
@@ -389,19 +403,43 @@ Graphics fail if that endpoint lacks graphics capability. Changing the default
 to `#0` selects `#0` for unqualified output; explicit selectors still use the
 selected handle's active binding. The current runtime still resolves per-session
 routes per operation; direct binding is the approved target architecture.
-`GETCHANNEL(KChannelCount)` returns the open-channel count;
+Channel handles belong to one interpreter session. A worker launched by the
+embedded `SPAWN` command has its own `#0`, `#1`, and opened handle numbers; a
+number in one session does not select a handle in another. The sessions still
+use shared platform services and physical devices, such as the same display,
+SD card, and serial console. Worker text is routed to the supervisor's output
+stream. `GETCHANNEL(KChannelCount)` returns the open-channel count;
 `GETCHANNEL(KChannelHandle, position)` returns the handle at the zero-based
 position in ascending-handle order; and `GETCHANNEL(KChannelType, #handle)`
 returns the endpoint type. These selector constants are provided by
-`ql32.inc`. `NULL` is a planned output sink, not yet an available endpoint;
-its input behavior remains unspecified.
+`ql32.inc`. `OPEN(KDeviceFile, path, mode)`, `OPEN(KDeviceSerial)`, and
+`OPEN(KDeviceNull)` open file, serial-output, and null-output endpoints;
+the legacy `OPEN(path, mode)` file form remains supported. The null endpoint
+discards text, byte, and graphics output. Serial and null input are not
+implemented, and reserved channels `#0` and `#1` are still managed outside
+the opened-endpoint registry.
+
+For text output, `WRITE channel, text$` is a one-string, newline-terminated
+write. `PRINT #channel` supports multiple expressions and separators. A
+trailing backslash emits an explicit line feed; a trailing semicolon suppresses
+`PRINT`'s automatic final line feed. For example:
+
+```basic
+file = OPEN("messages.txt", "WRITE")
+WRITE file, "Written with WRITE"
+PRINT #file, "Written with PRINT"\
+CLOSE file
+```
+
+Both lines are written to `messages.txt`, each followed by a line feed.
 
 The interpreter supports channel-qualified `PRINT`, `LIST`, `DIR`, and
 `WRITE`: text output can go to the retained window for `#1`, the console stream
-through `#0`, or an open file channel. These operations follow the default and
-route rules above. Graphics commands also accept a channel selector and follow
-those rules, but currently require the resolved endpoint to be the graphics
-window `#1`. `READ$` and `EOF` work with open file channels. Line-oriented
+through `#0`, or an open file, serial, or null channel. These operations follow
+the default and route rules above. Graphics commands also accept a channel
+selector and follow those rules; drawings target the graphics window `#1`,
+while null-target drawings are discarded. `READ$` and `EOF` work with open file
+channels. Line-oriented
 BASIC `INPUT` defaults to keyboard channel `#0`; file channels can be selected
 explicitly. A prompt defaults to output channel `#1` and may select an
 independent prompt channel. Supported forms are:

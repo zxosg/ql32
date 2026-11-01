@@ -931,11 +931,21 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     instruction.name == "CLOSEWINDOW") {
                     const auto channel = selectedChannel.value_or(
                         resolveChannel(default_output_channel_));
-                    if (channel != 1)
+                    bool nullSink = false;
+                    if (channel != 1 && channels_) {
+                        const auto endpoints = channels_->listOpen(session_id_);
+                        nullSink = std::any_of(endpoints.begin(), endpoints.end(),
+                            [&](const runtime::ChannelInfo& endpoint) {
+                                return endpoint.handle == channel &&
+                                       endpoint.type == runtime::ChannelType::Null;
+                            });
+                    }
+                    if (channel != 1 && !nullSink)
                         runtimeError(instruction, "selected channel is not a graphics window");
-                    if (!graphics_)
+                    if (!nullSink && !graphics_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "graphics service unavailable");
+                    if (!nullSink) {
                     const auto integerArgument = [&](std::size_t index,
                                                      const char* description) {
                         const auto* number = std::get_if<double>(&arguments[index]);
@@ -998,6 +1008,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } else {
                         graphics_->clear(session_id_);
                     }
+                    }
                     break;
                 }
                 const auto textArgument = [&](std::size_t index) -> const std::string& {
@@ -1017,17 +1028,31 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "channel service unavailable");
-                    const std::string& path = textArgument(0);
-                    std::string mode = textArgument(1);
-                    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
-                        return static_cast<char>(std::toupper(c));
-                    });
-                    runtime::ChannelMode channelMode;
-                    if (mode == "READ") channelMode = runtime::ChannelMode::Read;
-                    else if (mode == "WRITE") channelMode = runtime::ChannelMode::Write;
-                    else if (mode == "APPEND") channelMode = runtime::ChannelMode::Append;
-                    else runtimeError(instruction, "OPEN mode must be READ, WRITE, or APPEND");
-                    const auto id = channels_->open(session_id_, path, channelMode);
+                    runtime::ChannelDevice device = runtime::ChannelDevice::File;
+                    std::vector<std::string> parameters;
+                    if (const auto* deviceNumber = std::get_if<double>(&arguments[0])) {
+                        if (!std::isfinite(*deviceNumber) ||
+                            std::trunc(*deviceNumber) != *deviceNumber ||
+                            *deviceNumber < static_cast<double>(runtime::ChannelDevice::File) ||
+                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Null))
+                            runtimeError(instruction, "invalid OPEN device kind");
+                        device = static_cast<runtime::ChannelDevice>(
+                            static_cast<std::uint64_t>(*deviceNumber));
+                        const std::size_t expected =
+                            device == runtime::ChannelDevice::File ? 3 : 1;
+                        if (arguments.size() != expected)
+                            runtimeError(instruction, "incorrect OPEN parameter count");
+                        if (device == runtime::ChannelDevice::File) {
+                            parameters.push_back(textArgument(1));
+                            parameters.push_back(textArgument(2));
+                        }
+                    } else {
+                        if (arguments.size() != 2)
+                            runtimeError(instruction, "legacy OPEN requires a path and mode");
+                        parameters.push_back(textArgument(0));
+                        parameters.push_back(textArgument(1));
+                    }
+                    const auto id = channels_->openDevice(session_id_, device, parameters);
                     pushValue(static_cast<double>(id));
                 } else if (instruction.name == "READ$") {
                     if (!channels_)

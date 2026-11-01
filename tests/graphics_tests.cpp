@@ -361,6 +361,34 @@ void testWindowMovementRestoresCoveredContent() {
             "window info did not expose absolute screen coordinates");
 }
 
+void testCanvasReshapeReusesFullScreenStorage() {
+    using namespace ql32::graphics;
+    WindowManager manager(240, 320, 1, 0);
+    const auto id = manager.create(1, {0, 0, 240, 320}, PixelDepth::Four);
+    auto& canvas = manager.canvas(id);
+    canvas.setPaper(5);
+    canvas.clear();
+    canvas.setPixel(0, 0, 1);
+    canvas.setPixel(239, 239, 2);
+    canvas.setPixel(0, 319, 3);
+
+    manager.setBounds(id, {0, 0, 320, 240});
+    require(canvas.width() == 320 && canvas.height() == 240,
+            "canvas did not reshape to landscape dimensions");
+    require(canvas.pixel(0, 0) == 1 && canvas.pixel(239, 239) == 2,
+            "landscape reshape lost pixels in the retained upper-left area");
+    require(canvas.pixel(319, 10) == 5,
+            "landscape reshape did not fill newly exposed pixels with paper");
+
+    manager.setBounds(id, {0, 0, 240, 320});
+    require(canvas.width() == 240 && canvas.height() == 320,
+            "canvas did not reshape back to portrait dimensions");
+    require(canvas.pixel(0, 0) == 1 && canvas.pixel(239, 239) == 2,
+            "portrait reshape lost retained pixels");
+    require(canvas.pixel(0, 319) == 5,
+            "portrait reshape did not fill newly exposed pixels with paper");
+}
+
 void testCloseWindowReleasesCanvasAndAllowsReuse() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
@@ -404,6 +432,7 @@ int main() {
     testListChannelRouting();
     testWindowPositionCommand();
     testWindowMovementRestoresCoveredContent();
+    testCanvasReshapeReusesFullScreenStorage();
     testCloseWindowReleasesCanvasAndAllowsReuse();
     testCloseWindowCommandDispatch();
 }

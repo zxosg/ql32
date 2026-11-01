@@ -85,6 +85,8 @@ public:
     // Returns a row-major 8-bit palette-index frame, composited bottom-to-top.
     std::vector<ColorIndex> compose(ColorIndex desktopPaper = 0) const;
     void composeInto(std::vector<ColorIndex>& frame, ColorIndex desktopPaper = 0) const;
+    void composeRowInto(std::uint32_t y, std::vector<ColorIndex>& row,
+                        ColorIndex desktopPaper = 0) const;
 
     // Snapshot is ordered from back to front; invisible and fully offscreen
     // windows are omitted. screenClip is the visible part in physical pixels.

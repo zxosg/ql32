@@ -14,15 +14,15 @@ system, and UI layers independent of board libraries.
 
 ## Current state
 
-- The current committed baseline is `a0f1f49` (`Refactor BASIC editor and session UI handling`); the M2 work below is local and uncommitted.
+- The current committed baseline is `d1831f8` (`Add exact-byte file channel I/O and document endpoint bindings`). Current local changes are uncommitted and include target/build fixes, host memory portability, CYD compositor memory fixes, embedded scheduler integration and supervisor commands, and an opened-endpoint registry with serial/null output.
 - The Linux CLI reads complete source from a `.bas` file, accepts stdin source/batches, and opens a persistent line-oriented REPL on an interactive terminal. The REPL keeps session and numbered-program state between entries and reports a failed entry without exiting. The portable VM also exposes cooperative `executeSlice`/`resumeSlice` operations; `ql32::vm::SessionScheduler` round-robins interpreter sessions using a configurable bytecode instruction budget.
-- `FREE()` is a zero-argument BASIC function returning free-memory bytes through the portable `runtime::MemoryService`; ESP32 reports free 8-bit-capable heap and Linux reports host `MemAvailable`. The retained window canvas packs pixels at 1, 4, or 8 bits and enforces a total canvas-byte budget. BASIC graphics now render through the retained compositor on Linux, CYD, and VGA32; windows default to 4-bit depth.
+- `FREE()` is a zero-argument BASIC function returning free-memory bytes through the portable `runtime::MemoryService`; ESP32 reports free 8-bit-capable heap, Linux reports host `MemAvailable`, and macOS uses free plus reclaimable inactive pages. The retained window canvas packs pixels at 1, 4, or 8 bits and enforces a total canvas-byte budget. BASIC graphics now render through the retained compositor on Linux, CYD, and VGA32; windows default to 4-bit depth.
 - Implemented language coverage includes module-level immutable `CONST` declarations for numeric and string literals, assignments; numeric and string values; expression and `PRINT` rules; comments; block `IF`; block and inline `FOR` with mixed range lists; named `NEXT` and `EXIT`; block and inline `REPeat`; procedure/function definitions, parameters, invocation locals, return, forward calls, recursion, and array-by-reference parameters; zero-based inclusive arrays; block `SELect ON` with lists, ranges, and `REMAINDER`; numeric `GO TO`/`GOTO` line targets and QL/32 named labels; keyword abbreviations for the supported keyword set; and canonicalized `LIST` output.
 - String slicing is implemented for scalar strings using one-based inclusive `text$(start TO end)` syntax. The numeric `LEN(string$)` built-in returns UTF-8 code-point length and is covered by runtime tests. Slice assignment and slicing dimensioned string arrays are not implemented yet.
 - Numbered lines are validated against candidate program state before replacement, while incomplete block prefixes and forward calls are accepted. Calls unresolved in the complete program are diagnosed by `RUN`. Tests cover replacement rollback, incremental block entry, REPL recovery, interpreter isolation, array rank/type errors, stored-program errors, and cooperative cancellation through the C++17 cancellation token.
 - Known profile limits: `SELect` singleton comparisons use exact binary64 equality and only its block form is supported; allocation is capped at one million elements per array; nested inline loops are outside the explicit M1 grammar. See the specification for other QL/32 choices and deferrals.
-- The suite has 53 CTest cases across CLI and runtime behavior, including recursion depth, allocation limits, GOTO line/label behavior, storage and channel confinement, editor file commands, async UI lifecycle and BASIC dialog/menu round trips, cooperative scheduler slicing and UI suspension, graphics command dispatch/session cleanup, SVG rendering and escaping, FabGL and CYD graphics/console adapters, FabGL keyboard input, ESP32 clock/storage/channel/network behavior, Linux clock behavior, capability descriptor validation, VGA32 and CYD board profile validation, embedded line UI presentation and VM resumption, Wi-Fi BASIC calls, recursive source includes, and single-pass source-order evaluation of FOR ranges. `cmake -S . -B build`, `cmake --build build`, and `ctest --test-dir build --output-on-failure` pass with GNU C++ 15.2 and CMake 4.2.3.
-- M1 BASIC core acceptance is complete. The M2 Linux slice adds portable text storage and session-owned channel contracts, sandboxed directory adapters, interactive `LOAD`/`SAVE`/`DIR`, BASIC `OPEN`/`READ$`/`EOF`/`WRITE`/`CLOSE` calls, and a thread-safe asynchronous UI request queue. BASIC `ALERT`/`CONFIRM`, per-interpreter VM suspend/resume, and Linux and embedded line presenters are implemented and tested. M2 Linux acceptance is complete. All current changes remain uncommitted and unpushed.
+- The suite has 53 CTest cases across CLI and runtime behavior, including recursion depth, allocation limits, GOTO line/label behavior, storage and channel confinement, editor file commands, async UI lifecycle and BASIC dialog/menu round trips, cooperative scheduler slicing and UI suspension, graphics command dispatch/session cleanup, SVG rendering and escaping, FabGL and CYD graphics/console adapters, FabGL keyboard input, ESP32 clock/storage/channel/network behavior, Linux clock behavior, capability descriptor validation, VGA32 and CYD board profile validation, embedded line UI presentation and VM resumption, Wi-Fi BASIC calls, recursive source includes, and single-pass source-order evaluation of FOR ranges. The Linux suite passes with GNU C++ 15.2 and CMake 4.2.3. `tools/build-target.sh mac` builds with AppleClang, and all 53 CTest cases pass on macOS.
+- M1 BASIC core acceptance is complete. The M2 Linux slice adds portable text storage and session-owned channel contracts, sandboxed directory adapters, interactive `LOAD`/`SAVE`/`DIR`, BASIC `OPEN`/`READ$`/`EOF`/`WRITE`/`CLOSE` calls, and a thread-safe asynchronous UI request queue. BASIC `ALERT`/`CONFIRM`, per-interpreter VM suspend/resume, and Linux and embedded line presenters are implemented and tested. M2 Linux acceptance is complete.
 
 ## Decisions already made
 
@@ -63,9 +63,9 @@ text/binary file channels. A second `esp32_2432s028` profile now targets the com
 ESP32-2432S028R board with ILI9341 TFT graphics and serial terminal input. Its
 TFT adapter maps the QL eight-color indexed palette to RGB565, while SD uses
 the board's separate SPI bus. The shared BASIC VM is linked into firmware, with serial output
-and a prompt accepting input from both USB serial and PS/2. On
-startup it runs `startup.bas` from the SD root when present and falls back to a
-built-in demo otherwise. The channel adapter supports line and exact-byte file
+and a prompt accepting USB serial input. On startup it runs `startup.bas` from
+the SD root when present; otherwise, the TFT remains clear for readable text
+output. The built-in graphics demo was removed. The channel adapter supports line and exact-byte file
 I/O with root-confined paths. Host coverage exercises the hardware adapters
 using fakes; all 53 CTest cases pass. PlatformIO Core 6.2.0, Arduino-ESP32
 2.0.17, and FabGL 1.0.9 build both profiles. Current size and RAM measurements
@@ -86,11 +86,13 @@ VGA32 display/PS2/clock and SD behavior, including startup loading and channel
 round-trips. M6 has begun with a portable asynchronous Wi-Fi service and BASIC
 calls (`GETNET`, `DISNET`, `NETSTAT$`, `NETADDR$`, `NETSIGNAL`) plus an ESP32
 station adapter on both board profiles. Linux fake-service and adapter tests
-cover state and call behavior; both firmware profiles compile. `INCLUDE` now
+cover state and call behavior; both firmware profiles compile. The user has
+verified CYD association, status, address, signal, and disconnect on hardware;
+VGA32 Wi-Fi verification remains pending with the board unavailable. `INCLUDE` now
 expands recursively included BASIC source from the storage service, with cycle,
 root-confinement, depth, size, and module-preamble checks. Linux tests cover
-nested libraries and numbered programs. Physical Wi-Fi
-association remains pending. The
+nested libraries and numbered programs. CYD physical Wi-Fi acceptance has
+passed; VGA32 hardware acceptance remains pending. The
 current M6 acceptance spec is [`QL32-NET-001.md`](docs/specification/QL32-NET-001.md).
 HTTP/socket APIs, BLE, enhanced UI, and broader platform support remain later
 slices. Publish changes only when explicitly requested.
@@ -108,17 +110,67 @@ screen and scrolls correctly.
 
 Current open points before calling the hardware milestone accepted:
 
-- **CYD display:** hardware-verified. All four rotations, rotation 0's 320x240
-  query, red palette output, scrolling text strip, and edge graphics pass.
+- **CYD display:** basic TFT, serial REPL, SD round-trip, palette, and scrolling
+  console are hardware-verified. The retained-compositor regression has now
+  confirmed window movement, resize/clipping with retained drawing, and all
+  four rotations. The user confirmed that 90°/270° are portrait, 0°/180° are
+  landscape, and the 200x140 window remains at the top-left through rotation.
+  Initial allocation failures were fixed by skipping no-op canvas resizes,
+  reusing canvas storage for orientation changes, and dropping the cached
+  composed frame before size-changing allocations. On the patched firmware,
+  first-command `ROTATE 0`, resize from 200x140 to 240x320, full-screen 180° and
+  270° transitions, retained drawing, and return to 0° all succeeded without
+  serial errors. The user visually confirmed each orientation and retained
+  drawing. The repeatable memory check is `examples/cyd-rotation-memory.bas`.
+  `FREE()` values for one cycle were 100456, 100176, 100172, 100172, and
+  100128 bytes; all five values in a second cycle were 100140 bytes, showing
+  stable heap use after the initial warm-up. A direct CYD adapter test also
+  exercised 1-, 4-, and 8-bit canvases across every rotation; free heap stayed
+  constant within each depth and matched the expected canvas storage sizes.
+  The macOS build command is:
+
+  ```sh
+  PLATFORMIO_CORE_DIR=/private/tmp/ql32-platformio-core tools/build-target.sh cyd
+  ```
+
+  The serial monitor used `/dev/cu.usbserial-1110` at 115200 baud.
 - **VGA32 hardware:** verify VGA drawing, PS/2 input, clock display, SD mount,
   `startup.bas`, and SD channel read/write round-trip. Its embedded line UI
   presenter also needs physical interaction checks.
-- **Wi-Fi on hardware:** on either ESP32 board, connect to a local access point
-  and verify status, address, signal, and disconnect behavior per
-  [`QL32-NET-001.md`](docs/specification/QL32-NET-001.md).
+- **Wi-Fi on hardware:** CYD association, status, address, signal, and
+  disconnect behavior passed. Repeat the same acceptance on VGA32 when that
+  board is available, per [`QL32-NET-001.md`](docs/specification/QL32-NET-001.md).
 - **Multi-session UI/display:** a portable cooperative round-robin scheduler
   now runs independent interpreter sessions in bounded bytecode slices, and
-  UI waits suspend only their owner. The portable `graphics::WindowManager`
+  UI waits suspend only their owner. Both ESP32 event loops now drive a
+  persistent interactive REPL session through 128-instruction scheduler ticks;
+  startup, immediate commands, and `RUN` preserve interpreter state, with
+  serial/keyboard input and UI replies handled between ticks. Host tests cover
+  interactive-session continuity, round-robin execution, error recovery, and
+  UI resumption; both ESP32 profiles build. The CYD scheduler was flashed and
+  checked on hardware: persistent state produced `42`, a numbered `RUN` showed
+  all three expected lines, the alert waited for Enter, and `AFTER_UI_RESUME`
+  appeared afterward. A syntax error was reported over serial and the REPL
+  accepted the next command. The embedded REPL now provides `SPAWN "path.bas"`,
+  `TASKS`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, and `CANCEL id` for worker
+  sessions. Spawned workers remain interactive after their startup source
+  completes. Each session owns its BASIC state and channel handles; sessions
+  share board adapters and physical devices. Worker `#0` output and diagnostics
+  use the shared console; `#1` goes to its own graphics window. Both ESP32
+  profiles build with this supervisor. CYD hardware ran the flow: sessions
+  2–4 were started and cancelled in sequence; sessions 5–7 were started again;
+  `TASKCHANNELS` completed, and serial prompts confirmed `LOGON`, per-session
+  `WINDOW` changes, and `LOGOFF` for sessions 5, 6, and 7. No allocation errors
+  occurred after the TFT row-streaming and initial-bounds fixes. The serial
+  monitor cannot show the TFT's three-column layout or channel-list text, so
+  visual confirmation remains open. VGA32 acceptance remains pending because
+  that board is unavailable. The portable
+  first CYD three-worker run hit `std::bad_alloc` while creating the third
+  session. The TFT presenter now streams composed rows, and first-time
+  `WINDOW` creation allocates the requested bounds directly instead of keeping
+  a full-screen canvas allocation. Linux, CYD, and VGA32 builds pass after
+  these fixes; the updated CYD firmware has not yet been flashed.
+  `graphics::WindowManager`
   now tracks owner, bounds, visibility, stacking order, clipping, and tiled
   layouts. Each window has a retained indexed canvas for pixels and geometric
   primitives at 1, 4, or 8 bits per pixel, defaulting to 4-bit; `compose()`
@@ -134,16 +186,18 @@ Current open points before calling the hardware milestone accepted:
   C++ API. BASIC `WINDOW x,y,width,height` now moves/resizes the current
   session's window while keeping drawing coordinates canvas-relative; a BASIC
   `CLOSEWINDOW` releases that session's canvas, and later drawing recreates it;
-  `FREE()` can inspect available heap. A BASIC supervisor to control other
-  sessions remains open. Resize preserves
+  `FREE()` can inspect available heap. The embedded BASIC supervisor can start,
+  list, and cancel worker sessions; BASIC commands to arrange other sessions'
+  windows remain open. Resize preserves
   upper-left pixels and fills newly exposed space with paper color. Linux
   integration verifies that moving an overlapping window restores the
   underlying retained canvas. The user manually confirmed `WINDOW` position
   and size changes work. `GORIGINX()` and `GORIGINY()` expose absolute screen
   coordinates. The manual demo is `examples/window-manager.bas`.
-  Physical regression checks for the new
-  composed output remain open on both boards; prior CYD rotation, palette,
-  console scrolling, and direct graphics checks were done before this path.
+  The CYD composed-output regression is hardware-verified for window
+  move/resize, clipping, retained drawing, full-screen allocation, and all four
+  orientations. VGA32 composed output remains unverified because that board is
+  not physically available.
 - **Universal channel model:** reserve `#0` for the CON-like command/error
   console and keyboard input, and `#1` for user/program output and graphics.
   Default `PRINT` and graphics target `#1`; command input, BASIC `INPUT`, and
@@ -166,31 +220,36 @@ Current open points before calling the hardware milestone accepted:
   `GETCHANNEL(KChannelHandle, position)` returns a handle by zero-based
   position in ascending-handle order, and
   `GETCHANNEL(KChannelType, #handle)` returns a symbolic endpoint type.
-  Enumeration currently includes reserved `#0`/`#1` and open file channels.
-  `CONST` module declarations now support numeric and string literals;
-  `ql32.inc` defines the named channel selectors. Prefer general operations parameterized by included
+  Enumeration includes reserved `#0`/`#1` and opened file, serial, and null
+  channels. `CONST` module declarations now support numeric and string literals;
+  `ql32.inc` defines the channel selectors and device kinds. Prefer general operations parameterized by included
   constants over a growing set of operation-specific keywords.
   `CHANNEL` default and route commands, plus output routing for `PRINT`,
   `WRITE`, `LIST`, and `DIR`, are implemented per session. Graphics commands
   accept explicit channel selectors and follow the same default/routes; the
-  resolved endpoint must currently be graphics window `#1`. Text output can
-  target `#0`, `#1`, or an open file channel. `GETCHANNEL` enumerates reserved
-  channels and open file channels. `READ$` and `EOF` work on file channels.
+  resolved endpoint must currently be graphics window `#1`, except null
+  graphics output is discarded. Text output can target `#0`, `#1`, or an open
+  file, serial, or null channel. `GETCHANNEL` enumerates all these handles.
+  `READ$` and `EOF` work on file channels.
   `INPUT` reads a line from keyboard channel `#0` asynchronously or an explicit
   file channel; prompts default to `#1` and may select an independent channel.
   Keyboard input suspends only its session. `#channel AT offset`, `IN count,
   buffer$`, and `OUT count, buffer$` implement file seeking and exact-byte
-  transfers (maximum 8192 bytes) on Linux and ESP32 SD adapters. Serial and
-  null input endpoints, generic typed `OPEN`, and a unified endpoint registry remain open
-  work. The null endpoint is planned, not yet
-  available. Closing an opened channel releases its endpoint resources;
+  transfers (maximum 8192 bytes) on Linux and ESP32 SD adapters. The portable
+  `ChannelRegistry` allocates opened file, serial-output, and null-output
+  handles in one namespace; `OPEN(KDeviceFile, path, mode)`,
+  `OPEN(KDeviceSerial)`, and `OPEN(KDeviceNull)` are available, while the legacy
+  file form remains supported. Registry metadata and opened-handle lifecycle
+  are shared across these endpoints. Serial/null input and registry ownership
+  of reserved `#0`/`#1` remain open work. On CYD, serial text and byte output,
+  null text/byte/graphics discard, endpoint type/count enumeration, and
+  close/reopen were checked after flashing; the serial port is released.
   `CLOSEWINDOW` remains interim graphics-only behavior.
 - **Test state:** current source changes are local, uncommitted, and unpushed.
 
 Channel-based networking is deferred to the backlog; it is not part of the
 current M6 Wi-Fi station acceptance. File channels support text-line I/O,
-exact-byte `IN`/`OUT`, and `AT`; serial and null channel endpoints remain
-future work.
+exact-byte `IN`/`OUT`, and `AT`; serial is output-only and null is a sink.
 
 ## Pending language features
 
