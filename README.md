@@ -25,7 +25,8 @@ chips. A Linux build is the primary development and test host.
 The Linux CLI includes expressions, structured blocks, procedures, functions,
 locals, arrays, `SELect ON`, numbered-line commands (`LIST`, `RUN`, `NEW`,
 `LOAD`, `SAVE`, and `DIR`), and a persistent terminal REPL. The M2 host slice
-also defines portable storage, session-owned text channels, and asynchronous UI
+also defines portable storage, session-owned text/binary file channels, line
+input, and asynchronous UI
 request services. BASIC `ALERT`/`CONFIRM` calls suspend and resume individual
 interpreter sessions through the async service. The Linux console presenter
 supports alerts, confirmations, typed dialogs, and menus. BASIC exposes

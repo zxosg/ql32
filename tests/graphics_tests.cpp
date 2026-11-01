@@ -288,13 +288,12 @@ void testChannelDefaultRoutingAndGraphicsSelectors() {
                    "PRINT #1,\"explicit route\"\n", routedConsole);
     require(routedConsole.str() == "default route\nexplicit route\n",
             "CHANNEL route did not redirect default and explicit output");
-    bool cycleRejected = false;
-    try {
-        routed.execute("CHANNEL #0 TO #1\n", routedConsole);
-    } catch (const std::runtime_error& error) {
-        cycleRejected = std::string(error.what()).find("cycle") != std::string::npos;
-    }
-    require(cycleRejected, "CHANNEL accepted a cyclic route");
+    routed.execute("CHANNEL #0 TO #1\n"
+                   "PRINT #0,GETCHANNEL(2,#1)\n"
+                   "PRINT #1,\"same endpoint\"\n", routedConsole);
+    require(routedConsole.str() ==
+                "default route\nexplicit route\nCONSOLE\nsame endpoint\n",
+            "direct endpoint binding or active endpoint inspection failed");
 }
 
 void testListChannelRouting() {

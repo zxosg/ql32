@@ -58,12 +58,15 @@ private:
                                  std::size_t instructionBudget = 0);
     runtime::ChannelId resolveChannel(runtime::ChannelId channel) const;
     void setDefaultOutputChannel(runtime::ChannelId channel);
-    void routeOutputChannel(runtime::ChannelId source, runtime::ChannelId destination);
+    void bindChannel(runtime::ChannelId source, runtime::ChannelId destination);
+    void closeChannel(runtime::ChannelId channel);
     bool channelIsOpen(runtime::ChannelId channel) const;
     std::unordered_map<std::string, Value> variables_;
     std::size_t output_column_ = 0;
     runtime::ChannelId default_output_channel_ = 1;
-    std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_routes_;
+    // Logical channels point directly at the endpoint handle they currently
+    // represent. No channel-to-channel route chains are retained.
+    std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;
     std::map<int, std::string> program_;
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;

@@ -93,6 +93,13 @@ bool isBuiltinCommandName(std::string_view name) {
            std::end(builtinCommands);
 }
 
+std::string uppercaseAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return value;
+}
+
 bool isBuiltinFunctionName(std::string_view name) {
     return name == "LEN" || name == "FREE" || name == "OPEN" || name == "READ$" || name == "EOF" ||
            name == "CONFIRM" || name == "DIALOG" || name == "DINIT" ||
@@ -1197,9 +1204,7 @@ private:
             expression();
             if (!check(Kind::Identifier)) error(peek(), "expected AT, IN, or OUT after channel handle");
             const Token operation = advance();
-            std::string operationName = operation.text;
-            std::transform(operationName.begin(), operationName.end(), operationName.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            const std::string operationName = uppercaseAscii(operation.text);
             Instruction instruction{Op::ChannelSeek, 0.0, operationName,
                                     marker.line, marker.column};
             if (operationName == "AT") {
@@ -1241,7 +1246,7 @@ private:
             emitExit(keyword, name);
             return;
         }
-        if (check(Kind::Identifier) && peek().text == "CHANNEL" &&
+        if (check(Kind::Identifier) && uppercaseAscii(peek().text) == "CHANNEL" &&
             current_ + 1 < tokens_.size() && tokens_[current_ + 1].kind == Kind::Hash) {
             const Token name = advance();
             advance(); // selector marker
@@ -1804,14 +1809,16 @@ bool Interpreter::channelIsOpen(runtime::ChannelId channel) const {
 }
 
 runtime::ChannelId Interpreter::resolveChannel(runtime::ChannelId channel) const {
-    std::unordered_set<runtime::ChannelId> visited;
-    while (true) {
-        if (!visited.insert(channel).second)
-            throw std::runtime_error("channel route cycle detected");
-        const auto route = channel_routes_.find(channel);
-        if (route == channel_routes_.end()) return channel;
-        channel = route->second;
-    }
+    if (!channelIsOpen(channel))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "channel handle is not open for this session");
+    const auto binding = channel_bindings_.find(channel);
+    const runtime::ChannelId endpoint =
+        binding == channel_bindings_.end() ? channel : binding->second;
+    if (!channelIsOpen(endpoint))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "bound channel endpoint is no longer open");
+    return endpoint;
 }
 
 void Interpreter::setDefaultOutputChannel(runtime::ChannelId channel) {
@@ -1821,21 +1828,38 @@ void Interpreter::setDefaultOutputChannel(runtime::ChannelId channel) {
     default_output_channel_ = channel;
 }
 
-void Interpreter::routeOutputChannel(runtime::ChannelId source,
-                                     runtime::ChannelId destination) {
+void Interpreter::bindChannel(runtime::ChannelId source,
+                              runtime::ChannelId destination) {
     if (!channelIsOpen(source) || !channelIsOpen(destination))
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
-                                    "channel route endpoint is not open");
-    const auto previous = channel_routes_.find(source);
-    const bool hadPrevious = previous != channel_routes_.end();
-    const runtime::ChannelId oldDestination = hadPrevious ? previous->second : 0;
-    channel_routes_[source] = destination;
-    try {
-        (void)resolveChannel(source);
-    } catch (...) {
-        if (hadPrevious) channel_routes_[source] = oldDestination;
-        else channel_routes_.erase(source);
-        throw std::runtime_error("channel route would create a cycle");
+                                    "channel binding endpoint is not open");
+    if (source == destination) {
+        channel_bindings_.erase(source);
+        return;
+    }
+    const runtime::ChannelId endpoint = resolveChannel(destination);
+    if (!channelIsOpen(endpoint))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "bound channel endpoint is no longer open");
+    if (endpoint == source) channel_bindings_.erase(source);
+    else channel_bindings_[source] = endpoint;
+}
+
+void Interpreter::closeChannel(runtime::ChannelId channel) {
+    if (channel < 2)
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "reserved channels cannot be closed yet");
+    if (!channels_)
+        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                    "channel service unavailable");
+    if (!channelIsOpen(channel))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "channel is not open for this session");
+    channels_->close(session_id_, channel);
+    channel_bindings_.erase(channel);
+    for (auto binding = channel_bindings_.begin(); binding != channel_bindings_.end();) {
+        if (binding->second == channel) binding = channel_bindings_.erase(binding);
+        else ++binding;
     }
 }
 

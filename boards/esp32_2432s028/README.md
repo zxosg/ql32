@@ -84,9 +84,8 @@ The ESP32 image builds with PlatformIO `espressif32@6.12.0`
 [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for
 firmware, NVS, and a 64 KiB coredump area. It requires a 4 MiB flash chip.
 There is no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD.
-The current image uses 1,225,913
-bytes of the firmware partition (30.2%) and 49,864 bytes static RAM. The
-generated `firmware.bin` is 1,232,496 bytes. The user has verified TFT
+Current build-size and RAM measurements are kept in
+[QL32-PLAT-001](../../docs/specification/QL32-PLAT-001.md). The user has verified TFT
 output, the serial REPL, and a small BASIC `FOR` loop printing to the LCD on
 the board. The async line presenter for alerts, confirmations, dialogs, and
 menus is compiled into the image. The SD channel round-trip is verified on

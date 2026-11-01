@@ -3,7 +3,7 @@
 M5's first integration target is the LILYGO FabGL VGA32 V1.4, using Arduino-
 ESP32 2.0.17 through PlatformIO `espressif32@6.12.0` and FabGL v1.0.9. The
 firmware links the shared BASIC VM, VGA graphics adapter, PS/2 keyboard input,
-ESP32 clock, SD text storage, and SD-backed text channels. The profile reports
+ESP32 clock, SD text storage, and SD-backed text/binary channels. The profile reports
 a 320x200 landscape display with three-bit indexed color and PS/2 keyboard
 input through `capabilities.hpp`.
 
@@ -15,7 +15,7 @@ pio run -e lilygo_vga32 -t upload
 pio device monitor -b 115200
 ```
 
-Both ESP32 profiles use the custom [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for firmware, NVS, and a 64 KiB coredump area. This requires a 4 MiB flash chip and leaves no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD. The VGA32 build uses 1,286,905 bytes of the firmware partition (31.7%) and 52,416 bytes static RAM; `firmware.bin` is 1,293,488 bytes. The USB serial REPL has been verified on the physical board. VGA output, PS/2 input, clock status, and SD behavior still need hardware checks. The serial monitor reports VGA32 readiness, uptime, wall-clock synchronization, and SD mount status. BASIC output and runtime errors go to serial; the VGA canvas is available to BASIC graphics commands.
+Both ESP32 profiles use the custom [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for firmware, NVS, and a 64 KiB coredump area. This requires a 4 MiB flash chip and leaves no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD. Current build-size and RAM measurements are kept in [QL32-PLAT-001](../../docs/specification/QL32-PLAT-001.md). The USB serial REPL has been verified on the physical board. VGA output, PS/2 input, clock status, and SD behavior still need hardware checks. The serial monitor reports VGA32 readiness, uptime, wall-clock synchronization, and SD mount status. BASIC output and runtime errors go to serial; the VGA canvas is available to BASIC graphics commands.
 The BASIC prompt accepts input from both the USB serial terminal and PS/2
 keyboard. Connect at 115200 baud, type an immediate statement or numbered
 program line, and press Enter. Backspace edits the current line. Enter `RUN`

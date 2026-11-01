@@ -652,8 +652,12 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             runtimeError(instruction, "GETCHANNEL type requires a channel handle");
                         const auto handle = integerArgument(1, 9007199254740991.0,
                                                            "invalid channel handle");
+                        const runtime::ChannelId activeEndpoint =
+                            resolveChannel(static_cast<runtime::ChannelId>(handle));
                         const auto found = std::find_if(openChannels.begin(), openChannels.end(),
-                            [handle](const auto& channel) { return channel.handle == handle; });
+                            [activeEndpoint](const auto& channel) {
+                                return channel.handle == activeEndpoint;
+                            });
                         if (found == openChannels.end())
                             runtimeError(instruction, "channel handle is not open");
                         pushValue(std::string(runtime::channelTypeName(found->type)));
@@ -1060,10 +1064,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         channels_->write(session_id_, channel, text);
                     }
                 } else if (instruction.name == "CLOSE") {
-                    if (!channels_)
-                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                                    "channel service unavailable");
-                    channels_->close(session_id_, channelArgument(0));
+                    closeChannel(channelArgument(0));
                 }
                 break;
             }
@@ -1531,8 +1532,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             };
             if (!validHandle(source) || !validHandle(destination))
                 runtimeError(instruction, "channel handles must be nonnegative integers");
-            routeOutputChannel(static_cast<std::uint64_t>(source),
-                               static_cast<std::uint64_t>(destination));
+            bindChannel(static_cast<std::uint64_t>(source),
+                        static_cast<std::uint64_t>(destination));
             break;
         }
         case Op::ChannelSeek: {

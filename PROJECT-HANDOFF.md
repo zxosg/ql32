@@ -58,23 +58,22 @@ that writes one 640x480 `ql32-graphics-session-<id>.svg` snapshot on session
 close; `examples/graphics.bas` exercises all implemented commands. A FabGL
 VGA graphics adapter maps the portable service to the board canvas. The pinned
 `lilygo_vga32` image also includes a portable keyboard contract and FabGL PS/2
-adapter, ESP32 clock adapter, SD storage adapter, and SD-backed session-owned
-text channels. A second `esp32_2432s028` profile now targets the common yellow
+adapter, ESP32 clock adapter, SD storage adapter, and session-owned SD-backed
+text/binary file channels. A second `esp32_2432s028` profile now targets the common yellow
 ESP32-2432S028R board with ILI9341 TFT graphics and serial terminal input. Its
 TFT adapter maps the QL eight-color indexed palette to RGB565, while SD uses
 the board's separate SPI bus. The shared BASIC VM is linked into firmware, with serial output
 and a prompt accepting input from both USB serial and PS/2. On
 startup it runs `startup.bas` from the SD root when present and falls back to a
-built-in demo otherwise. The channel adapter supports `OPEN`/`READ$`/`EOF`/
-`WRITE`/`CLOSE` with root-confined paths. Host coverage exercises the hardware
-adapters using fakes; all 53 CTest cases pass. PlatformIO Core 6.2.0,
-  Arduino-ESP32 2.0.17, and FabGL 1.0.9 build the current image using 1,286,905
-bytes of the custom 4,063,232-byte app partition (31.7%) and 52,416 bytes static RAM.
+built-in demo otherwise. The channel adapter supports line and exact-byte file
+I/O with root-confined paths. Host coverage exercises the hardware adapters
+using fakes; all 53 CTest cases pass. PlatformIO Core 6.2.0, Arduino-ESP32
+2.0.17, and FabGL 1.0.9 build both profiles. Current size and RAM measurements
+are maintained in [`QL32-PLAT-001.md`](docs/specification/QL32-PLAT-001.md).
 The user confirmed the USB serial REPL works on the
 board. VGA output, PS/2 input, clock, and SD behavior remain unverified. The
-CYD target builds with Adafruit ILI9341/GFX and a scrolling TFT PRINT console
-using 1,225,913 bytes of the custom 4,063,232-byte app partition (30.2%) and
-49,864 bytes static RAM. The
+CYD target builds with Adafruit ILI9341/GFX and a scrolling TFT PRINT console.
+The
 user verified TFT output, the
 serial REPL, a small BASIC `FOR`/`PRINT` loop, and an SD channel round-trip
 with successful text readback and EOF detection on hardware. VGA32 SD behavior
@@ -157,12 +156,12 @@ Current open points before calling the hardware milestone accepted:
   I/O and graphics commands accept
   explicit channel selectors, for example `PRINT #out,...`, `LIST #out`, and
   `CIRCLE #window,...`. `CHANNEL #channel` changes the default for unqualified
-  output. `CHANNEL #source TO #destination` is approved to directly rebind the
-  source handle to the destination's current endpoint for all operations; the
-  source retains its original endpoint, restored with
-  `CHANNEL #source TO #source`. The current implementation still resolves
-  per-session routes at operation time and must be refactored to the
-  channel-table binding model.
+  output. `CHANNEL #source TO #destination` directly binds the source to the
+  destination's current endpoint for all operations. The one-step binding
+  shares endpoint state, retains the source's original endpoint, and resets
+  with `CHANNEL #source TO #source`; channel-to-channel chains are not kept.
+  Closing a file endpoint resets aliases that point to it; reserved-channel
+  close/reopen is not implemented.
   `GETCHANNEL(KChannelCount)` returns open-channel count,
   `GETCHANNEL(KChannelHandle, position)` returns a handle by zero-based
   position in ascending-handle order, and
@@ -189,8 +188,9 @@ Current open points before calling the hardware milestone accepted:
 - **Test state:** current source changes are local, uncommitted, and unpushed.
 
 Channel-based networking is deferred to the backlog; it is not part of the
-current M6 Wi-Fi station acceptance. Existing `OPEN`/`READ$`/`WRITE` calls
-handle file-backed text channels only.
+current M6 Wi-Fi station acceptance. File channels support text-line I/O,
+exact-byte `IN`/`OUT`, and `AT`; serial and null channel endpoints remain
+future work.
 
 ## Pending language features
 

@@ -137,12 +137,12 @@ void testBinaryChannelRandomAccess() {
         std::ostringstream output;
         interpreter.execute(
             "source = OPEN(\"binary.bin\", \"READ\")\n"
-            "#source IN 2, first$\n"
-            "#source AT 1\n"
-            "#source IN 3, packet$\n"
+            "#source in 2, first$\n"
+            "#source at 1\n"
+            "#source in 3, packet$\n"
             "CLOSE source\n"
             "target = OPEN(\"copy.bin\", \"WRITE\")\n"
-            "#target OUT 3, packet$\n"
+            "#target out 3, packet$\n"
             "CLOSE target\n"
             "PRINT LEN(packet$)\n", output);
         require(output.str() == "3\n", "binary channel transfer or seek failed");
@@ -219,6 +219,39 @@ void testDefaultAndRoutedOutputChannels() {
     std::filesystem::remove_all(root);
 }
 
+void testChannelBindingSnapshotsEndpoint() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-channel-binding-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        ql32::Interpreter interpreter({}, channels);
+        std::ostringstream output;
+        interpreter.execute(
+            "first = OPEN(\"first.txt\", \"WRITE\")\n"
+            "second = OPEN(\"second.txt\", \"WRITE\")\n"
+            "channel #1 to #first\n"
+            "CHANNEL #second TO #1\n"
+            "CHANNEL #1 TO #1\n"
+            "PRINT #second, \"bound snapshot\"\n"
+            "CLOSE first\n"
+            "PRINT #second, \"restored endpoint\"\n"
+            "CLOSE second\n", output);
+        std::ifstream result(root / "first.txt", std::ios::binary);
+        const std::string first{std::istreambuf_iterator<char>(result), {}};
+        std::ifstream untouched(root / "second.txt", std::ios::binary);
+        const std::string second{std::istreambuf_iterator<char>(untouched), {}};
+        require(first == "bound snapshot\n" && second == "restored endpoint\n",
+                "channel binding followed a later change instead of retaining the endpoint");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testGetChannelInspection() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -284,6 +317,7 @@ int main() {
         testBinaryChannelRandomAccess();
         testInputLineAndSessionResume();
         testDefaultAndRoutedOutputChannels();
+        testChannelBindingSnapshotsEndpoint();
         testGetChannelInspection();
     } catch (const std::exception& error) {
         std::cerr << "channel test failed: " << error.what() << '\n';
