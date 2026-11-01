@@ -5,7 +5,7 @@ endif()
 
 file(READ "${EXPECTED_STDOUT_FILE}" expected_stdout)
 execute_process(
-  COMMAND "${QL32_EXECUTABLE}" "${SOURCE_FILE}"
+  COMMAND "${QL32_EXECUTABLE}" --console "${SOURCE_FILE}"
   INPUT_FILE "${INPUT_FILE}"
   RESULT_VARIABLE actual_exit_code
   OUTPUT_VARIABLE actual_stdout

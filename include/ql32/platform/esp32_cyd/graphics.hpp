@@ -15,11 +15,24 @@ class CydIli9341Display final : public Adafruit_ILI9341 {
 public:
     using Adafruit_ILI9341::Adafruit_ILI9341;
 
-    void setRotationDegrees(std::uint16_t degrees) {
-        Adafruit_ILI9341::setRotation(static_cast<std::uint8_t>(degrees / 90));
-        const bool landscape = degrees == 0 || degrees == 180;
+    void setCydRotation(std::uint8_t rotation) {
+        const auto index = static_cast<std::uint8_t>(rotation % 4);
+        Adafruit_ILI9341::setRotation(index);
+
+        // Adafruit's ILI9341 driver always sets MADCTL_BGR. The tested CYD
+        // panel presents RGB565 red as blue with that flag set, so retain the
+        // orientation bits while selecting RGB pixel order.
+        static constexpr std::uint8_t madctlByRotation[] = {0x40, 0x20, 0x80, 0xE0};
+        auto madctl = madctlByRotation[index];
+        sendCommand(0x36, &madctl, 1);
+
+        const bool landscape = index == 0 || index == 2;
         _width = landscape ? 320 : 240;
         _height = landscape ? 240 : 320;
+    }
+
+    void setRotationDegrees(std::uint16_t degrees) {
+        setCydRotation(static_cast<std::uint8_t>(degrees / 90));
     }
 };
 

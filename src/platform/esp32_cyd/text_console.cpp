@@ -41,6 +41,10 @@ void TftTextConsole::reconfigure() {
     clear();
 }
 
+void TftTextConsole::restoreOverlay() {
+    redraw();
+}
+
 void TftTextConsole::clear() {
     lines_.clear();
     lines_.emplace_back();

@@ -20,10 +20,18 @@ public:
         _height = rotation_ % 2 ? 240 : 320;
         calls.push_back({"rotation", {rotation_}, {}});
     }
+    void sendCommand(std::uint8_t command, const std::uint8_t* data,
+                     std::uint8_t length) {
+        calls.push_back({"command", {command, length, length ? data[0] : 0}, {}});
+    }
     void fillScreen(std::uint16_t color) { calls.push_back({"fill", {color}, {}}); }
     void fillRect(std::int16_t x, std::int16_t y, std::int16_t width,
                   std::int16_t height, std::uint16_t color) {
         calls.push_back({"fill_rect", {x, y, width, height, color}, {}});
+    }
+    void drawRGBBitmap(std::int16_t x, std::int16_t y, const std::uint16_t*,
+                       std::int16_t width, std::int16_t height) {
+        calls.push_back({"rgb_bitmap", {x, y, width, height}, {}});
     }
     void drawLine(std::int16_t x0, std::int16_t y0, std::int16_t x1,
                   std::int16_t y1, std::uint16_t color) {

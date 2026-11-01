@@ -64,8 +64,24 @@ been verified with PlatformIO Core 6.2.0, Arduino-ESP32 2.0.17, and FabGL
 required. The ESP32-S3 TFT environment remains a backlog placeholder.
 
 For Linux graphics testing, run `./build/ql32 examples/graphics.bas`. The CLI
-writes `ql32-graphics-session-<id>.svg` to its current directory; open the SVG
-in a browser to inspect the drawing.
+composites drawing into retained 4-bit windows and writes the latest screen to
+`ql32-screen.ppm` in its current directory. Open the PPM image to inspect the
+composed frame.
+Unqualified `PRINT` and `PRINT #1` write text into the user window; `PRINT #0`
+writes to the terminal. Use `./build/ql32 --console program.bas` to run a
+program without graphics and send the default output to the terminal.
+
+To see a retained canvas move after it has been drawn, run
+`./build/ql32 examples/window-manager.bas`. The `WINDOW x,y,width,height`
+command changes the current window's position and size; its drawing coordinates
+remain relative to the window. `GORIGINX()` and `GORIGINY()` return its absolute
+screen coordinates. The resulting composed frame is written to
+`ql32-screen.ppm`.
+
+In the interactive REPL, run `PRINT FREE()`, `CLOSEWINDOW`, then
+`PRINT FREE()` to compare available memory before and after releasing the
+current session's graphics canvas. A later graphics command recreates its
+default window.
 
 For a manual dialog and menu test, run `./build/ql32 examples/ui.bas`. Enter
 values at the console prompts, accept or cancel the dialog, then select a menu

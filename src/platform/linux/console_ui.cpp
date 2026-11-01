@@ -39,9 +39,18 @@ ConsoleUi::ConsoleUi(std::shared_ptr<ui::QueuedService> service,
 bool ConsoleUi::dispatchNext() {
     const auto request = service_->takeNextRequest();
     if (!request) return false;
+    std::string response;
+
+    if (request->kind == ui::RequestKind::Input) {
+        if (!request->title.empty()) output_ << request->title;
+        output_ << std::flush;
+        if (std::getline(input_, response)) service_->submitInput(request->id, std::move(response));
+        else service_->resolve(request->id, ui::ResultKind::Cancelled);
+        output_ << '\n';
+        return true;
+    }
 
     output_ << '\n' << request->title << '\n';
-    std::string response;
     if (request->kind == ui::RequestKind::Alert) {
         if (!request->message.empty()) output_ << request->message << '\n';
         output_ << "Press Enter to continue..." << std::flush;

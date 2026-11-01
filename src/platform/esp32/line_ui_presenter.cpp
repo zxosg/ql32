@@ -58,6 +58,11 @@ bool LineUiPresenter::beginNext() {
 }
 
 void LineUiPresenter::present() {
+    if (request_->kind == ui::RequestKind::Input) {
+        if (!request_->title.empty()) output_ << request_->title;
+        output_.flush();
+        return;
+    }
     output_ << '\n' << request_->title << '\n';
     if (!request_->message.empty()) output_ << request_->message << '\n';
     switch (request_->kind) {
@@ -80,6 +85,8 @@ void LineUiPresenter::present() {
             output_ << '\n';
         }
         output_ << "Select item or shortcut; Enter cancels.\n";
+        break;
+    case ui::RequestKind::Input:
         break;
     }
     output_.flush();
@@ -149,6 +156,10 @@ bool LineUiPresenter::consumeLine(const std::string& line) {
         return consumeDialogLine(line);
     case ui::RequestKind::Menu:
         return consumeMenuLine(line);
+    case ui::RequestKind::Input:
+        service_->submitInput(request_->id, line);
+        finish();
+        return true;
     }
     return false;
 }

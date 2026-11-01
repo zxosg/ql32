@@ -60,9 +60,13 @@ void testRotationAndWindowQueries() {
     ql32::platform::esp32_cyd::Ili9341Graphics graphics(display);
     graphics.setRotation(3, 0);
     auto info = graphics.windowInfo(3);
-    require(display.calls[display.calls.size() - 2].name == "rotation" &&
-                display.calls[display.calls.size() - 2].values[0] == 0,
+    require(display.calls[display.calls.size() - 3].name == "rotation" &&
+                display.calls[display.calls.size() - 3].values[0] == 0,
             "zero degrees did not select the CYD's landscape rotation index");
+    require(display.calls[display.calls.size() - 2].name == "command" &&
+                display.calls[display.calls.size() - 2].values[0] == 0x36 &&
+                display.calls[display.calls.size() - 2].values[2] == 0x40,
+            "CYD rotation 0 did not select RGB pixel order");
     require(info.width == 320 && info.height == 240 && info.colorDepth == 16 &&
                 info.paletteSize == 8 && info.rotationDegrees == 0,
             "CYD landscape window metadata mismatch at zero degrees");
@@ -74,18 +78,21 @@ void testRotationAndWindowQueries() {
             "landscape drawing bounds did not use the 320x240 CYD geometry");
     graphics.setRotation(3, 90);
     info = graphics.windowInfo(3);
-    require(display.calls[display.calls.size() - 2].values[0] == 1 && info.width == 240 &&
-                info.height == 320 && info.rotationDegrees == 90,
+    require(display.calls[display.calls.size() - 3].values[0] == 1 && info.width == 240 &&
+                info.height == 320 && info.rotationDegrees == 90 &&
+                (display.calls[display.calls.size() - 2].values[2] & 0x08) == 0,
             "quarter-turn rotation metadata mismatch");
     graphics.setRotation(3, 180);
     info = graphics.windowInfo(3);
-    require(display.calls[display.calls.size() - 2].values[0] == 2 && info.width == 320 &&
-                info.height == 240 && info.rotationDegrees == 180,
+    require(display.calls[display.calls.size() - 3].values[0] == 2 && info.width == 320 &&
+                info.height == 240 && info.rotationDegrees == 180 &&
+                (display.calls[display.calls.size() - 2].values[2] & 0x08) == 0,
             "half-turn landscape metadata mismatch");
     graphics.setRotation(3, 270);
     info = graphics.windowInfo(3);
-    require(display.calls[display.calls.size() - 2].values[0] == 3 && info.width == 240 &&
-                info.height == 320 && info.rotationDegrees == 270,
+    require(display.calls[display.calls.size() - 3].values[0] == 3 && info.width == 240 &&
+                info.height == 320 && info.rotationDegrees == 270 &&
+                (display.calls[display.calls.size() - 2].values[2] & 0x08) == 0,
             "three-quarter-turn portrait metadata mismatch");
     const auto red = graphics.paletteColor(3, 2);
     require(red.red == 255 && red.green == 0 && red.blue == 0,

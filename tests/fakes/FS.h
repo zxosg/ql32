@@ -27,6 +27,7 @@ public:
     int read();
     std::size_t read(std::uint8_t* buffer, std::size_t length);
     std::size_t write(const std::uint8_t* buffer, std::size_t length);
+    bool seek(std::uint32_t offset, int = 0);
     void flush() {}
     void close() { valid_ = false; }
     const char* name() const { return name_.c_str(); }
@@ -60,7 +61,9 @@ public:
         if (std::string(mode) == FILE_APPEND) {
             if (!directories_.contains(parent(key))) return {};
             files_.try_emplace(key);
-            return File(this, key);
+            File file(this, key);
+            file.seek(static_cast<std::uint32_t>(files_[key].size()));
+            return file;
         }
         return found == files_.end() ? File{} : File(this, key);
     }
@@ -130,8 +133,17 @@ inline std::size_t File::read(std::uint8_t* buffer, std::size_t length) {
 }
 
 inline std::size_t File::write(const std::uint8_t* buffer, std::size_t length) {
-    filesystem_->files_[path_].append(reinterpret_cast<const char*>(buffer), length);
+    auto& contents = filesystem_->files_[path_];
+    if (cursor_ > contents.size()) contents.resize(cursor_, '\0');
+    if (cursor_ + length > contents.size()) contents.resize(cursor_ + length);
+    std::copy_n(reinterpret_cast<const char*>(buffer), length, contents.data() + cursor_);
+    cursor_ += length;
     return length;
+}
+
+inline bool File::seek(std::uint32_t offset, int) {
+    cursor_ = offset;
+    return true;
 }
 
 inline File File::openNextFile() {

@@ -89,6 +89,19 @@ void testInteractiveInterpreterSuspendResume() {
             "interactive VM did not resume after UI response");
 }
 
+void testInputRequestConsumesOneCompletedLine() {
+    auto service = std::make_shared<ql32::ui::QueuedService>();
+    std::ostringstream output;
+    ql32::platform::esp32::LineUiPresenter presenter(service, output);
+    const auto request = service->beginInput(9, "");
+    require(presenter.beginNext(), "line input was not presented");
+    require(presenter.consumeLine("binary line"), "input line was not consumed");
+    const auto result = service->poll(request);
+    require(result && result->kind == ql32::ui::ResultKind::Submitted &&
+                std::get<std::string>(result->fields.front()) == "binary line",
+            "presenter did not submit the input line");
+}
+
 } // namespace
 
 int main() {
@@ -96,6 +109,7 @@ int main() {
         testAlertAndConfirmAreIncremental();
         testTypedDialogAndStableMenuId();
         testInteractiveInterpreterSuspendResume();
+        testInputRequestConsumesOneCompletedLine();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

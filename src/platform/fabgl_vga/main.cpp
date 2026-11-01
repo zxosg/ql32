@@ -15,9 +15,12 @@
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/line_ui_presenter.hpp"
+#include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
+#include "ql32/graphics/windowed_service.hpp"
 #include "ql32/platform/fabgl_vga/graphics.hpp"
+#include "ql32/platform/fabgl_vga/frame_presenter.hpp"
 #include "ql32/platform/fabgl_vga/keyboard.hpp"
 
 namespace {
@@ -41,9 +44,10 @@ protected:
 fabgl::VGAController display;
 fabgl::Canvas canvas(&display);
 fabgl::PS2Controller ps2;
-ql32::platform::fabgl_vga::FabglGraphics graphics(canvas);
+std::shared_ptr<ql32::graphics::WindowedService> graphics;
 std::optional<ql32::platform::fabgl_vga::FabglKeyboard> keyboardInput;
 ql32::platform::esp32::Clock boardClock;
+ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 SPIClass sdBus(HSPI);
 ql32::platform::esp32::SdStorage sdStorage(SD);
@@ -143,6 +147,14 @@ void setup() {
         static_cast<gpio_num_t>(ql32::boards::lilygo_vga32::vgaVSync));
     display.setResolution(VGA_320x200_70Hz);
 
+    auto framePresenter = std::make_shared<ql32::platform::fabgl_vga::FabglFramePresenter>(canvas);
+    const auto screenWidth = static_cast<std::uint32_t>(canvas.getWidth());
+    const auto screenHeight = static_cast<std::uint32_t>(canvas.getHeight());
+    const std::size_t fullScreen4BitBytes =
+        (static_cast<std::size_t>(screenWidth) * screenHeight + 1) / 2;
+    graphics = std::make_shared<ql32::graphics::WindowedService>(
+        screenWidth, screenHeight, framePresenter, 4, fullScreen4BitBytes * 2);
+
     ps2.begin(fabgl::PS2Preset::KeyboardPort0);
     if (fabgl::PS2Controller::keyboard())
         keyboardInput.emplace(*fabgl::PS2Controller::keyboard());
@@ -154,17 +166,6 @@ void setup() {
     const bool sdReady = SD.begin(ql32::boards::lilygo_vga32::sdChipSelect,
                                  sdBus, 4000000, "/sd", 5);
 
-    constexpr ql32::graphics::SessionId demoSession = 1;
-    graphics.setPaper(demoSession, 0);
-    graphics.clear(demoSession);
-    graphics.setInk(demoSession, 7);
-    graphics.text(demoSession, {8, 8}, "QL/32 VGA32 V1.4");
-    graphics.text(demoSession, {8, 24}, "FabGL VGA + PS/2 ready");
-    graphics.text(demoSession, {8, 36}, "BASIC prompt on PS/2 keyboard");
-    graphics.rectangle(demoSession, {8, 48}, 96, 48);
-    graphics.line(demoSession, {8, 48}, {103, 95});
-    graphics.circle(demoSession, {150, 72}, 24);
-
     Serial.println("QL/32 VGA32 V1.4 bring-up ready");
     Serial.printf("Uptime ms: %llu\n",
                   static_cast<unsigned long long>(boardClock.monotonicMilliseconds()));
@@ -175,20 +176,26 @@ void setup() {
         Serial.println("Wall clock unsynchronized");
     Serial.println(sdReady ? "SD storage ready" : "SD storage unavailable");
 
-    auto graphicsService = std::shared_ptr<ql32::graphics::Service>(
-        &graphics, [](ql32::graphics::Service*) {});
+    auto graphicsService = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     auto storageService = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto channelService = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
     auto networkService = std::shared_ptr<ql32::runtime::NetworkService>(
         &boardNetwork, [](ql32::runtime::NetworkService*) {});
+    auto memoryService = std::shared_ptr<ql32::runtime::MemoryService>(
+        &boardMemory, [](ql32::runtime::MemoryService*) {});
     uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
         uiService, serialOutput);
     interpreter = std::make_unique<ql32::Interpreter>(
-        storageService, channelService, uiService, graphicsService, networkService);
+        storageService, channelService, uiService, graphicsService, networkService,
+        memoryService);
     std::string startupProgram =
-        "INK 7\nTEXT 8,112,\"BASIC VM ready\"\n"
+        "INK 7\nTEXT 8,8,\"QL/32 VGA32 V1.4\"\n"
+        "TEXT 8,24,\"FabGL VGA + PS/2 ready\"\n"
+        "TEXT 8,36,\"BASIC prompt on PS/2 keyboard\"\n"
+        "RECT 8,48,96,48\nLINE 8,48,103,95\nCIRCLE 150,72,24\n"
+        "TEXT 8,112,\"BASIC VM ready\"\n"
         "PRINT \"QL/32 BASIC VM running\"\n";
     if (sdReady) {
         try {

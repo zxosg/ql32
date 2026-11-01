@@ -12,7 +12,8 @@ enum class PrintSeparator { None, Semicolon, Exclamation, Comma, Backslash };
 enum class Op {
     Push, Load, Store, Add, Subtract, Multiply, Divide, IntegerDivide, Modulo,
     Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
-    And, Or, Xor, Negate, Not, Print, PrintSeparator, PrintEnd, JumpIfFalse, Jump,
+    And, Or, Xor, Negate, Not, PrintBegin, PrintChannel, Print, PrintSeparator, PrintEnd,
+    ChannelDefault, ChannelRoute, ChannelSeek, ChannelRead, ChannelWrite, Input, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
     DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd
 };
@@ -50,10 +51,12 @@ struct Instruction {
     std::size_t argCount = 0;
     bool expectsValue = false;
     bool builtin = false;
+    bool channelArgument = false;
     std::vector<std::string> parameters;
     std::vector<std::string> localNames;
     std::vector<ArrayArgumentCandidate> arrayArgumentCandidates;
     std::string ownerDefinition;
+    std::string targetVariable;
     std::size_t rank = 0;
     bool sliceHasStart = false;
     bool sliceHasEnd = false;

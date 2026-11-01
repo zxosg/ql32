@@ -1,15 +1,17 @@
 # QL/32 BASIC language specification
 
 **Document ID:** QL32-LANG-001  
-**Version:** 0.5 (M1 language contract)
-**Status:** Approved profile; M1 acceptance complete on Linux; source inclusion and GOTO implemented
+**Version:** 0.6 (M1 language contract)
+**Status:** Approved profile; M1 acceptance complete on Linux; source inclusion, GOTO, and module constants implemented
 **Sources:** [reference index](../reference/README.md), [language decision](../decisions/ADR-002-language-profile.md)
 
 ## 1. Language profile
 
 QL/32 BASIC is an interactive, structured, case-insensitive dialect based primarily on SMSQ/E SBASIC. Psion OPL inspires managed UI, not the core grammar. Complete source compatibility with either language is not promised.
 
-Compatibility labels apply per command: **S** = syntax and behavior verified against a cited SMSQ/E reference and tests; **Q** = QL/32 difference or QL-inspired command; **P** = Psion-inspired UI; **N** = new native API; **X** = unsupported. Historical spelling alone never earns S. All mappings here are candidates until tests pass.
+Toolkit II is treated as a near-standard SuperBASIC extension: it added substantial facilities planned for the QL but absent from the rushed initial release. QL/32 may draw on those features as compatibility references, while identifying toolkit-derived behavior separately from original QL ROM behavior.
+
+Compatibility labels apply per command: **S** = syntax and behavior verified against a cited SuperBASIC/SMSQ/E or named toolkit reference and tests; **Q** = QL/32 difference or QL-inspired command; **P** = Psion-inspired UI; **N** = new native API; **X** = unsupported. Historical spelling alone never earns S. All mappings here are candidates until tests pass.
 
 M1 is delivered in executable slices. The first slice is expressions, assignments, variables, and `PRINT`; the full M1 set includes block control flow, procedures, functions, and arrays.
 
@@ -71,20 +73,32 @@ for included code currently refer to line numbers in the expanded source.
 
 This borrows OPL32's quoted `INCLUDE` spelling, module-preamble placement, and
 textual expansion. OPL32 headers declare constants and procedure prototypes and
-do not contain module procedure bodies. QL/32 currently has no `CONST`,
-`EXTERNAL`, or OPX interface, so QL/32 include files can contain BASIC
-procedure/function definitions. `INCLUDE` does not compile C/C++ headers or
-link object libraries. See the [OPL reference notes](../reference/README.md).
+do not contain module procedure bodies. QL/32 supports module `CONST`
+declarations in included BASIC headers; it has no `EXTERNAL` or OPX interface.
+`INCLUDE` does not compile C/C++ headers or link object libraries. See the
+[OPL reference notes](../reference/README.md).
+
+QL/32 adopts the OPL-style use of a common include file for named constants and
+public selectors. Prefer a small set of general operations parameterized by
+those constants over adding a new keyword for each operation. Module-level
+`CONST name = literal` declarations accept numeric literals (optionally signed)
+or string literals. They must appear before definitions and executable code,
+are case-insensitive, and are immutable compile-time values. They cannot be
+reassigned, dimensioned, or used as loop variables. `ql32.inc` defines
+`KChannelCount = 0`, `KChannelHandle = 1`, and `KChannelType = 2` for
+`GETCHANNEL`; programs include it with `INCLUDE "ql32.inc"`.
 
 The first slice accepts this grammar (later sections extend it):
 
 ```text
 program       := source_line*
 source_line   := [line_number] [statement (":" statement)*] [comment] newline
-statement     := assignment | print
+statement     := const_declaration | assignment | print
+const_declaration := "CONST" identifier "=" (signed_number | string)
 comment       := ("REMark" | "REM" | "'") characters_to_end_of_line
 assignment    := identifier "=" expression
-print         := "PRINT" [expression (print_separator expression)* [print_separator]]
+print         := "PRINT" ["#" expression [("," | ";")]]
+                [expression (print_separator expression)* [print_separator]]
 print_separator := ";" | "!" | "," | "\\"
 expression    := literal | identifier | "(" expression ")" | unary | binary
 ```
@@ -322,6 +336,13 @@ bound behavior. `LEN(string$)` returns the number of UTF-8 code points in a
 string or string slice. Unlike the original QL ROM's coercion behavior, QL/32
 requires a string argument. See the [SuperBASIC string-slicing reference](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) and [`LEN` reference](https://superbasic-manual.readthedocs.io/en/latest/L/len.html).
 
+`FREE()` returns the current free-memory estimate in bytes as a number. On
+ESP32 it reports free byte-addressable heap; on Linux it reports host memory
+available for new allocations. This is platform memory, not an exact count of
+bytes owned by the current BASIC session. Use repeated `PRINT FREE()` calls
+to observe allocation changes. The target shell's separate `MEM` command is
+not implemented.
+
 ## 8. Immediate mode, commands, and errors
 
 Immediate statements execute without changing stored program source. Entering a
@@ -346,7 +367,74 @@ M2 also provides QL/32-specific `OPEN`, `READ$`, `EOF`, `WRITE`, and `CLOSE`
 file-channel operations; value-returning operations use function syntax while
 `WRITE channel, text$` and `CLOSE channel` are statement commands. See
 [QL32-API-001](QL32-API-001.md). `EDIT` and the target
-shell's `STOP`, `MEM`, `HELP`, and later `CONT` remain future work.
+shell's `STOP` and `HELP`, and later `CONT`, remain future work.
+
+Channels are universal session-owned I/O handles. `#0` is reserved for the
+command/error console and keyboard input; `#1` is reserved for user/program
+output and graphics. Window, file, serial, null, and future network endpoints
+share one handle namespace. Generic `OPEN(deviceKind, parameters...)` returns
+an automatically allocated channel handle; the device kind is a typed token,
+not a string. Programs do not select channel numbers when opening endpoints.
+Commands that perform I/O or drawing may select a channel explicitly, for
+example `PRINT #out, text$`, `LIST #out`, or
+`CIRCLE #window, x, y, radius`. Unqualified output uses the current output
+default. `CHANNEL #channel` changes the logical default for all unqualified
+output operations, including text and graphics. `CHANNEL #source TO
+#destination` directly rebinds the source handle to the endpoint currently
+bound to the destination. The binding is shared, session-local, and applies to
+all operations; the source retains its original endpoint, restored by
+`CHANNEL #source TO #source`. If the default is still `#1`, rebinding `#1` to
+`#2` makes unqualified output and explicit `#1` operations use `#2`'s endpoint.
+Graphics fail if that endpoint lacks graphics capability. Changing the default
+to `#0` selects `#0` for unqualified output; explicit selectors still use the
+selected handle's active binding. The current runtime still resolves per-session
+routes per operation; direct binding is the approved target architecture.
+`GETCHANNEL(KChannelCount)` returns the open-channel count;
+`GETCHANNEL(KChannelHandle, position)` returns the handle at the zero-based
+position in ascending-handle order; and `GETCHANNEL(KChannelType, #handle)`
+returns the endpoint type. These selector constants are provided by
+`ql32.inc`. `NULL` is a planned output sink, not yet an available endpoint;
+its input behavior remains unspecified.
+
+The interpreter supports channel-qualified `PRINT`, `LIST`, `DIR`, and
+`WRITE`: text output can go to the retained window for `#1`, the console stream
+through `#0`, or an open file channel. These operations follow the default and
+route rules above. Graphics commands also accept a channel selector and follow
+those rules, but currently require the resolved endpoint to be the graphics
+window `#1`. `READ$` and `EOF` work with open file channels. Line-oriented
+BASIC `INPUT` defaults to keyboard channel `#0`; file channels can be selected
+explicitly. A prompt defaults to output channel `#1` and may select an
+independent prompt channel. Supported forms are:
+
+```basic
+INPUT variable
+INPUT promptExpression; variable
+INPUT #readChannel, variable
+INPUT promptExpression #readChannel, variable
+INPUT #promptChannel, promptExpression, #readChannel, variable
+INPUT #1, "Serial line?", #3, response$
+```
+
+Prompt expressions must evaluate to strings. Keyboard input
+suspends only its BASIC session and resumes when the UI presenter submits a
+line. File-channel `INPUT` reads one line synchronously and raises an error at
+EOF. Serial and null input endpoints are not implemented yet.
+
+Exact binary I/O and random access use channel-context forms:
+
+```basic
+#channel AT byteOffset
+#channel IN byteCount, buffer$
+#channel OUT byteCount, buffer$
+```
+
+`AT` seeks to a zero-based absolute file offset. `IN` reads exactly the
+requested count from the current position; `OUT` writes that many bytes from
+the start of the string buffer. Counts are limited to 8192 bytes per
+operation. Linux directory and ESP32 SD file adapters support these
+operations. Strings preserve NUL and arbitrary byte sequences for binary I/O,
+but text operations such as slicing and printing assume UTF-8. `APPEND`
+channels are sequential and cannot be repositioned.
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
 

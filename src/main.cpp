@@ -2,7 +2,9 @@
 #include "ql32/platform/linux/directory_channels.hpp"
 #include "ql32/platform/linux/directory_storage.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
-#include "ql32/platform/linux/svg_graphics.hpp"
+#include "ql32/graphics/windowed_service.hpp"
+#include "ql32/platform/linux/memory.hpp"
+#include "ql32/platform/linux/ppm_presenter.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -15,29 +17,35 @@
 #endif
 
 int main(int argc, char** argv) {
-    if (argc > 2) {
-        std::cerr << "usage: ql32 [program.bas]\n";
+    const bool consoleOnly = argc > 1 && std::string(argv[1]) == "--console";
+    const bool hasProgram = consoleOnly ? argc == 3 : argc == 2;
+    if ((!consoleOnly && argc > 2) || (consoleOnly && argc > 3)) {
+        std::cerr << "usage: ql32 [--console] [program.bas]\n";
         return 2;
     }
 
     std::string source;
-    if (argc == 2) {
-        std::ifstream file(argv[1], std::ios::binary);
+    if (hasProgram) {
+        std::ifstream file(argv[consoleOnly ? 2 : 1], std::ios::binary);
         if (!file) {
-            std::cerr << "ql32: cannot open " << argv[1] << '\n';
+            std::cerr << "ql32: cannot open " << argv[consoleOnly ? 2 : 1] << '\n';
             return 2;
         }
         source.assign(std::istreambuf_iterator<char>(file), {});
     } else {
 #if defined(__unix__) || defined(__APPLE__)
-        if (::isatty(STDIN_FILENO)) {
+        if (!consoleOnly && argc == 1 && ::isatty(STDIN_FILENO)) {
             auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(
                 std::filesystem::current_path());
             auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
                 std::filesystem::current_path());
             auto ui = std::make_shared<ql32::ui::QueuedService>();
-            auto graphics = std::make_shared<ql32::platform::linux_host::SvgGraphics>();
-            ql32::Interpreter interpreter(storage, channels, ui, graphics);
+            auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
+                "ql32-screen.ppm");
+            auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+                640, 480, presenter, 4);
+            auto memory = std::make_shared<ql32::platform::linux_host::MemoryService>();
+            ql32::Interpreter interpreter(storage, channels, ui, graphics, {}, memory);
             ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout);
             interpreter.runRepl(std::cin, std::cout, std::cerr, true,
                                 [&] { return console.dispatchNext(); });
@@ -53,9 +61,15 @@ int main(int argc, char** argv) {
         auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
             std::filesystem::current_path());
         auto ui = std::make_shared<ql32::ui::QueuedService>();
-        auto graphics = std::make_shared<ql32::platform::linux_host::SvgGraphics>();
-        ql32::Interpreter interpreter(storage, channels, ui, graphics);
-        if (argc == 2) {
+        auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
+            "ql32-screen.ppm");
+        std::shared_ptr<ql32::graphics::Service> graphics;
+        if (!consoleOnly)
+            graphics = std::make_shared<ql32::graphics::WindowedService>(
+                640, 480, presenter, 4);
+        auto memory = std::make_shared<ql32::platform::linux_host::MemoryService>();
+        ql32::Interpreter interpreter(storage, channels, ui, graphics, {}, memory);
+        if (hasProgram) {
             ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout);
             auto status = interpreter.executeResumable(source, std::cout);
             while (status == ql32::ExecutionStatus::Suspended) {

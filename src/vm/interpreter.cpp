@@ -12,6 +12,7 @@
 #include <limits>
 #include <optional>
 #include <ostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -102,8 +103,16 @@ void verifyBytecode(const std::vector<Instruction>& code) {
         case Op::Negate:
         case Op::Not:
         case Op::Print:
+        case Op::PrintChannel:
         case Op::PrintSeparator:
         case Op::PrintEnd:
+        case Op::PrintBegin:
+        case Op::ChannelDefault:
+        case Op::ChannelRoute:
+        case Op::ChannelSeek:
+        case Op::ChannelRead:
+        case Op::ChannelWrite:
+        case Op::Input:
         case Op::Return:
         case Op::FunctionEnd:
         case Op::SelectBegin:
@@ -185,6 +194,27 @@ void verifyBytecode(const std::vector<Instruction>& code) {
             consumed = 1;
             produced = 1;
             break;
+        case Op::PrintChannel:
+            consumed = 1;
+            break;
+        case Op::ChannelDefault:
+            consumed = 1;
+            break;
+        case Op::ChannelRoute:
+            consumed = 2;
+            break;
+        case Op::ChannelSeek:
+        case Op::ChannelRead:
+            consumed = 2;
+            break;
+        case Op::ChannelWrite:
+            consumed = 3;
+            break;
+        case Op::Input:
+            consumed = static_cast<std::size_t>(instruction.expectsValue) +
+                       static_cast<std::size_t>(instruction.channelArgument) +
+                       static_cast<std::size_t>(instruction.clearTarget);
+            break;
         case Op::ForInit:
             for (const ForItemSpec& item : instruction.forItems)
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd) +
@@ -224,6 +254,7 @@ void verifyBytecode(const std::vector<Instruction>& code) {
         case Op::FunctionEnd:
         case Op::PrintSeparator:
         case Op::PrintEnd:
+        case Op::PrintBegin:
         case Op::SelectEnd:
             break;
         }
@@ -345,12 +376,20 @@ void Interpreter::execute(const std::string& source, std::ostream& output,
 
 ExecutionStatus Interpreter::executeResumable(const std::string& source, std::ostream& output,
                                                runtime::CancellationToken stop) {
+    return executeSlice(source, output, std::numeric_limits<std::size_t>::max(), stop);
+}
+
+ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostream& output,
+                                           std::size_t instructionBudget,
+                                           runtime::CancellationToken stop) {
     if (execution_) throw std::runtime_error("interpreter already has a suspended execution");
+    if (instructionBudget == 0)
+        throw std::invalid_argument("instruction budget must be positive");
     execution_ = std::make_unique<detail::VMExecutionState>();
     try {
         execution_->code = detail::compileSource(detail::expandIncludes(source, storage_.get()));
         verifyBytecode(execution_->code);
-        const auto status = runExecution(output, stop);
+        const auto status = runExecution(output, stop, instructionBudget);
         if (status == ExecutionStatus::Completed) execution_.reset();
         return status;
     } catch (...) {
@@ -361,9 +400,17 @@ ExecutionStatus Interpreter::executeResumable(const std::string& source, std::os
 }
 
 ExecutionStatus Interpreter::resume(std::ostream& output, runtime::CancellationToken stop) {
+    return resumeSlice(output, std::numeric_limits<std::size_t>::max(), stop);
+}
+
+ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
+                                          std::size_t instructionBudget,
+                                          runtime::CancellationToken stop) {
     if (!execution_) throw std::runtime_error("interpreter has no suspended execution");
+    if (instructionBudget == 0)
+        throw std::invalid_argument("instruction budget must be positive");
     try {
-        const auto status = runExecution(output, stop);
+        const auto status = runExecution(output, stop, instructionBudget);
         if (status == ExecutionStatus::Completed) execution_.reset();
         return status;
     } catch (...) {
@@ -374,7 +421,8 @@ ExecutionStatus Interpreter::resume(std::ostream& output, runtime::CancellationT
 }
 
 ExecutionStatus Interpreter::runExecution(std::ostream& output,
-                                           runtime::CancellationToken stop) {
+                                           runtime::CancellationToken stop,
+                                           std::size_t instructionBudget) {
     auto& state = *execution_;
     auto& code = state.code;
     auto& stack = state.stack;
@@ -398,6 +446,46 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     auto pushValue = [&](Value value) {
         if (const auto* number = std::get_if<double>(&value)) stack.emplace_back(*number);
         else stack.emplace_back(std::get<std::string>(value));
+    };
+    auto storeInputValue = [&](const std::string& name, const std::string& text,
+                               const Instruction& at) {
+        Value value;
+        if (!name.empty() && name.back() == '$') {
+            value = text;
+        } else {
+            char* end = nullptr;
+            const double number = std::strtod(text.c_str(), &end);
+            if (text.empty() || end != text.c_str() + text.size() || !std::isfinite(number))
+                runtimeError(at, "numeric input required");
+            if (!name.empty() && name.back() == '%' &&
+                (std::trunc(number) != number ||
+                 number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
+                 number > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
+                runtimeError(at, "Int32 input out of range");
+            value = number;
+        }
+        if (!callFrames.empty() && callFrames.back().locals.count(name))
+            callFrames.back().locals[name] = std::move(value);
+        else variables_[name] = std::move(value);
+    };
+    auto writePrintText = [&](const std::string& text, const Instruction& at) {
+        if (state.printChannel == 0) {
+            output << text;
+            output_column_ += utf8Length(text);
+        } else if (state.printChannel == 1) {
+            if (graphics_) graphics_->writeText(session_id_, text);
+            else {
+                output << text;
+                output_column_ += utf8Length(text);
+            }
+            state.printChannelColumn += utf8Length(text);
+        } else {
+            if (!channels_) runtimeError(at, "channel output is unavailable");
+            channels_->write(session_id_, state.printChannel, text);
+        }
+    };
+    auto printColumn = [&]() -> std::size_t& {
+        return state.printChannel == 0 ? output_column_ : state.printChannelColumn;
     };
     auto resolveArrayName = [&](const Instruction& instruction) {
         std::string name = instruction.name;
@@ -470,18 +558,41 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             menu.hasResult = result->kind == ui::ResultKind::Selected;
             menu.selectedCommand = menu.hasResult ? result->commandId : 0;
             stack.emplace_back(static_cast<double>(menu.selectedCommand));
+        } else if (state.pendingUiKind == ui::RequestKind::Input) {
+            if (result->kind != ui::ResultKind::Submitted || result->fields.empty() ||
+                !std::holds_alternative<std::string>(result->fields.front()))
+                throw std::runtime_error("input cancelled");
+            storeInputValue(state.pendingInputVariable,
+                            std::get<std::string>(result->fields.front()),
+                            code.at(state.pc == 0 ? 0 : state.pc - 1));
+            state.pendingInputVariable.clear();
         }
         state.pendingUiRequest.reset();
         state.pendingUiBuilderHandle = 0;
     }
+    std::size_t instructionsExecuted = 0;
     while (pc < code.size()) {
         if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
+        if (instructionBudget != 0 && instructionsExecuted >= instructionBudget)
+            return ExecutionStatus::Yielded;
         const auto& instruction = code[pc++];
+        ++instructionsExecuted;
         switch (instruction.op) {
         case Op::Call: {
             std::vector<StackEntry> arguments(instruction.argCount);
             for (std::size_t i = instruction.argCount; i-- > 0;)
                 arguments[i] = popEntry();
+            std::optional<runtime::ChannelId> selectedChannel;
+            if (instruction.channelArgument) {
+                const auto* number = arguments.empty() ? nullptr :
+                    std::get_if<double>(&arguments.front());
+                if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
+                    *number < 0 || *number > static_cast<double>(
+                        std::numeric_limits<std::uint64_t>::max()))
+                    runtimeError(instruction, "channel handle must be a nonnegative integer");
+                selectedChannel = resolveChannel(static_cast<std::uint64_t>(*number));
+                arguments.erase(arguments.begin());
+            }
             if (instruction.builtin) {
                 if (instruction.name == "LEN") {
                     const auto* text = std::get_if<std::string>(&arguments[0]);
@@ -489,8 +600,69 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     pushValue(static_cast<double>(utf8Length(*text)));
                     break;
                 }
+                if (instruction.name == "FREE") {
+                    if (!memory_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "memory service unavailable");
+                    pushValue(static_cast<double>(memory_->freeBytes()));
+                    break;
+                }
+                if (instruction.name == "GETCHANNEL") {
+                    const auto integerArgument = [&](std::size_t index, double maximum,
+                                                     const char* message) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number) runtimeError(instruction, "numeric value required");
+                        if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < 0 || *number > maximum)
+                            runtimeError(instruction, message);
+                        return static_cast<std::uint64_t>(*number);
+                    };
+                    const auto selector = integerArgument(0, 2, "invalid GETCHANNEL selector");
+                    std::vector<runtime::ChannelInfo> openChannels{
+                        {0, runtime::ChannelType::Console},
+                        {1, runtime::ChannelType::Window}
+                    };
+                    if (channels_) {
+                        const auto adapterChannels = channels_->listOpen(session_id_);
+                        for (const auto& channel : adapterChannels) {
+                            if (channel.handle < 2)
+                                runtimeError(instruction, "channel handle conflicts with a reserved channel");
+                            openChannels.push_back(channel);
+                        }
+                    }
+                    std::sort(openChannels.begin(), openChannels.end(),
+                        [](const auto& left, const auto& right) {
+                            return left.handle < right.handle;
+                        });
+                    if (selector == 0) {
+                        if (arguments.size() != 1)
+                            runtimeError(instruction, "GETCHANNEL count takes one argument");
+                        pushValue(static_cast<double>(openChannels.size()));
+                    } else if (selector == 1) {
+                        if (arguments.size() != 2)
+                            runtimeError(instruction, "GETCHANNEL handle requires a position");
+                        const auto position = integerArgument(1,
+                            static_cast<double>(openChannels.size()),
+                            "channel position out of range");
+                        if (position >= openChannels.size())
+                            runtimeError(instruction, "channel position out of range");
+                        pushValue(static_cast<double>(openChannels[position].handle));
+                    } else {
+                        if (arguments.size() != 2)
+                            runtimeError(instruction, "GETCHANNEL type requires a channel handle");
+                        const auto handle = integerArgument(1, 9007199254740991.0,
+                                                           "invalid channel handle");
+                        const auto found = std::find_if(openChannels.begin(), openChannels.end(),
+                            [handle](const auto& channel) { return channel.handle == handle; });
+                        if (found == openChannels.end())
+                            runtimeError(instruction, "channel handle is not open");
+                        pushValue(std::string(runtime::channelTypeName(found->type)));
+                    }
+                    break;
+                }
                 if (instruction.name == "GWIDTH" || instruction.name == "GHEIGHT" ||
-                    instruction.name == "GDEPTH" || instruction.name == "GROTATION" ||
+                    instruction.name == "GDEPTH" || instruction.name == "GORIGINX" ||
+                    instruction.name == "GORIGINY" || instruction.name == "GROTATION" ||
                     instruction.name == "GPALETTESIZE" || instruction.name == "GPALETTE$" ||
                     instruction.name == "ROTATE") {
                     if (!graphics_)
@@ -526,6 +698,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto info = graphics_->windowInfo(session_id_);
                         if (instruction.name == "GWIDTH") pushValue(static_cast<double>(info.width));
                         else if (instruction.name == "GHEIGHT") pushValue(static_cast<double>(info.height));
+                        else if (instruction.name == "GORIGINX") pushValue(static_cast<double>(info.originX));
+                        else if (instruction.name == "GORIGINY") pushValue(static_cast<double>(info.originY));
                         else if (instruction.name == "GDEPTH") pushValue(static_cast<double>(info.colorDepth));
                         else if (instruction.name == "GROTATION") pushValue(static_cast<double>(info.rotationDegrees));
                         else pushValue(static_cast<double>(info.paletteSize));
@@ -749,7 +923,12 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 if (instruction.name == "INK" || instruction.name == "PAPER" ||
                     instruction.name == "LINE" || instruction.name == "RECT" ||
                     instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
-                    instruction.name == "CLS") {
+                    instruction.name == "CLS" || instruction.name == "WINDOW" ||
+                    instruction.name == "CLOSEWINDOW") {
+                    const auto channel = selectedChannel.value_or(
+                        resolveChannel(default_output_channel_));
+                    if (channel != 1)
+                        runtimeError(instruction, "selected channel is not a graphics window");
                     if (!graphics_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "graphics service unavailable");
@@ -768,14 +947,27 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         return graphics::Point{integerArgument(0, "pixel coordinate out of range"),
                                                integerArgument(1, "pixel coordinate out of range")};
                     };
-                    if (instruction.name == "INK" || instruction.name == "PAPER") {
-                        const auto color = integerArgument(0, "color index must be an integer from 0 to 7");
-                        if (color < 0 || color > 7)
-                            runtimeError(instruction, "color index must be an integer from 0 to 7");
+                    if (instruction.name == "CLOSEWINDOW") {
+                        graphics_->closeWindow(session_id_);
+                    } else if (instruction.name == "INK" || instruction.name == "PAPER") {
+                        const auto color = integerArgument(0, "color index must be a nonnegative integer");
+                        const auto paletteSize = graphics_->windowInfo(session_id_).paletteSize;
+                        if (color < 0 || static_cast<std::uint32_t>(color) >= paletteSize)
+                            runtimeError(instruction, "color index exceeds the current window palette");
                         if (instruction.name == "INK")
                             graphics_->setInk(session_id_, static_cast<graphics::ColorIndex>(color));
                         else
                             graphics_->setPaper(session_id_, static_cast<graphics::ColorIndex>(color));
+                    } else if (instruction.name == "WINDOW") {
+                        const auto x = integerArgument(0, "window position out of range");
+                        const auto y = integerArgument(1, "window position out of range");
+                        const auto width = integerArgument(2, "window size must be positive");
+                        const auto height = integerArgument(3, "window size must be positive");
+                        if (width <= 0 || height <= 0)
+                            runtimeError(instruction, "window size must be positive");
+                        graphics_->setWindowBounds(session_id_,
+                            {x, y, static_cast<std::uint32_t>(width),
+                             static_cast<std::uint32_t>(height)});
                     } else if (instruction.name == "LINE") {
                         const auto from = pointArguments();
                         const auto to = graphics::Point{
@@ -804,9 +996,6 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     }
                     break;
                 }
-                if (!channels_)
-                    throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                                "channel service unavailable");
                 const auto textArgument = [&](std::size_t index) -> const std::string& {
                     if (const auto* text = std::get_if<std::string>(&arguments[index])) return *text;
                     runtimeError(instruction, "string value required");
@@ -815,12 +1004,15 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto* number = std::get_if<double>(&arguments[index]);
                     if (!number) runtimeError(instruction, "numeric value required");
                     const double value = *number;
-                    if (!std::isfinite(value) || std::trunc(value) != value || value < 1 ||
+                    if (!std::isfinite(value) || std::trunc(value) != value || value < 0 ||
                         value > 9007199254740991.0)
                         runtimeError(instruction, "invalid channel number");
                     return static_cast<runtime::ChannelId>(value);
                 };
                 if (instruction.name == "OPEN") {
+                    if (!channels_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "channel service unavailable");
                     const std::string& path = textArgument(0);
                     std::string mode = textArgument(1);
                     std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
@@ -834,13 +1026,43 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto id = channels_->open(session_id_, path, channelMode);
                     pushValue(static_cast<double>(id));
                 } else if (instruction.name == "READ$") {
-                    const auto line = channels_->readLine(session_id_, channelArgument(0));
+                    if (!channels_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "channel service unavailable");
+                    const auto channel = channelArgument(0);
+                    const auto inputChannel = resolveChannel(channel);
+                    if (inputChannel <= 1)
+                        runtimeError(instruction, "selected channel does not support line input");
+                    const auto line = channels_->readLine(session_id_, inputChannel);
                     pushValue(line ? Value(*line) : Value(std::string{}));
                 } else if (instruction.name == "EOF") {
-                    pushValue(channels_->atEnd(session_id_, channelArgument(0)) ? 1.0 : 0.0);
+                    if (!channels_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "channel service unavailable");
+                    const auto channel = channelArgument(0);
+                    const auto inputChannel = resolveChannel(channel);
+                    if (inputChannel <= 1)
+                        runtimeError(instruction, "selected channel does not support EOF");
+                    pushValue(channels_->atEnd(session_id_, inputChannel) ? 1.0 : 0.0);
                 } else if (instruction.name == "WRITE") {
-                    channels_->write(session_id_, channelArgument(0), textArgument(1) + "\n");
+                    const auto channel = resolveChannel(channelArgument(0));
+                    const std::string text = textArgument(1) + "\n";
+                    if (channel == 0) {
+                        output << text;
+                        output_column_ = 0;
+                    } else if (channel == 1) {
+                        if (graphics_) graphics_->writeText(session_id_, text);
+                        else output << text;
+                    } else {
+                        if (!channels_)
+                            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "channel service unavailable");
+                        channels_->write(session_id_, channel, text);
+                    }
                 } else if (instruction.name == "CLOSE") {
+                    if (!channels_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "channel service unavailable");
                     channels_->close(session_id_, channelArgument(0));
                 }
                 break;
@@ -1251,16 +1473,165 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             break;
         }
         case Op::Print:
-            printSeparator(instruction.separator, output, output_column_);
-            printValue(pop(), output, output_column_);
+        {
+            std::ostringstream formatted;
+            std::size_t column = printColumn();
+            printSeparator(instruction.separator, formatted, column);
+            const std::string prefix = formatted.str();
+            if (!prefix.empty()) writePrintText(prefix, instruction);
+            printColumn() = column;
+            std::ostringstream valueText;
+            std::size_t valueColumn = 0;
+            printValue(pop(), valueText, valueColumn);
+            const std::string value = valueText.str();
+            if (!value.empty()) writePrintText(value, instruction);
             break;
+        }
         case Op::PrintSeparator:
-            printSeparator(instruction.separator, output, output_column_);
+        {
+            std::ostringstream formatted;
+            std::size_t column = printColumn();
+            printSeparator(instruction.separator, formatted, column);
+            const std::string separator = formatted.str();
+            if (!separator.empty()) writePrintText(separator, instruction);
+            printColumn() = column;
             break;
+        }
         case Op::PrintEnd:
-            output << '\n';
-            output_column_ = 0;
+            writePrintText("\n", instruction);
+            if (state.printChannel == 0) output_column_ = 0;
+            else if (state.printChannel == 1) state.printChannelColumn = 0;
+            state.printChannel = 1;
             break;
+        case Op::PrintBegin:
+            state.printChannel = resolveChannel(default_output_channel_);
+            break;
+        case Op::PrintChannel: {
+            const double channel = numeric(pop(), instruction);
+            if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
+                channel > static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
+                runtimeError(instruction, "channel handle must be a nonnegative integer");
+            state.printChannel = resolveChannel(static_cast<std::uint64_t>(channel));
+            break;
+        }
+        case Op::ChannelDefault: {
+            const double channel = numeric(pop(), instruction);
+            if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
+                channel > static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
+                runtimeError(instruction, "channel handle must be a nonnegative integer");
+            setDefaultOutputChannel(static_cast<std::uint64_t>(channel));
+            break;
+        }
+        case Op::ChannelRoute: {
+            const double destination = numeric(pop(), instruction);
+            const double source = numeric(pop(), instruction);
+            const auto validHandle = [](double handle) {
+                return std::isfinite(handle) && std::trunc(handle) == handle && handle >= 0 &&
+                    handle <= static_cast<double>(std::numeric_limits<std::uint64_t>::max());
+            };
+            if (!validHandle(source) || !validHandle(destination))
+                runtimeError(instruction, "channel handles must be nonnegative integers");
+            routeOutputChannel(static_cast<std::uint64_t>(source),
+                               static_cast<std::uint64_t>(destination));
+            break;
+        }
+        case Op::ChannelSeek: {
+            if (!channels_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "channel service unavailable");
+            const double offset = numeric(pop(), instruction);
+            const double channel = numeric(pop(), instruction);
+            if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
+                channel > 9007199254740991.0 || !std::isfinite(offset) ||
+                std::trunc(offset) != offset || offset < 0 || offset > 9007199254740991.0)
+                runtimeError(instruction, "channel and offset must be nonnegative integers");
+            channels_->seek(session_id_, resolveChannel(static_cast<runtime::ChannelId>(channel)),
+                            static_cast<std::uint64_t>(offset));
+            break;
+        }
+        case Op::ChannelRead: {
+            if (!channels_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "channel service unavailable");
+            const double count = numeric(pop(), instruction);
+            const double channel = numeric(pop(), instruction);
+            if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
+                channel > 9007199254740991.0 || !std::isfinite(count) ||
+                std::trunc(count) != count || count < 0 || count > 8192)
+                runtimeError(instruction, "invalid channel or byte count (maximum is 8192)");
+            Value value(channels_->readBytes(session_id_,
+                resolveChannel(static_cast<runtime::ChannelId>(channel)),
+                static_cast<std::size_t>(count)));
+            if (instruction.targetVariable.empty() || instruction.targetVariable.back() != '$')
+                runtimeError(instruction, "binary IN target must be a string variable");
+            if (!callFrames.empty() && callFrames.back().locals.count(instruction.targetVariable))
+                callFrames.back().locals[instruction.targetVariable] = std::move(value);
+            else variables_[instruction.targetVariable] = std::move(value);
+            break;
+        }
+        case Op::ChannelWrite: {
+            if (!channels_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "channel service unavailable");
+            const StackEntry entry = popEntry();
+            const auto* bytes = std::get_if<std::string>(&entry);
+            if (!bytes) runtimeError(instruction, "string byte buffer required");
+            const double count = numeric(pop(), instruction);
+            const double channel = numeric(pop(), instruction);
+            if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
+                channel > 9007199254740991.0 || !std::isfinite(count) ||
+                std::trunc(count) != count || count < 0 || count > 8192 ||
+                count > static_cast<double>(bytes->size()))
+                runtimeError(instruction, "invalid channel or byte count");
+            channels_->writeBytes(session_id_, resolveChannel(static_cast<runtime::ChannelId>(channel)),
+                                  std::string_view(*bytes).substr(0, static_cast<std::size_t>(count)));
+            break;
+        }
+        case Op::Input: {
+            std::string prompt;
+            runtime::ChannelId promptChannel = instruction.expectsValue ?
+                static_cast<runtime::ChannelId>(instruction.target) : 1;
+            runtime::ChannelId inputChannel = 0;
+            if (instruction.channelArgument) {
+                const double channel = numeric(pop(), instruction);
+                if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
+                    channel > 9007199254740991.0)
+                    runtimeError(instruction, "invalid INPUT channel");
+                inputChannel = static_cast<runtime::ChannelId>(channel);
+            }
+            if (instruction.expectsValue) {
+                const Value value = pop();
+                const auto* text = std::get_if<std::string>(&value);
+                if (!text) runtimeError(instruction, "INPUT prompt must be a string");
+                prompt = *text;
+            }
+            if (instruction.clearTarget) {
+                const double channel = numeric(pop(), instruction);
+                if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
+                    channel > 9007199254740991.0)
+                    runtimeError(instruction, "invalid prompt channel");
+                promptChannel = static_cast<runtime::ChannelId>(channel);
+            }
+            inputChannel = resolveChannel(inputChannel);
+            if (instruction.expectsValue) {
+                state.printChannel = resolveChannel(promptChannel);
+                writePrintText(prompt, instruction);
+            }
+            if (inputChannel == 0) {
+                if (!ui_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                       "keyboard input service unavailable");
+                state.pendingInputVariable = instruction.name;
+                state.pendingUiKind = ui::RequestKind::Input;
+                state.pendingUiRequest = ui_->beginInput(session_id_, {});
+                return ExecutionStatus::Suspended;
+            }
+            if (inputChannel == 1)
+                runtimeError(instruction, "selected channel does not support input");
+            if (!channels_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "channel service unavailable");
+            const auto line = channels_->readLine(session_id_, inputChannel);
+            if (!line) runtimeError(instruction, "end of file during INPUT");
+            storeInputValue(instruction.name, *line, instruction);
+            break;
+        }
         }
     }
     return ExecutionStatus::Completed;

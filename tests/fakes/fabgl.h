@@ -26,6 +26,15 @@ struct VirtualKeyItem {
     bool CAPSLOCK = false;
 };
 
+struct RGB888 {
+    std::uint8_t R = 0;
+    std::uint8_t G = 0;
+    std::uint8_t B = 0;
+    RGB888() = default;
+    RGB888(std::uint8_t red, std::uint8_t green, std::uint8_t blue)
+        : R(red), G(green), B(blue) {}
+};
+
 class Keyboard {
 public:
     void push(VirtualKey key, bool down, std::uint8_t ascii,
@@ -64,9 +73,16 @@ public:
     int rectCount = 0;
     int ellipseCount = 0;
     std::string text;
+    int pixelCount = 0;
+    int updateCount = 0;
+    int completionCount = 0;
 
     int getWidth() const { return width; }
     int getHeight() const { return height; }
+    void beginUpdate() { ++updateCount; }
+    void endUpdate() { ++updateCount; }
+    void waitCompletion(bool) { ++completionCount; }
+    void setPixel(int, int, RGB888 const&) { ++pixelCount; }
     void setPenColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) {
         penRed = red; penGreen = green; penBlue = blue;
     }

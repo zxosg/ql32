@@ -15,7 +15,7 @@ using SessionId = std::uint64_t;
 using RequestId = std::uint64_t;
 
 enum class ResultKind { Acknowledged, Confirmed, Cancelled, Submitted, Selected };
-enum class RequestKind { Alert, Confirm, Dialog, Menu };
+enum class RequestKind { Alert, Confirm, Dialog, Menu, Input };
 enum class FieldKind { Text, Edit, Integer, Float, Choice, Check };
 using FieldValue = std::variant<std::monostate, std::string, double, bool>;
 
@@ -68,6 +68,7 @@ public:
                                   std::string cancelLabel = "Cancel") = 0;
     virtual RequestId beginMenu(SessionId session, std::string title,
                                 std::vector<MenuItem> items) = 0;
+    virtual RequestId beginInput(SessionId session, std::string prompt) = 0;
     virtual std::optional<Result> poll(RequestId request) = 0;
     virtual void cancel(RequestId request) = 0;
     virtual void cancelSession(SessionId session) = 0;
@@ -87,6 +88,7 @@ public:
                           std::string cancelLabel = "Cancel") override;
     RequestId beginMenu(SessionId session, std::string title,
                         std::vector<MenuItem> items) override;
+    RequestId beginInput(SessionId session, std::string prompt) override;
     std::optional<Result> poll(RequestId request) override;
     void cancel(RequestId request) override;
     void cancelSession(SessionId session) override;
@@ -94,6 +96,7 @@ public:
     std::optional<Request> takeNextRequest();
     bool resolve(RequestId request, ResultKind result);
     bool submitDialog(RequestId request, std::vector<FieldValue> fields);
+    bool submitInput(RequestId request, std::string line);
     bool selectMenu(RequestId request, std::uint32_t commandId);
 
 private:

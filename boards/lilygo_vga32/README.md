@@ -15,7 +15,7 @@ pio run -e lilygo_vga32 -t upload
 pio device monitor -b 115200
 ```
 
-Both ESP32 profiles use the custom [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for firmware, NVS, and a 64 KiB coredump area. This requires a 4 MiB flash chip and leaves no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD. The VGA32 build uses 1,247,153 bytes of the firmware partition (30.7%) and 52,432 bytes RAM; `firmware.bin` is 1,253,728 bytes. The USB serial REPL has been verified on the physical board. VGA output, PS/2 input, clock status, and SD behavior still need hardware checks. The serial monitor reports VGA32 readiness, uptime, wall-clock synchronization, and SD mount status. BASIC output and runtime errors go to serial; the VGA canvas is available to BASIC graphics commands.
+Both ESP32 profiles use the custom [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for firmware, NVS, and a 64 KiB coredump area. This requires a 4 MiB flash chip and leaves no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD. The VGA32 build uses 1,286,905 bytes of the firmware partition (31.7%) and 52,416 bytes static RAM; `firmware.bin` is 1,293,488 bytes. The USB serial REPL has been verified on the physical board. VGA output, PS/2 input, clock status, and SD behavior still need hardware checks. The serial monitor reports VGA32 readiness, uptime, wall-clock synchronization, and SD mount status. BASIC output and runtime errors go to serial; the VGA canvas is available to BASIC graphics commands.
 The BASIC prompt accepts input from both the USB serial terminal and PS/2
 keyboard. Connect at 115200 baud, type an immediate statement or numbered
 program line, and press Enter. Backspace edits the current line. Enter `RUN`
@@ -59,8 +59,11 @@ color mode, it drives one bit per RGB channel on GPIO 21 (red), 18 (green), and
 mouse data/clock use GPIO 27/26. The board also exposes audio on GPIO 25. SD
 uses HSPI with MOSI 12, MISO 2, clock 14, and chip select 13.
 
-The graphics adapter supports one active graphics session on the VGA surface;
-multi-session window composition remains future work. The line presenter for
+VGA graphics uses the shared retained indexed canvases and compositor. Each
+window defaults to 4-bit pixels; the built-in palette is quantized to the
+board's 8-color VGA output. The board adapter redraws the composed frame with
+FabGL. The configured canvas budget allows two full-screen 4-bit windows; the
+composed frame also occupies one byte per screen pixel. The line presenter for
 alerts, confirmations, dialogs, and menus is integrated and can accept input
 from serial or PS/2; physical verification is still pending. The exact
 physical unit revision, PSRAM behavior, and monitor

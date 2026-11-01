@@ -45,7 +45,9 @@ are landscape (320x240), while 90 and 270 are portrait (240x320). A rotation
 clears the display and recalculates the scrolling console layout. This
 board-specific geometry follows the [CYD setup reference](https://blog.decryption.net.au/posts/cyd-for-beginners.html),
 which configures the ILI9341 as 320x240 at rotation 0. Rotation 0 and its
-320x240 window query have been confirmed on hardware.
+320x240 window query have been confirmed on hardware. The CYD adapter clears
+the ILI9341 BGR-order flag; the user confirmed the red palette entry now
+renders red on this panel.
 
 The async alert, confirmation, dialog, and menu presenter prints prompts to the
 TFT console and accepts each response through serial input. Use
@@ -72,14 +74,19 @@ Boards sold under the same family name can differ. Check that the module is the
 2.8-inch ESP32-WROOM / ILI9341 variant before flashing; touch-controller wiring
 and alternate revisions are not used by this target.
 
+Graphics use retained indexed canvases and a compositor. New windows default
+to 4-bit pixels, and the CYD allows two full-screen canvases within its configured
+canvas budget. The composed frame occupies one byte per screen pixel in addition
+to canvas storage.
+
 The ESP32 image builds with PlatformIO `espressif32@6.12.0`
 (Arduino-ESP32 2.0.17), Adafruit ILI9341, and Adafruit GFX. It uses the shared
 [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for
 firmware, NVS, and a 64 KiB coredump area. It requires a 4 MiB flash chip.
 There is no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD.
-The current image uses 1,183,489
-bytes of the firmware partition (29.1%) and 49,896 bytes RAM. The
-generated `firmware.bin` is 1,190,064 bytes. The user has verified TFT
+The current image uses 1,225,913
+bytes of the firmware partition (30.2%) and 49,864 bytes static RAM. The
+generated `firmware.bin` is 1,232,496 bytes. The user has verified TFT
 output, the serial REPL, and a small BASIC `FOR` loop printing to the LCD on
 the board. The async line presenter for alerts, confirmations, dialogs, and
 menus is compiled into the image. The SD channel round-trip is verified on

@@ -7,14 +7,14 @@ file(READ "${EXPECTED_STDERR_FILE}" expected_stderr)
 
 if(TEST_NAME STREQUAL "cli_file" OR TEST_NAME STREQUAL "cli_language_slice")
   execute_process(
-    COMMAND "${QL32_EXECUTABLE}" "${SOURCE_FILE}"
+    COMMAND "${QL32_EXECUTABLE}" --console "${SOURCE_FILE}"
     RESULT_VARIABLE actual_exit_code
     OUTPUT_VARIABLE actual_stdout
     ERROR_VARIABLE actual_stderr
   )
 else()
   execute_process(
-    COMMAND "${QL32_EXECUTABLE}"
+    COMMAND "${QL32_EXECUTABLE}" --console
     INPUT_FILE "${SOURCE_FILE}"
     RESULT_VARIABLE actual_exit_code
     OUTPUT_VARIABLE actual_stdout

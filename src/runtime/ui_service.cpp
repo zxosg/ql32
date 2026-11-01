@@ -85,6 +85,10 @@ RequestId QueuedService::beginMenu(SessionId session, std::string title,
     return begin(session, RequestKind::Menu, std::move(title), {}, {}, std::move(items));
 }
 
+RequestId QueuedService::beginInput(SessionId session, std::string prompt) {
+    return begin(session, RequestKind::Input, std::move(prompt), {});
+}
+
 std::optional<Result> QueuedService::poll(RequestId request) {
     std::lock_guard lock(mutex_);
     const auto found = requests_.find(request);
@@ -160,6 +164,15 @@ bool QueuedService::submitDialog(RequestId request, std::vector<FieldValue> fiel
     for (std::size_t i = 0; i < fields.size(); ++i)
         if (!valid(found->second.request.fields[i], fields[i])) return false;
     found->second.result = Result{ResultKind::Submitted, 0, std::move(fields)};
+    return true;
+}
+
+bool QueuedService::submitInput(RequestId request, std::string line) {
+    std::lock_guard lock(mutex_);
+    const auto found = requests_.find(request);
+    if (found == requests_.end() || !found->second.dispatched || found->second.result ||
+        found->second.request.kind != RequestKind::Input) return false;
+    found->second.result = Result{ResultKind::Submitted, 0, {std::move(line)}};
     return true;
 }
 

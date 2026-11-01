@@ -1,6 +1,7 @@
 #include "ql32/platform/esp32/sd_channels.hpp"
 
 #include <array>
+#include <limits>
 
 namespace ql32::platform::esp32 {
 namespace {
@@ -113,6 +114,45 @@ std::optional<std::string> SdChannels::readLine(runtime::SessionId session,
     return std::nullopt;
 }
 
+std::string SdChannels::readBytes(runtime::SessionId session,
+                                  runtime::ChannelId channel, std::size_t count) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode != runtime::ChannelMode::Read)
+        throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
+    std::string bytes(count, '\0');
+    const std::size_t received = opened.file.read(
+        reinterpret_cast<std::uint8_t*>(bytes.data()), count);
+    if (received != count)
+        throw ServiceError(ServiceErrorCode::IoError, "channel has fewer bytes than requested");
+    return bytes;
+}
+
+void SdChannels::writeBytes(runtime::SessionId session, runtime::ChannelId channel,
+                            std::string_view bytes) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Read)
+        throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for writing");
+    const auto written = opened.file.write(
+        reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+    opened.file.flush();
+    if (written != bytes.size())
+        throw ServiceError(ServiceErrorCode::IoError, "channel write failed");
+}
+
+void SdChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
+                     std::uint64_t offset) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Append)
+        throw ServiceError(ServiceErrorCode::InvalidHandle,
+                           "append channels do not support seeking");
+    if (offset > std::numeric_limits<std::uint32_t>::max() ||
+        !opened.file.seek(static_cast<std::uint32_t>(offset)))
+        throw ServiceError(ServiceErrorCode::IoError, "channel seek failed");
+}
+
 bool SdChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
@@ -153,6 +193,14 @@ void SdChannels::closeSession(runtime::SessionId session) {
             ++channel;
         }
     }
+}
+
+std::vector<runtime::ChannelInfo> SdChannels::listOpen(runtime::SessionId session) {
+    std::lock_guard lock(mutex_);
+    std::vector<runtime::ChannelInfo> result;
+    for (const auto& [id, channel] : channels_)
+        if (channel.session == session) result.push_back({id, runtime::ChannelType::File});
+    return result;
 }
 
 } // namespace ql32::platform::esp32

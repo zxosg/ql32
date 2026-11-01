@@ -48,9 +48,12 @@ struct VMExecutionState {
     std::unordered_map<std::string, RuntimeArray> arrays;
     std::vector<SelectState> selectStates;
     std::size_t pc = 0;
+    std::uint64_t printChannel = 1;
+    std::size_t printChannelColumn = 0;
     std::optional<ui::RequestId> pendingUiRequest;
     ui::RequestKind pendingUiKind = ui::RequestKind::Alert;
     std::uint64_t pendingUiBuilderHandle = 0;
+    std::string pendingInputVariable;
 };
 
 struct UISessionState {

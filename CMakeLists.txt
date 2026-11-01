@@ -10,9 +10,14 @@ add_library(ql32_core
   src/platform/linux/directory_storage.cpp
   src/platform/linux/console_ui.cpp
   src/platform/linux/system_clock.cpp
+  src/platform/linux/memory.cpp
   src/platform/linux/svg_graphics.cpp
+  src/graphics/window_manager.cpp
+  src/graphics/windowed_service.cpp
+  src/platform/linux/ppm_presenter.cpp
   src/runtime/ui_service.cpp
   src/vm/interpreter.cpp
+  src/vm/scheduler.cpp
 )
 target_include_directories(ql32_core PUBLIC include)
 target_compile_features(ql32_core PUBLIC cxx_std_17)
@@ -73,6 +78,9 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_runtime_tests tests/runtime_tests.cpp)
   target_link_libraries(ql32_runtime_tests PRIVATE ql32_core)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
+  add_executable(ql32_scheduler_tests tests/scheduler_tests.cpp)
+  target_link_libraries(ql32_scheduler_tests PRIVATE ql32_core)
+  add_test(NAME ql32_scheduler_tests COMMAND ql32_scheduler_tests)
   add_executable(ql32_storage_tests tests/storage_tests.cpp)
   target_link_libraries(ql32_storage_tests PRIVATE ql32_core)
   add_test(NAME ql32_storage_tests COMMAND ql32_storage_tests)
@@ -141,6 +149,7 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_esp32_cyd_graphics_tests
     tests/esp32_cyd_graphics_tests.cpp
     src/platform/esp32_cyd/graphics.cpp
+    src/platform/esp32_cyd/frame_presenter.cpp
   )
   target_include_directories(ql32_esp32_cyd_graphics_tests PRIVATE
     tests/fakes include)
@@ -170,6 +179,7 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_fabgl_graphics_tests
     tests/fabgl_graphics_tests.cpp
     src/platform/fabgl_vga/graphics.cpp
+    src/platform/fabgl_vga/frame_presenter.cpp
   )
   target_include_directories(ql32_fabgl_graphics_tests PRIVATE tests/fakes include)
   target_compile_features(ql32_fabgl_graphics_tests PRIVATE cxx_std_20)

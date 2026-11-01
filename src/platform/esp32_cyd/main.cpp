@@ -10,12 +10,15 @@
 #include "capabilities.hpp"
 #include "pins.hpp"
 #include "ql32/interpreter.hpp"
+#include "ql32/graphics/windowed_service.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/line_ui_presenter.hpp"
+#include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
 #include "ql32/platform/esp32_cyd/graphics.hpp"
+#include "ql32/platform/esp32_cyd/frame_presenter.hpp"
 #include "ql32/platform/esp32_cyd/text_console.hpp"
 
 namespace {
@@ -25,8 +28,9 @@ SPIClass sdBus(VSPI);
 ql32::platform::esp32_cyd::CydIli9341Display display(&tftBus,
     ql32::boards::esp32_2432s028::tftDataCommand,
     ql32::boards::esp32_2432s028::tftChipSelect, -1);
-ql32::platform::esp32_cyd::Ili9341Graphics graphics(display);
+std::shared_ptr<ql32::graphics::WindowedService> graphics;
 ql32::platform::esp32::Clock boardClock;
+ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SdStorage sdStorage(SD);
 ql32::platform::esp32::SdChannels sdChannels(SD);
@@ -123,13 +127,16 @@ void setup() {
                  ql32::boards::esp32_2432s028::tftMosi,
                  ql32::boards::esp32_2432s028::tftChipSelect);
     display.begin(40000000);
-    graphics.setRotation(1, 0);
+    display.setRotationDegrees(0);
     display.fillScreen(ILI9341_BLACK);
     tftConsole = std::make_unique<ql32::platform::esp32_cyd::TftTextConsole>(display);
     basicOutput = std::make_unique<std::ostream>(tftConsole.get());
-    graphics.setTextClearCallback([] {
-        if (tftConsole) tftConsole->clear();
-    });
+    auto framePresenter = std::make_shared<ql32::platform::esp32_cyd::Ili9341FramePresenter>(
+        display,
+        [] { if (tftConsole) tftConsole->restoreOverlay(); },
+        [] { if (tftConsole) tftConsole->reconfigure(); });
+    graphics = std::make_shared<ql32::graphics::WindowedService>(
+        display.width(), display.height(), framePresenter, 4, 76800);
 
     sdBus.begin(ql32::boards::esp32_2432s028::sdSck,
                 ql32::boards::esp32_2432s028::sdMiso,
@@ -137,17 +144,6 @@ void setup() {
                 ql32::boards::esp32_2432s028::sdChipSelect);
     const bool sdReady = SD.begin(ql32::boards::esp32_2432s028::sdChipSelect,
                                  sdBus, 4000000, "/sd", 5);
-
-    constexpr ql32::graphics::SessionId demoSession = 1;
-    graphics.setPaper(demoSession, 0);
-    graphics.clear(demoSession);
-    graphics.setInk(demoSession, 7);
-    graphics.text(demoSession, {8, 8}, "QL/32 ESP32-2432S028");
-    graphics.text(demoSession, {8, 24}, "ILI9341 TFT ready");
-    graphics.text(demoSession, {8, 40}, "BASIC input via USB serial");
-    graphics.rectangle(demoSession, {8, 58}, 100, 50);
-    graphics.line(demoSession, {8, 58}, {107, 107});
-    graphics.circle(demoSession, {160, 82}, 24);
 
     Serial.println("QL/32 ESP32-2432S028 ready");
     Serial.printf("Uptime ms: %llu\n",
@@ -159,21 +155,27 @@ void setup() {
         Serial.println("Wall clock unsynchronized");
     Serial.println(sdReady ? "SD storage ready" : "SD storage unavailable");
 
-    auto graphicsService = std::shared_ptr<ql32::graphics::Service>(
-        &graphics, [](ql32::graphics::Service*) {});
+    auto graphicsService = std::shared_ptr<ql32::graphics::Service>(graphics);
     auto storageService = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto channelService = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
     auto networkService = std::shared_ptr<ql32::runtime::NetworkService>(
         &boardNetwork, [](ql32::runtime::NetworkService*) {});
+    auto memoryService = std::shared_ptr<ql32::runtime::MemoryService>(
+        &boardMemory, [](ql32::runtime::MemoryService*) {});
     uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
         uiService, *basicOutput);
     interpreter = std::make_unique<ql32::Interpreter>(
-        storageService, channelService, uiService, graphicsService, networkService);
+        storageService, channelService, uiService, graphicsService, networkService,
+        memoryService);
 
     std::string startupProgram =
-        "INK 7\nTEXT 8,132,\"BASIC VM ready\"\n"
+        "INK 7\nTEXT 8,8,\"QL/32 ESP32-2432S028\"\n"
+        "TEXT 8,24,\"ILI9341 TFT ready\"\n"
+        "TEXT 8,40,\"BASIC input via USB serial\"\n"
+        "RECT 8,58,100,50\nLINE 8,58,107,107\nCIRCLE 160,82,24\n"
+        "TEXT 8,132,\"BASIC VM ready\"\n"
         "PRINT \"QL/32 BASIC VM running\"\n";
     if (sdReady) {
         try {

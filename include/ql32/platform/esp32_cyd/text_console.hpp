@@ -15,6 +15,7 @@ public:
     explicit TftTextConsole(Adafruit_ILI9341& display);
     void clear();
     void reconfigure();
+    void restoreOverlay();
 
 protected:
     int_type overflow(int_type character) override;

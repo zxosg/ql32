@@ -5,6 +5,7 @@ These are the sources linked in the “QL32 Project Idea” chat and used to com
 ## SuperBASIC / SMSQ/E
 
 - [SBASIC/SuperBASIC Reference Manual Online](https://superbasic-manual.readthedocs.io/en/latest/) (online edition 4.0.2). It includes QL ROM, SMSQ/E, and optional toolkit commands. Check each command's **Location** and **SMS NOTES** before claiming SMSQ/E compatibility.
+- [Toolkit II manual](https://dilwyn.theqlforum.com/docs/ebooks/tk2_a4.pdf): Toolkit II is treated as a widely adopted, near-standard SuperBASIC extension. It supplied substantial facilities planned for the QL language/system but missing from the rushed initial release. QL/32 may use it as a compatibility and design reference; identify toolkit-derived behavior as such and check implementation notes rather than implying it shipped in the original ROM.
 - [Original Sinclair QL User Guide](https://sinclairql.speccy.org/archivo/docs/sys/QL_UsersGuide.pdf), “keyword” section in the Concepts guide: mixed-case keyword notation marks the minimum accepted abbreviation; entered keywords are reproduced in full. It gives `REPeat` → `REP` as an example.
 - [IF](https://superbasic-manual.readthedocs.io/en/latest/I/if.html): inline and block syntax; conditions and Boolean results use true/false and numeric `1`/`0`.
 - [FOR](https://superbasic-manual.readthedocs.io/en/latest/F/for.html) and [END FOR](https://superbasic-manual.readthedocs.io/en/latest/E/end--for.html): inline and block forms, mixed lists of single values and stepped intervals, `NEXT`, and `EXIT`.

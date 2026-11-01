@@ -1,6 +1,7 @@
 #include "ql32/platform/linux/directory_channels.hpp"
 
 #include <cerrno>
+#include <limits>
 #include <system_error>
 #include <utility>
 
@@ -109,6 +110,48 @@ std::optional<std::string> DirectoryChannels::readLine(runtime::SessionId sessio
     throw ServiceError(ServiceErrorCode::IoError, "channel read failed");
 }
 
+std::string DirectoryChannels::readBytes(runtime::SessionId session,
+                                         runtime::ChannelId channel,
+                                         std::size_t count) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode != runtime::ChannelMode::Read)
+        throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
+    std::string bytes(count, '\0');
+    opened.file.read(bytes.data(), static_cast<std::streamsize>(count));
+    if (static_cast<std::size_t>(opened.file.gcount()) != count)
+        throw ServiceError(ServiceErrorCode::IoError, "channel has fewer bytes than requested");
+    return bytes;
+}
+
+void DirectoryChannels::writeBytes(runtime::SessionId session,
+                                   runtime::ChannelId channel,
+                                   std::string_view bytes) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Read)
+        throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for writing");
+    opened.file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    opened.file.flush();
+    if (!opened.file) throw ServiceError(ServiceErrorCode::IoError, "channel write failed");
+}
+
+void DirectoryChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
+                             std::uint64_t offset) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Append)
+        throw ServiceError(ServiceErrorCode::InvalidHandle,
+                           "append channels do not support seeking");
+    if (offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()))
+        throw ServiceError(ServiceErrorCode::InvalidPath, "channel offset is too large");
+    opened.file.clear();
+    const auto position = static_cast<std::streamoff>(offset);
+    if (opened.mode == runtime::ChannelMode::Read) opened.file.seekg(position);
+    else opened.file.seekp(position);
+    if (!opened.file) throw ServiceError(ServiceErrorCode::IoError, "channel seek failed");
+}
+
 bool DirectoryChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
@@ -154,6 +197,14 @@ void DirectoryChannels::closeSession(runtime::SessionId session) {
             ++channel;
         }
     }
+}
+
+std::vector<runtime::ChannelInfo> DirectoryChannels::listOpen(runtime::SessionId session) {
+    std::lock_guard lock(mutex_);
+    std::vector<runtime::ChannelInfo> result;
+    for (const auto& [id, channel] : channels_)
+        if (channel.session == session) result.push_back({id, runtime::ChannelType::File});
+    return result;
 }
 
 } // namespace ql32::platform::linux_host
