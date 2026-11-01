@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ql32/interpreter.hpp"
+#include "ql32/vm/smooth_weighted_round_robin.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -22,6 +23,8 @@ struct TaskInfo {
     std::string error;
     bool interactive = false;
     bool supervisor = false;
+    std::uint32_t priority = 4;
+    std::uint32_t resumePriority = 4;
 };
 
 struct Services {
@@ -33,11 +36,15 @@ struct Services {
     std::shared_ptr<runtime::MemoryService> memory;
 };
 
-// Cooperative, single-threaded round-robin scheduler. Each task owns one
+// Cooperative, single-threaded weighted scheduler. Each task owns one
 // Interpreter/session; UI presenters and hardware adapters are driven by the
 // host between tick() calls. Output streams must outlive their tasks.
 class SessionScheduler {
 public:
+    static constexpr std::uint32_t MaximumPriority = runtime::maximumTaskPriority;
+    static constexpr std::size_t MaximumInstructionBudget =
+        runtime::maximumInstructionBudget;
+
     explicit SessionScheduler(Services services = {},
                               std::size_t instructionBudget = 128);
     ~SessionScheduler();
@@ -53,6 +60,11 @@ public:
     bool logon(TaskId id);
     TaskId logoff();
     TaskId focusedTask() const noexcept;
+    bool suspendTask(TaskId id) noexcept;
+    bool resumeTask(TaskId id) noexcept;
+    std::size_t instructionBudget() const noexcept { return instructionBudget_; }
+    bool setInstructionBudget(std::size_t budget) noexcept;
+    bool setTaskPriority(TaskId id, std::uint32_t priority) noexcept;
     std::vector<runtime::ChannelInfo> taskChannels(TaskId id) const;
     std::string takeError(TaskId id);
     bool tick();
@@ -66,10 +78,12 @@ private:
     Services services_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::size_t instructionBudget_;
+    SmoothWeightedRoundRobin policy_;
+    std::vector<SmoothWeightedRoundRobin::Task> eligibleTasks_;
+    std::vector<Task*> candidateTasks_;
     TaskId nextId_ = 1;
     TaskId supervisorId_ = 0;
     TaskId focusedTaskId_ = 0;
-    std::size_t cursor_ = 0;
     std::vector<std::unique_ptr<Task>> tasks_;
 };
 

@@ -160,7 +160,9 @@ void setup() {
     basicOutput = std::make_unique<std::ostream>(tftConsole.get());
     auto framePresenter = std::make_shared<ql32::platform::esp32_cyd::Ili9341FramePresenter>(
         display,
-        [] { if (tftConsole) tftConsole->restoreOverlay(); },
+        [](ql32::graphics::Rect region) {
+            if (tftConsole) tftConsole->restoreOverlay(region);
+        },
         [] { if (tftConsole) tftConsole->reconfigure(); });
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         display.width(), display.height(), framePresenter, 4, 76800);

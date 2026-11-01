@@ -36,8 +36,13 @@ session-owned dialog and menu builders through `DINIT`/`DIALOG` and
 `MINIT`/`MENU`; [examples/ui.bas](examples/ui.bas) exercises typed results and
 stable menu IDs. Embedded ESP32 line presenters are integrated. The embedded
 REPL can also launch and manage worker sessions with `SPAWN`,
-`TASKS`, `TASKCHANNELS`, `LOGON`, `LOGOFF`, and `CANCEL`; each session owns its
-BASIC state and channel handles while sharing the board's physical services.
+`TASKS`, `TASKCHANNELS`, `LOGON`, `LOGOFF`, `CANCEL`, `SUSPEND`, and `RESUME`.
+The supervisor can set a global bytecode slice with `SLICE n` and per-task
+scheduling weights with `PRIORITY id,weight`; smooth weighted scheduling gives
+higher weights more turns. `SUSPEND id` saves the current weight, while
+`RESUME id` restores it. `PRIORITY id,0` directly sets a zero baseline and
+clears the saved resume weight. Each session owns
+its BASIC state and channel handles while sharing the board's physical services.
 The [embedded supervisor demo](examples/supervisor/README.md) shows three
 workers in side-by-side display windows. See
 [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md).

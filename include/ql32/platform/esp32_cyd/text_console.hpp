@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ql32/graphics/service.hpp"
+
 #include <Adafruit_ILI9341.h>
 
 #include <deque>
@@ -15,7 +17,7 @@ public:
     explicit TftTextConsole(Adafruit_ILI9341& display);
     void clear();
     void reconfigure();
-    void restoreOverlay();
+    void restoreOverlay(graphics::Rect region);
 
 protected:
     int_type overflow(int_type character) override;
@@ -32,6 +34,7 @@ private:
     void put(char character);
     void advanceLine();
     void redraw();
+    void redraw(graphics::Rect region);
     void updateGeometry();
 };
 

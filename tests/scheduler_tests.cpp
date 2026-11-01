@@ -3,12 +3,88 @@
 
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
+#include <vector>
 
 namespace {
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+class CapturingChannelService final : public ql32::runtime::ChannelService {
+public:
+    ql32::runtime::ChannelId open(ql32::runtime::SessionId,
+                                  const std::string&,
+                                  ql32::runtime::ChannelMode) override {
+        return 2;
+    }
+    ql32::runtime::ChannelId openDevice(
+        ql32::runtime::SessionId, ql32::runtime::ChannelDevice,
+        const std::vector<std::string>&) override {
+        return 2;
+    }
+    std::optional<std::string> readLine(ql32::runtime::SessionId,
+                                        ql32::runtime::ChannelId) override {
+        return std::nullopt;
+    }
+    std::string readBytes(ql32::runtime::SessionId, ql32::runtime::ChannelId,
+                          std::size_t) override {
+        return {};
+    }
+    void writeBytes(ql32::runtime::SessionId, ql32::runtime::ChannelId,
+                    std::string_view) override {}
+    void seek(ql32::runtime::SessionId, ql32::runtime::ChannelId,
+              std::uint64_t) override {}
+    bool atEnd(ql32::runtime::SessionId, ql32::runtime::ChannelId) override {
+        return true;
+    }
+    void write(ql32::runtime::SessionId, ql32::runtime::ChannelId channel,
+               const std::string& text) override {
+        lastChannel = channel;
+        lastText = text;
+    }
+    void close(ql32::runtime::SessionId, ql32::runtime::ChannelId) override {}
+    void closeSession(ql32::runtime::SessionId) override {}
+    std::vector<ql32::runtime::ChannelInfo> listOpen(
+        ql32::runtime::SessionId) override {
+        return {{2, ql32::runtime::ChannelType::Null}};
+    }
+
+    ql32::runtime::ChannelId lastChannel = 0;
+    std::string lastText;
+};
+
+class CapturingGraphicsService final : public ql32::graphics::Service {
+public:
+    void setInk(ql32::graphics::SessionId, ql32::graphics::ColorIndex) override {}
+    void setPaper(ql32::graphics::SessionId, ql32::graphics::ColorIndex) override {}
+    void line(ql32::graphics::SessionId, ql32::graphics::Point,
+              ql32::graphics::Point) override {}
+    void rectangle(ql32::graphics::SessionId, ql32::graphics::Point,
+                   std::int32_t, std::int32_t) override {}
+    void circle(ql32::graphics::SessionId, ql32::graphics::Point,
+                std::int32_t) override {}
+    void text(ql32::graphics::SessionId, ql32::graphics::Point,
+              const std::string& value) override {
+        writtenText += value;
+    }
+    void writeText(ql32::graphics::SessionId,
+                   const std::string& value) override {
+        writtenText += value;
+    }
+    void clear(ql32::graphics::SessionId) override {}
+    void closeSession(ql32::graphics::SessionId) override {}
+    ql32::graphics::WindowInfo windowInfo(ql32::graphics::SessionId) override {
+        return {};
+    }
+    ql32::graphics::RgbColor paletteColor(ql32::graphics::SessionId,
+                                          std::uint16_t) override {
+        return {};
+    }
+
+    std::string writtenText;
+};
 
 void testRoundRobinSlicesKeepSessionsIndependent() {
     ql32::vm::SessionScheduler scheduler({}, 1);
@@ -153,6 +229,199 @@ void testInteractiveUiWaitResumesThroughScheduler() {
             "interactive session did not continue after UI completion");
 }
 
+void testSmoothWeightedRoundRobinMatchesReferenceSequence() {
+    ql32::vm::SmoothWeightedRoundRobin policy;
+    const std::vector<ql32::vm::SmoothWeightedRoundRobin::Task> tasks = {
+        {1, 4}, {2, 5}, {3, 1}, {4, 2}, {5, 16}};
+    const std::vector<std::uint64_t> expectedPrefix = {
+        5, 2, 5, 1, 5, 4, 5, 5, 2, 5, 1};
+    std::vector<std::uint64_t> counts(5, 0);
+
+    for (int tick = 0; tick < 71; ++tick) {
+        const auto selected = policy.select(tasks);
+        require(selected.has_value(), "positive weights produced an idle tick");
+        const auto taskId = tasks[*selected].id;
+        if (tick < static_cast<int>(expectedPrefix.size()))
+            require(taskId == expectedPrefix[static_cast<std::size_t>(tick)],
+                    "scheduler sequence differs from the reference sequence");
+        ++counts[static_cast<std::size_t>(taskId - 1)];
+    }
+
+    require(counts == std::vector<std::uint64_t>({10, 13, 3, 5, 40}),
+            "scheduler totals differ from the reference 71-tick totals");
+}
+
+void testZeroPriorityTaskIsNeverSelected() {
+    ql32::vm::SmoothWeightedRoundRobin policy;
+    const std::vector<ql32::vm::SmoothWeightedRoundRobin::Task> tasks = {
+        {1, 4}, {2, 0}};
+    for (int tick = 0; tick < 40; ++tick) {
+        const auto selected = policy.select(tasks);
+        require(selected && *selected == 0,
+                "zero-priority task was selected");
+    }
+}
+
+void testWeightedPolicyResetsForRemovalAndPriorityChanges() {
+    using Policy = ql32::vm::SmoothWeightedRoundRobin;
+    Policy removalPolicy;
+    std::vector<Policy::Task> tasks = {{1, 1}, {2, 1}, {3, 1}};
+    require(removalPolicy.select(tasks) == 0,
+            "initial tie did not select the first task");
+    tasks.pop_back();
+    require(removalPolicy.select(tasks) == 0,
+            "removing a task did not reset the remaining task credits");
+
+    Policy priorityPolicy;
+    tasks = {{1, 1}, {2, 1}};
+    require(priorityPolicy.select(tasks) == 0,
+            "initial priority-change setup selected the wrong task");
+    tasks[0].priority = 2;
+    require(priorityPolicy.select(tasks) == 0,
+            "changing a priority did not reset all task credits");
+
+    Policy additionPolicy;
+    tasks = {{1, 1}, {2, 1}};
+    require(additionPolicy.select(tasks) == 0,
+            "initial task-addition setup selected the wrong task");
+    tasks.push_back({3, 1});
+    require(additionPolicy.select(tasks) == 1,
+            "adding a task did not preserve existing credits and start new credit at zero");
+}
+
+void testPriorityWeightsChangeFrequency() {
+    ql32::vm::SessionScheduler scheduler({}, 16);
+    std::ostringstream highOutput;
+    std::ostringstream normalOutput;
+    std::ostringstream backgroundOutput;
+    const auto high = scheduler.launch(
+        "FOR i=1 TO 100000: PRINT \"high\": NEXT i\n", highOutput);
+    const auto normal = scheduler.launch(
+        "FOR i=1 TO 100000: PRINT \"normal\": NEXT i\n", normalOutput);
+    const auto background = scheduler.launch(
+        "FOR i=1 TO 100000: PRINT \"background\": NEXT i\n", backgroundOutput);
+
+    require(scheduler.setTaskPriority(high, 16), "could not set high task priority");
+    require(scheduler.setTaskPriority(normal, 4), "could not set normal task priority");
+    require(scheduler.setTaskPriority(background, 1),
+            "could not set low task priority");
+    for (int tick = 0; tick < 260; ++tick)
+        require(scheduler.tick(), "weighted scheduler stopped with runnable tasks");
+
+    const auto countLines = [](const std::string& output) {
+        std::size_t lines = 0;
+        for (char ch : output)
+            if (ch == '\n') ++lines;
+        return lines;
+    };
+    const auto highLines = countLines(highOutput.str());
+    const auto normalLines = countLines(normalOutput.str());
+    const auto backgroundLines = countLines(backgroundOutput.str());
+    require(highLines > normalLines && normalLines > backgroundLines,
+            "higher priority tasks did not run more often");
+    require(backgroundLines > 0,
+            "low-priority runnable task was starved");
+    require(scheduler.task(high)->priority == 16 &&
+                scheduler.task(normal)->priority == 4 &&
+                scheduler.task(background)->priority == 1,
+            "task priority was not retained in task information");
+}
+
+void testSupervisorCanSetSliceAndWorkerPriority() {
+    ql32::vm::SessionScheduler scheduler({}, 128);
+    std::ostringstream supervisorOutput;
+    std::ostringstream workerOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    const auto worker = scheduler.launchWorker("PRINT \"worker ready\"\n", workerOutput);
+
+    require(scheduler.submit(supervisor, "SLICE 16\n"),
+            "supervisor did not accept SLICE command");
+    for (int tick = 0; tick < 10 && scheduler.instructionBudget() != 16; ++tick)
+        require(scheduler.tick(), "scheduler did not execute SLICE command");
+    require(scheduler.instructionBudget() == 16,
+            "SLICE command did not change scheduler instruction budget");
+
+    require(scheduler.submit(supervisor, "PRIORITY " + std::to_string(worker) + ",12\n"),
+            "supervisor did not accept PRIORITY command");
+    for (int tick = 0; tick < 10 && scheduler.task(worker)->priority != 12; ++tick)
+        require(scheduler.tick(), "scheduler did not execute PRIORITY command");
+    require(scheduler.task(worker)->priority == 12,
+            "PRIORITY command did not update the selected task");
+
+    require(scheduler.submit(supervisor, "SUSPEND " + std::to_string(worker) + "\n"),
+            "supervisor did not accept SUSPEND command");
+    for (int tick = 0; tick < 10 && scheduler.task(worker)->priority != 0; ++tick)
+        require(scheduler.tick(), "scheduler did not execute SUSPEND command");
+    require(scheduler.task(worker)->priority == 0 &&
+                scheduler.task(worker)->resumePriority == 12,
+            "SUSPEND did not preserve the previous task priority");
+
+    require(scheduler.submit(supervisor, "TASKS\n"),
+            "supervisor did not accept TASKS after suspension");
+    for (int tick = 0; tick < 10 &&
+         supervisorOutput.str().find("SUSPENDED (resume P=12)") == std::string::npos;
+         ++tick)
+        require(scheduler.tick(), "scheduler did not list the suspended task");
+
+    require(scheduler.submit(supervisor, "RESUME " + std::to_string(worker) + "\n"),
+            "supervisor did not accept RESUME command");
+    for (int tick = 0; tick < 10 && scheduler.task(worker)->priority == 0; ++tick)
+        require(scheduler.tick(), "scheduler did not execute RESUME command");
+    require(scheduler.task(worker)->priority == 12,
+            "RESUME did not restore the previous task priority");
+
+    require(scheduler.submit(supervisor,
+                "PRIORITY " + std::to_string(worker) + ",0\n"),
+            "supervisor did not accept zero-priority suspension");
+    for (int tick = 0; tick < 10 && scheduler.task(worker)->priority != 0; ++tick)
+        require(scheduler.tick(), "scheduler did not execute zero-priority command");
+    require(scheduler.task(worker)->resumePriority == 0,
+            "PRIORITY 0 did not replace the saved priority baseline");
+    require(scheduler.submit(supervisor,
+                "PRIORITY " + std::to_string(worker) + ",12\n"),
+            "supervisor did not accept a new baseline priority");
+    for (int tick = 0; tick < 10 && scheduler.task(worker)->priority != 12; ++tick)
+        require(scheduler.tick(), "scheduler did not execute the new priority command");
+    require(scheduler.task(worker)->priority == 12,
+            "positive PRIORITY did not replace the zero baseline");
+
+    require(supervisorOutput.str().find("Instruction slice set to 16") != std::string::npos &&
+                supervisorOutput.str().find("priority set to 12") != std::string::npos &&
+                supervisorOutput.str().find("Suspended session") != std::string::npos &&
+                supervisorOutput.str().find("Resumed session") != std::string::npos &&
+                supervisorOutput.str().find("SUSPENDED (resume P=12)") !=
+                    std::string::npos,
+            "supervisor did not receive scheduler command confirmations");
+}
+
+void testTasksUsesDefaultAndExplicitPrintChannels() {
+    auto channels = std::make_shared<CapturingChannelService>();
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.channels = channels;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    std::ostringstream consoleOutput;
+    const auto supervisor = scheduler.launchInteractive(consoleOutput);
+
+    require(scheduler.submit(supervisor, "sink=OPEN(3)\n"),
+            "supervisor could not open a channel for TASKS output");
+    require(scheduler.tick(), "scheduler did not open the test channel");
+
+    require(scheduler.submit(supervisor, "TASKS\n"),
+            "supervisor did not accept unqualified TASKS");
+    require(scheduler.tick(), "scheduler did not execute unqualified TASKS");
+    require(graphics->writtenText.find("SLICE 32 instructions") != std::string::npos,
+            "TASKS did not default to print channel #1");
+
+    require(scheduler.submit(supervisor, "TASKS #2\n"),
+            "supervisor did not accept TASKS channel redirection");
+    require(scheduler.tick(), "scheduler did not execute redirected TASKS");
+    require(channels->lastChannel == 2 &&
+                channels->lastText.find("SLICE 32 instructions") != std::string::npos,
+            "TASKS #channel did not redirect output to the selected channel");
+}
+
 } // namespace
 
 int main() {
@@ -162,5 +431,11 @@ int main() {
     testInteractiveStartupProgramSharesReplSession();
     testInteractiveSessionRecoversFromCommandErrors();
     testInteractiveUiWaitResumesThroughScheduler();
+    testSmoothWeightedRoundRobinMatchesReferenceSequence();
+    testZeroPriorityTaskIsNeverSelected();
+    testWeightedPolicyResetsForRemovalAndPriorityChanges();
+    testPriorityWeightsChangeFrequency();
+    testSupervisorCanSetSliceAndWorkerPriority();
+    testTasksUsesDefaultAndExplicitPrintChannels();
     return 0;
 }

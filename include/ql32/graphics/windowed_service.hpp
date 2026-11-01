@@ -5,6 +5,7 @@
 #include "ql32/graphics/window_manager.hpp"
 
 #include <memory>
+#include <cstdint>
 #include <unordered_map>
 
 namespace ql32::graphics {
@@ -44,8 +45,11 @@ public:
 private:
     WindowId ensureWindow(SessionId session);
     IndexedCanvas& canvas(SessionId session);
+    Rect screenRegion(SessionId session, std::int64_t x, std::int64_t y,
+                      std::int64_t width, std::int64_t height);
     static RgbColor defaultPaletteColor(std::uint16_t index);
     void discardPresentationBuffer();
+    void presentRegion(Rect region);
     void presentIfConfigured();
 
     WindowManager manager_;

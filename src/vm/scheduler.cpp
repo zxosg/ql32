@@ -34,6 +34,21 @@ public:
     bool logon(runtime::TaskId id) override { return scheduler_.logon(id); }
     runtime::TaskId logoff() override { return scheduler_.logoff(); }
     runtime::TaskId focusedTask() const override { return scheduler_.focusedTask(); }
+    bool suspendTask(runtime::TaskId id) override {
+        return scheduler_.suspendTask(id);
+    }
+    bool resumeTask(runtime::TaskId id) override {
+        return scheduler_.resumeTask(id);
+    }
+    std::size_t instructionBudget() const override {
+        return scheduler_.instructionBudget();
+    }
+    bool setInstructionBudget(std::size_t budget) override {
+        return scheduler_.setInstructionBudget(budget);
+    }
+    bool setTaskPriority(runtime::TaskId id, std::uint32_t priority) override {
+        return scheduler_.setTaskPriority(id, priority);
+    }
 
     std::vector<runtime::ChannelInfo> listChannels(runtime::TaskId id) const override {
         return scheduler_.taskChannels(id);
@@ -43,7 +58,8 @@ public:
         std::vector<runtime::ManagedTaskInfo> result;
         for (const auto& info : scheduler_.tasks()) {
             result.push_back({info.id, taskState(info.status),
-                              info.supervisor, info.error});
+                              info.supervisor, info.priority, info.resumePriority,
+                              info.error});
         }
         return result;
     }
@@ -66,12 +82,14 @@ struct SessionScheduler::Task {
     bool supervisor = false;
     bool interactiveSubmission = false;
     bool hasPendingSource = true;
+    std::uint32_t priority = 4;
+    std::uint32_t resumePriority = 4;
 };
 
 SessionScheduler::SessionScheduler(Services services, std::size_t instructionBudget)
     : services_(std::move(services)), instructionBudget_(instructionBudget) {
-    if (instructionBudget_ == 0)
-        throw std::invalid_argument("scheduler instruction budget must be positive");
+    if (instructionBudget_ == 0 || instructionBudget_ > MaximumInstructionBudget)
+        throw std::invalid_argument("scheduler instruction budget must be in 1..65536");
     taskControl_ = std::make_shared<SchedulerTaskControl>(*this);
 }
 
@@ -87,6 +105,8 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_);
     const TaskId id = task->id;
+    eligibleTasks_.reserve(tasks_.size() + 1);
+    candidateTasks_.reserve(tasks_.size() + 1);
     tasks_.push_back(std::move(task));
     return id;
 }
@@ -103,6 +123,8 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
+    eligibleTasks_.reserve(tasks_.size() + 1);
+    candidateTasks_.reserve(tasks_.size() + 1);
     tasks_.push_back(std::move(task));
     return id;
 }
@@ -125,6 +147,8 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     const TaskId id = task->id;
     supervisorId_ = id;
     if (focusedTaskId_ == 0) focusedTaskId_ = id;
+    eligibleTasks_.reserve(tasks_.size() + 1);
+    candidateTasks_.reserve(tasks_.size() + 1);
     tasks_.push_back(std::move(task));
     return id;
 }
@@ -164,6 +188,62 @@ TaskId SessionScheduler::focusedTask() const noexcept {
     return focusedTaskId_ != 0 ? focusedTaskId_ : supervisorId_;
 }
 
+bool SessionScheduler::suspendTask(TaskId id) noexcept {
+    if (focusedTaskId_ == id) return false;
+    for (auto& current : tasks_) {
+        if (current->id != id || current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled)
+            continue;
+        if (current->priority != 0) {
+            current->resumePriority = current->priority;
+            current->priority = 0;
+            policy_.resetCredits();
+        }
+        return current->resumePriority != 0;
+    }
+    return false;
+}
+
+bool SessionScheduler::resumeTask(TaskId id) noexcept {
+    for (auto& current : tasks_) {
+        if (current->id != id || current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled || current->priority != 0 ||
+            current->resumePriority == 0)
+            continue;
+        current->priority = current->resumePriority;
+        policy_.resetCredits();
+        return true;
+    }
+    return false;
+}
+
+bool SessionScheduler::setInstructionBudget(std::size_t budget) noexcept {
+    if (budget == 0 || budget > MaximumInstructionBudget) return false;
+    instructionBudget_ = budget;
+    return true;
+}
+
+bool SessionScheduler::setTaskPriority(TaskId id,
+                                      std::uint32_t priority) noexcept {
+    if (priority > MaximumPriority) return false;
+    if (priority == 0 && focusedTaskId_ == id) return false;
+    for (auto& current : tasks_) {
+        if (current->id != id || current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled)
+            continue;
+        // PRIORITY sets the baseline directly. Unlike SUSPEND, it does not
+        // preserve the current weight for a later RESUME.
+        current->resumePriority = priority;
+        current->priority = priority;
+        policy_.resetCredits();
+        return true;
+    }
+    return false;
+}
+
 std::vector<runtime::ChannelInfo> SessionScheduler::taskChannels(TaskId id) const {
     for (const auto& current : tasks_)
         if (current->id == id && current->interpreter)
@@ -178,63 +258,72 @@ std::string SessionScheduler::takeError(TaskId id) {
 }
 
 bool SessionScheduler::tick() {
-    if (tasks_.empty()) return false;
-    for (std::size_t checked = 0; checked < tasks_.size(); ++checked) {
-        const std::size_t index = (cursor_ + checked) % tasks_.size();
-        Task& current = *tasks_[index];
-        if (current.status == TaskStatus::Completed ||
-            current.status == TaskStatus::Failed ||
-            current.status == TaskStatus::Cancelled) continue;
-        if (current.status == TaskStatus::WaitingInput && !current.hasPendingSource)
+    eligibleTasks_.clear();
+    candidateTasks_.clear();
+    for (auto& candidatePtr : tasks_) {
+        Task& candidate = *candidatePtr;
+        if (candidate.status == TaskStatus::Completed ||
+            candidate.status == TaskStatus::Failed ||
+            candidate.status == TaskStatus::Cancelled)
             continue;
+        if (candidate.status == TaskStatus::WaitingInput &&
+            !candidate.hasPendingSource)
+            continue;
+        eligibleTasks_.push_back({candidate.id, candidate.priority});
+        candidateTasks_.push_back(&candidate);
+    }
+    const auto selectedIndex = policy_.select(eligibleTasks_);
+    if (!selectedIndex) return false;
 
-        cursor_ = (index + 1) % tasks_.size();
-        try {
-            ExecutionStatus result;
-            if (current.started) {
-                result = current.interpreter->resumeSlice(*current.output,
-                                                          instructionBudget_);
-            } else if (current.interactive && current.interactiveSubmission) {
-                result = current.interpreter->executeInteractiveSlice(
-                    current.source, *current.output, instructionBudget_);
-            } else {
-                result = current.interpreter->executeSlice(
-                    current.source, *current.output, instructionBudget_);
-            }
-            current.hasPendingSource = false;
-            current.interactiveSubmission = false;
-            if (result == ExecutionStatus::Completed) {
-                current.started = false;
-                if (current.interactive) {
-                    current.status = TaskStatus::WaitingInput;
-                } else {
-                    current.status = TaskStatus::Completed;
-                    current.interpreter.reset();
-                }
-                current.source.clear();
-            } else if (result == ExecutionStatus::Suspended) {
-                current.started = true;
-                current.status = TaskStatus::WaitingUi;
-            } else {
-                current.started = true;
-                current.status = TaskStatus::Runnable;
-            }
-        } catch (const std::exception& error) {
-            current.error = error.what();
-            current.hasPendingSource = false;
-            current.interactiveSubmission = false;
-            current.source.clear();
+    Task& current = *candidateTasks_[*selectedIndex];
+
+    try {
+        ExecutionStatus result;
+        if (current.started) {
+            result = current.interpreter->resumeSlice(*current.output,
+                                                      instructionBudget_);
+        } else if (current.interactive && current.interactiveSubmission) {
+            result = current.interpreter->executeInteractiveSlice(
+                current.source, *current.output, instructionBudget_);
+        } else {
+            result = current.interpreter->executeSlice(
+                current.source, *current.output, instructionBudget_);
+        }
+        current.hasPendingSource = false;
+        current.interactiveSubmission = false;
+        if (result == ExecutionStatus::Completed) {
             current.started = false;
+            policy_.remove(current.id);
             if (current.interactive) {
                 current.status = TaskStatus::WaitingInput;
             } else {
-                current.status = TaskStatus::Failed;
+                current.status = TaskStatus::Completed;
                 current.interpreter.reset();
             }
+            current.source.clear();
+        } else if (result == ExecutionStatus::Suspended) {
+            current.started = true;
+            current.status = TaskStatus::WaitingUi;
+        } else {
+            current.started = true;
+            current.status = TaskStatus::Runnable;
         }
-        return true;
+    } catch (const std::exception& error) {
+        current.error = error.what();
+        current.hasPendingSource = false;
+        current.interactiveSubmission = false;
+        current.source.clear();
+        current.started = false;
+        if (current.interactive) {
+            policy_.remove(current.id);
+            current.status = TaskStatus::WaitingInput;
+        } else {
+            policy_.remove(current.id);
+            current.status = TaskStatus::Failed;
+            current.interpreter.reset();
+        }
     }
-    return false;
+    return true;
 }
 
 bool SessionScheduler::cancel(TaskId id) {
@@ -243,6 +332,7 @@ bool SessionScheduler::cancel(TaskId id) {
             task->status == TaskStatus::Failed || task->status == TaskStatus::Cancelled)
             continue;
         task->interpreter.reset();
+        policy_.remove(task->id);
         task->source.clear();
         task->hasPendingSource = false;
         task->interactiveSubmission = false;
@@ -260,6 +350,7 @@ bool SessionScheduler::cancelWorker(TaskId id) {
             task->status == TaskStatus::Cancelled)
             continue;
         task->interpreter.reset();
+        policy_.remove(task->id);
         task->source.clear();
         task->hasPendingSource = false;
         task->interactiveSubmission = false;
@@ -274,7 +365,8 @@ std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {
     for (const auto& current : tasks_)
         if (current->id == id)
             return TaskInfo{current->id, current->status, current->error,
-                            current->interactive, current->supervisor};
+                            current->interactive, current->supervisor,
+                            current->priority, current->resumePriority};
     return std::nullopt;
 }
 
@@ -283,7 +375,8 @@ std::vector<TaskInfo> SessionScheduler::tasks() const {
     result.reserve(tasks_.size());
     for (const auto& current : tasks_)
         result.push_back({current->id, current->status, current->error,
-                          current->interactive, current->supervisor});
+                          current->interactive, current->supervisor,
+                          current->priority, current->resumePriority});
     return result;
 }
 

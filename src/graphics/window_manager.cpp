@@ -631,10 +631,20 @@ void WindowManager::composeInto(std::vector<ColorIndex>& frame,
 void WindowManager::composeRowInto(std::uint32_t y,
                                    std::vector<ColorIndex>& row,
                                    ColorIndex desktopPaper) const {
-    if (y >= screenHeight_)
-        throw std::out_of_range("composed row is outside the screen");
-    row.resize(screenWidth_);
+    composeRegionRowInto(y, 0, screenWidth_, row, desktopPaper);
+}
+
+void WindowManager::composeRegionRowInto(std::uint32_t y, std::uint32_t x,
+                                         std::uint32_t width,
+                                         std::vector<ColorIndex>& row,
+                                         ColorIndex desktopPaper) const {
+    if (y >= screenHeight_ || x > screenWidth_ ||
+        width > screenWidth_ - x)
+        throw std::out_of_range("composed region row is outside the screen");
+    row.resize(width);
     std::fill(row.begin(), row.end(), desktopPaper);
+    if (width == 0) return;
+    const auto right = x + width;
     for (const auto& entry : windows_) {
         if (!entry.visible) continue;
         const Rect visible = clip(entry.bounds);
@@ -642,13 +652,18 @@ void WindowManager::composeRowInto(std::uint32_t y,
             y < static_cast<std::uint32_t>(visible.y) ||
             y >= static_cast<std::uint32_t>(visible.y) + visible.height)
             continue;
+        const auto left = std::max(x, static_cast<std::uint32_t>(visible.x));
+        const auto clippedRight = std::min(right,
+            static_cast<std::uint32_t>(visible.x) + visible.width);
+        if (left >= clippedRight) continue;
         const auto sourceX = static_cast<std::uint32_t>(
-            static_cast<std::int64_t>(visible.x) - entry.bounds.x);
+            static_cast<std::int64_t>(left) - entry.bounds.x);
         const auto sourceY = static_cast<std::uint32_t>(
             static_cast<std::int64_t>(y) - entry.bounds.y);
-        for (std::uint32_t column = 0; column < visible.width; ++column) {
-            const auto destinationX = static_cast<std::uint32_t>(visible.x) + column;
-            row[destinationX] = entry.canvas.pixel(sourceX + column, sourceY);
+        for (std::uint32_t destinationX = left;
+             destinationX < clippedRight; ++destinationX) {
+            row[destinationX - x] = entry.canvas.pixel(
+                sourceX + destinationX - left, sourceY);
         }
     }
 }

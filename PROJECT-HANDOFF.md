@@ -140,21 +140,34 @@ Current open points before calling the hardware milestone accepted:
 - **Wi-Fi on hardware:** CYD association, status, address, signal, and
   disconnect behavior passed. Repeat the same acceptance on VGA32 when that
   board is available, per [`QL32-NET-001.md`](docs/specification/QL32-NET-001.md).
-- **Multi-session UI/display:** a portable cooperative round-robin scheduler
-  now runs independent interpreter sessions in bounded bytecode slices, and
-  UI waits suspend only their owner. Both ESP32 event loops now drive a
-  persistent interactive REPL session through 128-instruction scheduler ticks;
+- **Multi-session UI/display:** a portable cooperative smooth weighted
+  round-robin scheduler runs independent interpreter sessions in bounded
+  bytecode slices. The supervisor can set the global slice with `SLICE n`
+  (1..65536, default 128) and each active task's weight with
+  `PRIORITY task-id,weight` (non-negative 32-bit integer, default 4).
+  `SUSPEND id` saves the current weight and sets it to 0; `RESUME id` restores
+  it. `PRIORITY id,0` sets zero directly and clears the saved resume weight.
+  `TASKS` reports the slice and priorities to the current print channel
+  (initially `#1`); `TASKS #channel` redirects one listing and suspended tasks
+  show their saved resume weight.
+  Host tests verify the reference sequence and
+  weighted frequencies. Priority behavior has not yet been checked on CYD or
+  VGA32 hardware. UI waits suspend only their owner. Both ESP32 event loops now
+  drive a persistent interactive REPL session with a default 128-instruction
+  scheduler slice, adjustable through `SLICE`;
   startup, immediate commands, and `RUN` preserve interpreter state, with
   serial/keyboard input and UI replies handled between ticks. Host tests cover
-  interactive-session continuity, round-robin execution, error recovery, and
+  interactive-session continuity, weighted scheduling, error recovery, and
   UI resumption; both ESP32 profiles build. The CYD scheduler was flashed and
   checked on hardware: persistent state produced `42`, a numbered `RUN` showed
   all three expected lines, the alert waited for Enter, and `AFTER_UI_RESUME`
   appeared afterward. A syntax error was reported over serial and the REPL
   accepted the next command. The embedded REPL now provides `SPAWN "path.bas"`,
-  `TASKS`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, and `CANCEL id` for worker
-  sessions. Spawned workers remain interactive after their startup source
-  completes. Each session owns its BASIC state and channel handles; sessions
+  `TASKS`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `CANCEL id`, `SUSPEND id`,
+  `RESUME id`, `SLICE n`, and `PRIORITY task-id,weight` for worker control.
+  Spawned workers remain
+  interactive after their startup source completes. Each session owns its
+  BASIC state and channel handles; sessions
   share board adapters and physical devices. Worker `#0` output and diagnostics
   use the shared console; `#1` goes to its own graphics window. Both ESP32
   profiles build with this supervisor. CYD hardware ran the flow: sessions
@@ -162,9 +175,11 @@ Current open points before calling the hardware milestone accepted:
   `TASKCHANNELS` completed, and serial prompts confirmed `LOGON`, per-session
   `WINDOW` changes, and `LOGOFF` for sessions 5, 6, and 7. No allocation errors
   occurred after the TFT row-streaming and initial-bounds fixes. The serial
-  monitor cannot show the TFT's three-column layout or channel-list text, so
-  visual confirmation remains open. VGA32 acceptance remains pending because
-  that board is unavailable. The portable
+  monitor cannot show the TFT channel-list text, so visual inspection of that
+  listing remains open. VGA32 acceptance remains pending because that board is
+  unavailable. The user visually confirmed the CYD's three
+  persistent columns side by side (white/blue/magenta, left to right), with
+  worker output advancing in roughly five-second turns. The portable
   first CYD three-worker run hit `std::bad_alloc` while creating the third
   session. The TFT presenter now streams composed rows, and first-time
   `WINDOW` creation allocates the requested bounds directly instead of keeping

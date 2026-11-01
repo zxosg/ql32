@@ -87,6 +87,10 @@ public:
     void composeInto(std::vector<ColorIndex>& frame, ColorIndex desktopPaper = 0) const;
     void composeRowInto(std::uint32_t y, std::vector<ColorIndex>& row,
                         ColorIndex desktopPaper = 0) const;
+    void composeRegionRowInto(std::uint32_t y, std::uint32_t x,
+                              std::uint32_t width,
+                              std::vector<ColorIndex>& row,
+                              ColorIndex desktopPaper = 0) const;
 
     // Snapshot is ordered from back to front; invisible and fully offscreen
     // windows are omitted. screenClip is the visible part in physical pixels.

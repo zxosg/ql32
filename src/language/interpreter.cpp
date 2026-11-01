@@ -2008,9 +2008,13 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "SPAWN" || word.rfind("SPAWN ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
             word == "CANCEL" || word.rfind("CANCEL ", 0) == 0 ||
+            word == "SUSPEND" || word.rfind("SUSPEND ", 0) == 0 ||
+            word == "RESUME" || word.rfind("RESUME ", 0) == 0 ||
             word == "LOGOFF" || word.rfind("LOGOFF ", 0) == 0 ||
             word == "LOGON" || word.rfind("LOGON ", 0) == 0 ||
-            word == "TASKCHANNELS" || word.rfind("TASKCHANNELS ", 0) == 0) {
+            word == "TASKCHANNELS" || word.rfind("TASKCHANNELS ", 0) == 0 ||
+            word == "SLICE" || word.rfind("SLICE ", 0) == 0 ||
+            word == "PRIORITY" || word.rfind("PRIORITY ", 0) == 0) {
             commandMode = true;
             break;
         }
@@ -2126,23 +2130,35 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             writeChannelText(0,
                 "Started session " + std::to_string(id) + "\n");
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
-            if (!trim(normalizedLine.substr(5)).empty())
-                throw std::runtime_error("TASKS takes no arguments");
+            const std::string argument = trim(normalizedLine.substr(5));
+            const std::uint64_t outputChannel = argument.empty() ?
+                default_output_channel_ : parseChannelSelector(argument, "TASKS");
             if (!taskControl_)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "session supervisor unavailable");
             const auto tasks = taskControl_->listTasks();
-            std::string listing;
+            std::string listing = "SLICE " +
+                std::to_string(taskControl_->instructionBudget()) + " instructions\n";
             for (const auto& task : tasks) {
                 listing += std::to_string(task.id) + " ";
                 if (task.supervisor) listing += "SUPERVISOR ";
                 else listing += "WORKER ";
-                listing += runtime::taskStateName(task.state);
+                if (task.priority == 0) {
+                    if (task.resumePriority == 0) {
+                        listing += "P=0 DISABLED (no saved resume priority)";
+                    } else {
+                        listing += "P=0 SUSPENDED (resume P=" +
+                            std::to_string(task.resumePriority) + ")";
+                    }
+                } else {
+                    listing += "P=" + std::to_string(task.priority) + " ";
+                    listing += runtime::taskStateName(task.state);
+                }
                 if (!task.error.empty()) listing += " " + task.error;
                 listing += "\n";
             }
             if (listing.empty()) listing = "No sessions\n";
-            writeChannelText(0, listing);
+            writeChannelText(outputChannel, listing);
         } else if (word == "TASKCHANNELS" || word.rfind("TASKCHANNELS ", 0) == 0) {
             if (!taskControl_)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2179,6 +2195,34 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 throw std::runtime_error("no active worker session with that ID");
             writeChannelText(0,
                              "Cancelled session " + std::to_string(id) + "\n");
+        } else if (word == "SUSPEND" || word.rfind("SUSPEND ", 0) == 0 ||
+                   word == "RESUME" || word.rfind("RESUME ", 0) == 0) {
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const bool suspend = word == "SUSPEND" || word.rfind("SUSPEND ", 0) == 0;
+            const std::string operation = suspend ? "SUSPEND" : "RESUME";
+            const std::string argument = trim(normalizedLine.substr(operation.size()));
+            std::uint64_t id = 0;
+            const auto parsed = std::from_chars(argument.data(),
+                                                argument.data() + argument.size(), id);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size())
+                throw std::runtime_error(operation + " requires a session ID");
+            const bool changed = suspend ? taskControl_->suspendTask(id) :
+                                           taskControl_->resumeTask(id);
+            if (!changed)
+                throw std::runtime_error(suspend ?
+                    "session cannot be suspended; LOGOFF first if it is attached" :
+                    "session is not suspended");
+            const auto tasks = taskControl_->listTasks();
+            const auto found = std::find_if(tasks.begin(), tasks.end(),
+                [id](const auto& task) { return task.id == id; });
+            const auto priority = found == tasks.end() ? 0U :
+                (suspend ? found->resumePriority : found->priority);
+            writeChannelText(0, (suspend ? "Suspended" : "Resumed") +
+                std::string(" session ") + std::to_string(id) +
+                " (priority " + std::to_string(priority) + ")\n");
         } else if (word == "LOGON" || word.rfind("LOGON ", 0) == 0) {
             if (!taskControl_)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2204,6 +2248,60 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             writeChannelText(0,
                              "Logged off; supervisor session " +
                                  std::to_string(id) + "\n");
+        } else if (word == "SLICE" || word.rfind("SLICE ", 0) == 0) {
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            const std::string argument = trim(normalizedLine.substr(5));
+            if (argument.empty()) {
+                writeChannelText(0, "Instruction slice: " +
+                    std::to_string(taskControl_->instructionBudget()) + "\n");
+                continue;
+            }
+            std::uint64_t budget = 0;
+            const auto parsed = std::from_chars(argument.data(),
+                                                argument.data() + argument.size(), budget);
+            if (parsed.ec != std::errc{} || parsed.ptr != argument.data() + argument.size() ||
+                budget == 0 || budget > runtime::maximumInstructionBudget)
+                throw std::runtime_error("SLICE must be an integer in 1..65536");
+            if (!taskControl_->setInstructionBudget(static_cast<std::size_t>(budget)))
+                throw std::runtime_error("unable to set scheduler instruction slice");
+            writeChannelText(0, "Instruction slice set to " +
+                std::to_string(budget) + "\n");
+        } else if (word == "PRIORITY" || word.rfind("PRIORITY ", 0) == 0) {
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "session supervisor unavailable");
+            std::string arguments = trim(normalizedLine.substr(8));
+            const auto separator = arguments.find_first_of(", \t");
+            if (separator == std::string::npos)
+                throw std::runtime_error("PRIORITY syntax is PRIORITY task-id,weight");
+            const std::string idText = trim(arguments.substr(0, separator));
+            std::size_t valueStart = separator + 1;
+            while (valueStart < arguments.size() &&
+                   (arguments[valueStart] == ',' || arguments[valueStart] == ' ' ||
+                    arguments[valueStart] == '\t'))
+                ++valueStart;
+            const std::string weightText = trim(arguments.substr(valueStart));
+            std::uint64_t id = 0;
+            std::uint32_t priority = 0;
+            const auto idParsed = std::from_chars(idText.data(),
+                idText.data() + idText.size(), id);
+            const auto priorityParsed = std::from_chars(weightText.data(),
+                weightText.data() + weightText.size(), priority);
+            if (idText.empty() || weightText.empty() ||
+                idParsed.ec != std::errc{} || idParsed.ptr != idText.data() + idText.size() ||
+                priorityParsed.ec != std::errc{} ||
+                priorityParsed.ptr != weightText.data() + weightText.size() ||
+                priority > runtime::maximumTaskPriority)
+                throw std::runtime_error(
+                    "PRIORITY weight must be a non-negative 32-bit integer");
+            if (!taskControl_->setTaskPriority(id, priority))
+                throw std::runtime_error(priority == 0 ?
+                    "no active session, or LOGOFF before suspending the attached session" :
+                    "no active session with that ID");
+            writeChannelText(0, "Session " + std::to_string(id) +
+                " priority set to " + std::to_string(priority) + "\n");
         } else {
             const auto status = executeSlice(line + "\n", output,
                                              instructionBudget, stop);

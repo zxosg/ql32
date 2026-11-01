@@ -28,6 +28,12 @@ public:
     virtual bool presentRows(std::uint32_t, std::uint32_t,
                              const std::array<RgbColor, 256>&,
                              const RowProvider&) { return false; }
+    // Present a clipped region. The row provider supplies exactly region.width
+    // palette indices for each requested screen row. Presenters that do not
+    // support partial updates can return false and let the service redraw fully.
+    virtual bool presentRowsRegion(std::uint32_t, std::uint32_t,
+                                   const std::array<RgbColor, 256>&, Rect,
+                                   const RowProvider&) { return false; }
     virtual WindowInfo setRotation(std::uint16_t) {
         throw std::runtime_error("display rotation unsupported");
     }

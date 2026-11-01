@@ -6,7 +6,7 @@
 namespace ql32::platform::esp32_cyd {
 
 Ili9341FramePresenter::Ili9341FramePresenter(
-    CydIli9341Display& display, std::function<void()> restoreOverlay,
+    CydIli9341Display& display, std::function<void(graphics::Rect)> restoreOverlay,
     std::function<void()> rotationChanged)
     : display_(display), restoreOverlay_(std::move(restoreOverlay)),
       rotationChanged_(std::move(rotationChanged)) {}
@@ -29,33 +29,50 @@ void Ili9341FramePresenter::present(const graphics::Frame& frame) {
         display_.drawRGBBitmap(0, static_cast<std::int16_t>(y), row_.data(),
                                static_cast<std::int16_t>(frame.width), 1);
     }
-    if (restoreOverlay_) restoreOverlay_();
+    if (restoreOverlay_)
+        restoreOverlay_({0, 0, frame.width, frame.height});
 }
 
 bool Ili9341FramePresenter::presentRows(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette,
     const graphics::FramePresenter::RowProvider& rowProvider) {
+    return presentRowsRegion(width, height, palette,
+        {0, 0, width, height}, rowProvider);
+}
+
+bool Ili9341FramePresenter::presentRowsRegion(
+    std::uint32_t width, std::uint32_t height,
+    const std::array<graphics::RgbColor, 256>& palette,
+    graphics::Rect region,
+    const graphics::FramePresenter::RowProvider& rowProvider) {
     if (width != static_cast<std::uint32_t>(display_.width()) ||
         height != static_cast<std::uint32_t>(display_.height()))
         throw std::invalid_argument("composed rows do not match CYD display geometry");
+    if (region.x < 0 || region.y < 0 ||
+        static_cast<std::uint64_t>(region.x) + region.width > width ||
+        static_cast<std::uint64_t>(region.y) + region.height > height)
+        throw std::invalid_argument("composed region exceeds CYD display geometry");
+    if (region.width == 0 || region.height == 0) return true;
     if (row_.size() < width) row_.resize(width);
-    if (indexedRow_.size() < width) indexedRow_.resize(width);
-    for (std::uint32_t y = 0; y < height; ++y) {
+    if (indexedRow_.size() < region.width) indexedRow_.resize(region.width);
+    for (std::uint32_t y = static_cast<std::uint32_t>(region.y);
+         y < static_cast<std::uint32_t>(region.y) + region.height; ++y) {
         rowProvider(y, indexedRow_);
-        if (indexedRow_.size() != width)
-            throw std::invalid_argument("composed row does not match CYD display width");
-        for (std::uint32_t x = 0; x < width; ++x) {
+        if (indexedRow_.size() != region.width)
+            throw std::invalid_argument("composed row does not match CYD region width");
+        for (std::uint32_t x = 0; x < region.width; ++x) {
             const auto& color = palette[indexedRow_[x]];
             row_[x] = static_cast<std::uint16_t>(
                 ((color.red & 0xF8u) << 8u) |
                 ((color.green & 0xFCu) << 3u) |
                 (color.blue >> 3u));
         }
-        display_.drawRGBBitmap(0, static_cast<std::int16_t>(y), row_.data(),
-                               static_cast<std::int16_t>(width), 1);
+        display_.drawRGBBitmap(static_cast<std::int16_t>(region.x),
+                               static_cast<std::int16_t>(y), row_.data(),
+                               static_cast<std::int16_t>(region.width), 1);
     }
-    if (restoreOverlay_) restoreOverlay_();
+    if (restoreOverlay_) restoreOverlay_(region);
     return true;
 }
 

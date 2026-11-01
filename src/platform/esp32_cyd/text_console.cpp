@@ -41,8 +41,8 @@ void TftTextConsole::reconfigure() {
     clear();
 }
 
-void TftTextConsole::restoreOverlay() {
-    redraw();
+void TftTextConsole::restoreOverlay(graphics::Rect region) {
+    redraw(region);
 }
 
 void TftTextConsole::clear() {
@@ -98,16 +98,51 @@ void TftTextConsole::advanceLine() {
 }
 
 void TftTextConsole::redraw() {
-    display_.fillRect(0, firstRowY_, display_.width(),
-                      static_cast<std::int16_t>(display_.height() - firstRowY_),
+    redraw({0, firstRowY_, static_cast<std::uint32_t>(display_.width()),
+            static_cast<std::uint32_t>(display_.height() - firstRowY_)});
+}
+
+void TftTextConsole::redraw(graphics::Rect region) {
+    const auto left = std::max<std::int32_t>(0, region.x);
+    const auto top = std::max<std::int32_t>(firstRowY_, region.y);
+    const auto right = std::min<std::int32_t>(display_.width(),
+        static_cast<std::int32_t>(static_cast<std::int64_t>(region.x) + region.width));
+    const auto bottom = std::min<std::int32_t>(display_.height(),
+        static_cast<std::int32_t>(static_cast<std::int64_t>(region.y) + region.height));
+    if (left >= right || top >= bottom) return;
+
+    const auto firstColumn = left / characterWidth;
+    const auto lastColumn = std::min<std::int32_t>(columns_,
+        (right + characterWidth - 1) / characterWidth);
+    const auto alignedLeft = firstColumn * characterWidth;
+    const auto alignedRight = std::min<std::int32_t>(display_.width(),
+        lastColumn * characterWidth);
+    const auto firstRow = (top - firstRowY_) / characterHeight;
+    const auto lastRow = std::min<std::int32_t>(visibleRows_,
+        (bottom - firstRowY_ + characterHeight - 1) / characterHeight);
+    const auto alignedTop = firstRowY_ + firstRow * characterHeight;
+    const auto alignedBottom = std::min<std::int32_t>(display_.height(),
+        firstRowY_ + lastRow * characterHeight);
+    display_.fillRect(static_cast<std::int16_t>(alignedLeft),
+                      static_cast<std::int16_t>(alignedTop),
+                      static_cast<std::int16_t>(alignedRight - alignedLeft),
+                      static_cast<std::int16_t>(alignedBottom - alignedTop),
                       consoleBackground);
+
     display_.setTextSize(1);
     display_.setTextColor(consoleForeground, consoleBackground);
-    std::size_t row = 0;
-    for (const auto& line : lines_) {
-        display_.setCursor(0, static_cast<std::int16_t>(firstRowY_ + row * characterHeight));
-        display_.print(line.c_str());
-        ++row;
+    for (std::int32_t row = firstRow; row < lastRow; ++row) {
+        if (static_cast<std::size_t>(row) >= lines_.size()) break;
+        const auto& line = lines_[static_cast<std::size_t>(row)];
+        const auto start = std::min<std::size_t>(
+            static_cast<std::size_t>(firstColumn), line.size());
+        const auto end = std::min<std::size_t>(
+            static_cast<std::size_t>(lastColumn), line.size());
+        if (start >= end) continue;
+        display_.setCursor(static_cast<std::int16_t>(firstColumn * characterWidth),
+            static_cast<std::int16_t>(firstRowY_ + row * characterHeight));
+        const auto clipped = line.substr(start, end - start);
+        display_.print(clipped.c_str());
     }
 }
 

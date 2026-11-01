@@ -364,17 +364,33 @@ statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
 interactive program. The Linux command loop provides `LOAD`, `SAVE`, and `DIR`.
 The scheduler-backed embedded REPL also provides `SPAWN "path.bas"`, `TASKS`,
-`TASKCHANNELS id`, `LOGON id`, `LOGOFF`, and `CANCEL id`. `SPAWN` reads source
+`TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `CANCEL id`, `SLICE [instructions]`,
+`PRIORITY task-id,weight`, `SUSPEND id`, and `RESUME id`. `SPAWN` reads source
 through the configured storage service and starts an independent worker
 session. When its startup source completes, the worker remains alive at its own
 interactive prompt with its variables, program, graphics window, and channels
-retained. `TASKS` lists session IDs, supervisor/worker kind, state, and errors;
+retained. `TASKS` lists session IDs, supervisor/worker kind, priority, state,
+and errors, along with the global instruction slice; suspended tasks also show
+their saved resume priority.
 `TASKCHANNELS id` lists a session's reserved and opened handles with endpoint
 types. `LOGON id` routes embedded console input to an idle worker so immediate
 BASIC commands operate in that session; `LOGOFF` returns to the supervisor.
 The prompt includes the attached task ID. `CANCEL id` stops an active worker;
-log off before cancelling the currently attached session. These QL/32-specific
-commands are not available in the Linux command loop.
+log off before cancelling the currently attached session. `SLICE` reports or
+changes the number of bytecode instructions allowed per scheduler turn (default
+128, valid range 1..65536). `PRIORITY id,weight` sets a task's scheduling
+weight to a non-negative 32-bit integer; the default is 4. Higher weights
+receive proportionally more turns under smooth weighted round-robin scheduling.
+`SUSPEND id` saves the task's current priority, sets priority to 0, and retains
+its interpreter state and channels. `RESUME id` restores the saved priority.
+`PRIORITY id,weight` sets the current and baseline priority directly; assigning
+0 clears a saved resume priority and disables the task until a positive
+priority is assigned. Resumption is manual, with no automatic wake-up timer.
+`TASKS` marks tasks with a saved weight as suspended, and zero-baseline tasks as
+disabled. It writes to the current print channel,
+initially `#1`; `TASKS #channel` redirects one listing. Log off before
+suspending the currently attached task.
+These QL/32-specific commands are not available in the Linux command loop.
 M2 also provides QL/32-specific `OPEN`, `READ$`, `EOF`, `WRITE`, and `CLOSE`
 channel operations. File endpoints support reads and writes; serial endpoints
 write to serial output, and null endpoints discard output. Value-returning
