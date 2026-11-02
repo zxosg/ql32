@@ -18,7 +18,8 @@ pio device monitor -b 115200
 Both ESP32 profiles use the custom [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for firmware, NVS, and a 64 KiB coredump area. This requires a 4 MiB flash chip and leaves no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD. Current build-size and RAM measurements are kept in [QL32-PLAT-001](../../docs/specification/QL32-PLAT-001.md). The USB serial REPL has been verified on the physical board. On 2026-11-02 the firmware was flashed and booted, but the attached PS/2 keyboard produced no input. VGA output, clock status, and SD behavior also need physical checks. The serial monitor reports VGA32 readiness, uptime, wall-clock synchronization, and SD mount status. BASIC output and runtime errors go to serial; the VGA canvas is available to BASIC graphics commands.
 The BASIC prompt accepts input through the USB serial terminal. PS/2 input is
 intended on port 0 (CLK GPIO 33, DATA GPIO 32), but it has not passed physical
-verification. Connect serial at 115200 baud, type an immediate statement or
+verification. Startup now reports whether FabGL received a keyboard reset
+response on port 0. Connect serial at 115200 baud, type an immediate statement or
 numbered program line, and press Enter. Backspace edits the current line.
 Enter `RUN` to execute a numbered program. If serial input appears twice,
 disable local echo in the terminal.

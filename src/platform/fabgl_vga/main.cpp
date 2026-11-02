@@ -182,8 +182,14 @@ void setup() {
         screenWidth, screenHeight, framePresenter, 4, fullScreen4BitBytes * 2);
 
     ps2.begin(fabgl::PS2Preset::KeyboardPort0);
-    if (fabgl::PS2Controller::keyboard())
-        keyboardInput.emplace(*fabgl::PS2Controller::keyboard());
+    if (auto* keyboard = fabgl::PS2Controller::keyboard()) {
+        Serial.println(keyboard->isKeyboardAvailable()
+            ? "PS/2 keyboard detected on port 0"
+            : "No PS/2 keyboard response on port 0");
+        keyboardInput.emplace(*keyboard);
+    } else {
+        Serial.println("FabGL keyboard interface unavailable on port 0");
+    }
 
     sdBus.begin(ql32::boards::lilygo_vga32::sdClock,
                 ql32::boards::lilygo_vga32::sdMiso,

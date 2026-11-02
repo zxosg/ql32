@@ -98,12 +98,15 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. Diagnose VGA32 PS/2 input. FabGL port 0 defaults to CLK GPIO 33 and
-   DATA GPIO 32, matching the board pin map; startup calls
+1. Diagnose VGA32 PS/2 input. The user confirmed this is a native PS/2
+   keyboard, not a USB keyboard with a passive adapter. FabGL port 0 defaults
+   to CLK GPIO 33 and DATA GPIO 32, matching the board pin map; startup calls
    `ps2.begin(PS2Preset::KeyboardPort0)` and the input adapter polls FabGL's
    virtual-key queue. The board firmware boots, but physical key events are
-   not reaching the REPL. Check the board/keyboard connection and add temporary
-   serial diagnostics for keyboard initialization and queued key events.
+   not reaching the REPL. The next firmware build now prints whether FabGL
+   received a keyboard reset response. Have the user report that line; if it
+   says detected but keys still do nothing, add temporary serial output for
+   queued key events and trace the REPL input gate.
 2. Run the current Linux and macOS build/test workflows and both ESP32 profile
    builds after the pull. Do not assume the previous test count describes the
    current tree.
