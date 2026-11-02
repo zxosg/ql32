@@ -32,6 +32,8 @@ focused task, `Shift+Pause` pauses/resumes the BASIC VM, `Ctrl+Pause` (also
 and returns to the supervisor. `Ctrl+Alt+Delete` restarts the board. At the
 prompt, `REBOOT` performs the same software restart.
 
-The VGA screen reserves its bottom two 8-pixel text rows for console channel
-`#0`, including echoed interactive input. The default `#1` graphics window
-occupies the area above those rows; output continues to mirror to USB serial.
+The VGA screen reserves its bottom three 8-pixel text rows for console channel
+`#0`, including echoed interactive input. Its 6x8 font matches the default
+character-cell size used by graphics channel `#1`; console text uses QL ink 4
+(green). The default `#1` graphics window occupies the area above those rows;
+output continues to mirror to USB serial.

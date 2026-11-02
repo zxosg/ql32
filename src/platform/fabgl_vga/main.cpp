@@ -4,6 +4,7 @@
 #include <driver/gpio.h>
 #include <fabgl.h>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -43,9 +44,16 @@ constexpr char kBoardName[] = "LILYGO VGA32 V1.4";
 
 namespace {
 
-constexpr std::uint32_t consoleRows = 2;
+constexpr std::uint32_t consoleRows = 3;
+constexpr std::uint32_t consoleCharacterWidth = 6;
 constexpr std::uint32_t consoleCharacterHeight = 8;
 constexpr std::uint32_t consoleHeight = consoleRows * consoleCharacterHeight;
+// QL mode-8 ink 4 is green (palette order: black, blue, red, magenta, green...).
+constexpr std::uint8_t consoleInk = 4;
+constexpr std::array<std::array<std::uint8_t, 3>, 8> consolePalette{{
+    {{0, 0, 0}}, {{0, 0, 255}}, {{255, 0, 0}}, {{255, 0, 255}},
+    {{0, 255, 0}}, {{0, 255, 255}}, {{255, 255, 0}}, {{255, 255, 255}}
+}};
 
 class VgaConsole {
 public:
@@ -54,9 +62,10 @@ public:
     }
 
     void begin() {
-        columns_ = static_cast<std::size_t>(std::max(1, canvas_.getWidth() / 8));
+        columns_ = static_cast<std::size_t>(
+            std::max(1, canvas_.getWidth() / static_cast<int>(consoleCharacterWidth)));
         firstRowY_ = canvas_.getHeight() - static_cast<int>(consoleHeight);
-        canvas_.selectFont(&fabgl::FONT_8x8);
+        canvas_.selectFont(&fabgl::FONT_6x8);
         redraw();
     }
 
@@ -96,8 +105,9 @@ private:
         canvas_.setBrushColor(0, 0, 0);
         canvas_.fillRectangle(0, firstRowY_, canvas_.getWidth() - 1,
                               canvas_.getHeight() - 1);
-        canvas_.selectFont(&fabgl::FONT_8x8);
-        canvas_.setPenColor(255, 255, 255);
+        canvas_.selectFont(&fabgl::FONT_6x8);
+        const auto& ink = consolePalette[consoleInk];
+        canvas_.setPenColor(ink[0], ink[1], ink[2]);
         canvas_.setBrushColor(0, 0, 0);
         for (std::size_t row = 0; row < lines_.size(); ++row)
             canvas_.drawText(0, firstRowY_ + static_cast<int>(row * consoleCharacterHeight),

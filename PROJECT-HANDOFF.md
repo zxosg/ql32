@@ -146,8 +146,9 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    path from ESPectrum instead of Arduino `SD.begin()`. Report the startup
    `SD diagnostic` line if it does not mount. The FatFs build has
    `FF_FS_EXFAT=0`; do not use exFAT media.
-2. Verify the Olimex VGA layout: `#0` text and PS/2 input occupy the bottom two
-   8-pixel rows, while the default `#1` graphics area stops above them. Then
+2. Verify the Olimex VGA layout: `#0` text and PS/2 input occupy the bottom
+   three 8-pixel rows using the 6x8 font and QL ink 4 (green), while the
+   default `#1` graphics area stops above them. Then
    exercise the execution controls on Olimex PS/2: bare `Pause`,
    `Shift+Pause`, `Ctrl+Pause`/`Ctrl+Space`, `Ctrl+Shift+Pause`, and
    `Ctrl+Alt+Delete`; verify `REBOOT` from the prompt on embedded targets.
