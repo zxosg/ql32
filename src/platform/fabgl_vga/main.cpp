@@ -26,6 +26,16 @@
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
 #include "ql32/platform/fabgl_vga/keyboard.hpp"
 
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+namespace ql32_board = ql32::boards::olimex_esp32_sbc_fabgl;
+constexpr char kBoardName[] = "Olimex ESP32-SBC-FabGL";
+#elif defined(QL32_BOARD_LILYGO_VGA32)
+namespace ql32_board = ql32::boards::lilygo_vga32;
+constexpr char kBoardName[] = "LILYGO VGA32 V1.4";
+#else
+#error "Select a supported FabGL VGA board profile"
+#endif
+
 namespace {
 
 class SerialOutputBuffer final : public std::streambuf {
@@ -160,17 +170,17 @@ void advanceScheduler() {
 void setup() {
     Serial.begin(115200);
 
-    if (!ql32::boards::lilygo_vga32::capabilities().valid()) {
-        Serial.println("QL/32 VGA32 capability profile invalid");
+    if (!ql32_board::capabilities().valid()) {
+        Serial.printf("QL/32 %s capability profile invalid\n", kBoardName);
         return;
     }
 
     display.begin(
-        static_cast<gpio_num_t>(ql32::boards::lilygo_vga32::vgaRed),
-        static_cast<gpio_num_t>(ql32::boards::lilygo_vga32::vgaGreen),
-        static_cast<gpio_num_t>(ql32::boards::lilygo_vga32::vgaBlue),
-        static_cast<gpio_num_t>(ql32::boards::lilygo_vga32::vgaHSync),
-        static_cast<gpio_num_t>(ql32::boards::lilygo_vga32::vgaVSync));
+        static_cast<gpio_num_t>(ql32_board::vgaRed),
+        static_cast<gpio_num_t>(ql32_board::vgaGreen),
+        static_cast<gpio_num_t>(ql32_board::vgaBlue),
+        static_cast<gpio_num_t>(ql32_board::vgaHSync),
+        static_cast<gpio_num_t>(ql32_board::vgaVSync));
     display.setResolution(VGA_320x200_70Hz);
 
     auto framePresenter = std::make_shared<ql32::platform::fabgl_vga::FabglFramePresenter>(canvas);
@@ -191,14 +201,14 @@ void setup() {
         Serial.println("FabGL keyboard interface unavailable on port 0");
     }
 
-    sdBus.begin(ql32::boards::lilygo_vga32::sdClock,
-                ql32::boards::lilygo_vga32::sdMiso,
-                ql32::boards::lilygo_vga32::sdMosi,
-                ql32::boards::lilygo_vga32::sdChipSelect);
-    const bool sdReady = SD.begin(ql32::boards::lilygo_vga32::sdChipSelect,
+    sdBus.begin(ql32_board::sdClock,
+                ql32_board::sdMiso,
+                ql32_board::sdMosi,
+                ql32_board::sdChipSelect);
+    const bool sdReady = SD.begin(ql32_board::sdChipSelect,
                                  sdBus, 4000000, "/sd", 5);
 
-    Serial.println("QL/32 VGA32 V1.4 bring-up ready");
+    Serial.printf("QL/32 %s bring-up ready\n", kBoardName);
     Serial.printf("Uptime ms: %llu\n",
                   static_cast<unsigned long long>(boardClock.monotonicMilliseconds()));
     const auto wallTime = boardClock.unixTimeSeconds();

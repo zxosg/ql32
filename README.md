@@ -4,9 +4,9 @@ QL/32 is a portable, standalone BASIC computer inspired by SMSQ/E SuperBASIC
 and Psion-style application interfaces. It is a native C++ implementation,
 not a QL emulator.
 
-The first hardware target is the LILYGO FabGL VGA32 (ESP32, VGA, PS/2), while
-the core also supports an ESP32-2432S028 TFT build. Linux and macOS are host
-development and test targets.
+ESP32 hardware targets include the LILYGO FabGL VGA32, Olimex ESP32-SBC-FabGL,
+and ESP32-2432S028 TFT board. Linux and macOS are host development and test
+targets.
 
 ## Repository map
 
@@ -91,24 +91,28 @@ tools/build-target.sh linux
 tools/build-target.sh mac
 tools/build-target.sh cyd
 tools/build-target.sh vga32
+tools/build-target.sh olimex
 ```
 
 The host executables are `build/linux/ql32` and `build/macos/ql32`. Run the
 matching host test suite with `ctest --test-dir build/linux --output-on-failure`
 or `ctest --test-dir build/macos --output-on-failure`.
 
-PlatformIO's plain `pio run` builds both supported ESP32 profiles. Select one
+PlatformIO's plain `pio run` builds all supported ESP32 profiles. Select one
 environment explicitly when uploading:
 
 ```bash
 pio run -e lilygo_vga32 -t upload
+pio run -e olimex_esp32_sbc_fabgl -t upload
 pio run -e esp32_2432s028 -t upload
 ```
 
-The `lilygo_vga32` image includes the shared portable BASIC VM and its FabGL
-adapters. Its display, PS/2, clock, SD, and line-presenter behavior still needs
-physical-board verification. The CYD's TFT, serial REPL, BASIC loop, SD text
-round-trip, retained-compositor movement/resize/clipping, full-screen canvas,
+The `lilygo_vga32` and `olimex_esp32_sbc_fabgl` images include the shared
+portable BASIC VM and FabGL adapters. Their VGA display, PS/2, clock, SD, and
+line-presenter behavior still needs physical-board verification. The Olimex
+profile uses SD MISO GPIO 35; the LILYGO profile uses GPIO 2. The CYD's TFT,
+serial REPL, BASIC loop, SD text round-trip, retained-compositor
+movement/resize/clipping, full-screen canvas,
 and all four rotations have been checked on hardware. CYD Wi-Fi association,
 status, address, signal, and disconnect are also verified; VGA32 Wi-Fi still
 needs a physical check. [`examples/cyd-rotation-memory.bas`](examples/cyd-rotation-memory.bas)

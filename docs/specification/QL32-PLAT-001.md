@@ -1,13 +1,14 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-02):** Both ESP32 firmware profiles and retained compositor adapters build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, all rotation behavior, and Wi-Fi station acceptance are hardware-verified. The VGA32 firmware has been flashed and boots; USB serial REPL was verified earlier, but the PS/2 keyboard produces no input and startup reports SD storage unavailable with a card inserted. Card capacity/filesystem are unknown. VGA display, clock, SD, and Wi-Fi acceptance remain pending.
+**Status (2026-11-02):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, all rotation behavior, and Wi-Fi station acceptance are hardware-verified. The VGA/PS2/SD hardware report was from an Olimex ESP32-SBC-FabGL Rev B running the LILYGO profile. That profile uses the wrong SD MISO pin for Olimex (GPIO 2 vs GPIO 35), so the SD failure is explained; an Olimex profile has been added but still needs build and hardware verification. PS/2 is wired to the expected GPIOs but remains unverified. VGA display, clock, SD, and Wi-Fi acceptance remain pending.
 
 Supported build families are independent firmware targets:
 
 | Profile | Display / input | Status |
 | --- | --- | --- |
-| `lilygo_vga32` | FabGL VGA, PS/2 | Firmware flashed and boots; USB serial REPL verified; PS/2 keyboard not working; inserted SD card not mounting; VGA display, clock, and Wi-Fi checks pending |
+| `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance on a LILYGO board pending |
+| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2 | Profile added for Rev B; build and hardware acceptance pending |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
@@ -26,9 +27,10 @@ pin numbers or assume a specific resolution; those values belong to a
 qualified board adapter. Linux remains the development and conformance host,
 not a target requirement for firmware.
 
-M5 targets LILYGO FabGL VGA32 V1.4. The image pins PlatformIO's
-`espressif32@6.12.0` (Arduino-ESP32 2.0.17) and FabGL v1.0.9, and uses the
-board's documented eight-color VGA, PS/2 keyboard, and SD-over-HSPI pin mapping.
+M5 supports LILYGO FabGL VGA32 V1.4 and Olimex ESP32-SBC-FabGL Rev B. Both
+images pin PlatformIO's `espressif32@6.12.0` (Arduino-ESP32 2.0.17) and FabGL
+v1.0.9. Their eight-color VGA and PS/2 mappings match; SD-over-HSPI differs:
+LILYGO uses MISO GPIO 2, Olimex Rev B uses MISO GPIO 35.
 The shared BASIC VM is linked with the portable graphics, storage, and channel
 services. A PS/2 prompt accepts immediate statements and numbered program
 lines; serial is the BASIC output stream. The firmware runs `startup.bas` from
@@ -40,12 +42,13 @@ permits one active display session. The custom 4 MiB partition reserves a
 3.875 MiB single factory app and a 64 KiB coredump, with NVS and PHY init
 partitions retained. The current VGA32 build uses 1,298,053 bytes of that app
 (31.9%) and 52,424 bytes static RAM; `firmware.bin` is 1,304,624 bytes. Host
-builds cover the adapters using fakes; the USB
-serial REPL has been verified on the physical board. On 2026-11-02, firmware
-was flashed and booted, but the PS/2 keyboard produced no input. The FabGL
-keyboard adapter uses port 0, whose default clock/data pins are GPIO 33/32,
-matching the board profile. VGA output, clock status, and SD behavior still
-require verification. The async line
+builds cover the adapters using fakes; USB serial REPL was verified on the
+physical Olimex board using the LILYGO image. That image configured SD MISO as
+GPIO 2, while the Olimex Rev B schematic specifies GPIO 35. A separate Olimex
+profile now selects MISO 35; the LILYGO profile retains MISO 2. Both use PS/2
+port 0 at CLK GPIO 33 and DATA GPIO 32. Rebuild and flash the Olimex image
+before repeating SD and keyboard checks. VGA output, clock status, and SD
+behavior still require verification. The async line
 presenter for alert, confirmation, dialog, and menu requests is integrated. It
 accepts replies via serial or PS/2 and is covered by Linux state-machine tests;
 physical interaction still requires board verification. ESP32-S3 TFT

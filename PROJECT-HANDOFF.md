@@ -9,7 +9,8 @@ implementation or hardware-acceptance changes.
 
 QL/32 is a portable, native BASIC computer inspired by SMSQ/E SuperBASIC and
 Psion-style application interfaces. Linux and macOS are host targets. ESP32
-targets are LILYGO FabGL VGA32 and ESP32-2432S028 (CYD). Keep the language,
+targets include LILYGO FabGL VGA32, Olimex ESP32-SBC-FabGL, and
+ESP32-2432S028 (CYD). Keep the language,
 VM, runtime, system, and UI layers independent of board libraries. Session
 resources belong to their BASIC session, and UI waits suspend only that
 session.
@@ -88,7 +89,11 @@ before relying on those results.
   produces no input. With an SD card inserted, startup reports
   `SD storage unavailable`; its capacity and filesystem are not yet known.
   VGA display, clock, SD/startup, line UI and supervisor behavior remain
-  unverified.
+  unverified. The user clarified that the tested board is Olimex
+  ESP32-SBC-FabGL Rev B, not LILYGO VGA32. The LILYGO image had been flashed on
+  the Olimex board. A separate Olimex profile now selects its SD MISO GPIO 35;
+  the LILYGO profile retains MISO GPIO 2. The supplied board PDF is local and
+  not included in the public repository.
 - M6 Wi-Fi works in host tests and both ESP32 profiles. CYD association,
   status, address, signal and disconnect are verified; repeat on VGA32 when
   available.
@@ -100,24 +105,18 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. Diagnose VGA32 PS/2 input. The user confirmed this is a native PS/2
-   keyboard, not a USB keyboard with a passive adapter. FabGL port 0 defaults
-   to CLK GPIO 33 and DATA GPIO 32, matching the board pin map; startup calls
-   `ps2.begin(PS2Preset::KeyboardPort0)` and the input adapter polls FabGL's
-   virtual-key queue. The board firmware boots, but physical key events are
-   not reaching the REPL. The next firmware build now prints whether FabGL
-   received a keyboard reset response. Have the user report that line; if it
-   says detected but keys still do nothing, add temporary serial output for
-   queued key events and trace the REPL input gate.
-2. Diagnose VGA32 SD mounting. The code selects the documented V1.4 HSPI pins
-   (SCK 14, MISO 2, MOSI 12, CS 13) and calls `SD.begin` at 4 MHz, but reports
-   unavailable with an inserted card. The configured Arduino-ESP32 2.0.17
-   FatFs build has `FF_FS_EXFAT=0`; an exFAT card will not mount. First check
-   the card's capacity/filesystem and test with a spare FAT32 card as a safe
-   control rather than reformatting the user's data card. If a FAT32 card also
-   fails, add serial diagnostics for card type and SPI initialization, then
-   compare with a minimal SD mount sketch.
-3. Run the current Linux and macOS build/test workflows and both ESP32 profile
+1. Build and flash the Olimex profile: `tools/build-target.sh olimex`, then
+   `pio run -e olimex_esp32_sbc_fabgl -t upload`. The board's SD wiring is
+   MOSI 12, MISO 35, SCK 14, CS 13; using the LILYGO profile (MISO 2) explains
+   the reported mount failure. The configured Arduino-ESP32 2.0.17 FatFs build
+   has `FF_FS_EXFAT=0`; if mounting still fails, test a spare FAT32 card before
+   diagnosing SPI or considering changes to the existing card.
+2. Check native PS/2 keyboard detection on the Olimex profile. Port 0 uses
+   DATA GPIO 32 and CLK GPIO 33, matching the board schematic. The next firmware
+   build reports whether FabGL received a keyboard reset response. If detected
+   but keys still do nothing, add temporary serial output for queued key events
+   and trace the REPL input gate.
+3. Run the current Linux and macOS build/test workflows and all ESP32 profile
    builds after the pull. Do not assume the previous test count describes the
    current tree.
 4. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi

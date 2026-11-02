@@ -15,16 +15,10 @@ pio run -e lilygo_vga32 -t upload
 pio device monitor -b 115200
 ```
 
-Both ESP32 profiles use the custom [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for firmware, NVS, and a 64 KiB coredump area. This requires a 4 MiB flash chip and leaves no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD. Current build-size and RAM measurements are kept in [QL32-PLAT-001](../../docs/specification/QL32-PLAT-001.md). The USB serial REPL has been verified on the physical board. On 2026-11-02 the firmware was flashed and booted, but the attached PS/2 keyboard produced no input. VGA output, clock status, and SD behavior also need physical checks. The serial monitor reports VGA32 readiness, uptime, wall-clock synchronization, and SD mount status. BASIC output and runtime errors go to serial; the VGA canvas is available to BASIC graphics commands.
-The BASIC prompt accepts input through the USB serial terminal. PS/2 input is
-intended on port 0 (CLK GPIO 33, DATA GPIO 32), but it has not passed physical
-verification. Startup now reports whether FabGL received a keyboard reset
-response on port 0. The initial VGA32 check also reported `SD storage
-unavailable` with a card inserted; its capacity and filesystem have not yet
-been recorded. The configured Arduino-ESP32 2.0.17 FatFs build disables exFAT
-(`FF_FS_EXFAT=0`), so an exFAT card will not mount. Check the card format and
-use a spare FAT32 card to isolate this safely; do not reformat the existing
-data card before backing it up. Connect serial at 115200 baud, type an
+The ESP32 firmware profiles use the custom [4 MiB single-app partition table](../esp32_4mb_single_app.csv): 3.875 MiB for firmware, NVS, and a 64 KiB coredump area. This requires a 4 MiB flash chip and leaves no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD. Current build-size and RAM measurements are kept in [QL32-PLAT-001](../../docs/specification/QL32-PLAT-001.md). The USB serial REPL has been verified, but physical acceptance for this LILYGO board has not. The earlier firmware/keyboard/SD report came from an Olimex ESP32-SBC-FabGL board flashed with the LILYGO profile; use the separate [Olimex profile](../olimex_esp32_sbc_fabgl/README.md) for that hardware. The serial monitor reports VGA32 readiness, uptime, wall-clock synchronization, and SD mount status. BASIC output and runtime errors go to serial; the VGA canvas is available to BASIC graphics commands.
+The BASIC prompt accepts input through the USB serial terminal. This profile's
+PS/2 input is intended on port 0 (CLK GPIO 33, DATA GPIO 32); physical
+verification on a LILYGO board is pending. Connect serial at 115200 baud, type an
 immediate statement or numbered program line, and press Enter. Backspace edits
 the current line.
 Enter `RUN` to execute a numbered program. If serial input appears twice,
