@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -38,6 +39,20 @@ using detail::RuntimeArray;
 using detail::SelectState;
 using detail::DialogBuilder;
 using detail::MenuBuilder;
+
+bool mayContainInclude(std::string_view source) {
+    constexpr std::string_view directive = "INCLUDE";
+    for (std::size_t start = 0; start + directive.size() <= source.size(); ++start) {
+        std::size_t offset = 0;
+        while (offset < directive.size()) {
+            const auto character = static_cast<unsigned char>(source[start + offset]);
+            if (static_cast<char>(std::toupper(character)) != directive[offset]) break;
+            ++offset;
+        }
+        if (offset == directive.size()) return true;
+    }
+    return false;
+}
 
 void verifyBytecode(const detail::InstructionSequence& code) {
     const auto invalid = [](const Instruction& instruction, const char* reason) {
@@ -390,8 +405,14 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
     bool preparingProgram = true;
     try {
         execution_ = std::make_unique<detail::VMExecutionState>();
-        const std::string expanded = detail::expandIncludes(source, storage_.get());
-        execution_->code = detail::compileSource(expanded);
+        if (mayContainInclude(source)) {
+            const std::string expanded = detail::expandIncludes(source, storage_.get());
+            execution_->code = detail::compileSource(expanded);
+        } else {
+            // Compile ordinary programs directly from their source. Avoid
+            // retaining an expanded duplicate while tokens and bytecode grow.
+            execution_->code = detail::compileSource(source);
+        }
         verifyBytecode(execution_->code);
         preparingProgram = false;
         const auto status = runExecution(output, stop, instructionBudget);

@@ -184,6 +184,10 @@ public:
 
     std::vector<Token> scan() {
         std::vector<Token> tokens;
+        // Avoid repeated geometric growth and its transient old+new buffer
+        // overlap on the memory-constrained ESP32 target. BASIC source is
+        // whitespace-heavy, so use a bounded, conservative estimate.
+        tokens.reserve(std::min<std::size_t>(source_.size() / 6 + 1, 512));
         while (!atEnd()) {
             const char c = peek();
             if (c == ' ' || c == '\t' || c == '\r') {
