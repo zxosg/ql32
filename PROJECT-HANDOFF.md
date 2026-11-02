@@ -85,8 +85,10 @@ before relying on those results.
   BASIC loop, SD text round-trip, graphics behavior and memory behavior have
   been verified on hardware. The VGA32 firmware has been flashed and boots;
   USB serial REPL was verified earlier, but the PS/2 keyboard currently
-  produces no input. VGA display, clock, SD/startup, line UI and supervisor
-  behavior remain unverified.
+  produces no input. With an SD card inserted, startup reports
+  `SD storage unavailable`; its capacity and filesystem are not yet known.
+  VGA display, clock, SD/startup, line UI and supervisor behavior remain
+  unverified.
 - M6 Wi-Fi works in host tests and both ESP32 profiles. CYD association,
   status, address, signal and disconnect are verified; repeat on VGA32 when
   available.
@@ -107,13 +109,21 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    received a keyboard reset response. Have the user report that line; if it
    says detected but keys still do nothing, add temporary serial output for
    queued key events and trace the REPL input gate.
-2. Run the current Linux and macOS build/test workflows and both ESP32 profile
+2. Diagnose VGA32 SD mounting. The code selects the documented V1.4 HSPI pins
+   (SCK 14, MISO 2, MOSI 12, CS 13) and calls `SD.begin` at 4 MHz, but reports
+   unavailable with an inserted card. The configured Arduino-ESP32 2.0.17
+   FatFs build has `FF_FS_EXFAT=0`; an exFAT card will not mount. First check
+   the card's capacity/filesystem and test with a spare FAT32 card as a safe
+   control rather than reformatting the user's data card. If a FAT32 card also
+   fails, add serial diagnostics for card type and SPI initialization, then
+   compare with a minimal SD mount sketch.
+3. Run the current Linux and macOS build/test workflows and both ESP32 profile
    builds after the pull. Do not assume the previous test count describes the
    current tree.
-3. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi
+4. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi
    acceptance. Run targeted CYD checks for the current task command and
    wait/result/error forms when practical.
-4. Keep deferred ideas as design backlog until specified: string splitting,
+5. Keep deferred ideas as design backlog until specified: string splitting,
    indirect procedure calls via a string name, slice assignment/string-array
    slicing, palette updates/cycling, and network connections as channels.
    Network channels are separate from the accepted Wi-Fi station service.

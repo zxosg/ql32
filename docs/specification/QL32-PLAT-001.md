@@ -1,13 +1,13 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-02):** Both ESP32 firmware profiles and retained compositor adapters build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, all rotation behavior, and Wi-Fi station acceptance are hardware-verified. The VGA32 firmware has now been flashed and boots; the USB serial REPL was verified earlier, but the PS/2 keyboard produces no input. VGA display, clock, SD, and Wi-Fi acceptance remain pending.
+**Status (2026-11-02):** Both ESP32 firmware profiles and retained compositor adapters build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, all rotation behavior, and Wi-Fi station acceptance are hardware-verified. The VGA32 firmware has been flashed and boots; USB serial REPL was verified earlier, but the PS/2 keyboard produces no input and startup reports SD storage unavailable with a card inserted. Card capacity/filesystem are unknown. VGA display, clock, SD, and Wi-Fi acceptance remain pending.
 
 Supported build families are independent firmware targets:
 
 | Profile | Display / input | Status |
 | --- | --- | --- |
-| `lilygo_vga32` | FabGL VGA, PS/2 | Firmware flashed and boots; USB serial REPL verified; PS/2 keyboard not working; VGA display, clock, SD, and Wi-Fi checks pending |
+| `lilygo_vga32` | FabGL VGA, PS/2 | Firmware flashed and boots; USB serial REPL verified; PS/2 keyboard not working; inserted SD card not mounting; VGA display, clock, and Wi-Fi checks pending |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |

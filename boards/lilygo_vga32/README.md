@@ -19,8 +19,14 @@ Both ESP32 profiles use the custom [4 MiB single-app partition table](../esp32_4
 The BASIC prompt accepts input through the USB serial terminal. PS/2 input is
 intended on port 0 (CLK GPIO 33, DATA GPIO 32), but it has not passed physical
 verification. Startup now reports whether FabGL received a keyboard reset
-response on port 0. Connect serial at 115200 baud, type an immediate statement or
-numbered program line, and press Enter. Backspace edits the current line.
+response on port 0. The initial VGA32 check also reported `SD storage
+unavailable` with a card inserted; its capacity and filesystem have not yet
+been recorded. The configured Arduino-ESP32 2.0.17 FatFs build disables exFAT
+(`FF_FS_EXFAT=0`), so an exFAT card will not mount. Check the card format and
+use a spare FAT32 card to isolate this safely; do not reformat the existing
+data card before backing it up. Connect serial at 115200 baud, type an
+immediate statement or numbered program line, and press Enter. Backspace edits
+the current line.
 Enter `RUN` to execute a numbered program. If serial input appears twice,
 disable local echo in the terminal.
 
