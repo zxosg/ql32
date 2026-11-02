@@ -83,8 +83,10 @@ before relying on those results.
   interactions hardware-verified.
 - M5 host and ESP32 software integration is present. CYD display, serial REPL,
   BASIC loop, SD text round-trip, graphics behavior and memory behavior have
-  been verified on hardware. VGA32 USB serial REPL is verified; VGA graphics,
-  PS/2, clock, SD/startup, line UI and supervisor behavior remain pending.
+  been verified on hardware. The VGA32 firmware has been flashed and boots;
+  USB serial REPL was verified earlier, but the PS/2 keyboard currently
+  produces no input. VGA display, clock, SD/startup, line UI and supervisor
+  behavior remain unverified.
 - M6 Wi-Fi works in host tests and both ESP32 profiles. CYD association,
   status, address, signal and disconnect are verified; repeat on VGA32 when
   available.
@@ -96,16 +98,18 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. Bring the docs into alignment with the current implementation. In
-   particular, the M4 row in `docs/specification/QL32-SRS-001.md` still uses
-   `SPAWN`/`CANCEL`, while current code and README use `TASK`/`KILL`.
-   Check related API, error, and task-result descriptions for the same drift.
-2. Pull/checkout the current `main`, inspect its status, then run the Linux
-   and macOS build/test workflows and both ESP32 profile builds. Do not assume
-   the previous test count describes the current tree.
-3. Run targeted CYD hardware checks for the newly published task command and
-   wait/result/error forms when practical. Complete VGA32 hardware acceptance
-   when that board is available.
+1. Diagnose VGA32 PS/2 input. FabGL port 0 defaults to CLK GPIO 33 and
+   DATA GPIO 32, matching the board pin map; startup calls
+   `ps2.begin(PS2Preset::KeyboardPort0)` and the input adapter polls FabGL's
+   virtual-key queue. The board firmware boots, but physical key events are
+   not reaching the REPL. Check the board/keyboard connection and add temporary
+   serial diagnostics for keyboard initialization and queued key events.
+2. Run the current Linux and macOS build/test workflows and both ESP32 profile
+   builds after the pull. Do not assume the previous test count describes the
+   current tree.
+3. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi
+   acceptance. Run targeted CYD checks for the current task command and
+   wait/result/error forms when practical.
 4. Keep deferred ideas as design backlog until specified: string splitting,
    indirect procedure calls via a string name, slice assignment/string-array
    slicing, palette updates/cycling, and network connections as channels.

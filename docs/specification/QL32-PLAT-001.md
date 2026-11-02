@@ -1,13 +1,13 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-01):** Both ESP32 firmware profiles and retained compositor adapters build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, all rotation behavior, and Wi-Fi station acceptance are hardware-verified. VGA32 display, PS/2, clock, SD, and Wi-Fi acceptance remains pending.
+**Status (2026-11-02):** Both ESP32 firmware profiles and retained compositor adapters build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, all rotation behavior, and Wi-Fi station acceptance are hardware-verified. The VGA32 firmware has now been flashed and boots; the USB serial REPL was verified earlier, but the PS/2 keyboard produces no input. VGA display, clock, SD, and Wi-Fi acceptance remain pending.
 
 Supported build families are independent firmware targets:
 
 | Profile | Display / input | Status |
 | --- | --- | --- |
-| `lilygo_vga32` | FabGL VGA, PS/2 | Firmware and host tests pass; VGA32 display, PS/2, clock, SD, and Wi-Fi checks pending |
+| `lilygo_vga32` | FabGL VGA, PS/2 | Firmware flashed and boots; USB serial REPL verified; PS/2 keyboard not working; VGA display, clock, SD, and Wi-Fi checks pending |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
@@ -41,8 +41,11 @@ permits one active display session. The custom 4 MiB partition reserves a
 partitions retained. The current VGA32 build uses 1,298,053 bytes of that app
 (31.9%) and 52,424 bytes static RAM; `firmware.bin` is 1,304,624 bytes. Host
 builds cover the adapters using fakes; the USB
-serial REPL has been verified on the physical board. VGA output, PS/2 behavior,
-clock status, and SD behavior still require verification. The async line
+serial REPL has been verified on the physical board. On 2026-11-02, firmware
+was flashed and booted, but the PS/2 keyboard produced no input. The FabGL
+keyboard adapter uses port 0, whose default clock/data pins are GPIO 33/32,
+matching the board profile. VGA output, clock status, and SD behavior still
+require verification. The async line
 presenter for alert, confirmation, dialog, and menu requests is integrated. It
 accepts replies via serial or PS/2 and is covered by Linux state-machine tests;
 physical interaction still requires board verification. ESP32-S3 TFT
