@@ -384,12 +384,16 @@ not a compatibility claim. See [Annex32's bitwise reference](https://cicciocb.co
 the [SuperBASIC operator appendix](https://superbasic-manual.readthedocs.io/en/latest/Appendices/Appendix11.html),
 and the OPL samples noted in [docs/reference](../reference/README.md).
 
-`FREE()` returns the current free-memory estimate in bytes as a number. On
-ESP32 it reports free byte-addressable heap; on Linux it reports host memory
-available for new allocations. This is platform memory, not an exact count of
-bytes owned by the current BASIC session. Use repeated `PRINT FREE()` calls
-to observe allocation changes. The target shell's separate `MEM` command is
-not implemented.
+`FREE()` and `FREE(0)` return the current free-memory estimate in bytes.
+`FREE(1)` returns the largest contiguous free block in bytes, and `FREE(2)`
+returns the number of free blocks reported by the allocator. ESP32 reports
+these values for byte-addressable heap. Linux supports only selector 0; the
+other selectors report that allocator fragmentation metrics are unavailable.
+Selectors must be integer values from 0 through 2. `ql32.inc` defines
+`KFreeTotal`, `KFreeContiguous`, and `KFreeFragments` for the selector values.
+Values are platform memory snapshots, not exact counts of memory owned by the
+current BASIC session. The target shell's separate `MEM` command is not
+implemented.
 
 ## 8. Immediate mode, commands, and errors
 
@@ -420,7 +424,7 @@ source lines. After loading, use `LIST` to inspect the numbered program and
 `SLICE [instructions]`, `PRIORITY task-id,weight`, `SUSPEND id`, and
 `RESUME id`. `TASK` reads source through the configured storage service and
 starts a task. Its statement form `TASK "path.bas"` reports the new task ID to
-the current print channel; `task_id = TASK("path.bas")` returns the ID without
+console channel `#0`; `task_id = TASK("path.bas")` returns the ID without
 printing. Add `KTaskWait` to wait for completion:
 `TASK "path.bas", KTaskWait` or `task_id = TASK("path.bas", KTaskWait)`.
 Wait mode focuses the child while it runs, then resumes the caller. Child

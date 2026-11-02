@@ -64,6 +64,9 @@ public:
     std::size_t openChannelCount() const;
     void setErrorContext(runtime::ErrorCode code, std::string detail = {});
     void abortExecution() noexcept;
+    // Release retained display memory while keeping this interpreter session
+    // available for the next interactive command.
+    void releaseGraphicsResources() noexcept;
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
     const std::string& errorDetail() const noexcept { return errorDetail_; }
     void clear();

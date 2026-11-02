@@ -448,6 +448,25 @@ void testTasksUsesDefaultAndExplicitPrintChannels() {
             "TASKS #channel did not redirect output to the selected channel");
 }
 
+void testKillConfirmationUsesConsoleChannel() {
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    std::ostringstream supervisorOutput;
+    std::ostringstream workerOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    const auto worker = scheduler.launchWorker("x=1\n", workerOutput);
+
+    require(scheduler.submit(supervisor, "KILL " + std::to_string(worker) + "\n"),
+            "supervisor did not accept KILL command");
+    require(scheduler.tick(), "scheduler did not execute KILL command");
+    require(supervisorOutput.str() == "Killed task " + std::to_string(worker) + "\n",
+            "KILL confirmation was not sent to console channel #0");
+    require(graphics->writtenText.empty(),
+            "KILL confirmation allocated or wrote to graphics channel #1");
+}
+
 void testTaskSupportsCommandAndFunctionSyntax() {
     auto storage = std::make_shared<ProgramStorage>();
     storage->files["worker.bas"] = "PRINT \"worker ready\"\n";
@@ -474,8 +493,8 @@ void testTaskSupportsCommandAndFunctionSyntax() {
     const auto commandChild = scheduler.tasks();
     require(commandChild.size() == 3 && commandChild[2].id == 3,
             "TASK command did not create a worker");
-    require(graphics->writtenText == "Started task 3\n",
-            "TASK command did not report its task ID to the print channel");
+    require(output.str() == "Started task 3\n" && graphics->writtenText.empty(),
+            "TASK command did not report its task ID to console channel #0");
 }
 
 void testTaskWaitResumesCallerAndExposesChildStatus() {
@@ -625,6 +644,7 @@ int main() {
     testPriorityWeightsChangeFrequency();
     testSupervisorCanSetSliceAndWorkerPriority();
     testTasksUsesDefaultAndExplicitPrintChannels();
+    testKillConfirmationUsesConsoleChannel();
     testTaskSupportsCommandAndFunctionSyntax();
     testTaskWaitResumesCallerAndExposesChildStatus();
     testTaskWaitReturnsChildErrorContext();

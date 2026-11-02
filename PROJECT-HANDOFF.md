@@ -17,12 +17,12 @@ session.
 
 ## Repository state reviewed
 
-GitHub `main` was reviewed at
-[`4bfa26e`](https://github.com/zxosg/ql32/commit/4bfa26e60e49774b8b104e5aba77638f6476fd4b),
-“Add session-safe UI commands and expand runtime services” (2 November 2026).
-This supersedes the old `d1831f8` baseline and old notes that described the
-implementation as unpushed local work. Check the actual checkout status before
-editing; this handoff describes the published GitHub state.
+The current work is based on `main` commit
+[`8bdb180`](https://github.com/zxosg/ql32/commit/8bdb1808bf7f4e7136c4cb705fcb98158cf77f71),
+“Reserve VGA console rows and compact bytecode metadata” (2 November 2026).
+This supersedes the earlier `4bfa26e` and `d1831f8` handoff baselines. Check
+the actual checkout status before editing; this file is updated with the
+current memory optimization and hardware validation results.
 
 The latest implementation includes:
 
@@ -94,6 +94,39 @@ before relying on those results.
   the Olimex board. A separate Olimex profile now selects its SD MISO GPIO 35;
   the LILYGO profile retains MISO GPIO 2. The supplied board PDF is local and
   not included in the public repository.
+- Olimex task/heap stress check (2026-11-02): `FREE()` reports total free
+  bytes, `FREE(1)` the largest contiguous block, and `FREE(2)` the free-block
+  count; `ql32.inc` defines `KFreeTotal`, `KFreeContiguous`, and
+  `KFreeFragments`. Earlier testing found a 104,808 / 69,620 / 15 baseline and
+  showed that Mandelbrot compilation fails below its memory peak. The
+  240x176 four-bit canvas itself needs 21,120 bytes.
+- Canvas arena and task-message hardware retest (2026-11-02): Olimex firmware
+  flashed successfully. Baseline was 106,224 / 69,620 / 12. `KILL` and
+  statement-form `TASK` acknowledgements now write to console channel `#0`;
+  this avoids allocating a full-screen supervisor graphics canvas. With the
+  fix, `TASK "worker-1.bas"` through worker 3 started as IDs 2–4 without the
+  prior worker line-2 OOM. All three active: 47,168 / 18,420 / 20. Mandelbrot
+  started as task 5 but failed during compilation at that pressure. FIFO kills
+  restored 102,880 / 69,620 / 26. Mandelbrot then completed and printed
+  `Mandelbrot complete`. A second three-worker cycle also started and killed
+  successfully; its largest block returned to 69,620. After task cycles, free
+  memory remained 5–10 KB below the reset baseline with a higher block count;
+  a reboot restored 106,244 / 69,620 / 16. Mandelbrot plus one worker started
+  and remained runnable without OOM, but did not complete during the test
+  window before the board was reset.
+- The window manager uses a bounded, lazily-growing canvas arena that compacts
+  blocks on close/resize and releases storage when the last canvas closes.
+  Focused host graphics tests pass; Olimex and CYD firmware builds pass. The
+  scheduler test reaches and passes the task-control channel tests, then fails
+  at the interactive BREAK variable-preservation assertion; that failure is
+  not yet isolated. The USB serial monitor was closed after testing, leaving
+  the board rebooted at the supervisor prompt.
+- CYD memory availability: CYD uses the same portable `WindowManager` arena,
+  VM/compiler, scheduler resource cleanup, task acknowledgements, and ESP32
+  `MemoryService` as Olimex. Its `WindowedService` cap is 76,800 bytes. The
+  CYD firmware builds (50,020 bytes static RAM, 1,298,805 bytes flash), but
+  the new multi-task heap/arena behavior has not yet been exercised on CYD
+  hardware.
 - M6 Wi-Fi works in host tests and both ESP32 profiles. CYD association,
   status, address, signal and disconnect are verified; repeat on VGA32 when
   available.
@@ -135,6 +168,18 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    indirect procedure calls via a string name, slice assignment/string-array
    slicing, palette updates/cycling, and network connections as channels.
    Network channels are separate from the accepted Wi-Fi station service.
+7. Investigate retained heap after repeated worker cycles (about 5–10 KB below
+   reset baseline, with free-block count rising), and measure Mandelbrot with
+   exactly one worker active to completion. Three concurrent workers plus
+   Mandelbrot currently exceed compiler memory; after FIFO kills it completes.
+   Current Olimex firmware was built and flashed on 2026-11-02 (53,012 bytes
+   static RAM, 1,391,773 bytes flash). Serial monitor has been closed and the
+   board rebooted after testing.
+8. When CYD hardware is available, flash its `esp32_2432s028` image and repeat
+   the three-worker/FIFO-kill/Mandelbrot sequence. Sample `FREE(0..2)` before
+   launch, with one and three workers, after each kill, and after reboot; verify
+   task acknowledgements stay on serial channel `#0` and compare the canvas
+   arena's recovery with the Olimex results.
 
 ## Starting a new chat
 

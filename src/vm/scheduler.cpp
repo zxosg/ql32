@@ -419,6 +419,8 @@ bool SessionScheduler::tick() {
     if (!selectedIndex) return false;
 
     Task& current = *candidateTasks_[*selectedIndex];
+    const bool submittedInteractiveCommand =
+        current.interactive && current.interactiveSubmission;
     const auto handleFailure = [&](std::string message, runtime::ErrorCode code,
                                    std::string detail) {
         current.error = std::move(message);
@@ -431,6 +433,8 @@ bool SessionScheduler::tick() {
         current.source.clear();
         current.started = false;
         if (current.interactive) {
+            if (!submittedInteractiveCommand && current.interpreter)
+                current.interpreter->releaseGraphicsResources();
             policy_.remove(current.id);
             current.status = TaskStatus::WaitingInput;
         } else {
@@ -459,6 +463,8 @@ bool SessionScheduler::tick() {
             current.started = false;
             policy_.remove(current.id);
             if (current.interactive) {
+                if (!submittedInteractiveCommand)
+                    current.interpreter->releaseGraphicsResources();
                 current.status = TaskStatus::WaitingInput;
             } else {
                 current.status = TaskStatus::Completed;

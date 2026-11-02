@@ -10,6 +10,10 @@ CONST KGupdateAuto = 1
 CONST KDeviceFile = 1
 CONST KDeviceSerial = 2
 CONST KDeviceNull = 3
+' FREE() heap memory selectors
+CONST KFreeTotal = 0
+CONST KFreeContiguous = 1
+CONST KFreeFragments = 2
 ' TASK start flags and TASKRESULT selectors
 CONST KTaskWait = 1
 CONST KTaskResultStatus = 1

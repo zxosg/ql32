@@ -473,6 +473,40 @@ void testCloseWindowReleasesCanvasAndAllowsReuse() {
             "released canvas budget could not be reused");
 }
 
+void testCanvasArenaCompactsAndReusesStorage() {
+    using namespace ql32::graphics;
+    WindowManager manager(16, 8, 5, 32);
+    const auto first = manager.create(1, {0, 0, 4, 4}, PixelDepth::Four);
+    const auto middle = manager.create(2, {4, 0, 4, 4}, PixelDepth::Four);
+    const auto last = manager.create(3, {8, 0, 4, 4}, PixelDepth::Four);
+    manager.canvas(first).setPixel(0, 0, 3);
+    manager.canvas(middle).setPixel(1, 1, 6);
+    manager.canvas(last).setPixel(2, 2, 9);
+
+    manager.close(middle);
+    require(manager.canvas(first).pixel(0, 0) == 3 &&
+                manager.canvas(last).pixel(2, 2) == 9,
+            "canvas arena compaction changed a live canvas");
+
+    const auto reused = manager.create(4, {12, 0, 4, 4}, PixelDepth::Four);
+    manager.canvas(reused).setPixel(3, 3, 12);
+    require(manager.canvas(reused).pixel(3, 3) == 12,
+            "canvas arena did not reuse released canvas space");
+    bool limited = false;
+    try {
+        (void)manager.create(5, {0, 4, 4, 4}, PixelDepth::Four);
+        (void)manager.create(6, {4, 4, 4, 4}, PixelDepth::Four);
+    } catch (const std::runtime_error&) {
+        limited = true;
+    }
+    require(limited, "canvas arena exceeded its configured byte limit");
+
+    manager.close(reused);
+    manager.setPixelDepth(last, PixelDepth::Eight);
+    require(manager.canvas(last).pixel(2, 2) == 9,
+            "canvas depth change lost pixels in the arena");
+}
+
 void testCloseWindowCommandDispatch() {
     auto graphics = std::make_shared<RecordingGraphics>();
     ql32::Interpreter interpreter({}, {}, {}, graphics);
@@ -498,5 +532,6 @@ int main() {
     testWindowMovementRestoresCoveredContent();
     testCanvasReshapeReusesFullScreenStorage();
     testCloseWindowReleasesCanvasAndAllowsReuse();
+    testCanvasArenaCompactsAndReusesStorage();
     testCloseWindowCommandDispatch();
 }

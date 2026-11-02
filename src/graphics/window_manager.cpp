@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <cstring>
 #include <stdexcept>
 #include <utility>
 
@@ -143,10 +144,155 @@ std::array<std::uint8_t, 5> glyph(char character) {
 
 } // namespace
 
+CanvasArena::Block& CanvasArena::find(std::uint64_t handle) {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    if (found == blocks_.end()) throw std::out_of_range("unknown canvas arena handle");
+    return *found;
+}
+
+const CanvasArena::Block& CanvasArena::find(std::uint64_t handle) const {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    if (found == blocks_.end()) throw std::out_of_range("unknown canvas arena handle");
+    return *found;
+}
+
+void CanvasArena::compact(std::uint64_t lastHandle) noexcept {
+    std::sort(blocks_.begin(), blocks_.end(), [lastHandle](const Block& a, const Block& b) {
+        if (a.handle == lastHandle) return false;
+        if (b.handle == lastHandle) return true;
+        return a.offset < b.offset;
+    });
+    std::size_t offset = 0;
+    for (auto& block : blocks_) {
+        if (block.offset != offset) {
+            std::memmove(bytes_.data() + offset, bytes_.data() + block.offset, block.size);
+            block.offset = offset;
+        }
+        offset += block.size;
+    }
+}
+
+std::uint64_t CanvasArena::allocate(std::size_t bytes) {
+    if (bytes == 0 || bytes > maximumBytes_)
+        throw std::runtime_error("window manager canvas memory limit reached");
+    compact();
+    const auto used = bytes_.size();
+    if (bytes > maximumBytes_ - used)
+        throw std::runtime_error("window manager canvas memory limit reached");
+    if (nextHandle_ == 0) throw std::overflow_error("canvas arena handles exhausted");
+    const auto handle = nextHandle_++;
+    blocks_.push_back({handle, used, bytes});
+    try {
+        bytes_.resize(used + bytes, 0);
+    } catch (...) {
+        blocks_.pop_back();
+        throw;
+    }
+    return handle;
+}
+
+void CanvasArena::release(std::uint64_t handle) noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    if (found == blocks_.end()) return;
+    blocks_.erase(found);
+    compact();
+    if (blocks_.empty()) {
+        std::vector<std::uint8_t>().swap(bytes_);
+    } else {
+        std::size_t used = 0;
+        for (const auto& block : blocks_) used += block.size;
+        bytes_.resize(used);
+    }
+}
+
+void CanvasArena::resize(std::uint64_t handle, std::size_t bytes) {
+    (void)find(handle);
+    if (bytes == 0) throw std::runtime_error("canvas dimensions must be positive");
+    if (bytes > maximumBytes_) throw std::runtime_error("window manager canvas memory limit reached");
+    compact(handle);
+    auto& target = find(handle);
+    const auto oldSize = target.size;
+    const auto used = bytes_.size();
+    const auto otherBytes = used - oldSize;
+    if (bytes > maximumBytes_ - otherBytes)
+        throw std::runtime_error("window manager canvas memory limit reached");
+    bytes_.resize(otherBytes + bytes, 0);
+    target.offset = otherBytes;
+    target.size = bytes;
+}
+
+std::uint8_t* CanvasArena::data(std::uint64_t handle) noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    return found == blocks_.end() ? nullptr : bytes_.data() + found->offset;
+}
+
+const std::uint8_t* CanvasArena::data(std::uint64_t handle) const noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    return found == blocks_.end() ? nullptr : bytes_.data() + found->offset;
+}
+
+std::size_t CanvasArena::size(std::uint64_t handle) const noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    return found == blocks_.end() ? 0 : found->size;
+}
+
 IndexedCanvas::IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth)
+    : IndexedCanvas(width, height, depth, nullptr) {}
+
+IndexedCanvas::IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth,
+                             CanvasArena* arena)
     : width_(width), height_(height), depth_(depth),
-      ink_(std::min<ColorIndex>(7, colorMask(depth))),
-      pixels_(checkedCanvasBytes(width, height, depth), 0) {}
+      ink_(std::min<ColorIndex>(7, colorMask(depth))), arena_(arena) {
+    const auto bytes = checkedCanvasBytes(width, height, depth);
+    if (arena_) arenaHandle_ = arena_->allocate(bytes);
+    else pixels_.assign(bytes, 0);
+}
+
+IndexedCanvas::~IndexedCanvas() {
+    if (arena_ && arenaHandle_) arena_->release(arenaHandle_);
+}
+
+IndexedCanvas::IndexedCanvas(IndexedCanvas&& other) noexcept
+    : width_(other.width_), height_(other.height_), depth_(other.depth_),
+      ink_(other.ink_), paper_(other.paper_), arena_(other.arena_),
+      arenaHandle_(other.arenaHandle_), pixels_(std::move(other.pixels_)) {
+    other.arena_ = nullptr;
+    other.arenaHandle_ = 0;
+}
+
+IndexedCanvas& IndexedCanvas::operator=(IndexedCanvas&& other) noexcept {
+    if (this == &other) return *this;
+    if (arena_ && arenaHandle_) arena_->release(arenaHandle_);
+    width_ = other.width_;
+    height_ = other.height_;
+    depth_ = other.depth_;
+    ink_ = other.ink_;
+    paper_ = other.paper_;
+    arena_ = other.arena_;
+    arenaHandle_ = other.arenaHandle_;
+    pixels_ = std::move(other.pixels_);
+    other.arena_ = nullptr;
+    other.arenaHandle_ = 0;
+    return *this;
+}
+
+std::uint8_t* IndexedCanvas::pixelData() noexcept {
+    return arena_ ? arena_->data(arenaHandle_) : pixels_.data();
+}
+
+const std::uint8_t* IndexedCanvas::pixelData() const noexcept {
+    return arena_ ? arena_->data(arenaHandle_) : pixels_.data();
+}
+
+std::size_t IndexedCanvas::storageBytes() const noexcept {
+    return arena_ ? arena_->size(arenaHandle_) : pixels_.size();
+}
 
 std::uint16_t IndexedCanvas::paletteSize() const noexcept {
     return static_cast<std::uint16_t>(colorMask(depth_)) + 1;
@@ -156,14 +302,14 @@ ColorIndex IndexedCanvas::readPixel(std::size_t index) const noexcept {
     switch (depth_) {
     case PixelDepth::One: {
         const auto shift = 7u - static_cast<unsigned>(index & 7u);
-        return static_cast<ColorIndex>((pixels_[index >> 3u] >> shift) & 1u);
+        return static_cast<ColorIndex>((pixelData()[index >> 3u] >> shift) & 1u);
     }
     case PixelDepth::Four: {
         const auto shift = (index & 1u) == 0 ? 4u : 0u;
-        return static_cast<ColorIndex>((pixels_[index >> 1u] >> shift) & 0x0Fu);
+        return static_cast<ColorIndex>((pixelData()[index >> 1u] >> shift) & 0x0Fu);
     }
     case PixelDepth::Eight:
-        return pixels_[index];
+        return pixelData()[index];
     }
     return 0;
 }
@@ -173,21 +319,21 @@ void IndexedCanvas::writePixel(std::size_t index, ColorIndex color) noexcept {
     case PixelDepth::One: {
         const auto shift = 7u - static_cast<unsigned>(index & 7u);
         const auto mask = static_cast<ColorIndex>(1u << shift);
-        pixels_[index >> 3u] = static_cast<ColorIndex>(
-            (pixels_[index >> 3u] & static_cast<ColorIndex>(~mask)) |
+        pixelData()[index >> 3u] = static_cast<ColorIndex>(
+            (pixelData()[index >> 3u] & static_cast<ColorIndex>(~mask)) |
             static_cast<ColorIndex>((color & 1u) << shift));
         break;
     }
     case PixelDepth::Four: {
         const auto shift = (index & 1u) == 0 ? 4u : 0u;
         const auto mask = static_cast<ColorIndex>(0x0Fu << shift);
-        pixels_[index >> 1u] = static_cast<ColorIndex>(
-            (pixels_[index >> 1u] & static_cast<ColorIndex>(~mask)) |
+        pixelData()[index >> 1u] = static_cast<ColorIndex>(
+            (pixelData()[index >> 1u] & static_cast<ColorIndex>(~mask)) |
             static_cast<ColorIndex>((color & 0x0Fu) << shift));
         break;
     }
     case PixelDepth::Eight:
-        pixels_[index] = color;
+        pixelData()[index] = color;
         break;
     }
 }
@@ -215,7 +361,12 @@ void IndexedCanvas::setDepth(PixelDepth depth) {
             break;
         }
     }
-    pixels_.swap(converted);
+    if (arena_) {
+        arena_->resize(arenaHandle_, converted.size());
+        std::memcpy(pixelData(), converted.data(), converted.size());
+    } else {
+        pixels_.swap(converted);
+    }
     depth_ = depth;
     ink_ &= mask;
     paper_ &= mask;
@@ -233,12 +384,12 @@ void IndexedCanvas::setPaper(ColorIndex color) {
 
 void IndexedCanvas::clear() {
     if (depth_ == PixelDepth::Eight) {
-        std::fill(pixels_.begin(), pixels_.end(), paper_);
+        std::fill(pixelData(), pixelData() + storageBytes(), paper_);
     } else if (depth_ == PixelDepth::Four) {
-        std::fill(pixels_.begin(), pixels_.end(),
+        std::fill(pixelData(), pixelData() + storageBytes(),
                   static_cast<ColorIndex>((paper_ << 4u) | paper_));
     } else {
-        std::fill(pixels_.begin(), pixels_.end(), paper_ ? 0xFFu : 0x00u);
+        std::fill(pixelData(), pixelData() + storageBytes(), paper_ ? 0xFFu : 0x00u);
     }
 }
 
@@ -387,7 +538,7 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
     if (width == width_ && height == height_) return;
 
     const auto newBytes = checkedCanvasBytes(width, height, depth_);
-    if (newBytes <= pixels_.capacity()) {
+    if (!arena_ && newBytes <= pixels_.capacity()) {
         const auto oldWidth = width_;
         const auto oldHeight = height_;
         const auto copyWidth = std::min(oldWidth, width);
@@ -434,7 +585,12 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
             const auto color = readPixel(static_cast<std::size_t>(row) * width_ + column);
             resized.writePixel(static_cast<std::size_t>(row) * width + column, color);
         }
-    pixels_.swap(resized.pixels_);
+    if (arena_) {
+        arena_->resize(arenaHandle_, newBytes);
+        std::memcpy(pixelData(), resized.pixels_.data(), newBytes);
+    } else {
+        pixels_.swap(resized.pixels_);
+    }
     width_ = width;
     height_ = height;
 }
@@ -443,7 +599,8 @@ WindowManager::WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeig
                              std::size_t maximumWindows,
                              std::size_t maximumCanvasBytes)
     : screenWidth_(screenWidth), screenHeight_(screenHeight),
-      maximumWindows_(maximumWindows), maximumCanvasBytes_(maximumCanvasBytes) {
+      maximumWindows_(maximumWindows), maximumCanvasBytes_(maximumCanvasBytes),
+      arena_(maximumCanvasBytes) {
     if (screenWidth_ == 0 || screenHeight_ == 0)
         throw std::invalid_argument("window manager screen dimensions must be positive");
     if (screenWidth_ > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
@@ -483,7 +640,7 @@ WindowId WindowManager::create(SessionId owner, Rect bounds, PixelDepth depth) {
     if (nextId_ == 0) throw std::overflow_error("window identifiers exhausted");
     const WindowId id = nextId_++;
     windows_.push_back({id, owner, bounds, true,
-                        IndexedCanvas(bounds.width, bounds.height, depth)});
+                        IndexedCanvas(bounds.width, bounds.height, depth, &arena_)});
     return id;
 }
 

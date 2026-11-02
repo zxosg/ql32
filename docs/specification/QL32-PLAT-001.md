@@ -1,15 +1,15 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-02):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, all rotation behavior, and Wi-Fi station acceptance are hardware-verified. The VGA/PS2/SD hardware report was from an Olimex ESP32-SBC-FabGL Rev B running the LILYGO profile. That profile uses the wrong SD MISO pin for Olimex (GPIO 2 vs GPIO 35), so the SD failure is explained; an Olimex profile has been added but still needs build and hardware verification. PS/2 is wired to the expected GPIOs but remains unverified. VGA display, clock, SD, and Wi-Fi acceptance remain pending.
+**Status (2026-11-02):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` are included in the CYD firmware build; these new memory paths still need CYD hardware stress validation. Olimex ESP32-SBC-FabGL Rev B has its own profile (SD MISO GPIO 35) and has been built and flashed. Multiple workers, FIFO cancellation, heap recovery, and Mandelbrot after cancellation were verified on Olimex. Three concurrent workers plus Mandelbrot still exceed compiler memory. Full VGA, keyboard shortcuts, clock, and Wi-Fi acceptance on Olimex remain partly open.
 
 Supported build families are independent firmware targets:
 
 | Profile | Display / input | Status |
 | --- | --- | --- |
 | `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance on a LILYGO board pending |
-| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2 | Profile added for Rev B; build and hardware acceptance pending |
-| `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified |
+| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2 | Built and flashed on Rev B; serial REPL, SD mount, PS/2 detection, and multi-task memory stress checked; full VGA and shortcut acceptance open |
+| `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; shared memory optimizations build, CYD stress validation pending |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
 | `linux` | Host adapter | Development and conformance host |
@@ -86,8 +86,14 @@ All values are free heap bytes. The 28,800-byte drop from 1-bit to 4-bit and
 38,400-byte drop from 4-bit to 8-bit match the additional storage for 76,800
 pixels. The depth was selected through the platform-neutral C++ adapter API;
 the BASIC language currently has no pixel-depth setter command. No rotation
-produced a further heap change at any tested depth. The current CYD firmware's
-opened-endpoint registry was also exercised: serial text and byte output,
+produced a further heap change at any tested depth. New shared memory
+management uses the bounded compacting `WindowManager` canvas arena, ESP-IDF
+`FREE(1..2)` metrics, and graphics cleanup when a task returns to its prompt.
+The portable VM also compiles ordinary source without retaining an expanded
+copy, reducing compiler preparation peaks. Both CYD and Olimex builds include
+these paths; Olimex received the hardware stress test, while CYD currently has
+build and host-test coverage only. The
+current CYD firmware's opened-endpoint registry was also exercised: serial text and byte output,
 null text/byte/graphics discard, type/count enumeration, and close/reopen all
 worked.
 

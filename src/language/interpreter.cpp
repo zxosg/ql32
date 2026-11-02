@@ -607,7 +607,10 @@ private:
                     error(instruction, "channel selector is missing");
                 const std::size_t passedArguments = instruction.argCount -
                     static_cast<std::size_t>(instruction.channelArgument);
-                if (instruction.name == "GETCHANNEL") {
+                if (instruction.name == "FREE") {
+                    if (passedArguments > 1)
+                        error(instruction, "FREE accepts zero or one selector (0, 1, or 2)");
+                } else if (instruction.name == "GETCHANNEL") {
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "GETCHANNEL expects one or two arguments");
                 } else if (instruction.name == "OPEN") {
@@ -1918,6 +1921,16 @@ void Interpreter::abortExecution() noexcept {
     execution_.reset();
 }
 
+void Interpreter::releaseGraphicsResources() noexcept {
+    if (!graphics_) return;
+    try {
+        graphics_->closeSession(session_id_);
+    } catch (...) {
+        // Resource cleanup must not prevent an interactive session from
+        // returning to its prompt.
+    }
+}
+
 Interpreter::~Interpreter() {
     if (ui_) ui_->cancelSession(session_id_);
     if (channels_) channels_->closeSession(session_id_);
@@ -2334,7 +2347,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!taskControl_->killTask(id))
                 throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
                                      "no active task with that ID");
-            writeChannelText(default_output_channel_,
+            writeChannelText(0,
                              "Killed task " + std::to_string(id) + "\n");
         } else if (word == "TASKRESULT" || word.rfind("TASKRESULT ", 0) == 0) {
             if (!taskControl_)

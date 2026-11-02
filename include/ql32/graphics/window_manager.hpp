@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace ql32::graphics {
@@ -20,11 +21,44 @@ struct WindowState {
     bool visible = true;
 };
 
+// Lazily growing compact store for retained canvas pixels. Handles remain
+// stable while blocks move during compaction.
+class CanvasArena {
+public:
+    explicit CanvasArena(std::size_t maximumBytes = 0) noexcept
+        : maximumBytes_(maximumBytes == 0 ? std::numeric_limits<std::size_t>::max()
+                                          : maximumBytes) {}
+    CanvasArena(const CanvasArena&) = delete;
+    CanvasArena& operator=(const CanvasArena&) = delete;
+
+    std::uint64_t allocate(std::size_t bytes);
+    void release(std::uint64_t handle) noexcept;
+    void resize(std::uint64_t handle, std::size_t bytes);
+    std::uint8_t* data(std::uint64_t handle) noexcept;
+    const std::uint8_t* data(std::uint64_t handle) const noexcept;
+    std::size_t size(std::uint64_t handle) const noexcept;
+
+private:
+    struct Block { std::uint64_t handle; std::size_t offset; std::size_t size; };
+    void compact(std::uint64_t lastHandle = 0) noexcept;
+    Block& find(std::uint64_t handle);
+    const Block& find(std::uint64_t handle) const;
+    std::size_t maximumBytes_;
+    std::uint64_t nextHandle_ = 1;
+    std::vector<Block> blocks_;
+    std::vector<std::uint8_t> bytes_;
+};
+
 // Retained indexed canvas with packed 1-, 4-, or 8-bit pixels.
 class IndexedCanvas {
 public:
     IndexedCanvas(std::uint32_t width, std::uint32_t height,
                   PixelDepth depth = PixelDepth::Four);
+    ~IndexedCanvas();
+    IndexedCanvas(const IndexedCanvas&) = delete;
+    IndexedCanvas& operator=(const IndexedCanvas&) = delete;
+    IndexedCanvas(IndexedCanvas&& other) noexcept;
+    IndexedCanvas& operator=(IndexedCanvas&& other) noexcept;
 
     std::uint32_t width() const noexcept { return width_; }
     std::uint32_t height() const noexcept { return height_; }
@@ -32,7 +66,7 @@ public:
     std::uint16_t paletteSize() const noexcept;
     ColorIndex ink() const noexcept { return ink_; }
     ColorIndex paper() const noexcept { return paper_; }
-    std::size_t storageBytes() const noexcept { return pixels_.size(); }
+    std::size_t storageBytes() const noexcept;
 
     void setDepth(PixelDepth depth);
     void setInk(ColorIndex color);
@@ -51,11 +85,17 @@ private:
     friend class WindowManager;
     ColorIndex readPixel(std::size_t index) const noexcept;
     void writePixel(std::size_t index, ColorIndex color) noexcept;
+    std::uint8_t* pixelData() noexcept;
+    const std::uint8_t* pixelData() const noexcept;
+    IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth,
+                  CanvasArena* arena);
     std::uint32_t width_;
     std::uint32_t height_;
     PixelDepth depth_;
     ColorIndex ink_ = 7;
     ColorIndex paper_ = 0;
+    CanvasArena* arena_ = nullptr;
+    std::uint64_t arenaHandle_ = 0;
     std::vector<ColorIndex> pixels_;
 };
 
@@ -117,6 +157,7 @@ private:
     std::uint32_t screenHeight_;
     std::size_t maximumWindows_;
     std::size_t maximumCanvasBytes_;
+    CanvasArena arena_;
     WindowId nextId_ = 1;
     std::vector<Entry> windows_; // bottom-to-top stacking order
 };

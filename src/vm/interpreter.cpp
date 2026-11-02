@@ -695,7 +695,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         pushValue(static_cast<double>(id));
                     } else {
                         const runtime::ChannelId previousChannel = state.printChannel;
-                        state.printChannel = resolveChannel(default_output_channel_);
+                        state.printChannel = resolveChannel(0);
                         writePrintText("Started task " + std::to_string(id) + "\n",
                                        instruction);
                         if (state.printChannel == 0) output_column_ = 0;
@@ -939,7 +939,25 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (!memory_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "memory service unavailable");
-                    pushValue(static_cast<double>(memory_->freeBytes()));
+                    std::uint64_t selector = 0;
+                    if (!arguments.empty()) {
+                        const auto* number = std::get_if<double>(&arguments[0]);
+                        if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < 0 || *number > 2)
+                            runtimeError(instruction, "FREE selector must be 0, 1, or 2");
+                        selector = static_cast<std::uint64_t>(*number);
+                    }
+                    if (selector == 0) {
+                        pushValue(static_cast<double>(memory_->freeBytes()));
+                    } else {
+                        const auto info = memory_->fragmentationInfo();
+                        if (!info)
+                            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                "heap fragmentation metrics unavailable on this platform");
+                        const auto value = selector == 1 ? info->largestFreeBlockBytes :
+                                                           info->freeBlockCount;
+                        pushValue(static_cast<double>(value));
+                    }
                     break;
                 }
                 if (instruction.name == "GETCHANNEL") {
