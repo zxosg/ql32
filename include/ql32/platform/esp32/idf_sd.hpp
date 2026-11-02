@@ -10,8 +10,6 @@
 #include <string_view>
 #include <unordered_map>
 
-struct sdmmc_card_t;
-
 namespace ql32::platform::esp32 {
 
 struct SdSpiPins {
@@ -38,7 +36,8 @@ public:
     const std::string& error() const noexcept { return error_; }
 
 private:
-    sdmmc_card_t* card_ = nullptr;
+    // Kept opaque so ESP-IDF types do not leak from this platform adapter.
+    void* card_ = nullptr;
     std::string mountPoint_ = "/sd";
     std::string error_;
     bool mounted_ = false;

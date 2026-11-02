@@ -101,7 +101,8 @@ bool IdfSdCard::mount(SdSpiPins pins, std::string mountPoint) {
     device.gpio_wp = SDSPI_SLOT_NO_WP;
     device.gpio_int = GPIO_NUM_NC;
 
-    result = esp_vfs_fat_sdspi_mount(mountPoint_.c_str(), &host, &device, &mount, &card_);
+    sdmmc_card_t* card = nullptr;
+    result = esp_vfs_fat_sdspi_mount(mountPoint_.c_str(), &host, &device, &mount, &card);
     if (result != ESP_OK) {
         error_ = std::string("SD card mount failed: ") + esp_err_to_name(result);
         spi_bus_free(SPI2_HOST);
@@ -109,13 +110,14 @@ bool IdfSdCard::mount(SdSpiPins pins, std::string mountPoint) {
         card_ = nullptr;
         return false;
     }
+    card_ = card;
     mounted_ = true;
     return true;
 }
 
 void IdfSdCard::unmount() {
     if (mounted_) {
-        esp_vfs_fat_sdcard_unmount(mountPoint_.c_str(), card_);
+        esp_vfs_fat_sdcard_unmount(mountPoint_.c_str(), static_cast<sdmmc_card_t*>(card_));
         card_ = nullptr;
         mounted_ = false;
     }
