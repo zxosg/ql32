@@ -420,13 +420,16 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         return status;
     } catch (const std::bad_alloc&) {
         if (ui_) ui_->cancelSession(session_id_);
+        std::string detail = preparingProgram ? "out of memory preparing BASIC program" :
+                                                 "out of memory executing BASIC program";
+        if (!preparingProgram && execution_ && execution_->pc != 0 &&
+            execution_->pc <= execution_->code.size()) {
+            const Instruction& current = execution_->code[execution_->pc - 1];
+            detail += " at line " + std::to_string(current.line);
+        }
         execution_.reset();
-        setErrorContext(runtime::ErrorCode::OutOfMemory,
-            preparingProgram ? "out of memory preparing BASIC program" :
-                               "out of memory executing BASIC program");
-        throw std::runtime_error(preparingProgram ?
-            "out of memory preparing BASIC program" :
-            "out of memory executing BASIC program");
+        setErrorContext(runtime::ErrorCode::OutOfMemory, detail);
+        throw std::runtime_error(detail);
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
@@ -589,17 +592,17 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 ", column " + std::to_string(instruction.column) +
                 ": incorrect array rank (expected " + std::to_string(instruction.rank) +
                 ", actual " + std::to_string(array.lengths.size()) + ")");
-        std::vector<std::size_t> indices(instruction.rank);
+        std::size_t offset = 0;
+        std::size_t stride = 1;
         for (std::size_t i = instruction.rank; i-- > 0;) {
             const double index = numeric(pop(), instruction);
             if (std::trunc(index) != index || index < 0 || index > 2147483647.0)
                 runtimeError(instruction, "array index must be a nonnegative integer");
-            indices[i] = static_cast<std::size_t>(index);
-        }
-        std::size_t offset = 0;
-        for (std::size_t i = 0; i < indices.size(); ++i) {
-            if (indices[i] >= array.lengths[i]) runtimeError(instruction, "array index out of bounds");
-            offset = offset * array.lengths[i] + indices[i];
+            const auto dimensionIndex = static_cast<std::size_t>(index);
+            if (dimensionIndex >= array.lengths[i])
+                runtimeError(instruction, "array index out of bounds");
+            offset += dimensionIndex * stride;
+            stride *= array.lengths[i];
         }
         return std::pair<RuntimeArray*, std::size_t>{&array, offset};
     };
