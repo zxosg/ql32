@@ -16,6 +16,7 @@
 #include "pins.hpp"
 #include "ql32/vm/scheduler.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
+#include "ql32/platform/esp32/idf_sd.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/line_ui_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
@@ -65,6 +66,11 @@ ql32::platform::esp32::WifiNetworkService boardNetwork;
 SPIClass sdBus(HSPI);
 ql32::platform::esp32::SdStorage sdStorage(SD);
 ql32::platform::esp32::SdChannels sdChannels(SD);
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+ql32::platform::esp32::IdfSdCard idfSdCard;
+ql32::platform::esp32::IdfSdStorage idfSdStorage(idfSdCard);
+ql32::platform::esp32::IdfSdChannels idfSdChannels(idfSdCard);
+#endif
 SerialOutputBuffer serialBuffer;
 std::ostream serialOutput(&serialBuffer);
 std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
@@ -201,12 +207,19 @@ void setup() {
         Serial.println("FabGL keyboard interface unavailable on port 0");
     }
 
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    const bool sdReady = idfSdCard.mount({
+        ql32_board::sdMosi, ql32_board::sdMiso, ql32_board::sdClock,
+        ql32_board::sdChipSelect
+    });
+#else
     sdBus.begin(ql32_board::sdClock,
                 ql32_board::sdMiso,
                 ql32_board::sdMosi,
                 ql32_board::sdChipSelect);
     const bool sdReady = SD.begin(ql32_board::sdChipSelect,
-                                 sdBus, 4000000, "/sd", 5);
+                                  sdBus, 4000000, "/sd", 5);
+#endif
 
     Serial.printf("QL/32 %s bring-up ready\n", kBoardName);
     Serial.printf("Uptime ms: %llu\n",
@@ -216,7 +229,14 @@ void setup() {
         Serial.printf("Unix time: %lld\n", static_cast<long long>(*wallTime));
     else
         Serial.println("Wall clock unsynchronized");
-    Serial.println(sdReady ? "SD storage ready" : "SD storage unavailable");
+    if (sdReady) {
+        Serial.println("SD storage ready");
+    } else {
+        Serial.println("SD storage unavailable");
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+        Serial.printf("SD diagnostic: %s\n", idfSdCard.error().c_str());
+#endif
+    }
 
     auto graphicsService = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     std::string startupProgram =
@@ -228,7 +248,11 @@ void setup() {
         "PRINT \"QL/32 BASIC VM running\"\n";
     if (sdReady) {
         try {
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+            startupProgram = idfSdStorage.readText("startup.bas");
+#else
             startupProgram = sdStorage.readText("startup.bas");
+#endif
             Serial.println("Running SD:/startup.bas");
         } catch (const ql32::runtime::ServiceError& error) {
             if (error.code() != ql32::runtime::ServiceErrorCode::NotFound) {
@@ -240,10 +264,17 @@ void setup() {
     }
 
     ql32::vm::Services services;
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    services.storage = std::shared_ptr<ql32::runtime::StorageService>(
+        &idfSdStorage, [](ql32::runtime::StorageService*) {});
+    auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
+        &idfSdChannels, [](ql32::runtime::ChannelService*) {});
+#else
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
+#endif
     services.channels = std::make_shared<ql32::runtime::ChannelRegistry>(
         std::move(fileChannels), [](std::string_view bytes) {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());

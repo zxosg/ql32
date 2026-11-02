@@ -47,7 +47,9 @@ physical Olimex board using the LILYGO image. That image configured SD MISO as
 GPIO 2, while the Olimex Rev B schematic specifies GPIO 35. A separate Olimex
 profile now selects MISO 35; the LILYGO profile retains MISO 2. Both use PS/2
 port 0 at CLK GPIO 33 and DATA GPIO 32. Rebuild and flash the Olimex image
-before repeating SD and keyboard checks. VGA output, clock status, and SD
+before repeating SD and keyboard checks. The Olimex adapter uses ESP-IDF's
+SPI2/VFS SD-SPI mount path, while the LILYGO adapter retains Arduino SD. VGA
+output, clock status, and SD
 behavior still require verification. The async line
 presenter for alert, confirmation, dialog, and menu requests is integrated. It
 accepts replies via serial or PS/2 and is covered by Linux state-machine tests;
