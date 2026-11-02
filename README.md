@@ -107,6 +107,10 @@ pio run -e olimex_esp32_sbc_fabgl -t upload
 pio run -e esp32_2432s028 -t upload
 ```
 
+On embedded targets, enter `REBOOT` at the interactive supervisor prompt to
+perform a software restart. The Olimex FabGL target also supports PS/2 execution
+shortcuts; see its [board notes](boards/olimex_esp32_sbc_fabgl/README.md).
+
 The `lilygo_vga32` and `olimex_esp32_sbc_fabgl` images include the shared
 portable BASIC VM and FabGL adapters. Their VGA display, PS/2, clock, SD, and
 line-presenter behavior still needs physical-board verification. The Olimex

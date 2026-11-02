@@ -36,6 +36,7 @@ struct TaskInfo {
     bool supervisor = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
+    bool paused = false;
     std::size_t openChannels = 0;
 };
 
@@ -46,6 +47,7 @@ struct Services {
     std::shared_ptr<graphics::Service> graphics;
     std::shared_ptr<runtime::NetworkService> network;
     std::shared_ptr<runtime::MemoryService> memory;
+    std::shared_ptr<runtime::SystemControlService> systemControl;
 };
 
 // Cooperative, single-threaded weighted scheduler. Each task owns one
@@ -75,6 +77,15 @@ public:
     TaskId focusedTask() const noexcept;
     bool suspendTask(TaskId id) noexcept;
     bool resumeTask(TaskId id) noexcept;
+    std::optional<bool> toggleTaskPaused(TaskId id) noexcept;
+    bool taskPaused(TaskId id) const noexcept;
+    bool executionPaused() const noexcept { return executionPaused_; }
+    bool toggleExecutionPaused() noexcept {
+        executionPaused_ = !executionPaused_;
+        return executionPaused_;
+    }
+    bool breakTaskExecution(TaskId id);
+    void stopWorkersAndReturnToSupervisor();
     std::size_t instructionBudget() const noexcept { return instructionBudget_; }
     bool setInstructionBudget(std::size_t budget) noexcept;
     bool setTaskPriority(TaskId id, std::uint32_t priority) noexcept;
@@ -91,6 +102,7 @@ private:
     Services services_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::size_t instructionBudget_;
+    bool executionPaused_ = false;
     SmoothWeightedRoundRobin policy_;
     std::vector<SmoothWeightedRoundRobin::Task> eligibleTasks_;
     std::vector<Task*> candidateTasks_;

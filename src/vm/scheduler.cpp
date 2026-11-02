@@ -67,6 +67,7 @@ public:
             result.push_back({info.id, taskState(info.status),
                               info.supervisor, info.interactive,
                               info.priority, info.resumePriority,
+                              info.paused,
                               info.error, info.errorCode, info.errorDetail,
                               info.openChannels});
         }
@@ -95,6 +96,7 @@ struct SessionScheduler::Task {
     bool supervisor = false;
     bool interactiveSubmission = false;
     bool hasPendingSource = true;
+    bool paused = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
 };
@@ -116,7 +118,8 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
-        services_.network, services_.memory, taskControl_, task->id);
+        services_.network, services_.memory, taskControl_, task->id,
+        services_.systemControl);
     const TaskId id = task->id;
     eligibleTasks_.reserve(tasks_.size() + 1);
     candidateTasks_.reserve(tasks_.size() + 1);
@@ -132,7 +135,8 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
-        services_.network, services_.memory, taskControl_, task->id);
+        services_.network, services_.memory, taskControl_, task->id,
+        services_.systemControl);
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
@@ -173,7 +177,8 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
-        services_.network, services_.memory, taskControl_, task->id);
+        services_.network, services_.memory, taskControl_, task->id,
+        services_.systemControl);
     task->interactive = true;
     task->supervisor = true;
     task->hasPendingSource = !task->source.empty();
@@ -254,6 +259,84 @@ bool SessionScheduler::resumeTask(TaskId id) noexcept {
     return false;
 }
 
+std::optional<bool> SessionScheduler::toggleTaskPaused(TaskId id) noexcept {
+    for (auto& current : tasks_) {
+        if (current->id != id || current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled)
+            continue;
+        current->paused = !current->paused;
+        return current->paused;
+    }
+    return std::nullopt;
+}
+
+bool SessionScheduler::taskPaused(TaskId id) const noexcept {
+    for (const auto& current : tasks_)
+        if (current->id == id) return current->paused;
+    return false;
+}
+
+bool SessionScheduler::breakTaskExecution(TaskId id) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter ||
+            current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled)
+            continue;
+        if (!current->interactive) return cancel(id);
+        const TaskId childId = current->waitingChildId;
+        current->waitingChildId = 0;
+        if (childId != 0) (void)cancel(childId);
+        current->interpreter->abortExecution();
+        current->interpreter->setErrorContext(runtime::ErrorCode::None);
+        policy_.remove(current->id);
+        current->source.clear();
+        current->hasPendingSource = false;
+        current->interactiveSubmission = false;
+        current->started = false;
+        current->paused = false;
+        current->error.clear();
+        current->errorCode = runtime::ErrorCode::None;
+        current->errorDetail.clear();
+        current->status = TaskStatus::WaitingInput;
+        focusedTaskId_ = current->id;
+        return true;
+    }
+    return false;
+}
+
+void SessionScheduler::stopWorkersAndReturnToSupervisor() {
+    executionPaused_ = false;
+    for (const auto& current : tasks_) {
+        if (current->supervisor || current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled)
+            continue;
+        (void)cancel(current->id);
+    }
+    if (supervisorId_ != 0) {
+        for (auto& current : tasks_) {
+            if (current->id != supervisorId_) continue;
+            if (current->interpreter) current->interpreter->abortExecution();
+            if (current->interpreter)
+                current->interpreter->setErrorContext(runtime::ErrorCode::None);
+            current->source.clear();
+            current->hasPendingSource = false;
+            current->interactiveSubmission = false;
+            current->started = false;
+            current->paused = false;
+            current->status = TaskStatus::WaitingInput;
+            current->error.clear();
+            current->errorCode = runtime::ErrorCode::None;
+            current->errorDetail.clear();
+            policy_.remove(current->id);
+            break;
+        }
+        focusedTaskId_ = supervisorId_;
+    }
+}
+
 bool SessionScheduler::setInstructionBudget(std::size_t budget) noexcept {
     if (budget == 0 || budget > MaximumInstructionBudget) return false;
     instructionBudget_ = budget;
@@ -293,6 +376,7 @@ std::string SessionScheduler::takeError(TaskId id) {
 }
 
 bool SessionScheduler::tick() {
+    if (executionPaused_) return false;
     const auto wakeParent = [&](Task& child) {
         if (child.waitingParentId == 0) return;
         for (auto& parentPtr : tasks_) {
@@ -323,7 +407,7 @@ bool SessionScheduler::tick() {
         if (candidate.status == TaskStatus::Completed ||
             candidate.status == TaskStatus::Failed ||
             candidate.status == TaskStatus::Cancelled ||
-            candidate.status == TaskStatus::WaitingTask)
+            candidate.status == TaskStatus::WaitingTask || candidate.paused)
             continue;
         if (candidate.status == TaskStatus::WaitingInput &&
             !candidate.hasPendingSource)
@@ -424,6 +508,7 @@ bool SessionScheduler::cancel(TaskId id) {
         task->source.clear();
         task->hasPendingSource = false;
         task->interactiveSubmission = false;
+        task->paused = false;
         task->status = TaskStatus::Cancelled;
         task->errorCode = runtime::ErrorCode::TaskCancelled;
         task->error = runtime::errorText(task->errorCode);
@@ -470,6 +555,7 @@ std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {
                             current->errorCode, current->errorDetail,
                             current->interactive, current->supervisor,
                             current->priority, current->resumePriority,
+                            current->paused,
                             current->interpreter ? current->interpreter->openChannelCount() : 0};
     return std::nullopt;
 }
@@ -482,6 +568,7 @@ std::vector<TaskInfo> SessionScheduler::tasks() const {
                           current->errorCode, current->errorDetail,
                           current->interactive, current->supervisor,
                           current->priority, current->resumePriority,
+                          current->paused,
                           current->interpreter ? current->interpreter->openChannelCount() : 0});
     return result;
 }

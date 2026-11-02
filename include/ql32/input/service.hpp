@@ -7,7 +7,7 @@ namespace ql32::input {
 
 enum class Key : std::uint8_t {
     Character, Enter, Escape, Backspace, Tab, Insert, Delete, Home, End,
-    PageUp, PageDown, Left, Right, Up, Down, Function, Other
+    PageUp, PageDown, Left, Right, Up, Down, Function, Pause, Break, Other
 };
 
 // A non-blocking, platform-neutral keyboard event. Character values are

@@ -20,6 +20,7 @@
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
+#include "ql32/platform/esp32/system_control.hpp"
 #include "ql32/platform/esp32_cyd/graphics.hpp"
 #include "ql32/platform/esp32_cyd/frame_presenter.hpp"
 #include "ql32/platform/esp32_cyd/text_console.hpp"
@@ -35,6 +36,7 @@ std::shared_ptr<ql32::graphics::WindowedService> graphics;
 ql32::platform::esp32::Clock boardClock;
 ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
+ql32::platform::esp32::SystemControl boardSystemControl;
 ql32::platform::esp32::SdStorage sdStorage(SD);
 ql32::platform::esp32::SdChannels sdChannels(SD);
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;
@@ -211,6 +213,8 @@ void setup() {
     services.graphics = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(
         &boardNetwork, [](ql32::runtime::NetworkService*) {});
+    services.systemControl = std::shared_ptr<ql32::runtime::SystemControlService>(
+        &boardSystemControl, [](ql32::runtime::SystemControlService*) {});
     services.memory = std::shared_ptr<ql32::runtime::MemoryService>(
         &boardMemory, [](ql32::runtime::MemoryService*) {});
     uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(

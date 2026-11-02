@@ -20,7 +20,14 @@ uses data GPIO 27 and clock GPIO 26. The selected VGA color pins are red GPIO
 21, green GPIO 18, blue GPIO 5, horizontal sync GPIO 23, and vertical sync
 GPIO 15. These connections are shown on schematic page 6 of the board PDF.
 
-Startup prints whether FabGL received a keyboard reset response and whether
-the SD filesystem mounted. The configured Arduino-ESP32 2.0.17 FatFs build has
+The Olimex target mounts SD through ESP-IDF's native SPI2/VFS SD-SPI driver,
+using the same approach as ESPectrum. Startup prints either `SD storage ready`
+or an ESP-IDF diagnostic naming the failed step. The configured FatFs build has
 exFAT disabled, so use FAT12/16/32 media; test with a spare FAT32 card before
 reformatting a card containing data.
+
+The PS/2 keyboard provides execution shortcuts: `Pause` pauses/resumes the
+focused task, `Shift+Pause` pauses/resumes the BASIC VM, `Ctrl+Pause` (also
+`Ctrl+Space`) breaks the current program, and `Ctrl+Shift+Pause` stops workers
+and returns to the supervisor. `Ctrl+Alt+Delete` restarts the board. At the
+prompt, `REBOOT` performs the same software restart.

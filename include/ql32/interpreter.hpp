@@ -13,6 +13,7 @@
 #include "ql32/runtime/storage.hpp"
 #include "ql32/runtime/network.hpp"
 #include "ql32/runtime/memory.hpp"
+#include "ql32/runtime/system_control.hpp"
 #include "ql32/runtime/task_control.hpp"
 #include "ql32/runtime/error.hpp"
 #include "ql32/graphics/service.hpp"
@@ -34,7 +35,8 @@ public:
                          std::shared_ptr<runtime::NetworkService> network = {},
                          std::shared_ptr<runtime::MemoryService> memory = {},
                          std::shared_ptr<runtime::TaskControlService> taskControl = {},
-                         runtime::TaskId taskId = 0);
+                         runtime::TaskId taskId = 0,
+                         std::shared_ptr<runtime::SystemControlService> systemControl = {});
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -61,6 +63,7 @@ public:
     std::vector<runtime::ChannelInfo> channelInventory() const;
     std::size_t openChannelCount() const;
     void setErrorContext(runtime::ErrorCode code, std::string detail = {});
+    void abortExecution() noexcept;
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
     const std::string& errorDetail() const noexcept { return errorDetail_; }
     void clear();
@@ -88,6 +91,7 @@ private:
     std::shared_ptr<runtime::NetworkService> network_;
     std::shared_ptr<runtime::MemoryService> memory_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
+    std::shared_ptr<runtime::SystemControlService> systemControl_;
     runtime::SessionId session_id_ = 0;
     runtime::TaskId task_id_ = 0;
     runtime::ErrorCode errorCode_ = runtime::ErrorCode::None;

@@ -108,21 +108,28 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 1. Build and flash the Olimex profile: `tools/build-target.sh olimex`, then
    `pio run -e olimex_esp32_sbc_fabgl -t upload`. The board's SD wiring is
    MOSI 12, MISO 35, SCK 14, CS 13; using the LILYGO profile (MISO 2) explains
-   the reported mount failure. The configured Arduino-ESP32 2.0.17 FatFs build
-   has `FF_FS_EXFAT=0`; if mounting still fails, test a spare FAT32 card before
-   diagnosing SPI or considering changes to the existing card.
-2. Check native PS/2 keyboard detection on the Olimex profile. Port 0 uses
+   the original mount failure. With a FAT32 card still failing after the
+   Olimex-profile flash, the target now uses ESP-IDF's SPI2/VFS SD-SPI mount
+   path from ESPectrum instead of Arduino `SD.begin()`. Report the startup
+   `SD diagnostic` line if it does not mount. The FatFs build has
+   `FF_FS_EXFAT=0`; do not use exFAT media.
+2. Exercise the new execution controls on Olimex PS/2: bare `Pause`,
+   `Shift+Pause`, `Ctrl+Pause`/`Ctrl+Space`, `Ctrl+Shift+Pause`, and
+   `Ctrl+Alt+Delete`; verify `REBOOT` from the prompt on embedded targets.
+   Both Olimex and CYD firmware profiles compile with the controls; physical
+   shortcut and reboot verification remains pending.
+3. Check native PS/2 keyboard detection on the Olimex profile. Port 0 uses
    DATA GPIO 32 and CLK GPIO 33, matching the board schematic. The next firmware
    build reports whether FabGL received a keyboard reset response. If detected
    but keys still do nothing, add temporary serial output for queued key events
    and trace the REPL input gate.
-3. Run the current Linux and macOS build/test workflows and all ESP32 profile
+4. Run the current Linux and macOS build/test workflows and all ESP32 profile
    builds after the pull. Do not assume the previous test count describes the
    current tree.
-4. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi
+5. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi
    acceptance. Run targeted CYD checks for the current task command and
    wait/result/error forms when practical.
-5. Keep deferred ideas as design backlog until specified: string splitting,
+6. Keep deferred ideas as design backlog until specified: string splitting,
    indirect procedure calls via a string name, slice assignment/string-array
    slicing, palette updates/cycling, and network connections as channels.
    Network channels are separate from the accepted Wi-Fi station service.

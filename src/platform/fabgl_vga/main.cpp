@@ -22,6 +22,7 @@
 #include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
+#include "ql32/platform/esp32/system_control.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/platform/fabgl_vga/graphics.hpp"
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
@@ -63,6 +64,7 @@ std::optional<ql32::platform::fabgl_vga::FabglKeyboard> keyboardInput;
 ql32::platform::esp32::Clock boardClock;
 ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
+ql32::platform::esp32::SystemControl boardSystemControl;
 SPIClass sdBus(HSPI);
 ql32::platform::esp32::SdStorage sdStorage(SD);
 ql32::platform::esp32::SdChannels sdChannels(SD);
@@ -134,7 +136,7 @@ bool acceptsInput() {
 
 void advanceScheduler() {
     if (!scheduler) return;
-    (void)scheduler->tick();
+    if (!scheduler->executionPaused()) (void)scheduler->tick();
 
     const auto tasks = scheduler->tasks();
     for (const auto& task : tasks) {
@@ -169,6 +171,39 @@ void advanceScheduler() {
     } else {
         replPromptShown = false;
     }
+}
+
+bool handleKeyboardShortcut(const ql32::input::KeyEvent& event) {
+    if (!event.pressed || !scheduler) return false;
+    if (event.key == ql32::input::Key::Delete && event.control && event.alt) {
+        boardSystemControl.reboot();
+        return true;
+    }
+
+    if (event.key != ql32::input::Key::Pause &&
+        event.key != ql32::input::Key::Break)
+        return false;
+
+    const bool control = event.control || event.key == ql32::input::Key::Break;
+    if (control && event.shift) {
+        scheduler->stopWorkersAndReturnToSupervisor();
+        Serial.println("All worker tasks stopped; supervisor ready");
+    } else if (control) {
+        const auto task = scheduler->focusedTask();
+        if (scheduler->breakTaskExecution(task))
+            Serial.printf("Break: task %llu returned to its prompt\n",
+                          static_cast<unsigned long long>(task));
+    } else if (event.shift) {
+        const bool paused = scheduler->toggleExecutionPaused();
+        Serial.println(paused ? "VM paused" : "VM resumed");
+    } else {
+        const auto task = scheduler->focusedTask();
+        const auto paused = scheduler->toggleTaskPaused(task);
+        if (paused)
+            Serial.printf("Task %llu %s\n", static_cast<unsigned long long>(task),
+                          *paused ? "paused" : "resumed");
+    }
+    return true;
 }
 
 } // namespace
@@ -283,6 +318,8 @@ void setup() {
     services.graphics = graphicsService;
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(
         &boardNetwork, [](ql32::runtime::NetworkService*) {});
+    services.systemControl = std::shared_ptr<ql32::runtime::SystemControlService>(
+        &boardSystemControl, [](ql32::runtime::SystemControlService*) {});
     services.memory = std::shared_ptr<ql32::runtime::MemoryService>(
         &boardMemory, [](ql32::runtime::MemoryService*) {});
     uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
@@ -296,9 +333,10 @@ void loop() {
         receiveSerialCharacter(static_cast<char>(Serial.read()));
     }
 
-    if (acceptsInput() && keyboardInput) {
+    if (keyboardInput) {
         const auto event = keyboardInput->poll();
-        if (event && event->pressed) {
+        if (event && !handleKeyboardShortcut(*event) && event->pressed && scheduler &&
+            !scheduler->executionPaused() && acceptsInput()) {
             if (event->key == ql32::input::Key::Character &&
                 event->character >= 32 && event->character <= 126) {
                 appendInputCharacter(static_cast<char>(event->character));

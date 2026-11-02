@@ -106,6 +106,12 @@ public:
     std::string writtenText;
 };
 
+class CountingSystemControl final : public ql32::runtime::SystemControlService {
+public:
+    void reboot() override { ++rebootCount; }
+    int rebootCount = 0;
+};
+
 void testRoundRobinSlicesKeepSessionsIndependent() {
     ql32::vm::SessionScheduler scheduler({}, 1);
     std::ostringstream firstOutput;
@@ -527,6 +533,83 @@ void testTaskWaitReturnsChildErrorContext() {
             "waiting caller did not receive the child's error code and detail");
 }
 
+void testTaskAndVmPausePreserveRunnableSessions() {
+    ql32::vm::SessionScheduler scheduler({}, 16);
+    std::ostringstream taskOutput;
+    const auto task = scheduler.launch("PRINT \"task resumed\"\n", taskOutput);
+
+    const auto paused = scheduler.toggleTaskPaused(task);
+    require(paused && *paused && !scheduler.tick() && taskOutput.str().empty(),
+            "paused task was allowed to execute");
+    const auto resumed = scheduler.toggleTaskPaused(task);
+    require(resumed && !*resumed, "task pause toggle did not resume it");
+    for (int tick = 0; tick < 20 && scheduler.task(task)->status !=
+            ql32::vm::TaskStatus::Completed; ++tick)
+        (void)scheduler.tick();
+    require(taskOutput.str() == "task resumed\n",
+            "resumed task did not continue from its saved execution state");
+
+    ql32::vm::SessionScheduler vmScheduler({}, 16);
+    std::ostringstream vmOutput;
+    const auto vmTask = vmScheduler.launch("PRINT \"vm resumed\"\n", vmOutput);
+    require(vmScheduler.toggleExecutionPaused() && !vmScheduler.tick() &&
+                vmOutput.str().empty(),
+            "VM-wide pause did not stop scheduler execution");
+    require(!vmScheduler.toggleExecutionPaused(), "VM-wide pause did not toggle off");
+    for (int tick = 0; tick < 20 && vmScheduler.task(vmTask)->status !=
+            ql32::vm::TaskStatus::Completed; ++tick)
+        (void)vmScheduler.tick();
+    require(vmOutput.str() == "vm resumed\n",
+            "unpaused VM did not resume its task");
+}
+
+void testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor() {
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 8);
+    std::ostringstream supervisorOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    require(scheduler.submit(supervisor,
+                "x=7\nREPeat forever\nx=x+1\nEND REPeat forever\n"),
+            "supervisor did not accept the long-running program");
+    for (int tick = 0; tick < 8; ++tick) (void)scheduler.tick();
+    require(scheduler.breakTaskExecution(supervisor),
+            "break did not interrupt the focused interactive program");
+    require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
+            "break did not return the interactive session to its prompt");
+    require(scheduler.submit(supervisor, "PRINT x\n"),
+            "broken session did not accept another command");
+    require(scheduler.tick(), "broken session did not execute the next command");
+    require(graphics->writtenText.find('7') != std::string::npos,
+            "break discarded the interactive session's variables");
+
+    std::ostringstream workerOutput;
+    const auto worker = scheduler.launchWorker("REPeat forever\nEND REPeat forever\n",
+                                               workerOutput);
+    scheduler.toggleExecutionPaused();
+    scheduler.stopWorkersAndReturnToSupervisor();
+    require(scheduler.focusedTask() == supervisor && !scheduler.executionPaused() &&
+                scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput &&
+                scheduler.task(worker)->status == ql32::vm::TaskStatus::Cancelled,
+            "stop-all did not cancel workers and restore the supervisor prompt");
+}
+
+void testRebootInteractiveCommandCallsSystemService() {
+    auto systemControl = std::make_shared<CountingSystemControl>();
+    ql32::vm::Services services;
+    services.systemControl = systemControl;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+    require(scheduler.submit(supervisor, "REBOOT\n"),
+            "supervisor did not accept REBOOT");
+    require(scheduler.tick(), "scheduler did not dispatch REBOOT");
+    require(systemControl->rebootCount == 1 &&
+                output.str().find("Rebooting QL/32") != std::string::npos,
+            "REBOOT did not notify and invoke the system-control service");
+}
+
 } // namespace
 
 int main() {
@@ -545,5 +628,8 @@ int main() {
     testTaskSupportsCommandAndFunctionSyntax();
     testTaskWaitResumesCallerAndExposesChildStatus();
     testTaskWaitReturnsChildErrorContext();
+    testTaskAndVmPausePreserveRunnableSessions();
+    testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor();
+    testRebootInteractiveCommandCallsSystemService();
     return 0;
 }

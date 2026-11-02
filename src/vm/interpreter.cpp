@@ -707,7 +707,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     setErrorContext(found->errorCode, found->errorDetail);
                     switch (static_cast<runtime::TaskResultField>(*numericField)) {
                     case runtime::TaskResultField::Status:
-                        pushValue(std::string(runtime::taskStateName(found->state)));
+                        pushValue(std::string(found->paused ? "PAUSED" :
+                            runtime::taskStateName(found->state)));
                         break;
                     case runtime::TaskResultField::Channels:
                         pushValue(static_cast<double>(found->openChannels));

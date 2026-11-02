@@ -1886,12 +1886,14 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<runtime::NetworkService> network,
                          std::shared_ptr<runtime::MemoryService> memory,
                          std::shared_ptr<runtime::TaskControlService> taskControl,
-                         runtime::TaskId taskId)
+                         runtime::TaskId taskId,
+                         std::shared_ptr<runtime::SystemControlService> systemControl)
     : uiSession_(std::make_unique<detail::UISessionState>()),
       storage_(std::move(storage)), channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
       taskControl_(std::move(taskControl)),
+      systemControl_(std::move(systemControl)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)),
       task_id_(taskId) {
     if (session_id_ == 0)
@@ -1901,6 +1903,11 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
 void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
     errorCode_ = code;
     errorDetail_ = std::move(detail);
+}
+
+void Interpreter::abortExecution() noexcept {
+    if (ui_) ui_->cancelSession(session_id_);
+    execution_.reset();
 }
 
 Interpreter::~Interpreter() {
@@ -2110,7 +2117,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         const std::string word = command(line);
         if (numberEnd != 0 || word == "RUN" || word == "LIST" ||
             word.rfind("LIST ", 0) == 0 || word.rfind("LIST#", 0) == 0 ||
-            word == "NEW" ||
+            word == "NEW" || word == "REBOOT" ||
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
             word.rfind("SAVE ", 0) == 0 || word == "DIR" ||
             word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
@@ -2163,6 +2170,13 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             for (const auto& [number, body] : program_)
                 listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
             writeChannelText(channel, listing);
+        } else if (word == "REBOOT") {
+            if (!systemControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "system control service unavailable");
+            writeChannelText(0, "Rebooting QL/32...\n");
+            output.flush();
+            systemControl_->reboot();
         } else if (word == "NEW") {
             program_.clear();
             clear();
@@ -2268,6 +2282,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                     listing += "P=" + std::to_string(task.priority) + " ";
                     listing += runtime::taskStateName(task.state);
                 }
+                if (task.paused) listing += " PAUSED";
                 if (!task.error.empty()) listing += " " + task.error;
                 listing += "\n";
             }
@@ -2331,7 +2346,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
                                      "no task exists with that ID");
             std::string detail = "Task " + std::to_string(found->id) + "\n";
-            detail += "Status: " + std::string(runtime::taskStateName(found->state)) + "\n";
+            detail += "Status: " + std::string(found->paused ? "PAUSED" :
+                runtime::taskStateName(found->state)) + "\n";
             detail += "Kind: " + std::string(found->supervisor ? "SUPERVISOR" :
                 (found->interactive ? "WORKER" : "PROGRAM")) + "\n";
             detail += "Priority: " + std::to_string(found->priority) + "\n";

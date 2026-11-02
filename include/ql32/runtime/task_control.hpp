@@ -46,6 +46,7 @@ struct ManagedTaskInfo {
     bool interactive = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
+    bool paused = false;
     std::string error;
     ErrorCode errorCode = ErrorCode::None;
     std::string errorDetail;

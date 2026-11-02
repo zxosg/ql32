@@ -15,6 +15,8 @@ input::Key mapKey(fabgl::VirtualKey key, std::uint8_t& functionNumber) {
     case fabgl::VK_KP_INSERT: return Key::Insert;
     case fabgl::VK_DELETE:
     case fabgl::VK_KP_DELETE: return Key::Delete;
+    case fabgl::VK_PAUSE: return Key::Pause;
+    case fabgl::VK_BREAK: return Key::Break;
     case fabgl::VK_HOME:
     case fabgl::VK_KP_HOME: return Key::Home;
     case fabgl::VK_END:
@@ -60,6 +62,8 @@ std::optional<input::KeyEvent> FabglKeyboard::poll() {
     event.alt = item.LALT || item.RALT;
     event.capsLock = item.CAPSLOCK;
     event.key = mapKey(item.vk, event.functionNumber);
+    if (item.vk == fabgl::VK_SPACE && item.CTRL)
+        event.key = input::Key::Break;
     if (event.key == input::Key::Other && item.ASCII > 0 && item.ASCII < 0x80) {
         event.key = input::Key::Character;
         event.character = item.ASCII;
