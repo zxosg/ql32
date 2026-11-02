@@ -14,6 +14,7 @@
 #include "ql32/runtime/network.hpp"
 #include "ql32/runtime/memory.hpp"
 #include "ql32/runtime/task_control.hpp"
+#include "ql32/runtime/error.hpp"
 #include "ql32/graphics/service.hpp"
 #include "ql32/ui/service.hpp"
 
@@ -22,7 +23,7 @@ namespace ql32 {
 namespace detail { struct VMExecutionState; struct UISessionState; }
 
 using Value = std::variant<double, std::string>;
-enum class ExecutionStatus { Completed, Suspended, Yielded };
+enum class ExecutionStatus { Completed, Suspended, WaitingTask, Yielded };
 
 class Interpreter {
 public:
@@ -32,7 +33,8 @@ public:
                          std::shared_ptr<graphics::Service> graphics = {},
                          std::shared_ptr<runtime::NetworkService> network = {},
                          std::shared_ptr<runtime::MemoryService> memory = {},
-                         std::shared_ptr<runtime::TaskControlService> taskControl = {});
+                         std::shared_ptr<runtime::TaskControlService> taskControl = {},
+                         runtime::TaskId taskId = 0);
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -57,6 +59,10 @@ public:
                  bool showPrompt = false,
                  std::function<bool()> dispatchUiRequest = {});
     std::vector<runtime::ChannelInfo> channelInventory() const;
+    std::size_t openChannelCount() const;
+    void setErrorContext(runtime::ErrorCode code, std::string detail = {});
+    runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
+    const std::string& errorDetail() const noexcept { return errorDetail_; }
     void clear();
 
 private:
@@ -83,6 +89,9 @@ private:
     std::shared_ptr<runtime::MemoryService> memory_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     runtime::SessionId session_id_ = 0;
+    runtime::TaskId task_id_ = 0;
+    runtime::ErrorCode errorCode_ = runtime::ErrorCode::None;
+    std::string errorDetail_;
     std::unique_ptr<detail::VMExecutionState> execution_;
 };
 

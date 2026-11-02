@@ -27,6 +27,7 @@ std::atomic<runtime::SessionId> nextInterpreterSessionId{1};
 using detail::ArrayArgumentCandidate;
 using detail::ForItemSpec;
 using detail::Instruction;
+using detail::InstructionSequence;
 using detail::Op;
 using detail::PrintSeparator;
 using detail::SelectItemSpec;
@@ -85,7 +86,7 @@ constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
     "INK", "PAPER", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
-    "CLOSEWINDOW"
+    "CLOSEWINDOW", "GUPDATE", "KILL"
 };
 
 bool isBuiltinCommandName(std::string_view name) {
@@ -101,7 +102,14 @@ std::string uppercaseAscii(std::string value) {
 }
 
 bool isBuiltinFunctionName(std::string_view name) {
-    return name == "LEN" || name == "FREE" || name == "OPEN" || name == "READ$" || name == "EOF" ||
+    return name == "TASK" || name == "TASKRESULT" || name == "ERR" ||
+           name == "ERR$" || name == "ERRX$" || name == "LEN" ||
+           name == "LEFT$" || name == "RIGHT$" || name == "MID$" ||
+           name == "BAND" || name == "BOR" || name == "BXOR" || name == "BNOT" ||
+           name == "ROL" || name == "ROR" || name == "HEX$" || name == "BIN$" || name == "FREE" ||
+           name == "SIN" || name == "COS" ||
+           name == "INT" ||
+           name == "OPEN" || name == "READ$" || name == "EOF" ||
            name == "CONFIRM" || name == "DIALOG" || name == "DINIT" ||
            name == "DGET" || name == "DGET$" || name == "MINIT" || name == "MENU" ||
            name == "NETSTAT$" || name == "NETADDR$" || name == "NETSIGNAL" ||
@@ -116,7 +124,22 @@ bool isBuiltinName(const std::string& name) {
 }
 
 std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
+    if (instruction.name == "KILL") return {1, false};
+    if (instruction.name == "TASK") return {1, instruction.expectsValue};
+    if (instruction.name == "TASKRESULT") return {2, true};
+    if (instruction.name == "ERR") return {0, true};
+    if (instruction.name == "ERR$") return {1, true};
+    if (instruction.name == "ERRX$") return {0, true};
     if (instruction.name == "LEN") return {1, true};
+    if (instruction.name == "LEFT$" || instruction.name == "RIGHT$") return {2, true};
+    if (instruction.name == "MID$") return {2, true};
+    if (instruction.name == "BAND" || instruction.name == "BOR" ||
+        instruction.name == "BXOR" || instruction.name == "ROL" ||
+        instruction.name == "ROR") return {2, true};
+    if (instruction.name == "BNOT" || instruction.name == "HEX$" ||
+        instruction.name == "BIN$") return {1, true};
+    if (instruction.name == "SIN" || instruction.name == "COS" ||
+        instruction.name == "INT") return {1, true};
     if (instruction.name == "FREE") return {0, true};
     if (instruction.name == "GETCHANNEL") return {1, true};
     if (instruction.name == "GETNET") return {2, false};
@@ -146,6 +169,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "ROTATE") return {1, false};
     if (instruction.name == "WINDOW") return {4, false};
     if (instruction.name == "CLOSEWINDOW") return {0, false};
+    if (instruction.name == "GUPDATE") return {0, false};
     if (instruction.name == "GWIDTH" || instruction.name == "GHEIGHT" ||
         instruction.name == "GORIGINX" || instruction.name == "GORIGINY" ||
         instruction.name == "GDEPTH" || instruction.name == "GROTATION" ||
@@ -174,6 +198,9 @@ public:
             } else if (std::isdigit(static_cast<unsigned char>(c)) ||
                        (c == '.' && std::isdigit(static_cast<unsigned char>(peek(1))))) {
                 tokens.push_back(number());
+            } else if (c == '&' && (peek(1) == 'H' || peek(1) == 'h' ||
+                                    peek(1) == 'B' || peek(1) == 'b')) {
+                tokens.push_back(radixNumber());
             } else if (c == '"') {
                 tokens.push_back(string());
             } else if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
@@ -224,8 +251,9 @@ private:
     }
     void advance() { ++offset_; ++column_; }
     [[noreturn]] void fail(const char* message) const {
-        throw std::runtime_error("line " + std::to_string(line_) + ", column " +
-                                 std::to_string(column_) + ": " + message);
+        throw runtime::Error(runtime::ErrorCode::Syntax,
+            "line " + std::to_string(line_) + ", column " +
+            std::to_string(column_) + ": " + message);
     }
     Token single(Kind kind) const { return {kind, std::string(1, peek()), 0, line_, column_}; }
     void skipComment() {
@@ -257,6 +285,33 @@ private:
             fail("invalid number");
         return {Kind::Number, text, value, line_, column};
     }
+    Token radixNumber() {
+        const int column = column_;
+        advance();
+        const char prefix = static_cast<char>(std::toupper(static_cast<unsigned char>(peek())));
+        advance();
+        const unsigned base = prefix == 'H' ? 16u : 2u;
+        const auto digitValue = [](char c) -> unsigned {
+            if (c >= '0' && c <= '9') return static_cast<unsigned>(c - '0');
+            if (c >= 'A' && c <= 'F') return static_cast<unsigned>(c - 'A' + 10);
+            if (c >= 'a' && c <= 'f') return static_cast<unsigned>(c - 'a' + 10);
+            return 255u;
+        };
+        std::uint64_t value = 0;
+        std::size_t digits = 0;
+        while (!atEnd()) {
+            const unsigned digit = digitValue(peek());
+            if (digit >= base) break;
+            if (value > (0xffffffffULL - digit) / base) fail("32-bit integer literal overflow");
+            value = value * base + digit;
+            ++digits;
+            advance();
+        }
+        if (digits == 0) fail("radix prefix must be followed by digits");
+        if (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_')
+            fail("invalid digit in radix integer literal");
+        return {Kind::Number, std::string{}, static_cast<double>(value), line_, column};
+    }
     Token string() {
         const int column = column_;
         advance();
@@ -287,6 +342,10 @@ private:
         std::string text(source_.substr(start, offset_ - start));
         std::string upper = text;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (upper == "TASK" || upper == "ERR" || upper == "ERR$" || upper == "ERRX$")
+            return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
+        if (upper == "OFF" || upper == "AUTO")
+            return {Kind::Identifier, upper, 0, line_, column, start, text.size()};
         if (isBuiltinCommandName(upper))
             return {Kind::BuiltinCommand, upper, 0, line_, column, start, text.size()};
         if (isBuiltinFunctionName(upper))
@@ -329,7 +388,10 @@ std::string canonicalizeKeywords(const std::string& source) {
     std::size_t copiedThrough = 0;
     for (const Token& token : tokens) {
         if (token.sourceLength == 0 || token.sourceStart < copiedThrough) continue;
-        if (token.kind == Kind::BuiltinCommand) {
+        if (token.kind == Kind::BuiltinCommand ||
+            (token.kind == Kind::BuiltinFunction &&
+             (token.text == "TASK" || token.text == "ERR" ||
+              token.text == "ERR$" || token.text == "ERRX$"))) {
             result.append(source, copiedThrough, token.sourceStart - copiedThrough);
             result.append(token.text);
             copiedThrough = token.sourceStart + token.sourceLength;
@@ -374,9 +436,9 @@ public:
         }
     }
 
-    std::vector<Instruction> compile(bool tolerateUnresolvedCalls = false,
-                                     bool tolerateIncompleteBlocks = false,
-                                     bool tolerateUnresolvedSourceJumps = false) {
+    InstructionSequence compile(bool tolerateUnresolvedCalls = false,
+                                 bool tolerateIncompleteBlocks = false,
+                                 bool tolerateUnresolvedSourceJumps = false) {
         try {
             block(true);
             if (!check(Kind::End)) error(peek(), "unexpected block terminator");
@@ -398,7 +460,7 @@ public:
 
 private:
     std::vector<Token> tokens_;
-    std::vector<Instruction> code_;
+    InstructionSequence code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
     std::unordered_map<std::string, std::size_t> arrays_;
     std::unordered_map<std::string, Value> constants_;
@@ -508,18 +570,22 @@ private:
                 tokens_[current_ + 1].kind == Kind::Go ||
                 tokens_[current_ + 1].kind == Kind::Goto ||
                 tokens_[current_ + 1].kind == Kind::BuiltinCommand ||
+                (tokens_[current_ + 1].kind == Kind::BuiltinFunction &&
+                 tokens_[current_ + 1].text == "TASK") ||
                 tokens_[current_ + 1].kind == Kind::Return ||
                 tokens_[current_ + 1].kind == Kind::Newline ||
                 tokens_[current_ + 1].kind == Kind::End ||
                 tokens_[current_ + 1].kind == Kind::Identifier);
     }
     [[noreturn]] void error(const Token& token, const char* message) const {
-        throw std::runtime_error("line " + std::to_string(token.line) + ", column " +
-                                 std::to_string(token.column) + ": " + message);
+        throw runtime::Error(runtime::ErrorCode::Syntax,
+            "line " + std::to_string(token.line) + ", column " +
+            std::to_string(token.column) + ": " + message);
     }
     [[noreturn]] void error(const Instruction& instruction, const char* message) const {
-        throw std::runtime_error("line " + std::to_string(instruction.line) + ", column " +
-                                 std::to_string(instruction.column) + ": " + message);
+        throw runtime::Error(runtime::ErrorCode::Syntax,
+            "line " + std::to_string(instruction.line) + ", column " +
+            std::to_string(instruction.column) + ": " + message);
     }
     void emit(Op op, const Token& token, Value value = 0.0, std::string name = {},
               PrintSeparator separator = PrintSeparator::None) {
@@ -541,6 +607,15 @@ private:
                 } else if (instruction.name == "OPEN") {
                     if (passedArguments < 1 || passedArguments > 3)
                         error(instruction, "OPEN expects one to three arguments");
+                } else if (instruction.name == "TASK") {
+                    if (passedArguments < 1 || passedArguments > 2)
+                        error(instruction, "TASK expects a filename and optional flags");
+                } else if (instruction.name == "MID$") {
+                    if (passedArguments < 2 || passedArguments > 3)
+                        error(instruction, "MID$ expects a string, start, and optional length");
+                } else if (instruction.name == "GUPDATE") {
+                    if (passedArguments > 1)
+                        error(instruction, "GUPDATE accepts one numeric mode or no argument");
                 } else if (passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
@@ -1327,6 +1402,14 @@ private:
                 code_.push_back(std::move(input));
                 return;
             }
+            if (name.text == "GUPDATE") {
+                const bool hasMode = !commandArgumentTerminator();
+                if (hasMode) expression();
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of line after GUPDATE mode");
+                emitCall(name, hasMode ? 1 : 0, false);
+                return;
+            }
             const bool supportsChannelSelector =
                 name.text == "INK" || name.text == "PAPER" || name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
@@ -1340,6 +1423,15 @@ private:
             std::vector<ArrayArgumentCandidate> arrayCandidates;
             const std::size_t arguments = commandArguments(&arrayCandidates);
             emitCall(name, arguments, false, std::move(arrayCandidates), hasChannelArgument);
+            return;
+        }
+        if (check(Kind::BuiltinFunction) && peek().text == "TASK" &&
+            current_ + 1 < tokens_.size() &&
+            tokens_[current_ + 1].kind != Kind::LeftParen) {
+            const Token name = advance();
+            std::vector<ArrayArgumentCandidate> arrayCandidates;
+            const std::size_t arguments = commandArguments(&arrayCandidates);
+            emitCall(name, arguments, false, std::move(arrayCandidates));
             return;
         }
         if (check(Kind::BuiltinFunction))
@@ -1547,7 +1639,13 @@ private:
         }
         if (match(Kind::BuiltinFunction)) {
             const Token t = previous();
-            if (!check(Kind::LeftParen)) error(t, "built-in function requires parentheses");
+            if (!check(Kind::LeftParen)) {
+                if (t.text == "ERR" || t.text == "ERRX$") {
+                    emitCall(t, 0, true);
+                    return;
+                }
+                error(t, "built-in function requires parentheses");
+            }
             std::vector<ArrayArgumentCandidate> arrayCandidates;
             const std::size_t arguments = callArguments(&arrayCandidates);
             emitCall(t, arguments, true, std::move(arrayCandidates));
@@ -1787,15 +1885,22 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<graphics::Service> graphics,
                          std::shared_ptr<runtime::NetworkService> network,
                          std::shared_ptr<runtime::MemoryService> memory,
-                         std::shared_ptr<runtime::TaskControlService> taskControl)
+                         std::shared_ptr<runtime::TaskControlService> taskControl,
+                         runtime::TaskId taskId)
     : uiSession_(std::make_unique<detail::UISessionState>()),
       storage_(std::move(storage)), channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
       taskControl_(std::move(taskControl)),
-      session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)) {
+      session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)),
+      task_id_(taskId) {
     if (session_id_ == 0)
         session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
+}
+
+void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
+    errorCode_ = code;
+    errorDetail_ = std::move(detail);
 }
 
 Interpreter::~Interpreter() {
@@ -1817,6 +1922,10 @@ std::vector<runtime::ChannelInfo> Interpreter::channelInventory() const {
         return left.handle < right.handle;
     });
     return result;
+}
+
+std::size_t Interpreter::openChannelCount() const {
+    return channels_ ? channels_->listOpen(session_id_).size() : 0;
 }
 
 bool Interpreter::channelIsOpen(runtime::ChannelId channel) const {
@@ -1883,7 +1992,7 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
     }
 }
 
-std::vector<detail::Instruction> detail::compileSource(const std::string& source) {
+detail::InstructionSequence detail::compileSource(const std::string& source) {
     Compiler compiler(Lexer(source).scan());
     return compiler.compile();
 }
@@ -2005,9 +2114,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
             word.rfind("SAVE ", 0) == 0 || word == "DIR" ||
             word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
-            word == "SPAWN" || word.rfind("SPAWN ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
-            word == "CANCEL" || word.rfind("CANCEL ", 0) == 0 ||
+            word == "KILL" || word.rfind("KILL ", 0) == 0 ||
+            word == "TASKRESULT" || word.rfind("TASKRESULT ", 0) == 0 ||
             word == "SUSPEND" || word.rfind("SUSPEND ", 0) == 0 ||
             word == "RESUME" || word.rfind("RESUME ", 0) == 0 ||
             word == "LOGOFF" || word.rfind("LOGOFF ", 0) == 0 ||
@@ -2070,23 +2179,40 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const std::string contents = storage_->readText(path);
             std::map<int, std::string> candidate;
             std::istringstream file(contents);
+            enum class LoadFormat { Unknown, Numbered, Unnumbered };
+            LoadFormat format = LoadFormat::Unknown;
+            int nextAutomaticLine = 10;
             for (std::string fileLine; std::getline(file, fileLine);) {
                 const std::string sourceLine = trim(fileLine);
                 if (sourceLine.empty()) continue;
                 const std::size_t storedNumberEnd = lineNumberEnd(fileLine);
-                if (storedNumberEnd == 0)
-                    throw std::runtime_error("LOAD expects numbered BASIC source lines");
                 int number = 0;
-                const auto parsed = std::from_chars(fileLine.data(),
-                    fileLine.data() + storedNumberEnd, number);
-                if (parsed.ec != std::errc{} || number < 1 || number > 32767)
-                    throw std::runtime_error("program line number must be in 1..32767");
-                const std::string body = canonicalizeKeywords(
-                    trim(fileLine.substr(storedNumberEnd)));
+                const bool numbered = storedNumberEnd != 0;
+                const LoadFormat currentFormat = numbered ? LoadFormat::Numbered :
+                                                            LoadFormat::Unnumbered;
+                if (format != LoadFormat::Unknown && format != currentFormat)
+                    throw std::runtime_error(
+                        "LOAD cannot mix numbered and unnumbered source lines");
+                format = currentFormat;
+
+                std::string body;
+                if (numbered) {
+                    const auto parsed = std::from_chars(fileLine.data(),
+                        fileLine.data() + storedNumberEnd, number);
+                    if (parsed.ec != std::errc{} || number < 1 || number > 32767)
+                        throw std::runtime_error("program line number must be in 1..32767");
+                    body = canonicalizeKeywords(trim(fileLine.substr(storedNumberEnd)));
+                } else {
+                    if (nextAutomaticLine > 32767)
+                        throw std::runtime_error(
+                            "LOAD unnumbered source exceeds 3276 non-empty lines");
+                    number = nextAutomaticLine;
+                    nextAutomaticLine += 10;
+                    body = canonicalizeKeywords(sourceLine);
+                }
                 if (body.empty()) candidate.erase(number);
                 else candidate[number] = body;
             }
-            validateProgramLines(candidate, storage_.get());
             program_.swap(candidate);
             clear();
         } else if (word == "SAVE" || word.rfind("SAVE ", 0) == 0) {
@@ -2117,18 +2243,6 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             for (const auto& entry : storage_->list(path))
                 listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
             writeChannelText(channel, listing);
-        } else if (word == "SPAWN" || word.rfind("SPAWN ", 0) == 0) {
-            if (!storage_)
-                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                            "storage service unavailable");
-            if (!taskControl_)
-                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                            "session supervisor unavailable");
-            const std::string path = parseQuotedPath(trim(normalizedLine.substr(5)), "SPAWN");
-            const std::string childSource = storage_->readText(path);
-            const auto id = taskControl_->spawn(childSource, output);
-            writeChannelText(0,
-                "Started session " + std::to_string(id) + "\n");
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(5));
             const std::uint64_t outputChannel = argument.empty() ?
@@ -2178,23 +2292,55 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 listing += "#" + std::to_string(channel.handle) + " " +
                     runtime::channelTypeName(channel.type) + "\n";
             writeChannelText(0, listing);
-        } else if (word == "CANCEL" || word.rfind("CANCEL ", 0) == 0) {
+        } else if (word == "KILL" || word.rfind("KILL ", 0) == 0) {
             if (!taskControl_)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "session supervisor unavailable");
-            const std::string argument = trim(normalizedLine.substr(6));
+            const std::string argument = trim(normalizedLine.substr(4));
             std::uint64_t id = 0;
             const auto parsed = std::from_chars(argument.data(),
                                                 argument.data() + argument.size(), id);
             if (argument.empty() || parsed.ec != std::errc{} ||
                 parsed.ptr != argument.data() + argument.size())
-                throw std::runtime_error("CANCEL requires a session ID");
+                throw runtime::Error(runtime::ErrorCode::InvalidArgument,
+                                     "KILL requires a task ID");
             if (taskControl_->focusedTask() == id)
-                throw std::runtime_error("LOGOFF before cancelling the attached session");
-            if (!taskControl_->cancelWorker(id))
-                throw std::runtime_error("no active worker session with that ID");
-            writeChannelText(0,
-                             "Cancelled session " + std::to_string(id) + "\n");
+                throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
+                                     "LOGOFF before killing the attached task");
+            if (!taskControl_->killTask(id))
+                throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
+                                     "no active task with that ID");
+            writeChannelText(default_output_channel_,
+                             "Killed task " + std::to_string(id) + "\n");
+        } else if (word == "TASKRESULT" || word.rfind("TASKRESULT ", 0) == 0) {
+            if (!taskControl_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "task supervisor unavailable");
+            const std::string argument = trim(normalizedLine.substr(10));
+            std::uint64_t id = 0;
+            const auto parsed = std::from_chars(argument.data(),
+                                                argument.data() + argument.size(), id);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size())
+                throw runtime::Error(runtime::ErrorCode::InvalidArgument,
+                                     "TASKRESULT requires a task ID");
+            const auto tasks = taskControl_->listTasks();
+            const auto found = std::find_if(tasks.begin(), tasks.end(),
+                [id](const runtime::ManagedTaskInfo& task) { return task.id == id; });
+            if (found == tasks.end())
+                throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
+                                     "no task exists with that ID");
+            std::string detail = "Task " + std::to_string(found->id) + "\n";
+            detail += "Status: " + std::string(runtime::taskStateName(found->state)) + "\n";
+            detail += "Kind: " + std::string(found->supervisor ? "SUPERVISOR" :
+                (found->interactive ? "WORKER" : "PROGRAM")) + "\n";
+            detail += "Priority: " + std::to_string(found->priority) + "\n";
+            detail += "Resume priority: " + std::to_string(found->resumePriority) + "\n";
+            detail += "Open channels: " + std::to_string(found->openChannels) + "\n";
+            detail += "Error: " + std::to_string(static_cast<std::int32_t>(found->errorCode)) +
+                " " + runtime::errorText(found->errorCode) + "\n";
+            if (!found->errorDetail.empty()) detail += "Detail: " + found->errorDetail + "\n";
+            writeChannelText(default_output_channel_, detail);
         } else if (word == "SUSPEND" || word.rfind("SUSPEND ", 0) == 0 ||
                    word == "RESUME" || word.rfind("RESUME ", 0) == 0) {
             if (!taskControl_)

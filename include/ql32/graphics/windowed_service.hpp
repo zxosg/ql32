@@ -29,6 +29,8 @@ public:
     void clear(SessionId session) override;
     void closeWindow(SessionId session) override;
     void closeSession(SessionId session) override;
+    void setUpdateMode(SessionId session, UpdateMode mode) override;
+    void update(SessionId session) override;
     WindowInfo windowInfo(SessionId session) override;
     RgbColor paletteColor(SessionId session, std::uint16_t index) override;
     void setWindowBounds(SessionId session, Rect bounds) override;
@@ -58,6 +60,7 @@ private:
     std::unordered_map<SessionId, Point> textCursors_;
     Frame frame_;
     std::uint16_t rotationDegrees_ = 0;
+    UpdateMode updateMode_ = UpdateMode::Auto;
 };
 
 } // namespace ql32::graphics

@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "ql32/runtime/channel.hpp"
+#include "ql32/runtime/error.hpp"
 
 namespace ql32::runtime {
 
@@ -13,23 +14,51 @@ using TaskId = std::uint64_t;
 inline constexpr std::uint32_t maximumTaskPriority = 2147483647U;
 inline constexpr std::size_t maximumInstructionBudget = 65536;
 
-enum class TaskState { Runnable, WaitingUi, WaitingInput, Completed, Failed, Cancelled };
+enum class TaskState {
+    Runnable,
+    WaitingUi,
+    WaitingInput,
+    WaitingTask,
+    Completed,
+    Failed,
+    Cancelled
+};
+
+enum TaskStartFlag : std::uint32_t {
+    TaskStartNone = 0,
+    TaskStartWait = 1U << 0
+};
+
+enum class TaskResultField : std::uint32_t {
+    Status = 1,
+    Channels = 2,
+    ErrorCode = 3,
+    ErrorDetail = 4,
+    Kind = 5,
+    Priority = 6,
+    ResumePriority = 7
+};
 
 struct ManagedTaskInfo {
     TaskId id = 0;
     TaskState state = TaskState::Runnable;
     bool supervisor = false;
+    bool interactive = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
     std::string error;
+    ErrorCode errorCode = ErrorCode::None;
+    std::string errorDetail;
+    std::size_t openChannels = 0;
 };
 
 // Control surface available to the interactive BASIC supervisor.
 class TaskControlService {
 public:
     virtual ~TaskControlService() = default;
-    virtual TaskId spawn(std::string source, std::ostream& output) = 0;
-    virtual bool cancelWorker(TaskId id) = 0;
+    virtual TaskId startTask(std::string source, std::ostream& output,
+                             TaskId caller, std::uint32_t flags) = 0;
+    virtual bool killTask(TaskId id) = 0;
     virtual bool logon(TaskId id) = 0;
     virtual TaskId logoff() = 0;
     virtual TaskId focusedTask() const = 0;
@@ -47,6 +76,7 @@ inline const char* taskStateName(TaskState state) noexcept {
     case TaskState::Runnable: return "RUNNABLE";
     case TaskState::WaitingUi: return "WAITING_UI";
     case TaskState::WaitingInput: return "WAITING_INPUT";
+    case TaskState::WaitingTask: return "WAITING_TASK";
     case TaskState::Completed: return "COMPLETED";
     case TaskState::Failed: return "FAILED";
     case TaskState::Cancelled: return "CANCELLED";

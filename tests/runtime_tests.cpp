@@ -1,6 +1,7 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -357,6 +358,115 @@ void testSuperBasicStringSlices() {
             "string slicing parsing broke forward string-function calls");
 }
 
+void testStringExtractionFunctions() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "text$=\"QL/32\"\n"
+        "PRINT LEFT$(text$,0)\n"
+        "PRINT LEFT$(text$,3)\n"
+        "PRINT LEFT$(text$,99)\n"
+        "PRINT RIGHT$(text$,2)\n"
+        "PRINT RIGHT$(text$,0)\n"
+        "PRINT MID$(text$,2,3)\n"
+        "PRINT MID$(text$,3)\n"
+        "PRINT MID$(text$,7,1)\n"
+        "unicode$=\"caf\u00e9\U0001f642\"\n"
+        "PRINT LEN(unicode$)\n"
+        "PRINT LEFT$(unicode$,4)\n"
+        "PRINT RIGHT$(unicode$,2)\n"
+        "PRINT MID$(unicode$,4,2)\n", output);
+    require(output.str() ==
+                "\nQL/\nQL/32\n32\n\nL/3\n/32\n\n5\ncaf\u00e9\n\u00e9\U0001f642\n\u00e9\U0001f642\n",
+            "string extraction functions returned incorrect character slices");
+
+    for (const std::string& expression : {
+             "PRINT LEFT$(\"x\",-1)\n",
+             "PRINT RIGHT$(\"x\",1.5)\n",
+             "PRINT MID$(\"x\",0)\n",
+             "PRINT MID$(\"x\",1,-1)\n"}) {
+        bool rejected = false;
+        try {
+            std::ostringstream ignored;
+            interpreter.execute(expression, ignored);
+        } catch (const ql32::runtime::Error& error) {
+            rejected = error.code() == ql32::runtime::ErrorCode::InvalidArgument;
+        }
+        require(rejected, "string extraction accepted an invalid index or length");
+    }
+}
+
+void testUnsignedBitFunctionsAndRadixLiterals() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT &HCAFE\n"
+        "PRINT &b101101\n"
+        "PRINT BAND(&HCAFE,&H0FF0)\n"
+        "PRINT HEX$(BAND(&HCAFE,&H0FF0))\n"
+        "PRINT BOR(&HCAFE,&H0030)\n"
+        "PRINT HEX$(BXOR(&HCAFE,&HFFFF))\n"
+        "PRINT HEX$(BNOT(0))\n"
+        "PRINT BIN$(0)\n"
+        "PRINT ROL(&H80000001,1)\n"
+        "PRINT HEX$(ROR(&H80000001,1))\n"
+        "PRINT ROL(1,-1)\n"
+        "PRINT ROL(1,33)\n"
+        "PRINT HEX$(&HFFFFFFFF)\n"
+        "PRINT BIN$(&HFFFFFFFF)\n", output);
+    require(output.str() ==
+                "51966\n45\n2800\nAF0\n51966\n3501\nFFFFFFFF\n0\n3\nC0000000\n2147483648\n2\nFFFFFFFF\n11111111111111111111111111111111\n",
+            "32-bit bit functions or radix literals returned incorrect values");
+
+    for (const std::string& source : {
+             "PRINT &H100000000\n", "PRINT &B102\n", "PRINT &H\n",
+             "PRINT BAND(-1,0)\n", "PRINT BNOT(1.5)\n", "PRINT ROR(1,0.5)\n"}) {
+        bool rejected = false;
+        try {
+            std::ostringstream ignored;
+            interpreter.execute(source, ignored);
+        } catch (const ql32::runtime::Error& error) {
+            rejected = error.code() == ql32::runtime::ErrorCode::InvalidArgument ||
+                       error.code() == ql32::runtime::ErrorCode::Syntax;
+        }
+        require(rejected, "bit functions accepted an invalid integer or radix literal");
+    }
+}
+
+void testTrigonometricFunctionsUseRadians() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT SIN(0)\n"
+        "PRINT COS(0)\n"
+        "PRINT SIN(1.5707963267948966)\n"
+        "PRINT COS(3.141592653589793)\n"
+        "PRINT SIN(-0.5235987755982988)\n"
+        "PRINT INT(2.8)\n"
+        "PRINT INT(-2.8)\n", output);
+    std::istringstream values(output.str());
+    const double expected[] = {0, 1, 1, -1, -0.5, 2, -3};
+    for (const double value : expected) {
+        double actual = 0;
+        require(static_cast<bool>(values >> actual) && std::fabs(actual - value) < 1e-12,
+                "SIN or COS did not use radian input");
+    }
+    std::string extra;
+    require(!(values >> extra), "SIN or COS produced extra values");
+}
+
+void testQ32ErrorFunctions() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT ERR\n"
+        "PRINT ERR$(0)\n"
+        "PRINT ERR$(22)\n"
+        "PRINT ERRX$\n", output);
+    require(output.str() == "0\nNo error\nUnknown QL/32 error code 22\n\n",
+            "ERR, ERR$, or ERRX$ returned an incorrect value");
+}
+
 void testUiCallsSuspendAndResumePerSession() {
     auto service = std::make_shared<ql32::ui::QueuedService>();
     ql32::Interpreter first({}, {}, service);
@@ -512,6 +622,10 @@ int main() {
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
         testSuperBasicStringSlices();
+        testStringExtractionFunctions();
+        testUnsignedBitFunctionsAndRadixLiterals();
+        testTrigonometricFunctionsUseRadians();
+        testQ32ErrorFunctions();
         testUiCallsSuspendAndResumePerSession();
         testDialogMenuBasicCallsSuspendAndResume();
     } catch (const std::exception& error) {

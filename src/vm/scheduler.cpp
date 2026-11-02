@@ -12,6 +12,7 @@ runtime::TaskState taskState(TaskStatus status) {
     case TaskStatus::Runnable: return runtime::TaskState::Runnable;
     case TaskStatus::WaitingUi: return runtime::TaskState::WaitingUi;
     case TaskStatus::WaitingInput: return runtime::TaskState::WaitingInput;
+    case TaskStatus::WaitingTask: return runtime::TaskState::WaitingTask;
     case TaskStatus::Completed: return runtime::TaskState::Completed;
     case TaskStatus::Failed: return runtime::TaskState::Failed;
     case TaskStatus::Cancelled: return runtime::TaskState::Cancelled;
@@ -23,12 +24,18 @@ class SchedulerTaskControl final : public runtime::TaskControlService {
 public:
     explicit SchedulerTaskControl(SessionScheduler& scheduler) : scheduler_(scheduler) {}
 
-    runtime::TaskId spawn(std::string source, std::ostream& output) override {
+    runtime::TaskId startTask(std::string source, std::ostream& output,
+                              runtime::TaskId caller, std::uint32_t flags) override {
+        if ((flags & ~static_cast<std::uint32_t>(runtime::TaskStartWait)) != 0)
+            throw runtime::Error(runtime::ErrorCode::InvalidArgument,
+                                 "unknown TASK option bits");
+        if ((flags & runtime::TaskStartWait) != 0)
+            return scheduler_.launchAndWait(std::move(source), output, caller);
         return scheduler_.launchWorker(std::move(source), output);
     }
 
-    bool cancelWorker(runtime::TaskId id) override {
-        return scheduler_.cancelWorker(id);
+    bool killTask(runtime::TaskId id) override {
+        return scheduler_.kill(id);
     }
 
     bool logon(runtime::TaskId id) override { return scheduler_.logon(id); }
@@ -58,8 +65,10 @@ public:
         std::vector<runtime::ManagedTaskInfo> result;
         for (const auto& info : scheduler_.tasks()) {
             result.push_back({info.id, taskState(info.status),
-                              info.supervisor, info.priority, info.resumePriority,
-                              info.error});
+                              info.supervisor, info.interactive,
+                              info.priority, info.resumePriority,
+                              info.error, info.errorCode, info.errorDetail,
+                              info.openChannels});
         }
         return result;
     }
@@ -77,6 +86,10 @@ struct SessionScheduler::Task {
     std::unique_ptr<Interpreter> interpreter;
     TaskStatus status = TaskStatus::Runnable;
     std::string error;
+    runtime::ErrorCode errorCode = runtime::ErrorCode::None;
+    std::string errorDetail;
+    TaskId waitingChildId = 0;
+    TaskId waitingParentId = 0;
     bool started = false;
     bool interactive = false;
     bool supervisor = false;
@@ -103,7 +116,7 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
-        services_.network, services_.memory, taskControl_);
+        services_.network, services_.memory, taskControl_, task->id);
     const TaskId id = task->id;
     eligibleTasks_.reserve(tasks_.size() + 1);
     candidateTasks_.reserve(tasks_.size() + 1);
@@ -119,7 +132,7 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
-        services_.network, services_.memory, taskControl_);
+        services_.network, services_.memory, taskControl_, task->id);
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
@@ -127,6 +140,28 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     candidateTasks_.reserve(tasks_.size() + 1);
     tasks_.push_back(std::move(task));
     return id;
+}
+
+TaskId SessionScheduler::launchAndWait(std::string source, std::ostream& output,
+                                       TaskId parentId) {
+    Task* parent = nullptr;
+    for (auto& task : tasks_)
+        if (task->id == parentId) parent = task.get();
+    if (!parent || !parent->interpreter || parent->status == TaskStatus::Completed ||
+        parent->status == TaskStatus::Failed || parent->status == TaskStatus::Cancelled)
+        throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
+                             "caller cannot wait for a task");
+    if (parent->waitingChildId != 0)
+        throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
+                             "caller is already waiting for a child task");
+    const TaskId childId = launch(std::move(source), output);
+    Task* child = tasks_.back().get();
+    parent->waitingChildId = childId;
+    child->waitingParentId = parentId;
+    child->priority = parent->priority;
+    child->resumePriority = parent->resumePriority;
+    focusedTaskId_ = childId;
+    return childId;
 }
 
 TaskId SessionScheduler::launchInteractive(std::ostream& output,
@@ -138,7 +173,7 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
-        services_.network, services_.memory, taskControl_);
+        services_.network, services_.memory, taskControl_, task->id);
     task->interactive = true;
     task->supervisor = true;
     task->hasPendingSource = !task->source.empty();
@@ -258,13 +293,37 @@ std::string SessionScheduler::takeError(TaskId id) {
 }
 
 bool SessionScheduler::tick() {
+    const auto wakeParent = [&](Task& child) {
+        if (child.waitingParentId == 0) return;
+        for (auto& parentPtr : tasks_) {
+            Task& parent = *parentPtr;
+            if (parent.id != child.waitingParentId) continue;
+            parent.waitingChildId = 0;
+            parent.errorCode = child.errorCode;
+            parent.errorDetail = child.errorDetail;
+            parent.error = child.error;
+            if (parent.interpreter)
+                parent.interpreter->setErrorContext(child.errorCode, child.errorDetail);
+            if (parent.status != TaskStatus::Completed &&
+                parent.status != TaskStatus::Failed &&
+                parent.status != TaskStatus::Cancelled) {
+                parent.started = true;
+                parent.status = TaskStatus::Runnable;
+                focusedTaskId_ = parent.id;
+            }
+            break;
+        }
+        child.waitingParentId = 0;
+    };
+
     eligibleTasks_.clear();
     candidateTasks_.clear();
     for (auto& candidatePtr : tasks_) {
         Task& candidate = *candidatePtr;
         if (candidate.status == TaskStatus::Completed ||
             candidate.status == TaskStatus::Failed ||
-            candidate.status == TaskStatus::Cancelled)
+            candidate.status == TaskStatus::Cancelled ||
+            candidate.status == TaskStatus::WaitingTask)
             continue;
         if (candidate.status == TaskStatus::WaitingInput &&
             !candidate.hasPendingSource)
@@ -276,6 +335,27 @@ bool SessionScheduler::tick() {
     if (!selectedIndex) return false;
 
     Task& current = *candidateTasks_[*selectedIndex];
+    const auto handleFailure = [&](std::string message, runtime::ErrorCode code,
+                                   std::string detail) {
+        current.error = std::move(message);
+        current.errorCode = code;
+        current.errorDetail = std::move(detail);
+        if (current.interpreter)
+            current.interpreter->setErrorContext(current.errorCode, current.errorDetail);
+        current.hasPendingSource = false;
+        current.interactiveSubmission = false;
+        current.source.clear();
+        current.started = false;
+        if (current.interactive) {
+            policy_.remove(current.id);
+            current.status = TaskStatus::WaitingInput;
+        } else {
+            policy_.remove(current.id);
+            current.status = TaskStatus::Failed;
+            current.interpreter.reset();
+        }
+        wakeParent(current);
+    };
 
     try {
         ExecutionStatus result;
@@ -301,6 +381,10 @@ bool SessionScheduler::tick() {
                 current.interpreter.reset();
             }
             current.source.clear();
+            wakeParent(current);
+        } else if (result == ExecutionStatus::WaitingTask) {
+            current.started = true;
+            current.status = TaskStatus::WaitingTask;
         } else if (result == ExecutionStatus::Suspended) {
             current.started = true;
             current.status = TaskStatus::WaitingUi;
@@ -308,20 +392,24 @@ bool SessionScheduler::tick() {
             current.started = true;
             current.status = TaskStatus::Runnable;
         }
+    } catch (const runtime::Error& error) {
+        handleFailure(error.what(), error.code(), error.detail());
+    } catch (const runtime::ServiceError& error) {
+        handleFailure(error.what(), error.languageCode(), error.detail());
+    } catch (const std::bad_alloc& error) {
+        handleFailure(error.what(), runtime::ErrorCode::OutOfMemory, error.what());
+    } catch (const std::invalid_argument& error) {
+        handleFailure(error.what(), runtime::ErrorCode::InvalidArgument, error.what());
+    } catch (const std::out_of_range& error) {
+        handleFailure(error.what(), runtime::ErrorCode::OutOfRange, error.what());
+    } catch (const std::overflow_error& error) {
+        handleFailure(error.what(), runtime::ErrorCode::NumericOverflow, error.what());
     } catch (const std::exception& error) {
-        current.error = error.what();
-        current.hasPendingSource = false;
-        current.interactiveSubmission = false;
-        current.source.clear();
-        current.started = false;
-        if (current.interactive) {
-            policy_.remove(current.id);
-            current.status = TaskStatus::WaitingInput;
-        } else {
-            policy_.remove(current.id);
-            current.status = TaskStatus::Failed;
-            current.interpreter.reset();
-        }
+        handleFailure(error.what(), runtime::errorCodeFor(error),
+                      runtime::extendedErrorText(error));
+    } catch (...) {
+        handleFailure("unknown scheduler failure", runtime::ErrorCode::GeneralFailure,
+                      "unknown scheduler failure");
     }
     return true;
 }
@@ -337,36 +425,52 @@ bool SessionScheduler::cancel(TaskId id) {
         task->hasPendingSource = false;
         task->interactiveSubmission = false;
         task->status = TaskStatus::Cancelled;
+        task->errorCode = runtime::ErrorCode::TaskCancelled;
+        task->error = runtime::errorText(task->errorCode);
+        task->errorDetail = "task " + std::to_string(id) + " was killed";
+        const TaskId parentId = task->waitingParentId;
+        const TaskId childId = task->waitingChildId;
+        task->waitingParentId = 0;
+        task->waitingChildId = 0;
         if (focusedTaskId_ == id) logoff();
+        if (childId != 0) (void)cancel(childId);
+        if (parentId != 0) {
+            for (auto& parent : tasks_) {
+                if (parent->id != parentId || !parent->interpreter) continue;
+                parent->waitingChildId = 0;
+                parent->errorCode = runtime::ErrorCode::TaskCancelled;
+                parent->error = runtime::errorText(parent->errorCode);
+                parent->errorDetail = "waited task " + std::to_string(id) + " was killed";
+                parent->interpreter->setErrorContext(parent->errorCode, parent->errorDetail);
+                parent->started = true;
+                if (parent->status != TaskStatus::Cancelled &&
+                    parent->status != TaskStatus::Completed &&
+                    parent->status != TaskStatus::Failed) {
+                    parent->status = TaskStatus::Runnable;
+                    focusedTaskId_ = parentId;
+                }
+                break;
+            }
+        }
         return true;
     }
     return false;
 }
 
-bool SessionScheduler::cancelWorker(TaskId id) {
-    for (auto& task : tasks_) {
-        if (task->id != id || task->supervisor || !task->interactive ||
-            task->status == TaskStatus::Completed || task->status == TaskStatus::Failed ||
-            task->status == TaskStatus::Cancelled)
-            continue;
-        task->interpreter.reset();
-        policy_.remove(task->id);
-        task->source.clear();
-        task->hasPendingSource = false;
-        task->interactiveSubmission = false;
-        task->status = TaskStatus::Cancelled;
-        if (focusedTaskId_ == id) logoff();
-        return true;
-    }
-    return false;
+bool SessionScheduler::kill(TaskId id) {
+    for (auto& task : tasks_)
+        if (task->id == id && task->supervisor) return false;
+    return cancel(id);
 }
 
 std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {
     for (const auto& current : tasks_)
         if (current->id == id)
             return TaskInfo{current->id, current->status, current->error,
+                            current->errorCode, current->errorDetail,
                             current->interactive, current->supervisor,
-                            current->priority, current->resumePriority};
+                            current->priority, current->resumePriority,
+                            current->interpreter ? current->interpreter->openChannelCount() : 0};
     return std::nullopt;
 }
 
@@ -375,8 +479,10 @@ std::vector<TaskInfo> SessionScheduler::tasks() const {
     result.reserve(tasks_.size());
     for (const auto& current : tasks_)
         result.push_back({current->id, current->status, current->error,
+                          current->errorCode, current->errorDetail,
                           current->interactive, current->supervisor,
-                          current->priority, current->resumePriority});
+                          current->priority, current->resumePriority,
+                          current->interpreter ? current->interpreter->openChannelCount() : 0});
     return result;
 }
 

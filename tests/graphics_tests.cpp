@@ -27,8 +27,12 @@ struct Event {
 
 class CapturingPresenter final : public ql32::graphics::FramePresenter {
 public:
-    void present(const ql32::graphics::Frame& frame) override { lastFrame = frame; }
+    void present(const ql32::graphics::Frame& frame) override {
+        lastFrame = frame;
+        ++presentCount;
+    }
     ql32::graphics::Frame lastFrame;
+    std::size_t presentCount = 0;
 };
 
 class RecordingGraphics final : public ql32::graphics::Service {
@@ -61,6 +65,12 @@ public:
     void closeSession(SessionId session) override {
         events.push_back({"CLOSE_SESSION", session});
     }
+    void setUpdateMode(SessionId session, UpdateMode mode) override {
+        const char* name = mode == UpdateMode::Off ? "GUPDATE_OFF" :
+                           mode == UpdateMode::On ? "GUPDATE_ON" : "GUPDATE_AUTO";
+        events.push_back({name, session});
+    }
+    void update(SessionId session) override { events.push_back({"GUPDATE", session}); }
     WindowInfo windowInfo(SessionId) override { return info; }
     RgbColor paletteColor(SessionId, std::uint16_t index) override {
         if (index == 2) return {255, 0, 0};
@@ -125,6 +135,58 @@ void testDrawingCallsAndSessionOwnership() {
     require(graphics->events.back().name == "CLOSE_SESSION" &&
                 graphics->events.back().session == session,
             "interpreter destruction did not release its graphics session");
+}
+
+void testGraphicsUpdateCommandDispatch() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    std::ostringstream output;
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    interpreter.execute(
+        "CONST KGupdateOff = 0\n"
+        "CONST KGupdateOn = 1\n"
+        "CONST KGupdateAuto = 1\n"
+        "GUPDATE KGupdateOff\n"
+        "CIRCLE 2,3,1\n"
+        "GUPDATE\n"
+        "GUPDATE KGupdateOn\n"
+        "GUPDATE KGupdateAuto\n", output);
+    require(graphics->events.size() == 5,
+            "GUPDATE or drawing command dispatch count was incorrect");
+    require(graphics->events[0].name == "GUPDATE_OFF" &&
+                graphics->events[1].name == "CIRCLE" &&
+                graphics->events[2].name == "GUPDATE" &&
+                graphics->events[3].name == "GUPDATE_AUTO" &&
+                graphics->events[4].name == "GUPDATE_AUTO",
+            "GUPDATE modes or explicit flush were dispatched in the wrong order");
+}
+
+void testWindowedGraphicsUpdateBatching() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter, 2);
+    graphics.setUpdateMode(1, UpdateMode::Off);
+    graphics.setInk(1, 2);
+    graphics.circle(1, {4, 5}, 0);
+    require(presenter->presentCount == 0,
+            "drawing was presented while GUPDATE was OFF");
+
+    graphics.update(1);
+    require(presenter->presentCount == 1,
+            "GUPDATE did not force one composed-screen presentation");
+    require(presenter->lastFrame.pixels[5 * 10 + 4] == 2,
+            "forced GUPDATE did not present retained drawing changes");
+
+    graphics.circle(1, {6, 5}, 0);
+    require(presenter->presentCount == 1,
+            "manual GUPDATE unexpectedly enabled automatic updates");
+    graphics.setUpdateMode(1, UpdateMode::On);
+    require(presenter->presentCount == 2 && presenter->lastFrame.pixels[5 * 10 + 6] == 2,
+            "GUPDATE ON did not restore updates and present pending drawing");
+
+    graphics.setUpdateMode(1, UpdateMode::Off);
+    graphics.circle(1, {8, 5}, 0);
+    graphics.setUpdateMode(1, UpdateMode::Auto);
+    require(presenter->presentCount == 3 && presenter->lastFrame.pixels[5 * 10 + 8] == 2,
+            "GUPDATE AUTO did not restore default automatic presentation");
 }
 
 void testDrawingArgumentValidation() {
@@ -425,6 +487,8 @@ void testCloseWindowCommandDispatch() {
 
 int main() {
     testDrawingCallsAndSessionOwnership();
+    testGraphicsUpdateCommandDispatch();
+    testWindowedGraphicsUpdateBatching();
     testDrawingArgumentValidation();
     testDisplayCommands();
     testPrintChannelRouting();

@@ -4,6 +4,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -11,6 +12,25 @@ namespace {
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+class ProgramStorage final : public ql32::runtime::StorageService {
+public:
+    std::string readText(const std::string& path) override {
+        const auto found = files.find(path);
+        if (found == files.end())
+            throw ql32::runtime::ServiceError(ql32::runtime::ServiceErrorCode::NotFound,
+                                              "test file not found");
+        return found->second;
+    }
+    void writeText(const std::string& path, const std::string& contents) override {
+        files[path] = contents;
+    }
+    std::vector<ql32::runtime::FileEntry> list(const std::string&) override {
+        return {};
+    }
+
+    std::unordered_map<std::string, std::string> files;
+};
 
 class CapturingChannelService final : public ql32::runtime::ChannelService {
 public:
@@ -422,6 +442,91 @@ void testTasksUsesDefaultAndExplicitPrintChannels() {
             "TASKS #channel did not redirect output to the selected channel");
 }
 
+void testTaskSupportsCommandAndFunctionSyntax() {
+    auto storage = std::make_shared<ProgramStorage>();
+    storage->files["worker.bas"] = "PRINT \"worker ready\"\n";
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.storage = storage;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+
+    require(scheduler.submit(supervisor, "id=TASK(\"worker.bas\")\n"),
+            "supervisor did not accept TASK function syntax");
+    require(scheduler.tick(), "scheduler did not execute TASK function syntax");
+    require(graphics->writtenText.empty(),
+            "TASK function printed an implicit status message");
+    const auto functionChild = scheduler.tasks();
+    require(functionChild.size() == 2 && functionChild[1].id == 2,
+            "TASK function did not create a worker");
+
+    require(scheduler.submit(supervisor, "TASK \"worker.bas\"\n"),
+            "supervisor did not accept TASK command syntax");
+    require(scheduler.tick(), "scheduler did not execute TASK command syntax");
+    const auto commandChild = scheduler.tasks();
+    require(commandChild.size() == 3 && commandChild[2].id == 3,
+            "TASK command did not create a worker");
+    require(graphics->writtenText == "Started task 3\n",
+            "TASK command did not report its task ID to the print channel");
+}
+
+void testTaskWaitResumesCallerAndExposesChildStatus() {
+    auto storage = std::make_shared<ProgramStorage>();
+    storage->files["worker.bas"] = "x=42\n";
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.storage = storage;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+
+    require(scheduler.submit(supervisor,
+                "id=TASK(\"worker.bas\",1)\n"
+                "state$=TASKRESULT(id,1)\n"
+                "PRINT state$\n"),
+            "supervisor did not accept TASK wait syntax");
+    require(scheduler.tick(), "scheduler did not start the waiting task");
+    require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingTask,
+            "caller did not suspend while its child was running");
+    require(scheduler.focusedTask() == 2,
+            "waiting task did not focus its child");
+    require(scheduler.tick(), "scheduler did not run the waiting task's child");
+    require(scheduler.tick(), "scheduler did not resume the waiting caller");
+    const auto tasks = scheduler.tasks();
+    require(tasks.size() == 2 && tasks[0].status == ql32::vm::TaskStatus::WaitingInput &&
+                tasks[1].status == ql32::vm::TaskStatus::Completed,
+            "wait form did not finish child and return caller to its prompt");
+    require(graphics->writtenText == "COMPLETED\n",
+            "TASKRESULT did not expose the completed standard task status");
+}
+
+void testTaskWaitReturnsChildErrorContext() {
+    auto storage = std::make_shared<ProgramStorage>();
+    storage->files["bad.bas"] = "PRINT (\n";
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.storage = storage;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+
+    require(scheduler.submit(supervisor, "TASK \"bad.bas\",1\n"),
+            "supervisor did not accept command-form TASK wait syntax");
+    require(scheduler.tick(), "scheduler did not start the failing child");
+    require(scheduler.tick(), "scheduler did not report the child's failure");
+    require(scheduler.tick(), "scheduler did not resume after child failure");
+    const auto parent = scheduler.task(supervisor);
+    const auto child = scheduler.task(2);
+    require(parent && child && child->status == ql32::vm::TaskStatus::Failed &&
+                parent->errorCode == ql32::runtime::ErrorCode::Syntax &&
+                !parent->errorDetail.empty(),
+            "waiting caller did not receive the child's error code and detail");
+}
+
 } // namespace
 
 int main() {
@@ -437,5 +542,8 @@ int main() {
     testPriorityWeightsChangeFrequency();
     testSupervisorCanSetSliceAndWorkerPriority();
     testTasksUsesDefaultAndExplicitPrintChannels();
+    testTaskSupportsCommandAndFunctionSyntax();
+    testTaskWaitResumesCallerAndExposesChildStatus();
+    testTaskWaitReturnsChildErrorContext();
     return 0;
 }

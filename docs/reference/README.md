@@ -25,7 +25,12 @@ These are the sources linked in the “QL32 Project Idea” chat and used to com
 - [Psion Series 3c, Series 5 and Siena OPL User Guide](PSION%203c%20Series5%20y%20Siena%20Programming%20Ref.pdf), supplied in `docs/reference`. Its Basics and Graphics & Friendlier Interaction sections cover OPL declarations, control flow, pixel windows, menus, and dialogs. OPL behavior varies by device generation; observe the Series 5/Series 3c markers.
 - The Series 5 OPL32 `INCLUDE` reference (Basics, “Series 5 Header Files, Constants and Procedure Prototypes”; OPL Reference chapter 9) places includes at module scope and describes header constants/prototypes rather than procedure bodies. QL/32's source-file inclusion is a documented adaptation, not OPL32 compatibility.
 - [Leigh Edwards, *Programming Psion Computers*](Programming-Psion-Computers.pdf), supplied in `docs/reference`; see OPL Reference chapter 9 for menus and dialogs, and the application architecture discussions for broader UI context.
+- [OPL `gUPDATE` reference](https://www.unix-ag.uni-siegen.de/docs/psionopl/b06graph.htm) describes disabling automatic redraw during a graphics batch and forcing a refresh with `gUPDATE`. QL/32 adopts that workflow; its `AUTO` mode is a QL/32 extension.
 - Its `dINIT`/`DIALOG` controls and `mINIT`/`mCARD`/`MENU` illustrate the UI model. OPL variants differ by device. QL/32 adopts the model with its own syntax and session ownership.
+
+## Annex32 Wi-Fi BASIC
+
+- [Annex32 Wi-Fi BASIC help](https://cicciocb.com/annex32help/V1.43/start.htm) documents `LEFT$`, `RIGHT$`, `MID$`, including the optional length argument to `MID$`, and 32-bit bitwise operators, shifts, and hexadecimal values. Annex32 is a separate ESP32-oriented BASIC dialect and is used only as a design reference.
 
 The OPL manuals are design references for managed UI and selected language
 refinements, not a source-compatibility target. SuperBASIC remains the core

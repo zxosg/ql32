@@ -37,6 +37,8 @@ struct RgbColor {
     std::uint8_t blue = 0;
 };
 
+enum class UpdateMode : std::uint8_t { Auto, On, Off };
+
 // Platform-neutral drawing contract. An implementation owns a default pixel
 // window and drawing state for each session. It creates the window on first
 // use, clips drawing to its bounds, and releases it from closeSession().
@@ -61,6 +63,12 @@ public:
         throw std::runtime_error("closing graphics windows unsupported");
     }
     virtual void closeSession(SessionId session) = 0;
+
+    // Update suppression controls the shared physical display. Drawing still
+    // updates retained canvases while automatic presentation is disabled.
+    virtual void setUpdateMode(SessionId, UpdateMode) {}
+    // Force the current composed screen to be presented without changing mode.
+    virtual void update(SessionId) {}
 
     virtual WindowInfo windowInfo(SessionId session) = 0;
     virtual RgbColor paletteColor(SessionId session, std::uint16_t index) = 0;

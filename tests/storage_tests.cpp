@@ -78,18 +78,39 @@ void testInteractiveFileCommands() {
         require(output.str() == "10 PRINT \"loaded\"\nloaded\ndemo.bas\n",
                 "LOAD, LIST, RUN, or DIR returned unexpected output");
 
-        storage->writeText("broken.bas", "this is not numbered source\n");
+        storage->writeText("plain.bas",
+            "PRINT \"first\"\n\nPRINT \"second\"\n");
+        std::ostringstream plainOutput;
+        interpreter.executeInteractive("LOAD \"plain.bas\"\nLIST\nRUN\n", plainOutput);
+        require(plainOutput.str() ==
+                    "10 PRINT \"first\"\n20 PRINT \"second\"\nfirst\nsecond\n",
+                "LOAD did not auto-number and run unnumbered BASIC source");
+
+        storage->writeText("broken.bas", "PRINT )\n");
+        std::ostringstream brokenOutput;
+        interpreter.executeInteractive("LOAD \"broken.bas\"\nLIST\n", brokenOutput);
+        require(brokenOutput.str() == "10 PRINT )\n",
+                "LOAD did not preserve invalid source for a later RUN diagnostic");
         bool rejected = false;
         try {
-            interpreter.executeInteractive("LOAD \"broken.bas\"\n", output);
+            interpreter.executeInteractive("RUN\n", output);
         } catch (const std::runtime_error&) {
             rejected = true;
         }
-        require(rejected, "LOAD accepted a file without numbered source lines");
+        require(rejected, "RUN accepted invalid BASIC source loaded from disk");
         std::ostringstream listing;
         interpreter.executeInteractive("LIST\n", listing);
-        require(listing.str() == "10 PRINT \"loaded\"\n",
-                "failed LOAD replaced the current program");
+        require(listing.str() == "10 PRINT )\n",
+                "RUN failure discarded the loaded source");
+
+        storage->writeText("mixed.bas", "10 PRINT \"numbered\"\nPRINT \"plain\"\n");
+        bool mixedRejected = false;
+        try {
+            interpreter.executeInteractive("LOAD \"mixed.bas\"\n", output);
+        } catch (const std::runtime_error&) {
+            mixedRejected = true;
+        }
+        require(mixedRejected, "LOAD accepted a mixture of numbered and unnumbered lines");
 
         bool traversalRejected = false;
         try {

@@ -17,8 +17,9 @@ system, and UI layers independent of board libraries.
 - The current committed baseline is `d1831f8` (`Add exact-byte file channel I/O and document endpoint bindings`). Current local changes are uncommitted and include target/build fixes, host memory portability, CYD compositor memory fixes, embedded scheduler integration and supervisor commands, and an opened-endpoint registry with serial/null output.
 - The Linux CLI reads complete source from a `.bas` file, accepts stdin source/batches, and opens a persistent line-oriented REPL on an interactive terminal. The REPL keeps session and numbered-program state between entries and reports a failed entry without exiting. The portable VM also exposes cooperative `executeSlice`/`resumeSlice` operations; `ql32::vm::SessionScheduler` round-robins interpreter sessions using a configurable bytecode instruction budget.
 - `FREE()` is a zero-argument BASIC function returning free-memory bytes through the portable `runtime::MemoryService`; ESP32 reports free 8-bit-capable heap, Linux reports host `MemAvailable`, and macOS uses free plus reclaimable inactive pages. The retained window canvas packs pixels at 1, 4, or 8 bits and enforces a total canvas-byte budget. BASIC graphics now render through the retained compositor on Linux, CYD, and VGA32; windows default to 4-bit depth.
-- Implemented language coverage includes module-level immutable `CONST` declarations for numeric and string literals, assignments; numeric and string values; expression and `PRINT` rules; comments; block `IF`; block and inline `FOR` with mixed range lists; named `NEXT` and `EXIT`; block and inline `REPeat`; procedure/function definitions, parameters, invocation locals, return, forward calls, recursion, and array-by-reference parameters; zero-based inclusive arrays; block `SELect ON` with lists, ranges, and `REMAINDER`; numeric `GO TO`/`GOTO` line targets and QL/32 named labels; keyword abbreviations for the supported keyword set; and canonicalized `LIST` output.
-- String slicing is implemented for scalar strings using one-based inclusive `text$(start TO end)` syntax. The numeric `LEN(string$)` built-in returns UTF-8 code-point length and is covered by runtime tests. Slice assignment and slicing dimensioned string arrays are not implemented yet.
+- Implemented language coverage includes module-level immutable `CONST` declarations for numeric and string literals, assignments; numeric and string values; expression and `PRINT` rules; comments; block `IF`; block and inline `FOR` with mixed range lists; named `NEXT` and `EXIT`; block and inline `REPeat`; procedure/function definitions, parameters, invocation locals, return, forward calls, recursion, and array-by-reference parameters; zero-based inclusive arrays; block `SELect ON` with lists, ranges, and `REMAINDER`; numeric `GO TO`/`GOTO` line targets and QL/32 named labels; UTF-8 string slices and `LEN`, `LEFT$`, `RIGHT$`, and `MID$`; trigonometric `SIN`/`COS` and flooring `INT`; graphics refresh control with `GUPDATE`; keyword abbreviations for the supported keyword set; and canonicalized `LIST` output.
+- QL/32-specific numeric helpers also include unsigned 32-bit bit operations (`BAND`, `BOR`, `BXOR`, `BNOT`, `ROL`, `ROR`), `&H`/`&B` literals, and `HEX$`/`BIN$` formatting. The Linux regression suite covers their valid and invalid boundaries.
+- String slicing and extraction functions use one-based UTF-8 code-point indexes. Slice assignment and slicing dimensioned string arrays are not implemented yet.
 - Numbered lines are validated against candidate program state before replacement, while incomplete block prefixes and forward calls are accepted. Calls unresolved in the complete program are diagnosed by `RUN`. Tests cover replacement rollback, incremental block entry, REPL recovery, interpreter isolation, array rank/type errors, stored-program errors, and cooperative cancellation through the C++17 cancellation token.
 - Known profile limits: `SELect` singleton comparisons use exact binary64 equality and only its block form is supported; allocation is capped at one million elements per array; nested inline loops are outside the explicit M1 grammar. See the specification for other QL/32 choices and deferrals.
 - The suite has 53 CTest cases across CLI and runtime behavior, including recursion depth, allocation limits, GOTO line/label behavior, storage and channel confinement, editor file commands, async UI lifecycle and BASIC dialog/menu round trips, cooperative scheduler slicing and UI suspension, graphics command dispatch/session cleanup, SVG rendering and escaping, FabGL and CYD graphics/console adapters, FabGL keyboard input, ESP32 clock/storage/channel/network behavior, Linux clock behavior, capability descriptor validation, VGA32 and CYD board profile validation, embedded line UI presentation and VM resumption, Wi-Fi BASIC calls, recursive source includes, and single-pass source-order evaluation of FOR ranges. The Linux suite passes with GNU C++ 15.2 and CMake 4.2.3. `tools/build-target.sh mac` builds with AppleClang, and all 53 CTest cases pass on macOS.
@@ -39,6 +40,8 @@ system, and UI layers independent of board libraries.
 - Scalar procedure/function arguments pass by value; dimensioned array arguments pass by reference, including forwarding through calls.
 - Numeric arrays use zero-based inclusive bounds. QL/32 dynamic UTF-8 string arrays differ from historical fixed-length arrays.
 - `RUN` clears session variables. Numbered lines replace a prior line with the same number; a blank numbered line deletes it.
+- Task management uses `TASK` in command and function forms; `KTaskWait` makes it wait synchronously while the child owns focus. `KILL` stops a task, `TASKRESULT` reports task properties, and `ERR`/`ERR$`/`ERRX$` expose QL/32 errors. The task-result memory property is deferred. Linux build and tests pass; ESP32 build and CYD verification remain.
+- Bit functions use an unsigned 32-bit range; `BNOT` inverts 32 bits, and `ROL`/`ROR` wrap integer counts modulo 32. `HEX$`/`BIN$` emit unprefixed uppercase hex/binary digits without leading zeroes. Logical operators retain their Boolean meaning.
 - `SELect` block arms accept values, inclusive ranges, and a final `REMAINDER`; exact singleton matching is currently a QL/32-specific choice.
 - The language contract and remaining open questions are in
   [`QL32-LANG-001.md`](docs/specification/QL32-LANG-001.md). References and
@@ -48,7 +51,7 @@ system, and UI layers independent of board libraries.
 
 M2 Linux acceptance is complete. M3 now has a portable session-owned graphics
 service contract and VM dispatch for `INK`, `PAPER`, `LINE`, `RECT`, `CIRCLE`,
-`TEXT`, and `CLS`. Decisions: one lazy default graphics window per session;
+`TEXT`, `CLS`, and `GUPDATE`. Decisions: one lazy default graphics window per session;
 OPL-style integer pixel coordinates with `(0,0)` at the top-left; indexed ink
 and paper colors initialized to the QL eight-color order. SuperBASIC remains
 the core loop syntax; use OPL selectively for language refinements and as the
@@ -151,8 +154,10 @@ Current open points before calling the hardware milestone accepted:
   (initially `#1`); `TASKS #channel` redirects one listing and suspended tasks
   show their saved resume weight.
   Host tests verify the reference sequence and
-  weighted frequencies. Priority behavior has not yet been checked on CYD or
-  VGA32 hardware. UI waits suspend only their owner. Both ESP32 event loops now
+  weighted frequencies. On CYD, the user confirmed the 8:4:1 demo rates ran in
+  the expected order and verified `SUSPEND`, `RESUME`, and `CANCEL` on hardware.
+  Direct `PRIORITY id,0` baseline behavior and VGA32 scheduler acceptance
+  remain unverified on hardware. UI waits suspend only their owner. Both ESP32 event loops now
   drive a persistent interactive REPL session with a default 128-instruction
   scheduler slice, adjustable through `SLICE`;
   startup, immediate commands, and `RUN` preserve interpreter state, with
@@ -162,9 +167,11 @@ Current open points before calling the hardware milestone accepted:
   checked on hardware: persistent state produced `42`, a numbered `RUN` showed
   all three expected lines, the alert waited for Enter, and `AFTER_UI_RESUME`
   appeared afterward. A syntax error was reported over serial and the REPL
-  accepted the next command. The embedded REPL now provides `SPAWN "path.bas"`,
-  `TASKS`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `CANCEL id`, `SUSPEND id`,
-  `RESUME id`, `SLICE n`, and `PRIORITY task-id,weight` for worker control.
+  accepted the next command. The embedded REPL provides task controls and
+  separate per-session state. The latest working tree changes replace
+  `SPAWN`/`CANCEL` with `TASK`/`KILL`, add optional `KTaskWait`, `TASKRESULT`,
+  and the QL/32 error functions `ERR`, `ERR$`, and `ERRX$`. Those latest API
+  changes have not yet been built, tested, or verified on CYD hardware.
   Spawned workers remain
   interactive after their startup source completes. Each session owns its
   BASIC state and channel handles; sessions
@@ -183,8 +190,12 @@ Current open points before calling the hardware milestone accepted:
   first CYD three-worker run hit `std::bad_alloc` while creating the third
   session. The TFT presenter now streams composed rows, and first-time
   `WINDOW` creation allocates the requested bounds directly instead of keeping
-  a full-screen canvas allocation. Linux, CYD, and VGA32 builds pass after
-  these fixes; the updated CYD firmware has not yet been flashed.
+  a full-screen canvas allocation. CYD text updates now compose and transfer
+  dirty regions, and restore the console overlay only when an update overlaps
+  it. The optimized CYD firmware was flashed and the priority demo restarted
+  at slice 32 with task weights 8:4:1. The user confirmed the expected relative
+  rates and verified suspend, resume, and cancel on hardware. Linux, CYD, and
+  VGA32 builds pass after these fixes.
   `graphics::WindowManager`
   now tracks owner, bounds, visibility, stacking order, clipping, and tiled
   layouts. Each window has a retained indexed canvas for pixels and geometric
@@ -268,17 +279,11 @@ exact-byte `IN`/`OUT`, and `AT`; serial is output-only and null is a sink.
 
 ## Pending language features
 
-- Add standard string functions `LEFT$`, `RIGHT$`, and `MID$`; specify whether
-  their indexing and out-of-range behavior follow SuperBASIC or another
-  documented QL/32 rule, and cover the chosen behavior with conformance tests.
-- Add bitwise integer operations: bitwise AND, OR, XOR, invert, and bit
-  rotations. Keep these distinct from the existing logical `AND`, `OR`, and
-  `XOR` operators. Define the integer width, signedness, rotation behavior,
-  conversion APIs, and source syntax before implementation.
-- Add hexadecimal and binary number support, including conversions to and
-  from numeric values and literals with explicit, documented prefixes. Choose
-  prefixes and define overflow, signed-value, and formatting behavior as part
-  of the language contract.
+- Implemented QL/32-specific unsigned 32-bit bit functions (`BAND`, `BOR`,
+  `BXOR`, `BNOT`, `ROL`, `ROR`), hexadecimal/binary literals (`&H`, `&B`),
+  and formatting (`HEX$`, `BIN$`). All 53 Linux tests pass both normally and
+  under ASan/UBSan. CYD and VGA32 firmware builds pass; hardware checks remain
+  pending.
 - Add a string-parsing facility that splits text using a caller-supplied
   delimiter string. Include an option to remove non-printable characters from
   the beginning and end of each parsed word, so input such as

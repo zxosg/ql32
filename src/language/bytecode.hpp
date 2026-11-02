@@ -3,6 +3,7 @@
 #include "ql32/interpreter.hpp"
 
 #include <cstddef>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -68,7 +69,11 @@ struct Instruction {
     std::vector<std::size_t> jumpScopes;
 };
 
-std::vector<Instruction> compileSource(const std::string& source);
+// Chunked instruction storage keeps bytecode growth from requiring one large
+// contiguous allocation on memory-constrained targets.
+using InstructionSequence = std::deque<Instruction>;
+
+InstructionSequence compileSource(const std::string& source);
 std::string expandIncludes(const std::string& source, runtime::StorageService* storage);
 
 } // namespace ql32::detail

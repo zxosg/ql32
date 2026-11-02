@@ -127,6 +127,14 @@ numeric comparisons, string equality/inequality, `AND OR XOR`, parentheses,
 function calls, and array indexing. `&`, `INSTR`, approximate equality `==`,
 bitwise operators, and chained comparisons are outside M1.
 
+The math functions `SIN(angle)` and `COS(angle)` accept finite numeric angles
+in radians and return binary64 results. They do not use a mutable global angle
+mode; this matches common host APIs and keeps sessions independent. `INT(value)`
+returns the greatest integer less than or equal to the finite numeric value,
+which is useful when converting drawing positions to pixel coordinates. These
+functions are available for later language slices and are not part of the M1
+compatibility claim.
+
 Precedence from highest to lowest is:
 
 | Level | Operators | Associativity |
@@ -333,8 +341,48 @@ points. A start outside the string or a reversed range is a runtime error.
 This is a QL/32-defined subset: slice assignment and descriptors on string
 arrays are not yet supported, and SuperBASIC ROM variants differ in omitted
 bound behavior. `LEN(string$)` returns the number of UTF-8 code points in a
-string or string slice. Unlike the original QL ROM's coercion behavior, QL/32
-requires a string argument. See the [SuperBASIC string-slicing reference](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) and [`LEN` reference](https://superbasic-manual.readthedocs.io/en/latest/L/len.html).
+string or string slice. `LEFT$(string$, count)` and `RIGHT$(string$, count)`
+return up to the requested number of code points from the beginning or end.
+`MID$(string$, start[, count])` uses a one-based start; if count is omitted,
+it returns the rest of the string. Counts may be zero and are clipped at the
+available characters. A negative or fractional count, or a non-positive or
+fractional `MID$` start, raises an invalid-argument error. A positive start
+beyond the string returns an empty string. These functions count UTF-8 code
+points, as `LEN` and QL/32 string slices do. Unlike the original QL ROM's
+coercion behavior, QL/32 requires string arguments. SuperBASIC expresses
+equivalent operations with slices; OPL tests support zero-length results,
+clipping at the string end, and invalid negative arguments; Annex32 documents
+an optional `MID$` length. QL/32 combines those useful behaviors without
+claiming source compatibility with either dialect. See the
+[SuperBASIC string-slicing reference](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html),
+[`LEN` reference](https://superbasic-manual.readthedocs.io/en/latest/L/len.html),
+and OPL/Annex references in [docs/reference](../reference/README.md).
+
+### 32-bit integer bit functions and literals
+
+QL/32 keeps `AND`, `OR`, `XOR`, and `NOT` as logical operators that return
+numeric `1` or `0`. Bit manipulation uses the explicit functions `BAND(a,b)`,
+`BOR(a,b)`, `BXOR(a,b)`, `BNOT(a)`, `ROL(value,count)`, and
+`ROR(value,count)`. They operate on unsigned 32-bit values represented as
+exact binary64 integers, from 0 through 4294967295. A value outside that range,
+a fraction, or a non-finite value raises an invalid-argument error. `BNOT`
+inverts exactly 32 bits. Rotation counts may be any finite integer; they wrap
+modulo 32, including negative counts. Results are unsigned values in the same
+range.
+
+Hexadecimal integer literals use `&H` or `&h`; binary literals use `&B` or
+`&b`. Both accept at most 32 bits and must contain at least one valid digit.
+Overflow and invalid digits are syntax errors. `HEX$(value)` and `BIN$(value)`
+return uppercase hexadecimal digits or binary digits, with no prefix and no
+leading zeroes (zero is returned as `"0"`). These functions and literals
+provide conversion to and from numeric values without changing the meaning of
+logical operators. QL/32's 32-bit unsigned profile is QL/32-specific; Annex32
+provides bitwise operators and shifts, while SuperBASIC references describe
+bitwise operations separately from Boolean operations. OPL32 code commonly
+combines integer flags with `OR`; these similarities are design references,
+not a compatibility claim. See [Annex32's bitwise reference](https://cicciocb.com/annex32help/V1.43/start.htm),
+the [SuperBASIC operator appendix](https://superbasic-manual.readthedocs.io/en/latest/Appendices/Appendix11.html),
+and the OPL samples noted in [docs/reference](../reference/README.md).
 
 `FREE()` returns the current free-memory estimate in bytes as a number. On
 ESP32 it reports free byte-addressable heap; on Linux it reports host memory
@@ -362,21 +410,35 @@ multi-line structures can be entered incrementally; unresolved procedure and
 function calls are bound when `RUN` compiles the complete program. Unnumbered
 statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
-interactive program. The Linux command loop provides `LOAD`, `SAVE`, and `DIR`.
-The scheduler-backed embedded REPL also provides `SPAWN "path.bas"`, `TASKS`,
-`TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `CANCEL id`, `SLICE [instructions]`,
-`PRIORITY task-id,weight`, `SUSPEND id`, and `RESUME id`. `SPAWN` reads source
-through the configured storage service and starts an independent worker
-session. When its startup source completes, the worker remains alive at its own
-interactive prompt with its variables, program, graphics window, and channels
-retained. `TASKS` lists session IDs, supervisor/worker kind, priority, state,
-and errors, along with the global instruction slice; suspended tasks also show
-their saved resume priority.
+interactive program. The REPL command processor provides `LOAD`, `SAVE`, and
+`DIR`. `LOAD "path.bas"` accepts either numbered BASIC source or unnumbered
+source. Unnumbered non-empty lines receive line numbers 10, 20, and so on in
+file order; blank lines are skipped. A file cannot mix numbered and unnumbered
+source lines. After loading, use `LIST` to inspect the numbered program and
+`RUN` to execute it. The scheduler-backed embedded REPL also provides `TASKS`,
+`TASKRESULT id`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `KILL id`,
+`SLICE [instructions]`, `PRIORITY task-id,weight`, `SUSPEND id`, and
+`RESUME id`. `TASK` reads source through the configured storage service and
+starts a task. Its statement form `TASK "path.bas"` reports the new task ID to
+the current print channel; `task_id = TASK("path.bas")` returns the ID without
+printing. Add `KTaskWait` to wait for completion:
+`TASK "path.bas", KTaskWait` or `task_id = TASK("path.bas", KTaskWait)`.
+Wait mode focuses the child while it runs, then resumes the caller. Child
+failure details are available through `ERR`, `ERR$`, and `ERRX$`. Without wait
+mode, source completion leaves the task at its own interactive prompt with its
+variables, program, graphics window, and channels retained. `TASKS` lists task
+IDs, kind, priority, state, and errors, along with the global instruction
+slice; suspended tasks also show their saved resume priority.
+`TASKRESULT id` prints all available properties. In expressions,
+`TASKRESULT(id, selector)` returns one property selected by `KTaskResultStatus`,
+`KTaskResultChannels`, `KTaskResultErrorCode`, `KTaskResultErrorDetail`,
+`KTaskResultKind`, `KTaskResultPriority`, or `KTaskResultResumePriority`;
+include `ql32.inc` to use these named constants.
 `TASKCHANNELS id` lists a session's reserved and opened handles with endpoint
 types. `LOGON id` routes embedded console input to an idle worker so immediate
 BASIC commands operate in that session; `LOGOFF` returns to the supervisor.
-The prompt includes the attached task ID. `CANCEL id` stops an active worker;
-log off before cancelling the currently attached session. `SLICE` reports or
+The prompt includes the attached task ID. `KILL id` stops an active task;
+log off before killing the currently attached session. `SLICE` reports or
 changes the number of bytecode instructions allowed per scheduler turn (default
 128, valid range 1..65536). `PRIORITY id,weight` sets a task's scheduling
 weight to a non-negative 32-bit integer; the default is 4. Higher weights
@@ -391,6 +453,35 @@ disabled. It writes to the current print channel,
 initially `#1`; `TASKS #channel` redirects one listing. Log off before
 suspending the currently attached task.
 These QL/32-specific commands are not available in the Linux command loop.
+`ERR` returns the current QL/32 error code, `ERR$(code)` returns its message,
+and `ERRX$` returns contextual detail for the current task error. Error code 0
+means no error; positive codes are stable QL/32 codes, with no SMSQ/E numeric
+compatibility claim.
+
+| Code | `ERR$` message |
+| ---: | --- |
+| 0 | No error |
+| 1 | General failure |
+| 2 | Invalid argument |
+| 3 | Syntax error |
+| 4 | Type mismatch |
+| 5 | Value out of range |
+| 6 | Numeric overflow |
+| 7 | Division by zero |
+| 8 | Out of memory |
+| 9 | Invalid path |
+| 10 | Not found |
+| 11 | Permission denied |
+| 12 | Input/output error |
+| 13 | Service unavailable |
+| 14 | Invalid handle |
+| 15 | Invalid task ID |
+| 16 | Invalid task state |
+| 17 | Task cancelled |
+| 18 | Task resource limit reached |
+| 19 | Operation not supported |
+| 20 | Invalid task result selector |
+| 21 | Task has not completed |
 M2 also provides QL/32-specific `OPEN`, `READ$`, `EOF`, `WRITE`, and `CLOSE`
 channel operations. File endpoints support reads and writes; serial endpoints
 write to serial output, and null endpoints discard output. Value-returning
@@ -419,8 +510,8 @@ Graphics fail if that endpoint lacks graphics capability. Changing the default
 to `#0` selects `#0` for unqualified output; explicit selectors still use the
 selected handle's active binding. The current runtime still resolves per-session
 routes per operation; direct binding is the approved target architecture.
-Channel handles belong to one interpreter session. A worker launched by the
-embedded `SPAWN` command has its own `#0`, `#1`, and opened handle numbers; a
+Channel handles belong to one interpreter session. A task launched by the
+embedded `TASK` command has its own `#0`, `#1`, and opened handle numbers; a
 number in one session does not select a handle in another. The sessions still
 use shared platform services and physical devices, such as the same display,
 SD card, and serial console. Worker text is routed to the supervisor's output
@@ -469,6 +560,16 @@ INPUT #promptChannel, promptExpression, #readChannel, variable
 INPUT #1, "Serial line?", #3, response$
 ```
 
+`GUPDATE 0` suppresses automatic presentation while drawing commands still
+modify their retained canvases. Bare `GUPDATE` forces the current composed
+screen to display without changing the selected mode. `GUPDATE 1` restores
+automatic presentation. `ql32.inc` defines `KGupdateOff = 0`, and both
+`KGupdateOn` and `KGupdateAuto` as `1`; they name the automatic mode, which is
+immediate on current presenters. Other numeric modes are reserved. Update
+suppression controls the shared physical display, so it affects drawing from
+all sessions until a later `GUPDATE 1`. Use it around a drawing batch, then
+call bare `GUPDATE` once to present the batch.
+
 Prompt expressions must evaluate to strings. Keyboard input
 suspends only its BASIC session and resumes when the UI presenter submits a
 line. File-channel `INPUT` reads one line synchronously and raises an error at
@@ -500,10 +601,17 @@ example, `ROTATE 90`, `ALERT title$, message$`, or `draw_line x1,y1`).
 Functions return values and require parentheses around their arguments,
 including empty parentheses for zero-argument functions (for example,
 `GWIDTH()` or `CONFIRM(title$, message$)`). A function call must be used in an
-expression; a procedure cannot be used as an expression. Parentheses remain
-part of other syntax such as definition parameter lists, array indexing,
-string slicing, and grouping. These rules apply to built-ins and
-user-defined procedures/functions alike. OPL-inspired `ALERT` and `CONFIRM`
+expression; a procedure cannot be used as an expression. A side-effecting
+operation may deliberately provide both forms when it is useful as a command
+and as a value-returning function. The command form performs the operation and
+reports its result through normal command output; the function form returns
+the result and does not print implicitly. Both forms must use the same runtime
+operation. `TASK` is the first example: `TASK "worker.bas"` starts a task
+and reports its ID, while `worker_id = TASK("worker.bas")` returns the ID for
+later use. Parentheses remain part of other syntax such as definition
+parameter lists, array indexing, string slicing, and grouping. These rules
+apply to built-ins and user-defined procedures/functions alike.
+OPL-inspired `ALERT` and `CONFIRM`
 are M2 native APIs, drawing is M3, and declarative `DINIT`, `DEDIT`, `DINT`,
 `DIALOG`, `MINIT`, `MCARD`, and `MENU` are M4 APIs. SuperBASIC remains the core
 language, including its loop forms; selected OPL-inspired refinements may be

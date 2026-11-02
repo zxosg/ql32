@@ -5,10 +5,11 @@ Copy this directory to the SD card so the three worker files are available at
 `supervisor/worker-3.bas`. Start the three workers from the embedded REPL:
 
 ```text
-SPAWN "supervisor/worker-1.bas"
-SPAWN "supervisor/worker-2.bas"
-SPAWN "supervisor/worker-3.bas"
+TASK "supervisor/worker-1.bas"
+TASK "supervisor/worker-2.bas"
+TASK "supervisor/worker-3.bas"
 TASKS
+TASKRESULT 2
 ```
 
 The supervisor can control responsiveness and relative run frequency. `SLICE`
@@ -35,17 +36,21 @@ the saved resume weight. A later `RESUME` will not restore the old value; set a
 positive priority to enable the task again. `TASKS` shows saved resume weights
 and writes to the current print channel (initially `#1`); use `TASKS #channel`
 to redirect a listing. Log off before suspending the currently attached task.
-Use the actual IDs printed by `SPAWN` or `TASKS`.
+Use the actual IDs printed by `TASK` or `TASKS`.
+Use `TASK "path.bas", KTaskWait` when the current task must wait for its child;
+the child takes the active console focus while it runs. Use
+`TASKRESULT(id, KTaskResultStatus)` or one of the other `KTaskResult...`
+selectors in BASIC expressions.
 
 Each worker creates a retained window in one third of the 320x240 display,
 opens a per-session log file, and prints 250 numbers. The scheduler advances
 workers according to their priority weights. Let them run for several seconds,
-then cancel them one at a time using the IDs printed by `SPAWN`:
+then cancel them one at a time using the IDs printed by `TASK`:
 
 ```text
-CANCEL 2
-CANCEL 3
-CANCEL 4
+KILL 2
+KILL 3
+KILL 4
 TASKS
 ```
 
@@ -78,5 +83,5 @@ LOGOFF
 Use the actual task IDs from `TASKS`. The prompt changes to `task <id>>` while
 attached. BASIC statements, variables, and channel commands then operate in
 that task. `LOGON` only attaches to a worker that has reached its prompt after
-its startup file finishes. `CANCEL` cannot cancel the currently attached
+its startup file finishes. `KILL` cannot cancel the currently attached
 session; `LOGOFF` first.

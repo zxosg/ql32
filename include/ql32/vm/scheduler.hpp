@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ql32/interpreter.hpp"
+#include "ql32/runtime/error.hpp"
 #include "ql32/vm/smooth_weighted_round_robin.hpp"
 
 #include <cstddef>
@@ -15,16 +16,27 @@ namespace ql32::vm {
 
 using TaskId = std::uint64_t;
 
-enum class TaskStatus { Runnable, WaitingUi, WaitingInput, Completed, Failed, Cancelled };
+enum class TaskStatus {
+    Runnable,
+    WaitingUi,
+    WaitingInput,
+    WaitingTask,
+    Completed,
+    Failed,
+    Cancelled
+};
 
 struct TaskInfo {
     TaskId id = 0;
     TaskStatus status = TaskStatus::Runnable;
     std::string error;
+    runtime::ErrorCode errorCode = runtime::ErrorCode::None;
+    std::string errorDetail;
     bool interactive = false;
     bool supervisor = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
+    std::size_t openChannels = 0;
 };
 
 struct Services {
@@ -53,6 +65,7 @@ public:
 
     TaskId launch(std::string source, std::ostream& output);
     TaskId launchWorker(std::string source, std::ostream& output);
+    TaskId launchAndWait(std::string source, std::ostream& output, TaskId parent);
     // Creates a persistent interactive session. An optional initial program
     // runs as source before the session begins accepting REPL input.
     TaskId launchInteractive(std::ostream& output, std::string initialProgram = {});
@@ -69,7 +82,7 @@ public:
     std::string takeError(TaskId id);
     bool tick();
     bool cancel(TaskId id);
-    bool cancelWorker(TaskId id);
+    bool kill(TaskId id);
     std::optional<TaskInfo> task(TaskId id) const;
     std::vector<TaskInfo> tasks() const;
 

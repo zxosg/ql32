@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <deque>
 #include <limits>
+#include <new>
 #include <optional>
 #include <ostream>
 #include <sstream>
@@ -38,7 +39,7 @@ using detail::SelectState;
 using detail::DialogBuilder;
 using detail::MenuBuilder;
 
-void verifyBytecode(const std::vector<Instruction>& code) {
+void verifyBytecode(const detail::InstructionSequence& code) {
     const auto invalid = [](const Instruction& instruction, const char* reason) {
         throw std::runtime_error("line " + std::to_string(instruction.line) +
             ", column " + std::to_string(instruction.column) +
@@ -286,8 +287,9 @@ double numeric(const Value& value, const Instruction& at) {
 }
 
 [[noreturn]] void runtimeError(const Instruction& at, const char* message) {
-    throw std::runtime_error("line " + std::to_string(at.line) + ", column " +
-                             std::to_string(at.column) + ": " + message);
+    const std::string detail = "line " + std::to_string(at.line) + ", column " +
+                               std::to_string(at.column) + ": " + message;
+    throw runtime::Error(runtime::errorCodeForMessage(detail), detail);
 }
 
 std::size_t utf8Length(const std::string& text) {
@@ -385,16 +387,44 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
     if (execution_) throw std::runtime_error("interpreter already has a suspended execution");
     if (instructionBudget == 0)
         throw std::invalid_argument("instruction budget must be positive");
-    execution_ = std::make_unique<detail::VMExecutionState>();
+    bool preparingProgram = true;
     try {
-        execution_->code = detail::compileSource(detail::expandIncludes(source, storage_.get()));
+        execution_ = std::make_unique<detail::VMExecutionState>();
+        const std::string expanded = detail::expandIncludes(source, storage_.get());
+        execution_->code = detail::compileSource(expanded);
         verifyBytecode(execution_->code);
+        preparingProgram = false;
         const auto status = runExecution(output, stop, instructionBudget);
         if (status == ExecutionStatus::Completed) execution_.reset();
         return status;
+    } catch (const std::bad_alloc&) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(runtime::ErrorCode::OutOfMemory,
+            preparingProgram ? "out of memory preparing BASIC program" :
+                               "out of memory executing BASIC program");
+        throw std::runtime_error(preparingProgram ?
+            "out of memory preparing BASIC program" :
+            "out of memory executing BASIC program");
+    } catch (const runtime::Error& error) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(error.code(), error.detail());
+        throw;
+    } catch (const runtime::ServiceError& error) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(error.languageCode(), error.detail());
+        throw;
+    } catch (const std::exception& error) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(runtime::errorCodeFor(error), runtime::extendedErrorText(error));
+        throw;
     } catch (...) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        setErrorContext(runtime::ErrorCode::GeneralFailure, "unknown BASIC execution failure");
         throw;
     }
 }
@@ -413,9 +443,30 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
         const auto status = runExecution(output, stop, instructionBudget);
         if (status == ExecutionStatus::Completed) execution_.reset();
         return status;
+    } catch (const runtime::Error& error) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(error.code(), error.detail());
+        throw;
+    } catch (const runtime::ServiceError& error) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(error.languageCode(), error.detail());
+        throw;
+    } catch (const std::bad_alloc&) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(runtime::ErrorCode::OutOfMemory, "out of memory resuming BASIC program");
+        throw;
+    } catch (const std::exception& error) {
+        if (ui_) ui_->cancelSession(session_id_);
+        execution_.reset();
+        setErrorContext(runtime::errorCodeFor(error), runtime::extendedErrorText(error));
+        throw;
     } catch (...) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        setErrorContext(runtime::ErrorCode::GeneralFailure, "unknown BASIC execution failure");
         throw;
     }
 }
@@ -594,6 +645,265 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 arguments.erase(arguments.begin());
             }
             if (instruction.builtin) {
+                if (instruction.name == "TASK") {
+                    if (!storage_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "storage service unavailable");
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "session supervisor unavailable");
+                    const auto* path = std::get_if<std::string>(&arguments[0]);
+                    if (!path) runtimeError(instruction, "string path required");
+                    std::uint32_t flags = runtime::TaskStartNone;
+                    if (arguments.size() == 2) {
+                        const auto* numericFlags = std::get_if<double>(&arguments[1]);
+                        if (!numericFlags || !std::isfinite(*numericFlags) ||
+                            std::trunc(*numericFlags) != *numericFlags ||
+                            *numericFlags < 0 || *numericFlags > 1)
+                            runtimeError(instruction, "TASK flags must be a nonnegative bit field");
+                        flags = static_cast<std::uint32_t>(*numericFlags);
+                    }
+                    const std::string source = storage_->readText(*path);
+                    const runtime::TaskId id = taskControl_->startTask(
+                        source, output, task_id_, flags);
+                    setErrorContext(runtime::ErrorCode::None);
+                    if (instruction.expectsValue) {
+                        pushValue(static_cast<double>(id));
+                    } else {
+                        const runtime::ChannelId previousChannel = state.printChannel;
+                        state.printChannel = resolveChannel(default_output_channel_);
+                        writePrintText("Started task " + std::to_string(id) + "\n",
+                                       instruction);
+                        if (state.printChannel == 0) output_column_ = 0;
+                        else if (state.printChannel == 1) state.printChannelColumn = 0;
+                        state.printChannel = previousChannel;
+                    }
+                    if ((flags & runtime::TaskStartWait) != 0)
+                        return ExecutionStatus::WaitingTask;
+                    break;
+                }
+                if (instruction.name == "TASKRESULT") {
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "task supervisor unavailable");
+                    const auto* numericId = std::get_if<double>(&arguments[0]);
+                    const auto* numericField = std::get_if<double>(&arguments[1]);
+                    if (!numericId || !std::isfinite(*numericId) ||
+                        std::trunc(*numericId) != *numericId || *numericId < 1 ||
+                        *numericId >= std::ldexp(1.0, 64))
+                        runtimeError(instruction, "TASKRESULT requires a positive task ID");
+                    if (!numericField || !std::isfinite(*numericField) ||
+                        std::trunc(*numericField) != *numericField ||
+                        *numericField < 1 || *numericField > 7)
+                        runtimeError(instruction, "invalid TASKRESULT selector");
+                    const auto tasks = taskControl_->listTasks();
+                    const auto found = std::find_if(tasks.begin(), tasks.end(),
+                        [&](const runtime::ManagedTaskInfo& task) {
+                            return task.id == static_cast<runtime::TaskId>(*numericId);
+                        });
+                    if (found == tasks.end())
+                        throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
+                                             "no task exists with that ID");
+                    setErrorContext(found->errorCode, found->errorDetail);
+                    switch (static_cast<runtime::TaskResultField>(*numericField)) {
+                    case runtime::TaskResultField::Status:
+                        pushValue(std::string(runtime::taskStateName(found->state)));
+                        break;
+                    case runtime::TaskResultField::Channels:
+                        pushValue(static_cast<double>(found->openChannels));
+                        break;
+                    case runtime::TaskResultField::ErrorCode:
+                        pushValue(static_cast<double>(found->errorCode));
+                        break;
+                    case runtime::TaskResultField::ErrorDetail:
+                        pushValue(found->errorDetail);
+                        break;
+                    case runtime::TaskResultField::Kind:
+                        pushValue(std::string(found->supervisor ? "SUPERVISOR" :
+                            (found->interactive ? "WORKER" : "PROGRAM")));
+                        break;
+                    case runtime::TaskResultField::Priority:
+                        pushValue(static_cast<double>(found->priority));
+                        break;
+                    case runtime::TaskResultField::ResumePriority:
+                        pushValue(static_cast<double>(found->resumePriority));
+                        break;
+                    }
+                    break;
+                }
+                if (instruction.name == "ERR") {
+                    pushValue(static_cast<double>(errorCode_));
+                    break;
+                }
+                if (instruction.name == "ERR$") {
+                    const auto* numericCode = std::get_if<double>(&arguments[0]);
+                    if (!numericCode || !std::isfinite(*numericCode) ||
+                        std::trunc(*numericCode) != *numericCode)
+                        runtimeError(instruction, "ERR$ requires an integer error code");
+                    if (*numericCode < -std::ldexp(1.0, 63) ||
+                        *numericCode >= std::ldexp(1.0, 63))
+                        runtimeError(instruction, "ERR$ error code is out of range");
+                    const auto value = static_cast<std::int64_t>(*numericCode);
+                    if (value < 0 || value > 21)
+                        pushValue("Unknown QL/32 error code " + std::to_string(value));
+                    else
+                        pushValue(std::string(runtime::errorText(
+                            static_cast<runtime::ErrorCode>(value))));
+                    break;
+                }
+                if (instruction.name == "ERRX$") {
+                    pushValue(errorDetail_);
+                    break;
+                }
+                if (instruction.name == "SIN" || instruction.name == "COS" ||
+                    instruction.name == "INT") {
+                    const auto* number = std::get_if<double>(&arguments[0]);
+                    if (!number) runtimeError(instruction, "numeric value required");
+                    if (!std::isfinite(*number))
+                        runtimeError(instruction, "argument must be finite");
+                    pushValue(instruction.name == "SIN" ? std::sin(*number) :
+                              instruction.name == "COS" ? std::cos(*number) :
+                              std::floor(*number));
+                    break;
+                }
+                if (instruction.name == "BAND" || instruction.name == "BOR" ||
+                    instruction.name == "BXOR" || instruction.name == "BNOT" ||
+                    instruction.name == "ROL" || instruction.name == "ROR" ||
+                    instruction.name == "HEX$" || instruction.name == "BIN$") {
+                    constexpr std::uint64_t mask = 0xffffffffULL;
+                    const auto requireWord = [&](std::size_t index) -> std::uint32_t {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number) runtimeError(instruction, "32-bit unsigned integer required");
+                        if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < 0.0 || *number > static_cast<double>(mask))
+                            runtimeError(instruction,
+                                "value must be an integer from 0 through 4294967295");
+                        return static_cast<std::uint32_t>(*number);
+                    };
+                    const std::uint32_t first = requireWord(0);
+                    if (instruction.name == "BAND" || instruction.name == "BOR" ||
+                        instruction.name == "BXOR") {
+                        const std::uint32_t second = requireWord(1);
+                        const std::uint32_t result = instruction.name == "BAND" ?
+                            (first & second) : instruction.name == "BOR" ?
+                            (first | second) : (first ^ second);
+                        pushValue(static_cast<double>(result));
+                    } else if (instruction.name == "BNOT") {
+                        pushValue(static_cast<double>((~first) & mask));
+                    } else if (instruction.name == "ROL" || instruction.name == "ROR") {
+                        const auto* countValue = std::get_if<double>(&arguments[1]);
+                        if (!countValue) runtimeError(instruction, "rotation count must be an integer");
+                        if (!std::isfinite(*countValue) || std::trunc(*countValue) != *countValue)
+                            runtimeError(instruction, "rotation count must be an integer");
+                        double reduced = std::fmod(*countValue, 32.0);
+                        if (reduced < 0.0) reduced += 32.0;
+                        const unsigned count = static_cast<unsigned>(reduced);
+                        const std::uint32_t result = count == 0 ? first :
+                            instruction.name == "ROL" ?
+                                static_cast<std::uint32_t>((first << count) | (first >> (32u - count))) :
+                                static_cast<std::uint32_t>((first >> count) | (first << (32u - count)));
+                        pushValue(static_cast<double>(result));
+                    } else if (instruction.name == "HEX$") {
+                        char buffer[9];
+                        std::snprintf(buffer, sizeof(buffer), "%X", first);
+                        pushValue(std::string(buffer));
+                    } else {
+                        std::string digits;
+                        std::uint32_t value = first;
+                        do {
+                            digits.push_back((value & 1u) != 0 ? '1' : '0');
+                            value >>= 1u;
+                        } while (value != 0);
+                        std::reverse(digits.begin(), digits.end());
+                        pushValue(std::move(digits));
+                    }
+                    break;
+                }
+                if (instruction.name == "KILL") {
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "task supervisor unavailable");
+                    const auto* numericId = std::get_if<double>(&arguments[0]);
+                    if (!numericId || !std::isfinite(*numericId) ||
+                        std::trunc(*numericId) != *numericId || *numericId < 1 ||
+                        *numericId >= std::ldexp(1.0, 64))
+                        runtimeError(instruction, "KILL requires a positive task ID");
+                    const auto target = static_cast<runtime::TaskId>(*numericId);
+                    if (target == task_id_)
+                        throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
+                                             "a task cannot kill itself");
+                    if (!taskControl_->killTask(target))
+                        throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
+                                             "no active task exists with that ID");
+                    setErrorContext(runtime::ErrorCode::None);
+                    const auto previousChannel = state.printChannel;
+                    state.printChannel = resolveChannel(default_output_channel_);
+                    writePrintText("Killed task " + std::to_string(target) + "\n",
+                                   instruction);
+                    state.printChannel = previousChannel;
+                    break;
+                }
+                if (instruction.name == "LEFT$" || instruction.name == "RIGHT$" ||
+                    instruction.name == "MID$") {
+                    const auto* text = std::get_if<std::string>(&arguments[0]);
+                    if (!text) runtimeError(instruction, "string value required");
+                    const auto requireIndex = [&](const StackEntry& value, const char* description,
+                                                  bool allowZero) {
+                        const auto* number = std::get_if<double>(&value);
+                        if (!number) runtimeError(instruction,
+                                                  "numeric value required for string index");
+                        if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < (allowZero ? 0.0 : 1.0))
+                            runtimeError(instruction, description);
+                        return *number;
+                    };
+                    const std::size_t length = utf8Length(*text);
+                    const auto byteOffset = [&](std::size_t characterIndex) {
+                        std::size_t seen = 0;
+                        for (std::size_t i = 0; i < text->size(); ++i) {
+                            const auto byte = static_cast<unsigned char>((*text)[i]);
+                            if ((byte & 0xc0) == 0x80) continue;
+                            if (seen == characterIndex) return i;
+                            ++seen;
+                        }
+                        return text->size();
+                    };
+                    std::size_t first = 0;
+                    std::size_t count = 0;
+                    if (instruction.name == "LEFT$") {
+                        const double requested = requireIndex(
+                            arguments[1], "LEFT$ length must be a nonnegative integer", true);
+                        count = requested >= static_cast<double>(length) ? length :
+                            static_cast<std::size_t>(requested);
+                    } else if (instruction.name == "RIGHT$") {
+                        const double requested = requireIndex(
+                            arguments[1], "RIGHT$ length must be a nonnegative integer", true);
+                        count = requested >= static_cast<double>(length) ? length :
+                            static_cast<std::size_t>(requested);
+                        first = length - count;
+                    } else {
+                        const double requestedStart = requireIndex(
+                            arguments[1], "MID$ start must be a positive integer", false);
+                        if (requestedStart > static_cast<double>(length)) {
+                            pushValue(std::string{});
+                            break;
+                        }
+                        first = static_cast<std::size_t>(requestedStart) - 1;
+                        const std::size_t remaining = length - first;
+                        if (arguments.size() == 2) {
+                            count = remaining;
+                        } else {
+                            const double requestedLength = requireIndex(
+                                arguments[2], "MID$ length must be a nonnegative integer", true);
+                            count = requestedLength >= static_cast<double>(remaining) ? remaining :
+                                static_cast<std::size_t>(requestedLength);
+                        }
+                    }
+                    const std::size_t firstByte = byteOffset(first);
+                    const std::size_t lastByte = byteOffset(first + count);
+                    pushValue(text->substr(firstByte, lastByte - firstByte));
+                    break;
+                }
                 if (instruction.name == "LEN") {
                     const auto* text = std::get_if<std::string>(&arguments[0]);
                     if (!text) runtimeError(instruction, "string value required");
@@ -921,6 +1231,26 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         state.pendingUiRequest = ui_->beginMenu(
                             session_id_, found->second.title, found->second.items);
                         return ExecutionStatus::Suspended;
+                    }
+                    break;
+                }
+                if (instruction.name == "GUPDATE") {
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    if (arguments.empty()) {
+                        graphics_->update(session_id_);
+                    } else {
+                        const auto* mode = std::get_if<double>(&arguments[0]);
+                        if (!mode || !std::isfinite(*mode) || std::trunc(*mode) != *mode)
+                            runtimeError(instruction, "GUPDATE mode must be an integer");
+                        if (*mode == 0.0)
+                            graphics_->setUpdateMode(session_id_, graphics::UpdateMode::Off);
+                        else if (*mode == 1.0)
+                            graphics_->setUpdateMode(session_id_, graphics::UpdateMode::Auto);
+                        else
+                            throw runtime::Error(runtime::ErrorCode::InvalidArgument,
+                                                 "GUPDATE mode must be 0 (off) or 1 (automatic)");
                     }
                     break;
                 }

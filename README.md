@@ -35,8 +35,13 @@ supports alerts, confirmations, typed dialogs, and menus. BASIC exposes
 session-owned dialog and menu builders through `DINIT`/`DIALOG` and
 `MINIT`/`MENU`; [examples/ui.bas](examples/ui.bas) exercises typed results and
 stable menu IDs. Embedded ESP32 line presenters are integrated. The embedded
-REPL can also launch and manage worker sessions with `SPAWN`,
-`TASKS`, `TASKCHANNELS`, `LOGON`, `LOGOFF`, `CANCEL`, `SUSPEND`, and `RESUME`.
+REPL can also launch and manage worker sessions with `TASK`,
+`TASKS`, `TASKRESULT`, `TASKCHANNELS`, `LOGON`, `LOGOFF`, `KILL`, `SUSPEND`,
+and `RESUME`. Use `TASK "worker.bas"` to start asynchronously, or add
+`KTaskWait` to wait for completion. `TASKRESULT id` prints the available task
+properties; `TASKRESULT(id, selector)` returns one selected property. `ERR`,
+`ERR$(code)`, and `ERRX$` expose the current QL/32 error code, message, and
+contextual detail.
 The supervisor can set a global bytecode slice with `SLICE n` and per-task
 scheduling weights with `PRIORITY id,weight`; smooth weighted scheduling gives
 higher weights more turns. `SUSPEND id` saves the current weight, while

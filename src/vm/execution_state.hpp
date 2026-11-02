@@ -41,7 +41,7 @@ struct MenuBuilder {
 };
 
 struct VMExecutionState {
-    std::vector<Instruction> code;
+    InstructionSequence code;
     std::vector<StackEntry> stack;
     std::unordered_map<std::size_t, ForState> forStates;
     std::vector<RuntimeFrame> callFrames;

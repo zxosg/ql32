@@ -211,6 +211,17 @@ void WindowedService::closeSession(SessionId session) {
     if (manager_.size() != 0) presentRegion(oldBounds);
 }
 
+void WindowedService::setUpdateMode(SessionId session, UpdateMode mode) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    updateMode_ = mode;
+    if (mode != UpdateMode::Off) present();
+}
+
+void WindowedService::update(SessionId session) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    present();
+}
+
 WindowInfo WindowedService::windowInfo(SessionId session) {
     const auto id = ensureWindow(session);
     const auto& window = manager_.canvas(id);
@@ -314,8 +325,9 @@ void WindowedService::present() {
             width, height, frame_.palette,
             [this](std::uint32_t y, std::vector<ColorIndex>& row) {
                 manager_.composeRowInto(y, row);
-            }))
+            })) {
         return;
+    }
     frame_.width = manager_.screenWidth();
     frame_.height = manager_.screenHeight();
     manager_.composeInto(frame_.pixels);
@@ -324,6 +336,7 @@ void WindowedService::present() {
 
 void WindowedService::presentRegion(Rect region) {
     if (!presenter_) return;
+    if (updateMode_ == UpdateMode::Off) return;
     region = intersect(region,
         {0, 0, manager_.screenWidth(), manager_.screenHeight()});
     if (region.width == 0 || region.height == 0) return;
@@ -345,7 +358,9 @@ void WindowedService::discardPresentationBuffer() {
 }
 
 void WindowedService::presentIfConfigured() {
-    if (presenter_) present();
+    if (!presenter_) return;
+    if (updateMode_ == UpdateMode::Off) return;
+    present();
 }
 
 } // namespace ql32::graphics
