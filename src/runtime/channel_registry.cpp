@@ -99,6 +99,11 @@ ChannelId ChannelRegistry::openDevice(SessionId session, ChannelDevice device,
             throw ServiceError(ServiceErrorCode::InvalidPath,
                                "OPEN null takes no parameters");
         return allocate(session, ChannelType::Null);
+    case ChannelDevice::Window:
+        if (!parameters.empty())
+            throw ServiceError(ServiceErrorCode::InvalidPath,
+                               "OPEN window takes no parameters");
+        return allocate(session, ChannelType::Window);
     }
     throw ServiceError(ServiceErrorCode::InvalidPath, "unknown channel device");
 }

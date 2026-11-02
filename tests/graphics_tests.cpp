@@ -23,6 +23,8 @@ struct Event {
     int a = 0;
     int b = 0;
     std::string text;
+    ql32::graphics::ChannelId channel = 1;
+    bool filled = false;
 };
 
 class CapturingPresenter final : public ql32::graphics::FramePresenter {
@@ -46,12 +48,32 @@ public:
     void line(SessionId session, Point from, Point to) override {
         events.push_back({"LINE", session, from, to});
     }
+    void line(SessionId session, ChannelId channel, Point from, Point to) override {
+        line(session, from, to);
+        events.back().channel = channel;
+    }
+    void pixel(SessionId session, ChannelId channel, Point position) override {
+        events.push_back({"PLOT", session, position, {}, 0, 0, {}, channel});
+    }
     void rectangle(SessionId session, Point topLeft, std::int32_t width,
                    std::int32_t height) override {
         events.push_back({"RECT", session, topLeft, {}, width, height});
     }
     void circle(SessionId session, Point center, std::int32_t radius) override {
         events.push_back({"CIRCLE", session, center, {}, radius});
+    }
+    void circle(SessionId session, ChannelId channel, Point center,
+                std::int32_t radius) override {
+        circle(session, center, radius);
+        events.back().channel = channel;
+    }
+    void fillRectangle(SessionId session, ChannelId channel, Point topLeft,
+                       std::int32_t width, std::int32_t height) override {
+        events.push_back({"RECT", session, topLeft, {}, width, height, {}, channel, true});
+    }
+    void fillCircle(SessionId session, ChannelId channel, Point center,
+                    std::int32_t radius) override {
+        events.push_back({"CIRCLE", session, center, {}, radius, 0, {}, channel, true});
     }
     void text(SessionId session, Point topLeft, const std::string& value) override {
         events.push_back({"TEXT", session, topLeft, {}, 0, 0, value});
@@ -88,6 +110,13 @@ public:
                           static_cast<int>(bounds.width),
                           static_cast<int>(bounds.height)});
     }
+    void setWindowBounds(SessionId session, ChannelId channel, Rect bounds) override {
+        if (channel == 1) setWindowBounds(session, bounds);
+        else events.push_back({"WINDOW", session, {bounds.x, bounds.y}, {},
+                              static_cast<int>(bounds.width),
+                              static_cast<int>(bounds.height)});
+        events.back().channel = channel;
+    }
 
     std::vector<Event> events;
     WindowInfo info{320, 240, 16, 8, 90};
@@ -112,11 +141,14 @@ void testDrawingCallsAndSessionOwnership() {
             "INK 7\n"
             "PAPER 1\n"
             "LINE 1,2,30,40\n"
+            "PLOT #1,3,4\n"
             "RECT 5,6,20,10\n"
+            "RECT #1,7,8,6,5,1\n"
             "CIRCLE 50,60,8\n"
+            "CIRCLE 60,70,9,1\n"
             "TEXT 2,3,\"hello\"\n"
             "CLS\n", output);
-        require(graphics->events.size() == 7, "drawing calls were not dispatched");
+        require(graphics->events.size() == 10, "drawing calls were not dispatched");
         session = graphics->events.front().session;
         require(session != 0, "graphics calls used an invalid session");
         require(graphics->events[0].name == "INK" && graphics->events[0].a == 7,
@@ -126,11 +158,22 @@ void testDrawingCallsAndSessionOwnership() {
         require(graphics->events[2].first.x == 1 && graphics->events[2].first.y == 2 &&
                     graphics->events[2].second.x == 30 && graphics->events[2].second.y == 40,
                 "LINE coordinates were not preserved");
-        require(graphics->events[3].a == 20 && graphics->events[3].b == 10,
+        require(graphics->events[3].name == "PLOT" && graphics->events[3].channel == 1 &&
+                    graphics->events[3].first.x == 3 && graphics->events[3].first.y == 4,
+                "PLOT coordinates were not preserved");
+        require(graphics->events[4].a == 20 && graphics->events[4].b == 10 &&
+                    !graphics->events[4].filled,
                 "RECT dimensions were not preserved");
-        require(graphics->events[4].a == 8, "CIRCLE radius was not preserved");
-        require(graphics->events[5].text == "hello", "TEXT value was not preserved");
-        require(graphics->events[6].name == "CLS", "CLS was not dispatched");
+        require(graphics->events[5].name == "RECT" && graphics->events[5].channel == 1 &&
+                    graphics->events[5].filled && graphics->events[5].a == 6 &&
+                    graphics->events[5].b == 5,
+                "channel-qualified filled RECT arguments were not preserved");
+        require(graphics->events[6].a == 8 && !graphics->events[6].filled,
+                "CIRCLE outline radius was not preserved");
+        require(graphics->events[7].a == 9 && graphics->events[7].filled,
+                "filled CIRCLE was not dispatched");
+        require(graphics->events[8].text == "hello", "TEXT value was not preserved");
+        require(graphics->events[9].name == "CLS", "CLS was not dispatched");
     }
     require(graphics->events.back().name == "CLOSE_SESSION" &&
                 graphics->events.back().session == session,
@@ -208,7 +251,45 @@ void testDrawingArgumentValidation() {
                              std::string::npos;
     }
     require(invalidCoordinates, "non-integer pixel coordinate was accepted");
+    bool invalidFill = false;
+    try {
+        interpreter.execute("RECT 1,2,3,4,2\n", output);
+    } catch (const std::runtime_error& error) {
+        invalidFill = std::string(error.what()).find("fill flag") != std::string::npos;
+    }
+    require(invalidFill, "RECT accepted a fill flag other than 0 or 1");
+    bool missingArguments = false;
+    try {
+        interpreter.execute("CIRCLE 1,2,3,1,0\n", output);
+    } catch (const std::runtime_error& error) {
+        missingArguments = std::string(error.what()).find("CIRCLE expects") != std::string::npos;
+    }
+    require(missingArguments, "CIRCLE accepted too many arguments");
     require(graphics->events.empty(), "invalid drawing call reached the service");
+}
+
+void testPixelAndFilledShapesRenderOnRetainedCanvas() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(16, 16, presenter, 2);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "INK 2\n"
+        "PLOT 1,1\n"
+        "RECT 2,2,5,5,1\n"
+        "RECT 2,8,5,5,0\n"
+        "CIRCLE 10,5,2,1\n"
+        "CIRCLE 10,12,2\n", output);
+    const auto& frame = presenter->lastFrame;
+    const auto pixel = [&](std::uint32_t x, std::uint32_t y) {
+        return frame.pixels[static_cast<std::size_t>(y) * frame.width + x];
+    };
+    require(pixel(1, 1) == 2, "PLOT did not set one pixel to the current ink");
+    require(pixel(4, 4) == 2, "filled RECT did not draw its interior");
+    require(pixel(4, 8) == 2 && pixel(4, 9) == 0,
+            "RECT outline and fill=0 behavior were incorrect");
+    require(pixel(10, 5) == 2 && pixel(10, 12) == 0,
+            "filled and outline CIRCLE behavior was incorrect");
 }
 
 void testDisplayCommands() {
@@ -259,6 +340,13 @@ void testWindowPositionCommand() {
     require(event.first.x == 21 && event.first.y == 34 &&
                 event.a == 123 && event.b == 95,
             "WINDOW bounds were not preserved");
+    interpreter.execute("WINDOW #0,7,8,80,60\n", output);
+    require(graphics->events.back().name == "WINDOW" &&
+                graphics->events.back().channel == 0 &&
+                graphics->events.back().first.x == 7 &&
+                graphics->events.back().first.y == 8 &&
+                graphics->events.back().a == 80 && graphics->events.back().b == 60,
+            "channel-qualified WINDOW did not target channel #0");
     interpreter.execute("PRINT #0,GORIGINX()\nPRINT #0,GORIGINY()\n", output);
     require(output.str() == "21\n34\n",
             "window screen-origin queries returned incorrect coordinates");
@@ -335,14 +423,29 @@ void testChannelDefaultRoutingAndGraphicsSelectors() {
             return event.name == "CIRCLE" && event.first.x == 10 && event.first.y == 20;
         }) != graphics->events.end(), "CIRCLE #1 was not dispatched to the graphics window");
 
-    bool consoleGraphicsRejected = false;
-    try {
-        interpreter.execute("CIRCLE #0,1,2,3\n", console);
-    } catch (const std::runtime_error& error) {
-        consoleGraphicsRejected = std::string(error.what()).find("not a graphics window") !=
-                                  std::string::npos;
-    }
-    require(consoleGraphicsRejected, "graphics output was silently sent to the console channel");
+    interpreter.execute("CIRCLE #0,1,2,3\n", console);
+    require(std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) {
+            return event.name == "CIRCLE" && event.channel == 0 &&
+                   event.first.x == 1 && event.first.y == 2;
+        }) != graphics->events.end(), "CIRCLE #0 was not dispatched to the console window");
+
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto windowed = std::make_shared<WindowedService>(100, 80, presenter, 3);
+    ql32::Interpreter windowInterpreter({}, {}, {}, windowed);
+    std::ostringstream windowConsole;
+    windowInterpreter.execute(
+        "WINDOW #0,5,6,30,20\nRECT #0,0,0,12,12\n"
+        "WINDOW #1,50,6,30,20\nRECT #1,0,0,12,12\n",
+        windowConsole);
+    const auto windowStates = windowed->windowManager().compositionOrder();
+    const auto owner = windowStates.empty() ? 0 : windowStates.front().owner;
+    const auto zeroWindow = windowed->windowInfo(owner, 0);
+    const auto oneWindow = windowed->windowInfo(owner, 1);
+    require(windowed->windowManager().size() == 2 &&
+                zeroWindow.originX == 5 && zeroWindow.originY == 6 &&
+                oneWindow.originX == 50 && oneWindow.originY == 6,
+            "channel windows did not retain independent bounds");
 
     ql32::Interpreter routed({}, {}, {}, graphics);
     std::ostringstream routedConsole;
@@ -524,6 +627,7 @@ int main() {
     testGraphicsUpdateCommandDispatch();
     testWindowedGraphicsUpdateBatching();
     testDrawingArgumentValidation();
+    testPixelAndFilledShapesRenderOnRetainedCanvas();
     testDisplayCommands();
     testPrintChannelRouting();
     testChannelDefaultRoutingAndGraphicsSelectors();

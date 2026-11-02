@@ -22,7 +22,7 @@ enum class ChannelMode { Read, Write, Append };
 
 enum class ChannelType { Console, Window, File, Serial, Network, Null };
 
-enum class ChannelDevice : std::uint64_t { File = 1, Serial = 2, Null = 3 };
+enum class ChannelDevice : std::uint64_t { File = 1, Serial = 2, Null = 3, Window = 4 };
 
 struct ChannelInfo {
     ChannelId handle = 0;

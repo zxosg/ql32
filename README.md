@@ -52,6 +52,27 @@ The [embedded supervisor demo](examples/supervisor/README.md) shows three
 workers in side-by-side display windows. See
 [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md).
 
+### Math precision and ESP32 CPU frequency
+
+Programs default to DOUBLE precision. Include `ql32.inc` and put module
+options before definitions and executable statements to select math precision
+or, on supported ESP32 boards, the device-wide CPU frequency:
+
+```basic
+INCLUDE "ql32.inc"
+OPTION KOptMathSingle
+OPTION KEspCpuFreq240
+```
+
+Use `KOptMathDouble` to select the default binary64 calculations, or
+`KEspCpuFreq80` / `KEspCpuFreq160` for a lower ESP32 clock. Each option
+category may appear once per module. The CPU setting applies to the whole board
+when the module starts; the latest started module with a CPU option controls
+the clock for all tasks. Linux and macOS accept the ESP32 option and ignore it.
+SINGLE changes rounding and arithmetic precision, not the VM value storage
+size. See the [language specification](docs/specification/QL32-LANG-001.md)
+and the [attractor example](examples/attractor-README.md).
+
 `INCLUDE "relative/path.bas"` at the start of a source module expands a BASIC
 library/header file before compilation. Included procedures and functions
 become part of that module. For example, run
@@ -136,10 +157,14 @@ and send the default output to the terminal.
 
 To see a retained canvas move after it has been drawn, run
 `./build/linux/ql32 examples/window-manager.bas` or
-`./build/macos/ql32 examples/window-manager.bas`. The `WINDOW x,y,width,height`
-command changes the current window's position and size; its drawing coordinates
-remain relative to the window. `GORIGINX()` and `GORIGINY()` return its absolute
-screen coordinates. The resulting composed frame is written to
+`./build/macos/ql32 examples/window-manager.bas`. `WINDOW x,y,width,height`
+changes the current default window (initially `#1`).
+`WINDOW #channel,x,y,width,height` selects a window by channel, including the
+console-associated `#0` graphics surface.
+Drawing coordinates remain relative to the selected window. `PRINT #0` still
+writes to the console stream; drawing commands such as `LINE #0,...` target its
+graphics surface. `GORIGINX()` and `GORIGINY()` report the default `#1` window's
+absolute screen coordinates. The resulting composed frame is written to
 `ql32-screen.ppm`.
 
 Start the interactive REPL with `./build/linux/ql32` or

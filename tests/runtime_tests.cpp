@@ -25,6 +25,19 @@ private:
     ql32::runtime::CancellationSource& source_;
 };
 
+class RecordingCpuFrequencyService final : public ql32::runtime::CpuFrequencyService {
+public:
+    bool setFrequencyMHz(std::uint16_t mhz) override {
+        lastFrequency = mhz;
+        ++calls;
+        return succeeds;
+    }
+
+    std::uint16_t lastFrequency = 0;
+    int calls = 0;
+    bool succeeds = true;
+};
+
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
@@ -455,6 +468,93 @@ void testTrigonometricFunctionsUseRadians() {
     require(!(values >> extra), "SIN or COS produced extra values");
 }
 
+void testProgramNumericPrecisionOption() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute("PRINT 16777216 + 1 - 16777216\n", output);
+    require(output.str() == "1\n", "default numeric precision is not double precision");
+
+    interpreter.execute(
+        "CONST KOptMathDouble = 0\n"
+        "CONST KOptMathSingle = 1\n"
+        "OPTION KOptMathSingle\n"
+        "PRINT 16777216 + 1 - 16777216\n"
+        "PRINT SIN(1)\n", output);
+    std::istringstream singleValues(output.str().substr(2));
+    double rounded = -1;
+    double sine = 0;
+    require(static_cast<bool>(singleValues >> rounded >> sine) && rounded == 0.0 &&
+                std::fabs(sine - static_cast<double>(std::sin(1.0f))) < 1e-6,
+            "SINGLE precision did not round intermediate arithmetic and trig to binary32");
+
+    interpreter.execute(
+        "CONST KOptMathDouble = 0\n"
+        "CONST KOptMathSingle = 1\n"
+        "OPTION KOptMathDouble\n"
+        "PRINT 16777216 + 1 - 16777216\n", output);
+    require(endsWith(output.str(), "1\n"),
+            "DOUBLE precision option did not restore binary64 calculations");
+
+    for (const std::string& source : {
+             "CONST KOptMathSingle = 1\nPRINT 1\nOPTION KOptMathSingle\n",
+             "CONST KOptMathSingle = 1\nIF 1 THEN\nOPTION KOptMathSingle\nEND IF\n",
+             "CONST KOptMathSingle = 1\nOPTION KOptMathSingle\nOPTION KOptMathSingle\n"}) {
+        bool rejected = false;
+        try {
+            std::ostringstream ignored;
+            interpreter.execute(source, ignored);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        require(rejected, "numeric precision option accepted an invalid location or duplicate");
+    }
+}
+
+void testCpuFrequencyOption() {
+    for (const std::uint16_t mhz : {80, 160, 240}) {
+        auto service = std::make_shared<RecordingCpuFrequencyService>();
+        ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 0, {}, service);
+        std::ostringstream output;
+        const std::string source = std::string(
+            "CONST KEspCpuFreq80 = 80\n"
+            "CONST KEspCpuFreq160 = 160\n"
+            "CONST KEspCpuFreq240 = 240\n"
+            "CONST KOptMathSingle = 1\n"
+            "OPTION KOptMathSingle\n") +
+            "OPTION KEspCpuFreq" + std::to_string(mhz) + "\n"
+            "PRINT 16777216 + 1 - 16777216\n";
+        interpreter.execute(source, output);
+        require(service->calls == 1 && service->lastFrequency == mhz,
+                "CPU frequency option did not call the platform service");
+        require(output.str() == "0\n",
+                "CPU frequency option did not coexist with math precision OPTION");
+    }
+
+    ql32::Interpreter host;
+    std::ostringstream ignoredOutput;
+    host.execute(
+        "CONST KEspCpuFreq160 = 160\n"
+        "OPTION KEspCpuFreq160\n"
+        "PRINT 42\n", ignoredOutput);
+    require(ignoredOutput.str() == "42\n",
+            "CPU frequency option was not harmless without a platform adapter");
+
+    for (const std::string& source : {
+             "CONST KEspCpuFreq160 = 160\nOPTION KEspCpuFreq160\n"
+             "OPTION KEspCpuFreq160\n",
+             "CONST KEspCpuFreq120 = 120\nOPTION KEspCpuFreq120\n"}) {
+        bool rejected = false;
+        try {
+            ql32::Interpreter interpreter;
+            std::ostringstream output;
+            interpreter.execute(source, output);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        require(rejected, "unsupported or duplicate CPU frequency OPTION was accepted");
+    }
+}
+
 void testQ32ErrorFunctions() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -625,6 +725,8 @@ int main() {
         testStringExtractionFunctions();
         testUnsignedBitFunctionsAndRadixLiterals();
         testTrigonometricFunctionsUseRadians();
+        testProgramNumericPrecisionOption();
+        testCpuFrequencyOption();
         testQ32ErrorFunctions();
         testUiCallsSuspendAndResumePerSession();
         testDialogMenuBasicCallsSuspendAndResume();

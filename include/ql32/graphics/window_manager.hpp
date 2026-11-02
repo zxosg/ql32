@@ -76,8 +76,9 @@ public:
     void setPixel(std::int32_t x, std::int32_t y, ColorIndex color);
     ColorIndex pixel(std::uint32_t x, std::uint32_t y) const;
     void line(Point from, Point to);
-    void rectangle(Point topLeft, std::int32_t width, std::int32_t height);
-    void circle(Point center, std::int32_t radius);
+    void rectangle(Point topLeft, std::int32_t width, std::int32_t height,
+                   bool filled = false);
+    void circle(Point center, std::int32_t radius, bool filled = false);
     void text(Point topLeft, const std::string& value);
     void resize(std::uint32_t width, std::uint32_t height);
 

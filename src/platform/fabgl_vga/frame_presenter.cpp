@@ -23,6 +23,7 @@ void FabglFramePresenter::present(const graphics::Frame& frame) {
     }
     canvas_.endUpdate();
     canvas_.waitCompletion(true);
+    if (restoreOverlay_) restoreOverlay_({0, 0, frame.width, frame.height});
 }
 
 bool FabglFramePresenter::presentRows(
@@ -64,6 +65,7 @@ bool FabglFramePresenter::presentRowsRegion(
     }
     canvas_.endUpdate();
     canvas_.waitCompletion(true);
+    if (restoreOverlay_) restoreOverlay_(region);
     return true;
 }
 

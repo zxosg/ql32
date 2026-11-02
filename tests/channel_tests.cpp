@@ -117,6 +117,26 @@ void testBasicChannelCalls() {
     std::filesystem::remove_all(root);
 }
 
+void testWindowDeviceChannel() {
+    ql32::runtime::ChannelRegistry channels(nullptr);
+    const auto window = channels.openDevice(17, ql32::runtime::ChannelDevice::Window, {});
+    const auto opened = channels.listOpen(17);
+    require(window == 2 && opened.size() == 1 && opened[0].handle == window &&
+                opened[0].type == ql32::runtime::ChannelType::Window,
+            "OPEN window did not allocate a graphics window endpoint");
+
+    bool parametersRejected = false;
+    try {
+        (void)channels.openDevice(17, ql32::runtime::ChannelDevice::Window, {"1"});
+    } catch (const ql32::runtime::ServiceError& error) {
+        parametersRejected = error.code() == ql32::runtime::ServiceErrorCode::InvalidPath;
+    }
+    require(parametersRejected, "OPEN window accepted unexpected parameters");
+
+    channels.close(17, window);
+    require(channels.listOpen(17).empty(), "closing window left its endpoint registered");
+}
+
 void testBinaryChannelRandomAccess() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -314,6 +334,7 @@ int main() {
     try {
         testDirectoryChannels();
         testBasicChannelCalls();
+        testWindowDeviceChannel();
         testBinaryChannelRandomAccess();
         testInputLineAndSessionResume();
         testDefaultAndRoutedOutputChannels();

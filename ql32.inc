@@ -2,6 +2,13 @@
 CONST KChannelCount = 0
 CONST KChannelHandle = 1
 CONST KChannelType = 2
+' OPTION math precision values
+CONST KOptMathDouble = 0
+CONST KOptMathSingle = 1
+' ESP32 CPU frequency options in MHz; ignored on host targets
+CONST KEspCpuFreq80 = 80
+CONST KEspCpuFreq160 = 160
+CONST KEspCpuFreq240 = 240
 ' Graphics update modes for GUPDATE
 CONST KGupdateOff = 0
 CONST KGupdateOn = 1
@@ -10,6 +17,7 @@ CONST KGupdateAuto = 1
 CONST KDeviceFile = 1
 CONST KDeviceSerial = 2
 CONST KDeviceNull = 3
+CONST KDeviceWindow = 4
 ' FREE() heap memory selectors
 CONST KFreeTotal = 0
 CONST KFreeContiguous = 1

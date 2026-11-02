@@ -17,12 +17,13 @@ session.
 
 ## Repository state reviewed
 
-The current work is based on `main` commit
-[`8bdb180`](https://github.com/zxosg/ql32/commit/8bdb1808bf7f4e7136c4cb705fcb98158cf77f71),
-“Reserve VGA console rows and compact bytecode metadata” (2 November 2026).
-This supersedes the earlier `4bfa26e` and `d1831f8` handoff baselines. Check
-the actual checkout status before editing; this file is updated with the
-current memory optimization and hardware validation results.
+The current upstream baseline is `main` commit
+[`4a4586c`](https://github.com/zxosg/ql32/commit/4a4586c) (“Adjust VGA console
+size and ink”, 2 November 2026), following `8bdb180` and the earlier
+`4bfa26e`/`d1831f8` baselines. Local uncommitted math precision and ESP32 CPU
+frequency changes have been reapplied on top of this update. Check the actual
+checkout status before editing; those changes have not been revalidated
+against the latest upstream code yet.
 
 The latest implementation includes:
 
@@ -35,6 +36,11 @@ The latest implementation includes:
   `CONFIRM`, dialogs and menus suspend/resume only their calling session.
 - Retained indexed graphics windows, window movement/resizing, CYD rotation
   and palette queries, Linux PPM output, and CYD/VGA32 graphics adapters.
+  `WINDOW #channel,x,y,w,h` now selects independent per-session channel
+  surfaces, including a graphics surface for console channel `#0`; `PRINT #0`
+  remains console output. CYD and FabGL console overlays follow `#0` bounds.
+  Linux, CYD, SPIFFS-CYD, and VGA32 builds pass; the new display behavior still
+  needs a board-level visual check.
 - Cooperative weighted session scheduling and an embedded persistent REPL.
   Current supervisor/BASIC task APIs use `TASK`, `KILL`, `TASKRESULT`,
   `TASKCHANNELS`, `LOGON`, `LOGOFF`, `SUSPEND`, `RESUME`, `SLICE`,
@@ -48,6 +54,13 @@ The latest implementation includes:
   `COS`, `INT`; unsigned 32-bit `BAND`, `BOR`, `BXOR`, `BNOT`,
   `ROL`, `ROR`; `&H`/`&B` literals and `HEX$`/`BIN$`. Graphics
   refresh batching uses `GUPDATE`.
+- Local uncommitted `OPTION` additions select `KOptMathSingle` or
+  `KOptMathDouble` (DOUBLE default) and ESP32-wide `KEspCpuFreq80`,
+  `KEspCpuFreq160`, or `KEspCpuFreq240`. Host builds accept and ignore the
+  device clock setting. A CYD attractor run with SINGLE and 240 MHz was
+  animated but reported slow; that run preceded the latest upstream pull, and
+  frame duration/clock readback were not measured. Rebuild and retest after
+  integration.
 
 The handoff at the previous revision reported 53 CTest cases passing on Linux
 and macOS and both ESP32 profiles building. The latest commit adds more tests;
@@ -160,7 +173,8 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    but keys still do nothing, add temporary serial output for queued key events
    and trace the REPL input gate.
 4. Run the current Linux and macOS build/test workflows and all ESP32 profile
-   builds after the pull. Do not assume the previous test count describes the
+   builds after the pull, including module math precision and CPU-frequency
+   option coverage. Do not assume the previous test count describes the
    current tree.
 5. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi
    acceptance. Run targeted CYD checks for the current task command and
@@ -176,11 +190,34 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    Current Olimex firmware was built and flashed on 2026-11-02 (53,012 bytes
    static RAM, 1,391,773 bytes flash). Serial monitor has been closed and the
    board rebooted after testing.
-8. When CYD hardware is available, flash its `esp32_2432s028` image and repeat
-   the three-worker/FIFO-kill/Mandelbrot sequence. Sample `FREE(0..2)` before
-   launch, with one and three workers, after each kill, and after reboot; verify
-   task acknowledgements stay on serial channel `#0` and compare the canvas
-   arena's recovery with the Olimex results.
+8. CYD storage and task-buffer check: the SD profile booted with `Storage
+   unavailable` because no card was mounted. The `esp32_2432s028_spiffs` profile
+   was flashed instead; internal `FFS` mounted and boot reported
+   `Running Storage:/startup.bas`. Five worker launch/kill cycles completed.
+   A no-graphics worker probe changed `FREE(0..2)` from 225,304 / 110,580 / 18
+   to 224,880 / 110,580 / 22; this includes retained task-result records. The
+   graphics-worker run reached 163,816 free bytes from 203,556 during the test,
+   while `FREE(1)` stayed 110,580; after reboot it returned to 225,464 / 110,580
+   / 15. Isolate the shared canvas arena's retained high-water capacity from
+   source-buffer and task-record memory in the next CYD memory stress run.
+9. Repeat the attractor check on CYD after rebuilding the pulled source. The
+   earlier run with `OPTION KOptMathSingle` and `OPTION KEspCpuFreq240` animated
+   but remained slow; frame duration and actual CPU clock were not measured.
+10. Improve host-to-board and board-to-host file transfer over USB serial.
+    Prefer YMODEM with CRC and a small Mac-friendly host utility over line-by-line
+    REPL entry. Add monitor transfer commands such as `RECV "path"` and
+    `SEND "path"`; use the storage service, bounded buffers, acknowledgements,
+    and clear success/error reporting. Confirm baud-rate limits and support the
+    available SD and flash filesystems.
+11. Add selectable portable bitmap fonts. `FONT fontID` should select a font
+    for the current graphics channel. `LOAD FONT filename$` should validate and
+    load a font file, select it, and report its assigned ID. Define a bounded,
+    platform-neutral font file format and decide later whether console `PRINT`
+    uses the same selected font or retains a separate console font.
+12. Add the REPL command `EDIT linenumber`. It should place the selected stored
+    line, including its line number, in the current input editor so the user can
+    revise it and press Enter to replace the stored line. An empty edited line
+    should follow the existing numbered-line rule and delete that line.
 
 ## Starting a new chat
 

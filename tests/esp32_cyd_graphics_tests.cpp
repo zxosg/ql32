@@ -1,6 +1,9 @@
 #include "ql32/platform/esp32_cyd/graphics.hpp"
+#include "ql32/platform/esp32_cyd/frame_presenter.hpp"
 
+#include <array>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -104,11 +107,39 @@ void testRotationAndWindowQueries() {
     }
 }
 
+void testFramePresenterStreamsAddressedRows() {
+    using namespace ql32::graphics;
+    using namespace ql32::platform::esp32_cyd;
+    CydIli9341Display display;
+    Ili9341FramePresenter presenter(display, {}, {});
+    std::array<RgbColor, 256> palette{};
+    palette[1] = {255, 0, 0};
+    palette[2] = {0, 255, 0};
+    const Rect region{10, 20, 2, 2};
+    const auto rowProvider = [](std::uint32_t y, std::vector<ColorIndex>& row) {
+        row[0] = y == 20 ? 1 : 2;
+        row[1] = 2;
+    };
+
+    require(presenter.presentRowsRegion(320, 240, palette, region, rowProvider),
+            "CYD frame presenter declined row streaming");
+    require(display.calls.size() == 5 && display.calls[0].name == "start_write" &&
+                display.calls[1].name == "addr_window" &&
+                display.calls[1].values == std::vector<std::int32_t>({10, 20, 2, 2}) &&
+                display.calls[2].name == "write_pixels" &&
+                display.calls[2].values[0] == 2 &&
+                display.calls[3].name == "write_pixels" &&
+                display.calls[3].values[0] == 2 &&
+                display.calls[4].name == "end_write",
+            "CYD rows were not sent through one address window and SPI transaction");
+}
+
 } // namespace
 
 int main() {
     testIndexedPaletteAndDrawing();
     testOwnershipAndValidation();
     testRotationAndWindowQueries();
+    testFramePresenterStreamsAddressedRows();
     return 0;
 }

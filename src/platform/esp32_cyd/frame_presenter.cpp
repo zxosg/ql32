@@ -56,21 +56,32 @@ bool Ili9341FramePresenter::presentRowsRegion(
     if (region.width == 0 || region.height == 0) return true;
     if (row_.size() < width) row_.resize(width);
     if (indexedRow_.size() < region.width) indexedRow_.resize(region.width);
-    for (std::uint32_t y = static_cast<std::uint32_t>(region.y);
-         y < static_cast<std::uint32_t>(region.y) + region.height; ++y) {
-        rowProvider(y, indexedRow_);
-        if (indexedRow_.size() != region.width)
-            throw std::invalid_argument("composed row does not match CYD region width");
-        for (std::uint32_t x = 0; x < region.width; ++x) {
-            const auto& color = palette[indexedRow_[x]];
-            row_[x] = static_cast<std::uint16_t>(
-                ((color.red & 0xF8u) << 8u) |
-                ((color.green & 0xFCu) << 3u) |
-                (color.blue >> 3u));
+    {
+        struct WriteTransaction {
+            explicit WriteTransaction(CydIli9341Display& display) : display(display) {
+                display.startWrite();
+            }
+            ~WriteTransaction() { display.endWrite(); }
+            CydIli9341Display& display;
+        } transaction(display_);
+        display_.setAddrWindow(static_cast<std::uint16_t>(region.x),
+                               static_cast<std::uint16_t>(region.y),
+                               static_cast<std::uint16_t>(region.width),
+                               static_cast<std::uint16_t>(region.height));
+        for (std::uint32_t y = static_cast<std::uint32_t>(region.y);
+             y < static_cast<std::uint32_t>(region.y) + region.height; ++y) {
+            rowProvider(y, indexedRow_);
+            if (indexedRow_.size() != region.width)
+                throw std::invalid_argument("composed row does not match CYD region width");
+            for (std::uint32_t x = 0; x < region.width; ++x) {
+                const auto& color = palette[indexedRow_[x]];
+                row_[x] = static_cast<std::uint16_t>(
+                    ((color.red & 0xF8u) << 8u) |
+                    ((color.green & 0xFCu) << 3u) |
+                    (color.blue >> 3u));
+            }
+            display_.writePixels(row_.data(), region.width);
         }
-        display_.drawRGBBitmap(static_cast<std::int16_t>(region.x),
-                               static_cast<std::int16_t>(y), row_.data(),
-                               static_cast<std::int16_t>(region.width), 1);
     }
     if (restoreOverlay_) restoreOverlay_(region);
     return true;

@@ -99,6 +99,10 @@ struct SessionScheduler::Task {
     bool paused = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
+
+    void releaseSource() noexcept {
+        std::string{}.swap(source);
+    }
 };
 
 SessionScheduler::SessionScheduler(Services services, std::size_t instructionBudget)
@@ -119,7 +123,7 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl);
+        services_.systemControl, services_.cpuFrequency);
     const TaskId id = task->id;
     eligibleTasks_.reserve(tasks_.size() + 1);
     candidateTasks_.reserve(tasks_.size() + 1);
@@ -136,7 +140,7 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl);
+        services_.systemControl, services_.cpuFrequency);
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
@@ -178,7 +182,7 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl);
+        services_.systemControl, services_.cpuFrequency);
     task->interactive = true;
     task->supervisor = true;
     task->hasPendingSource = !task->source.empty();
@@ -291,7 +295,7 @@ bool SessionScheduler::breakTaskExecution(TaskId id) {
         current->interpreter->abortExecution();
         current->interpreter->setErrorContext(runtime::ErrorCode::None);
         policy_.remove(current->id);
-        current->source.clear();
+        current->releaseSource();
         current->hasPendingSource = false;
         current->interactiveSubmission = false;
         current->started = false;
@@ -321,7 +325,7 @@ void SessionScheduler::stopWorkersAndReturnToSupervisor() {
             if (current->interpreter) current->interpreter->abortExecution();
             if (current->interpreter)
                 current->interpreter->setErrorContext(runtime::ErrorCode::None);
-            current->source.clear();
+            current->releaseSource();
             current->hasPendingSource = false;
             current->interactiveSubmission = false;
             current->started = false;
@@ -430,7 +434,7 @@ bool SessionScheduler::tick() {
             current.interpreter->setErrorContext(current.errorCode, current.errorDetail);
         current.hasPendingSource = false;
         current.interactiveSubmission = false;
-        current.source.clear();
+        current.releaseSource();
         current.started = false;
         if (current.interactive) {
             if (!submittedInteractiveCommand && current.interpreter)
@@ -470,7 +474,7 @@ bool SessionScheduler::tick() {
                 current.status = TaskStatus::Completed;
                 current.interpreter.reset();
             }
-            current.source.clear();
+            current.releaseSource();
             wakeParent(current);
         } else if (result == ExecutionStatus::WaitingTask) {
             current.started = true;
@@ -511,7 +515,7 @@ bool SessionScheduler::cancel(TaskId id) {
             continue;
         task->interpreter.reset();
         policy_.remove(task->id);
-        task->source.clear();
+        task->releaseSource();
         task->hasPendingSource = false;
         task->interactiveSubmission = false;
         task->paused = false;

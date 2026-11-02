@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <Adafruit_ILI9341.h>
 #include <SD.h>
+#if defined(QL32_CYD_USE_SPIFFS)
+#include <SPIFFS.h>
+#endif
 #include <SPI.h>
 
 #include <algorithm>
@@ -15,6 +18,7 @@
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/vm/scheduler.hpp"
 #include "ql32/platform/esp32/clock.hpp"
+#include "ql32/platform/esp32/cpu_frequency.hpp"
 #include "ql32/platform/esp32/line_ui_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
@@ -34,11 +38,17 @@ ql32::platform::esp32_cyd::CydIli9341Display display(&tftBus,
     ql32::boards::esp32_2432s028::tftChipSelect, -1);
 std::shared_ptr<ql32::graphics::WindowedService> graphics;
 ql32::platform::esp32::Clock boardClock;
+ql32::platform::esp32::CpuFrequency boardCpuFrequency;
 ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
+#if defined(QL32_CYD_USE_SPIFFS)
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS);
+ql32::platform::esp32::SdChannels sdChannels(SPIFFS);
+#else
 ql32::platform::esp32::SdStorage sdStorage(SD);
 ql32::platform::esp32::SdChannels sdChannels(SD);
+#endif
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;
 std::unique_ptr<std::ostream> basicOutput;
 std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
@@ -168,13 +178,33 @@ void setup() {
         [] { if (tftConsole) tftConsole->reconfigure(); });
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         display.width(), display.height(), framePresenter, 4, 76800);
+    graphics->setDefaultWindowBounds(0, {
+        0, std::max<std::int32_t>(0, static_cast<std::int32_t>(display.height()) - 64),
+        static_cast<std::uint32_t>(display.width()),
+        static_cast<std::uint32_t>(std::min<std::int32_t>(64, display.height()))});
+    graphics->setConsoleBoundsCallback([](ql32::graphics::Rect bounds) {
+        if (tftConsole) tftConsole->setBounds(bounds);
+    });
+    graphics->setConsoleColorsCallback([](ql32::graphics::ColorIndex ink,
+                                          ql32::graphics::ColorIndex paper) {
+        if (tftConsole) tftConsole->setColors(ink, paper);
+    });
+    graphics->setConsoleClearCallback([] {
+        if (tftConsole) tftConsole->clear();
+    });
 
+#if defined(QL32_CYD_USE_SPIFFS)
+    const bool storageReady = SPIFFS.begin(true);
+    if (storageReady && !SPIFFS.exists("/supervisor"))
+        (void)SPIFFS.mkdir("/supervisor");
+#else
     sdBus.begin(ql32::boards::esp32_2432s028::sdSck,
                 ql32::boards::esp32_2432s028::sdMiso,
                 ql32::boards::esp32_2432s028::sdMosi,
                 ql32::boards::esp32_2432s028::sdChipSelect);
-    const bool sdReady = SD.begin(ql32::boards::esp32_2432s028::sdChipSelect,
-                                 sdBus, 4000000, "/sd", 5);
+    const bool storageReady = SD.begin(ql32::boards::esp32_2432s028::sdChipSelect,
+                                      sdBus, 4000000, "/sd", 5);
+#endif
 
     Serial.println("QL/32 ESP32-2432S028 ready");
     Serial.printf("Uptime ms: %llu\n",
@@ -184,20 +214,34 @@ void setup() {
         Serial.printf("Unix time: %lld\n", static_cast<long long>(*wallTime));
     else
         Serial.println("Wall clock unsynchronized");
-    Serial.println(sdReady ? "SD storage ready" : "SD storage unavailable");
+    Serial.println(storageReady ? "Storage ready" : "Storage unavailable");
 
     std::string startupProgram;
-    if (sdReady) {
+    if (storageReady) {
+#if defined(QL32_CYD_USE_SPIFFS)
+        if (SPIFFS.exists("/startup.bas")) {
+            try {
+                startupProgram = sdStorage.readText("startup.bas");
+                Serial.println("Running Storage:/startup.bas");
+            } catch (const ql32::runtime::ServiceError& error) {
+                Serial.printf("Storage startup read error: %s\n", error.what());
+                return;
+            }
+        } else {
+            Serial.println("Storage:/startup.bas not found; starting with a clear display");
+        }
+#else
         try {
             startupProgram = sdStorage.readText("startup.bas");
             Serial.println("Running SD:/startup.bas");
         } catch (const ql32::runtime::ServiceError& error) {
             if (error.code() != ql32::runtime::ServiceErrorCode::NotFound) {
-                Serial.printf("SD startup read error: %s\n", error.what());
+                Serial.printf("Storage startup read error: %s\n", error.what());
                 return;
             }
             Serial.println("SD:/startup.bas not found; starting with a clear display");
         }
+#endif
     }
 
     ql32::vm::Services services;
@@ -217,6 +261,8 @@ void setup() {
         &boardSystemControl, [](ql32::runtime::SystemControlService*) {});
     services.memory = std::shared_ptr<ql32::runtime::MemoryService>(
         &boardMemory, [](ql32::runtime::MemoryService*) {});
+    services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
+        &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
     uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
         uiService, *basicOutput);
     scheduler = std::make_unique<ql32::vm::SessionScheduler>(std::move(services), 128);

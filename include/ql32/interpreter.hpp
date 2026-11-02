@@ -14,6 +14,7 @@
 #include "ql32/runtime/network.hpp"
 #include "ql32/runtime/memory.hpp"
 #include "ql32/runtime/system_control.hpp"
+#include "ql32/runtime/cpu_frequency.hpp"
 #include "ql32/runtime/task_control.hpp"
 #include "ql32/runtime/error.hpp"
 #include "ql32/graphics/service.hpp"
@@ -36,7 +37,8 @@ public:
                          std::shared_ptr<runtime::MemoryService> memory = {},
                          std::shared_ptr<runtime::TaskControlService> taskControl = {},
                          runtime::TaskId taskId = 0,
-                         std::shared_ptr<runtime::SystemControlService> systemControl = {});
+                         std::shared_ptr<runtime::SystemControlService> systemControl = {},
+                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency = {});
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -93,6 +95,7 @@ private:
     std::shared_ptr<graphics::Service> graphics_;
     std::shared_ptr<runtime::NetworkService> network_;
     std::shared_ptr<runtime::MemoryService> memory_;
+    std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::shared_ptr<runtime::SystemControlService> systemControl_;
     runtime::SessionId session_id_ = 0;

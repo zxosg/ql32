@@ -5,11 +5,13 @@ stateful `x`, `v`, and `t` updates and centers/scales the pattern to the active
 graphics window. `rowStep=4` and `sampleStep=8` reduce draw calls on ESP32; set
 them to `2` and `1` for the source sketch's full point density. `SIN()` and
 `COS()` use radians; `INT()` maps positions to pixel coordinates.
+The demo selects `OPTION KOptMathSingle` and `OPTION KEspCpuFreq240` in its
+module preamble. The latter changes the ESP32's device-wide CPU frequency; it
+is ignored by Linux and macOS builds.
 
-The p5 sketch uses a custom 16-entry RGB565 table and filled circles. QL/32
-currently exposes the eight QL colors and outline-only `CIRCLE`, so this port
-cycles through the seven non-black QL colors and uses radius-1 circles as small
-points. The pattern and movement are preserved; the exact colors and dot fill
+The p5 sketch uses a custom 16-entry RGB565 table and 3-pixel filled circles.
+QL/32 uses `PLOT` to draw one pixel and cycles through the seven non-black QL
+colors. The recurrence and movement are preserved; the palette and point size
 are approximated.
 
 To run it on Linux, build the host target and launch:
@@ -19,7 +21,8 @@ To run it on Linux, build the host target and launch:
 ```
 
 The Linux graphics presenter writes the composed image to `ql32-screen.ppm`.
-On an ESP32 board, copy `attractor.bas` to the SD card. At the supervisor
-prompt, set `SLICE 2048` and start it as a worker with `TASK "attractor.bas"`.
-The larger slice makes the frame loop smoother while the supervisor remains
-available. The task ID is printed on the display; stop it with `KILL id`.
+On an ESP32 board, copy `attractor.bas` to the available `SDC:` or `FFS:` drive.
+At the supervisor prompt, set `SLICE 2048` and start it as a worker with
+`TASK "FFS:/attractor.bas"` (or use the matching `SDC:` path). The larger slice
+makes the frame loop smoother while the supervisor remains available. The
+task ID is printed on the display; stop it with `KILL id`.

@@ -22,6 +22,11 @@ firmware runs a built-in demo. `examples/cyd_startup.bas` demonstrates text,
 lines, rectangles, and circles on the TFT. BASIC channel paths are relative to
 the SD root.
 
+`data/startup.bas` is the two-pane startup example. Copy it to the SD card root
+as `startup.bas` for the SD profile. The `esp32_2432s028_spiffs` profile uses
+the internal 1 MiB `FFS` filesystem; after flashing it, a program entered in the
+REPL can be saved there with `SAVE "startup.bas"` and will run at the next boot.
+
 To check that text and graphics use separate output paths, enter
 `PRINT "hello on LCD"`, then `TEXT 8,8,"positioned graphics text"`. The first
 line appears in the scrolling strip at the bottom; the second is drawn at the
@@ -92,3 +97,23 @@ menus is compiled into the image. The SD channel round-trip is verified on
 hardware: written text read back successfully and `EOF` returned `1`. Define
 `QL32_TFT_CONSOLE_SERIAL_MIRROR` in this environment's `build_flags` to mirror
 BASIC console output to serial.
+
+### Internal SPIFFS test profile
+
+For tests that need BASIC files but do not have a working SD card, use the
+separate `esp32_2432s028_spiffs` environment. It allocates a 1 MiB SPIFFS
+partition, leaving a 2.875 MiB firmware partition. The standard
+`esp32_2432s028` profile remains SD-backed. The test image contains
+`data/supervisor/worker-1.bas` through `worker-3.bas` and
+`data/mandelbrot.bas`.
+
+Flash the test firmware, then upload its SPIFFS image:
+
+```bash
+pio run -e esp32_2432s028_spiffs -t upload --upload-port /dev/cu.usbserial-XXXX
+pio run -e esp32_2432s028_spiffs -t uploadfs --upload-port /dev/cu.usbserial-XXXX
+```
+
+The partition table and filesystem differ from the standard SD profile. To
+return to the standard profile, flash `esp32_2432s028`; files in the test
+SPIFFS image are not available to that SD-backed firmware.

@@ -10,13 +10,15 @@
 
 namespace ql32::platform::esp32_cyd {
 
-// Scrollable PRINT output at the bottom of the TFT. Graphics retain the full
-// display coordinate space and can draw behind this text overlay.
+// Scrollable PRINT output in the channel #0 area. Graphics retain the full
+// display coordinate space and can draw behind this transparent text overlay.
 class TftTextConsole final : public std::streambuf {
 public:
     explicit TftTextConsole(Adafruit_ILI9341& display);
     void clear();
     void reconfigure();
+    void setBounds(graphics::Rect bounds);
+    void setColors(graphics::ColorIndex ink, graphics::ColorIndex paper);
     void restoreOverlay(graphics::Rect region);
 
 protected:
@@ -30,6 +32,10 @@ private:
     std::size_t visibleRows_;
     std::size_t columns_;
     std::int16_t firstRowY_;
+    std::int16_t firstColumnX_;
+    graphics::Rect bounds_{};
+    std::uint16_t foregroundColor_ = 0xFFFF;
+    std::uint16_t backgroundColor_ = 0x0000;
 
     void put(char character);
     void advanceLine();

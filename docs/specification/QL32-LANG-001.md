@@ -1,8 +1,8 @@
 # QL/32 BASIC language specification
 
 **Document ID:** QL32-LANG-001  
-**Version:** 0.6 (M1 language contract)
-**Status:** Approved profile; M1 acceptance complete on Linux; source inclusion, GOTO, and module constants implemented
+**Version:** 0.7 (M1 language contract)
+**Status:** Approved profile; M1 acceptance complete on Linux; source inclusion, GOTO, module constants, and module options implemented and host-tested
 **Sources:** [reference index](../reference/README.md), [language decision](../decisions/ADR-002-language-profile.md)
 
 ## 1. Language profile
@@ -86,15 +86,47 @@ or string literals. They must appear before definitions and executable code,
 are case-insensitive, and are immutable compile-time values. They cannot be
 reassigned, dimensioned, or used as loop variables. `ql32.inc` defines
 `KChannelCount = 0`, `KChannelHandle = 1`, and `KChannelType = 2` for
-`GETCHANNEL`; programs include it with `INCLUDE "ql32.inc"`.
+`GETCHANNEL`; it also defines `KOptMathDouble = 0` and `KOptMathSingle = 1`.
+For ESP32 targets it defines `KEspCpuFreq80`, `KEspCpuFreq160`, and
+`KEspCpuFreq240`. Programs include it with `INCLUDE "ql32.inc"`.
+
+`OPTION KOptMathSingle` selects binary32 numeric calculations for that source
+unit; `OPTION KOptMathDouble` selects binary64. The default is DOUBLE. An
+option declaration belongs at module scope before definitions and executable
+code. Each option category may appear only once. It must name the corresponding
+declared constant, so the common form includes `ql32.inc` first. In SINGLE mode,
+numeric literals, floating-point intermediates, stored numeric results, and
+`SIN`/`COS` results are rounded to binary32. `%` variables still require
+signed 32-bit integral values; expressions involving them use the selected
+precision. `DIV` and `MOD` retain their defined integer behavior. SINGLE has
+less range and precision than the default, but uses the ESP32's accelerated
+single-precision arithmetic. The setting is per compiled source unit and does
+not change other BASIC tasks. It changes arithmetic precision, not the VM's
+value storage size or program memory use. This option is QL/32-specific. OPL and
+Annex32 use double-precision reals, and SuperBASIC uses its default
+floating-point format with integer-suffixed variables; none has this
+per-source switch.
+
+`OPTION KEspCpuFreq80`, `OPTION KEspCpuFreq160`, and
+`OPTION KEspCpuFreq240` request the corresponding CPU frequency in MHz on
+supported ESP32 firmware. CPU frequency is a device-wide setting, not a
+per-task property. The request is applied when the module starts and remains
+active until another module requests a different frequency or the board
+restarts; among running tasks, the most recently started module containing
+this option wins. Linux and macOS accept these declarations and ignore them.
+This option is QL/32-specific and platform-dependent.
 
 The first slice accepts this grammar (later sections extend it):
 
 ```text
-program       := source_line*
+program       := module_declaration* source_line*
+module_declaration := const_declaration | option_declaration
 source_line   := [line_number] [statement (":" statement)*] [comment] newline
-statement     := const_declaration | assignment | print
+statement     := assignment | print
 const_declaration := "CONST" identifier "=" (signed_number | string)
+option_declaration := "OPTION" option_constant
+option_constant := "KOptMathDouble" | "KOptMathSingle"
+                 | "KEspCpuFreq80" | "KEspCpuFreq160" | "KEspCpuFreq240"
 comment       := ("REMark" | "REM" | "'") characters_to_end_of_line
 assignment    := identifier "=" expression
 print         := "PRINT" ["#" expression [("," | ";")]]
@@ -102,6 +134,21 @@ print         := "PRINT" ["#" expression [("," | ";")]]
 print_separator := ";" | "!" | "," | "\\"
 expression    := literal | identifier | "(" expression ")" | unary | binary
 ```
+
+Typical use:
+
+```basic
+INCLUDE "ql32.inc"
+OPTION KOptMathSingle
+OPTION KEspCpuFreq160
+
+x = SIN(1) + COS(1)
+PRINT x
+```
+
+`OPTION` is a module declaration, not an executable statement. The declaration
+is processed during compilation; no executable instruction is generated, and
+the selected settings are stored as module metadata.
 
 ## 3. Values and variables
 
@@ -156,8 +203,10 @@ explicit. The table is the QL/32 precedence profile: it groups `*`, `/`,
 reference's ordered precedence list. These simplifications are not class S
 compatibility claims.
 
-Numeric literals and unsuffixed numeric variables are binary64. Arithmetic
-operators require numeric operands and do not parse strings implicitly. Binary
+By default, numeric literals and unsuffixed numeric variables use binary64.
+With `OPTION KOptMathSingle`, they are rounded to binary32 as they enter
+calculations and after each result. Arithmetic operators require numeric
+operands and do not parse strings implicitly. Binary
 `+` adds two numbers or concatenates two strings; it rejects a mixed pair.
 This string use of `+` is a QL/32 choice; the cited SuperBASIC operator is
 `&`, which M1 does not implement. String equality and inequality compare UTF-8
@@ -168,11 +217,12 @@ operators test each operand for nonzero and evaluate both operands from left
 to right. No implicit number-to-string or string-to-number conversion occurs.
 `PRINT` formats either value type directly.
 
-`/` is binary64 division and division by zero is an error. `DIV` and `MOD`
-require finite, integral operands in the Int32 range. `DIV` is floor division,
+`/` is binary64 division by default and binary32 in SINGLE mode; division by
+zero is an error. `DIV` and `MOD` require finite, integral operands in the
+Int32 range. `DIV` is floor division,
 and `MOD` satisfies `x = y * (x DIV y) + (x MOD y)`; divisor zero is an error.
-`DIV` also errors if its quotient is outside the Int32 range. `^` uses
-binary64 operands; a non-finite result, zero raised to a negative
+`DIV` also errors if its quotient is outside the Int32 range. `^` uses the
+selected precision; a non-finite result, zero raised to a negative
 power, or a negative base with a non-integral exponent is a runtime error.
 `0^0` evaluates to `1`. Assignment to a `%` variable requires an exact
 integral result in the Int32 range; it does not truncate or wrap. Assignment to
@@ -419,7 +469,22 @@ interactive program. The REPL command processor provides `LOAD`, `SAVE`, and
 source. Unnumbered non-empty lines receive line numbers 10, 20, and so on in
 file order; blank lines are skipped. A file cannot mix numbered and unnumbered
 source lines. After loading, use `LIST` to inspect the numbered program and
-`RUN` to execute it. The scheduler-backed embedded REPL also provides `TASKS`,
+`RUN` to execute it.
+
+Storage paths may select a named drive with a prefix before the colon:
+`FFS:` is the internal flash filesystem and `SDC:` is the removable SD card.
+For example, `DIR "FFS:/"`, `LOAD "SDC:/mandelbrot.bas"`, and
+`SAVE "FFS:/test.bas"`. Drive names are case-insensitive. The slash after the
+colon marks the drive root; paths remain inside that drive, and `..` cannot
+escape its root. A drive prefix can be used by any operation that accepts a
+storage path, including `LOAD`, `SAVE`, `DIR`, `INCLUDE`, `TASK`, and file
+channels. Relative include paths stay on the drive of the including file.
+Unprefixed paths continue to use the platform's default storage drive.
+Attempting to use a drive that is not mounted reports a storage-unavailable
+error. These names describe logical storage roles; a platform may implement
+`FFS:` with SPIFFS, LittleFS, or another flash filesystem.
+
+The scheduler-backed embedded REPL also provides `TASKS`,
 `TASKRESULT id`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `KILL id`,
 `SLICE [instructions]`, `PRIORITY task-id,weight`, `SUSPEND id`, and
 `RESUME id`. `TASK` reads source through the configured storage service and
@@ -491,8 +556,10 @@ channel operations. File endpoints support reads and writes; serial endpoints
 write to serial output, and null endpoints discard output. Value-returning
 operations use function syntax while `WRITE channel, text$` and `CLOSE channel`
 are statement commands. See
-[QL32-API-001](QL32-API-001.md). `EDIT` and the target
-shell's `STOP` and `HELP`, and later `CONT`, remain future work.
+[QL32-API-001](QL32-API-001.md). `EDIT linenumber` is planned as a REPL
+editing command: it will load the numbered line into the input editor so Enter
+replaces it; submitting an empty numbered line deletes it. The target shell's
+`STOP` and `HELP`, and later `CONT`, remain future work.
 
 Channels are universal session-owned I/O handles. `#0` is reserved for the
 command/error console and keyboard input; `#1` is reserved for user/program
@@ -501,10 +568,13 @@ share one handle namespace. Generic `OPEN(deviceKind, parameters...)` returns
 an automatically allocated channel handle; the device kind is a typed token,
 not a string. Programs do not select channel numbers when opening endpoints.
 Commands that perform I/O or drawing may select a channel explicitly, for
-example `PRINT #out, text$`, `LIST #out`, or
-`CIRCLE #window, x, y, radius`. Unqualified output uses the current output
-default. `CHANNEL #channel` changes the logical default for all unqualified
-output operations, including text and graphics. `CHANNEL #source TO
+example `PRINT #out, text$`, `LIST #out`, `PLOT #window, x, y`, or
+`CIRCLE #window, x, y, radius, 1`. `RECT` and `CIRCLE` accept an optional
+`fill` flag: omit it or use `0` for an outline, or use `1` for a solid shape.
+`PLOT` draws one pixel in the selected window's current ink color. Unqualified
+output uses the current output default. `CHANNEL #channel` changes the logical
+default for all unqualified output operations, including text and graphics.
+`CHANNEL #source TO
 #destination` directly rebinds the source handle to the endpoint currently
 bound to the destination. The binding is shared, session-local, and applies to
 all operations; the source retains its original endpoint, restored by
@@ -527,8 +597,9 @@ returns the endpoint type. These selector constants are provided by
 `OPEN(KDeviceNull)` open file, serial-output, and null-output endpoints;
 the legacy `OPEN(path, mode)` file form remains supported. The null endpoint
 discards text, byte, and graphics output. Serial and null input are not
-implemented, and reserved channels `#0` and `#1` are still managed outside
-the opened-endpoint registry.
+implemented. `OPEN(KDeviceWindow)` allocates a graphics window channel with no
+arguments; use `WINDOW #channel,x,y,w,h` to position and size it. Reserved
+channels `#0` and `#1` are still managed outside the opened-endpoint registry.
 
 For text output, `WRITE channel, text$` is a one-string, newline-terminated
 write. `PRINT #channel` supports multiple expressions and separators. A

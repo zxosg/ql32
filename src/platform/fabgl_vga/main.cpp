@@ -22,6 +22,7 @@
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/idf_sd.hpp"
 #include "ql32/platform/esp32/clock.hpp"
+#include "ql32/platform/esp32/cpu_frequency.hpp"
 #include "ql32/platform/esp32/line_ui_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
@@ -50,9 +51,11 @@ constexpr std::uint32_t consoleCharacterHeight = 8;
 constexpr std::uint32_t consoleHeight = consoleRows * consoleCharacterHeight;
 // QL mode-8 ink 4 is green (palette order: black, blue, red, magenta, green...).
 constexpr std::uint8_t consoleInk = 4;
-constexpr std::array<std::array<std::uint8_t, 3>, 8> consolePalette{{
+constexpr std::array<std::array<std::uint8_t, 3>, 16> consolePalette{{
     {{0, 0, 0}}, {{0, 0, 255}}, {{255, 0, 0}}, {{255, 0, 255}},
-    {{0, 255, 0}}, {{0, 255, 255}}, {{255, 255, 0}}, {{255, 255, 255}}
+    {{0, 255, 0}}, {{0, 255, 255}}, {{255, 255, 0}}, {{255, 255, 255}},
+    {{85, 85, 85}}, {{85, 85, 255}}, {{255, 85, 85}}, {{255, 85, 255}},
+    {{85, 255, 85}}, {{85, 255, 255}}, {{255, 255, 85}}, {{192, 192, 192}}
 }};
 
 class VgaConsole {
@@ -62,11 +65,40 @@ public:
     }
 
     void begin() {
-        columns_ = static_cast<std::size_t>(
-            std::max(1, canvas_.getWidth() / static_cast<int>(consoleCharacterWidth)));
-        firstRowY_ = canvas_.getHeight() - static_cast<int>(consoleHeight);
+        bounds_ = {0, std::max(0, canvas_.getHeight() - static_cast<int>(consoleHeight)),
+                   static_cast<std::uint32_t>(canvas_.getWidth()), consoleHeight};
+        updateGeometry();
         canvas_.selectFont(&fabgl::FONT_6x8);
-        redraw();
+        redraw(true);
+    }
+
+    void setBounds(ql32::graphics::Rect bounds) {
+        if (bounds.width == 0 || bounds.height == 0) return;
+        bounds.x = std::clamp<std::int32_t>(bounds.x, 0, canvas_.getWidth());
+        bounds.y = std::clamp<std::int32_t>(bounds.y, 0, canvas_.getHeight());
+        bounds.width = std::min<std::uint32_t>(bounds.width,
+            static_cast<std::uint32_t>(canvas_.getWidth() - bounds.x));
+        bounds.height = std::min<std::uint32_t>(bounds.height,
+            static_cast<std::uint32_t>(canvas_.getHeight() - bounds.y));
+        bounds_ = bounds;
+        updateGeometry();
+        redraw(true);
+    }
+
+    void setColors(ql32::graphics::ColorIndex ink, ql32::graphics::ColorIndex paper) {
+        ink_ = ink % consolePalette.size();
+        paper_ = paper % consolePalette.size();
+        redraw(true);
+    }
+
+    void clear() {
+        lines_.clear();
+        lines_.emplace_back();
+        redraw(true);
+    }
+
+    void restoreOverlay(ql32::graphics::Rect region) {
+        redraw(false, region);
     }
 
     void write(const char* data, std::size_t size) {
@@ -76,7 +108,7 @@ public:
             if (character == '\r') continue;
             if (character == '\n') {
                 lines_.emplace_back();
-                if (lines_.size() > consoleRows) lines_.pop_front();
+                if (lines_.size() > rows_) lines_.pop_front();
                 changed = true;
                 continue;
             }
@@ -90,28 +122,53 @@ public:
             if (character < 32 || character >= 127) continue;
             if (lines_.back().size() >= columns_) {
                 lines_.emplace_back();
-                if (lines_.size() > consoleRows) lines_.pop_front();
+                if (lines_.size() > rows_) lines_.pop_front();
                 changed = true;
             }
             lines_.back().push_back(static_cast<char>(character));
             changed = true;
         }
-        if (changed) redraw();
+        if (changed) redraw(false);
     }
 
 private:
-    void redraw() {
+    void updateGeometry() {
+        columns_ = static_cast<std::size_t>(std::max<std::uint32_t>(1,
+            bounds_.width / consoleCharacterWidth));
+        rows_ = static_cast<std::size_t>(std::max<std::uint32_t>(1,
+            bounds_.height / consoleCharacterHeight));
+        firstRowY_ = bounds_.y;
+        while (lines_.size() > rows_) lines_.pop_front();
+    }
+
+    void redraw(bool clearBackground, ql32::graphics::Rect region = {}) {
+        if (bounds_.width == 0 || bounds_.height == 0) return;
+        const auto left = std::max<std::int32_t>(bounds_.x, region.width ? region.x : bounds_.x);
+        const auto top = std::max<std::int32_t>(bounds_.y, region.height ? region.y : bounds_.y);
+        const auto right = std::min<std::int32_t>(bounds_.x + bounds_.width,
+            region.width ? region.x + static_cast<std::int32_t>(region.width) :
+                           bounds_.x + bounds_.width);
+        const auto bottom = std::min<std::int32_t>(bounds_.y + bounds_.height,
+            region.height ? region.y + static_cast<std::int32_t>(region.height) :
+                            bounds_.y + bounds_.height);
+        if (left >= right || top >= bottom) return;
         canvas_.beginUpdate();
-        canvas_.setBrushColor(0, 0, 0);
-        canvas_.fillRectangle(0, firstRowY_, canvas_.getWidth() - 1,
-                              canvas_.getHeight() - 1);
+        canvas_.setClippingRect(fabgl::Rect(left, top, right - 1, bottom - 1));
+        if (clearBackground) {
+            const auto& paper = consolePalette[paper_];
+            canvas_.setBrushColor(paper[0], paper[1], paper[2]);
+            canvas_.fillRectangle(left, top, right - 1, bottom - 1);
+        }
         canvas_.selectFont(&fabgl::FONT_6x8);
-        const auto& ink = consolePalette[consoleInk];
+        const auto& ink = consolePalette[ink_];
         canvas_.setPenColor(ink[0], ink[1], ink[2]);
-        canvas_.setBrushColor(0, 0, 0);
+        canvas_.setGlyphOptions(fabgl::GlyphOptions().FillBackground(false));
         for (std::size_t row = 0; row < lines_.size(); ++row)
-            canvas_.drawText(0, firstRowY_ + static_cast<int>(row * consoleCharacterHeight),
+            canvas_.drawText(bounds_.x,
+                             firstRowY_ + static_cast<int>(row * consoleCharacterHeight),
                              lines_[row].c_str());
+        canvas_.setClippingRect(fabgl::Rect(0, 0, canvas_.getWidth() - 1,
+                                           canvas_.getHeight() - 1));
         canvas_.endUpdate();
         canvas_.waitCompletion(true);
     }
@@ -119,7 +176,11 @@ private:
     fabgl::Canvas& canvas_;
     std::deque<std::string> lines_;
     std::size_t columns_ = 1;
+    std::size_t rows_ = consoleRows;
     int firstRowY_ = 0;
+    ql32::graphics::Rect bounds_{};
+    std::uint8_t ink_ = consoleInk;
+    std::uint8_t paper_ = 0;
 };
 
 extern VgaConsole screenConsole;
@@ -150,6 +211,7 @@ fabgl::PS2Controller ps2;
 std::shared_ptr<ql32::graphics::WindowedService> graphics;
 std::optional<ql32::platform::fabgl_vga::FabglKeyboard> keyboardInput;
 ql32::platform::esp32::Clock boardClock;
+ql32::platform::esp32::CpuFrequency boardCpuFrequency;
 ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
@@ -337,14 +399,27 @@ void setup() {
     display.setResolution(VGA_320x200_70Hz);
 
     screenConsole.begin();
-    auto framePresenter = std::make_shared<ql32::platform::fabgl_vga::FabglFramePresenter>(canvas);
+    auto framePresenter = std::make_shared<ql32::platform::fabgl_vga::FabglFramePresenter>(
+        canvas, [](ql32::graphics::Rect region) { screenConsole.restoreOverlay(region); });
     const auto screenWidth = static_cast<std::uint32_t>(canvas.getWidth());
     const auto screenHeight = static_cast<std::uint32_t>(canvas.getHeight());
     const std::size_t fullScreen4BitBytes =
         (static_cast<std::size_t>(screenWidth) * screenHeight + 1) / 2;
     graphics = std::make_shared<ql32::graphics::WindowedService>(
-        screenWidth, screenHeight - consoleHeight, framePresenter, 4,
+        screenWidth, screenHeight, framePresenter, 4,
         fullScreen4BitBytes * 2);
+    graphics->setDefaultWindowBounds(0,
+        {0, static_cast<std::int32_t>(screenHeight - consoleHeight), screenWidth, consoleHeight});
+    graphics->setDefaultWindowBounds(1,
+        {0, 0, screenWidth, screenHeight - consoleHeight});
+    graphics->setConsoleBoundsCallback([](ql32::graphics::Rect bounds) {
+        screenConsole.setBounds(bounds);
+    });
+    graphics->setConsoleColorsCallback([](ql32::graphics::ColorIndex ink,
+                                          ql32::graphics::ColorIndex paper) {
+        screenConsole.setColors(ink, paper);
+    });
+    graphics->setConsoleClearCallback([] { screenConsole.clear(); });
 
     ps2.begin(fabgl::PS2Preset::KeyboardPort0);
     if (auto* keyboard = fabgl::PS2Controller::keyboard()) {
@@ -436,6 +511,8 @@ void setup() {
         &boardSystemControl, [](ql32::runtime::SystemControlService*) {});
     services.memory = std::shared_ptr<ql32::runtime::MemoryService>(
         &boardMemory, [](ql32::runtime::MemoryService*) {});
+    services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
+        &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
     uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
         uiService, serialOutput);
     scheduler = std::make_unique<ql32::vm::SessionScheduler>(std::move(services), 128);

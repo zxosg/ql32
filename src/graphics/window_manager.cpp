@@ -465,7 +465,8 @@ void IndexedCanvas::line(Point from, Point to) {
     }
 }
 
-void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t height) {
+void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t height,
+                              bool filled) {
     if (width <= 0 || height <= 0)
         throw std::invalid_argument("rectangle dimensions must be positive");
     const auto right = static_cast<std::int64_t>(topLeft.x) + width - 1;
@@ -473,6 +474,16 @@ void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t he
     if (right > std::numeric_limits<std::int32_t>::max() ||
         bottom > std::numeric_limits<std::int32_t>::max())
         throw std::out_of_range("rectangle exceeds supported coordinates");
+    if (filled) {
+        const auto left = std::max<std::int64_t>(0, topLeft.x);
+        const auto clippedRight = std::min<std::int64_t>(width_ - 1, right);
+        const auto top = std::max<std::int64_t>(0, topLeft.y);
+        const auto clippedBottom = std::min<std::int64_t>(height_ - 1, bottom);
+        for (auto y = top; y <= clippedBottom; ++y)
+            for (auto x = left; x <= clippedRight; ++x)
+                setPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), ink_);
+        return;
+    }
     line(topLeft, {static_cast<std::int32_t>(right), topLeft.y});
     line({static_cast<std::int32_t>(right), topLeft.y},
          {static_cast<std::int32_t>(right), static_cast<std::int32_t>(bottom)});
@@ -481,8 +492,31 @@ void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t he
     line({topLeft.x, static_cast<std::int32_t>(bottom)}, topLeft);
 }
 
-void IndexedCanvas::circle(Point center, std::int32_t radius) {
+void IndexedCanvas::circle(Point center, std::int32_t radius, bool filled) {
     if (radius < 0) throw std::invalid_argument("circle radius must be nonnegative");
+    if (filled) {
+        const auto top = std::max<std::int64_t>(0,
+            static_cast<std::int64_t>(center.y) - radius);
+        const auto bottom = std::min<std::int64_t>(height_ - 1,
+            static_cast<std::int64_t>(center.y) + radius);
+        const auto radiusSquared = static_cast<std::int64_t>(radius) * radius;
+        for (auto y = top; y <= bottom; ++y) {
+            const auto dy = y - center.y;
+            const auto remaining = radiusSquared - dy * dy;
+            if (remaining < 0) continue;
+            auto span = static_cast<std::int64_t>(std::sqrt(
+                static_cast<long double>(remaining)));
+            while ((span + 1) * (span + 1) <= remaining) ++span;
+            while (span * span > remaining) --span;
+            const auto left = std::max<std::int64_t>(0,
+                static_cast<std::int64_t>(center.x) - span);
+            const auto right = std::min<std::int64_t>(width_ - 1,
+                static_cast<std::int64_t>(center.x) + span);
+            for (auto x = left; x <= right; ++x)
+                setPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), ink_);
+        }
+        return;
+    }
     std::int64_t x = radius;
     std::int64_t y = 0;
     std::int64_t error = 1 - x;

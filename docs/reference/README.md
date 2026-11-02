@@ -26,7 +26,14 @@ These are the sources linked in the “QL32 Project Idea” chat and used to com
 - The Series 5 OPL32 `INCLUDE` reference (Basics, “Series 5 Header Files, Constants and Procedure Prototypes”; OPL Reference chapter 9) places includes at module scope and describes header constants/prototypes rather than procedure bodies. QL/32's source-file inclusion is a documented adaptation, not OPL32 compatibility.
 - [Leigh Edwards, *Programming Psion Computers*](Programming-Psion-Computers.pdf), supplied in `docs/reference`; see OPL Reference chapter 9 for menus and dialogs, and the application architecture discussions for broader UI context.
 - [OPL `gUPDATE` reference](https://www.unix-ag.uni-siegen.de/docs/psionopl/b06graph.htm) describes disabling automatic redraw during a graphics batch and forcing a refresh with `gUPDATE`. QL/32 adopts that workflow; its `AUTO` mode is a QL/32 extension.
+- OPL uses floating-point reals by default, with `%` and `&` suffixes for 16-bit and 32-bit integers. It has no per-program single/double precision switch. The [OPL values reference](https://waghornswood.net.nz/Auda/psion/sysdoc/opl/lang/basics.html) documents the real range and typed integers; the local OPL32 runtime represents real variables as `TReal64`.
 - Its `dINIT`/`DIALOG` controls and `mINIT`/`mCARD`/`MENU` illustrate the UI model. OPL variants differ by device. QL/32 adopts the model with its own syntax and session ownership.
+
+## Numeric precision and platform options
+
+- Original SuperBASIC uses its built-in floating-point format by default (eight significant decimal digits in the QL manual) and `%` for 16-bit integer variables; it does not select single or double precision per program. See the [SuperBASIC concept guide](https://sinclairql.net/djw/docs/ebooks/olqlug/QL%20Manual%20-%20Concepts.htm).
+- Annex32 stores numeric variables as double-precision floating point and offers `OPTION.CPUFREQ 80|160|240` for device configuration; it has no single/double math mode. QL/32 adopts those CPU frequency choices with named constants. See the [Annex32 language and options reference](https://www.cicciocb.com/annex32help/V1.518/start.htm).
+- QL/32 defines `OPTION KOptMathSingle` / `KOptMathDouble`, defaulting to DOUBLE, and ESP32-specific `OPTION KEspCpuFreq80` / `160` / `240`. Host builds accept the CPU option and ignore it.
 
 ## Annex32 Wi-Fi BASIC
 

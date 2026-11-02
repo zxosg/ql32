@@ -34,7 +34,7 @@ using detail::SelectItemSpec;
 
 enum class Kind {
     End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
-    Print, If, Then, Else, EndKeyword, Go, Goto, Dim, Const,
+    Print, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
     Select, On, Remainder, Remark,
     For, To, Step, Next, Repeat, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
@@ -77,6 +77,7 @@ constexpr Keyword keywords[] = {
     {"FUNCTION", "FN", Kind::Function, "FuNction"},
     {"LOCAL", "LOC", Kind::Local, "LOCal"}, {"RETURN", "RET", Kind::Return, "RETurn"},
     {"CONST", "CONST", Kind::Const, "CONST"},
+    {"OPTION", "OPTION", Kind::Option, "OPTION"},
     {"DIV", "DIV", Kind::Div, "DIV"}, {"MOD", "MOD", Kind::Mod, "MOD"},
     {"AND", "AND", Kind::And, "AND"}, {"OR", "OR", Kind::Or, "OR"},
     {"XOR", "XOR", Kind::Xor, "XOR"}, {"NOT", "NOT", Kind::Not, "NOT"}
@@ -85,7 +86,7 @@ constexpr Keyword keywords[] = {
 constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
-    "INK", "PAPER", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
+    "INK", "PAPER", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "KILL"
 };
 
@@ -162,6 +163,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "DGET" || instruction.name == "DGET$") return {2, true};
     if (instruction.name == "MCARD") return {4, false};
     if (instruction.name == "INK" || instruction.name == "PAPER") return {1, false};
+    if (instruction.name == "PLOT") return {2, false};
     if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
     if (instruction.name == "CIRCLE") return {3, false};
     if (instruction.name == "TEXT") return {3, false};
@@ -486,6 +488,8 @@ private:
     std::size_t nextLoopId_ = 1;
     bool inDefinition_ = false;
     bool moduleCodeStarted_ = false;
+    bool numericPrecisionDeclared_ = false;
+    bool cpuFrequencyDeclared_ = false;
     std::string currentDefinitionName_;
 
     std::string scopedLabel(const std::string& name) const {
@@ -625,6 +629,12 @@ private:
                 } else if (instruction.name == "GUPDATE") {
                     if (passedArguments > 1)
                         error(instruction, "GUPDATE accepts one numeric mode or no argument");
+                } else if (instruction.name == "RECT") {
+                    if (passedArguments < 4 || passedArguments > 5)
+                        error(instruction, "RECT expects x, y, width, height, and optional fill flag");
+                } else if (instruction.name == "CIRCLE") {
+                    if (passedArguments < 3 || passedArguments > 4)
+                        error(instruction, "CIRCLE expects x, y, radius, and optional fill flag");
                 } else if (passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
@@ -771,9 +781,10 @@ private:
                 if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End) ||
                     check(Kind::Else) || check(Kind::EndKeyword)) continue;
             }
-            const bool constantDeclaration = moduleScope && check(Kind::Const);
+            const bool moduleDeclaration = moduleScope &&
+                (check(Kind::Const) || check(Kind::Option));
             statement(moduleScope);
-            if (moduleScope && !constantDeclaration) moduleCodeStarted_ = true;
+            if (moduleScope && !moduleDeclaration) moduleCodeStarted_ = true;
             if (!check(Kind::End) && !check(Kind::Newline) && !check(Kind::Colon) &&
                 !check(Kind::Else) && !check(Kind::EndKeyword))
                 error(peek(), "expected end of statement");
@@ -1238,6 +1249,46 @@ private:
         code_.push_back(std::move(jump));
     }
     void statement(bool moduleScope = false) {
+        if (check(Kind::Option)) {
+            const Token keyword = advance();
+            if (!moduleScope || inDefinition_)
+                error(keyword, "OPTION is only valid at module scope");
+            if (moduleCodeStarted_)
+                error(keyword, "OPTION declarations must precede executable code and definitions");
+            if (!check(Kind::Identifier))
+                error(peek(), "OPTION requires a supported option constant from ql32.inc");
+            const Token optionValue = advance();
+            const auto constant = constants_.find(optionValue.text);
+            if (constant == constants_.end())
+                error(optionValue, "OPTION value must be a declared constant");
+            const auto* numericValue = std::get_if<double>(&constant->second);
+            if (optionValue.text == "KOPTMATHSINGLE" && numericValue &&
+                *numericValue == 1.0) {
+                if (numericPrecisionDeclared_)
+                    error(optionValue, "math precision OPTION may only be declared once");
+                code_.numericPrecision = detail::NumericPrecision::Single;
+                numericPrecisionDeclared_ = true;
+            } else if (optionValue.text == "KOPTMATHDOUBLE" && numericValue &&
+                       *numericValue == 0.0) {
+                if (numericPrecisionDeclared_)
+                    error(optionValue, "math precision OPTION may only be declared once");
+                code_.numericPrecision = detail::NumericPrecision::Double;
+                numericPrecisionDeclared_ = true;
+            } else if ((optionValue.text == "KESPCPUFREQ80" && numericValue &&
+                        *numericValue == 80.0) ||
+                       (optionValue.text == "KESPCPUFREQ160" && numericValue &&
+                        *numericValue == 160.0) ||
+                       (optionValue.text == "KESPCPUFREQ240" && numericValue &&
+                        *numericValue == 240.0)) {
+                if (cpuFrequencyDeclared_)
+                    error(optionValue, "CPU frequency OPTION may only be declared once");
+                code_.cpuFrequencyMHz = static_cast<std::uint16_t>(*numericValue);
+                cpuFrequencyDeclared_ = true;
+            } else {
+                error(optionValue, "unsupported OPTION constant");
+            }
+            return;
+        }
         if (check(Kind::Const)) {
             const Token keyword = advance();
             if (!moduleScope || inDefinition_)
@@ -1420,7 +1471,8 @@ private:
                 return;
             }
             const bool supportsChannelSelector =
-                name.text == "INK" || name.text == "PAPER" || name.text == "LINE" ||
+                name.text == "INK" || name.text == "PAPER" || name.text == "PLOT" ||
+                name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
                 name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW";
             const bool hasChannelArgument = supportsChannelSelector && match(Kind::Hash);
@@ -1898,11 +1950,13 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<runtime::MemoryService> memory,
                          std::shared_ptr<runtime::TaskControlService> taskControl,
                          runtime::TaskId taskId,
-                         std::shared_ptr<runtime::SystemControlService> systemControl)
+                         std::shared_ptr<runtime::SystemControlService> systemControl,
+                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency)
     : uiSession_(std::make_unique<detail::UISessionState>()),
       storage_(std::move(storage)), channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
+      cpuFrequency_(std::move(cpuFrequency)),
       taskControl_(std::move(taskControl)),
       systemControl_(std::move(systemControl)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)),
@@ -2012,6 +2066,11 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
     if (!channelIsOpen(channel))
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
                                     "channel is not open for this session");
+    const auto opened = channels_->listOpen(session_id_);
+    const auto endpoint = std::find_if(opened.begin(), opened.end(),
+        [&](const runtime::ChannelInfo& item) { return item.handle == channel; });
+    if (endpoint != opened.end() && endpoint->type == runtime::ChannelType::Window && graphics_)
+        graphics_->closeWindow(session_id_, channel);
     channels_->close(session_id_, channel);
     channel_bindings_.erase(channel);
     for (auto binding = channel_bindings_.begin(); binding != channel_bindings_.end();) {

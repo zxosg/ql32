@@ -415,6 +415,10 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         }
         verifyBytecode(execution_->code);
         preparingProgram = false;
+        if (execution_->code.cpuFrequencyMHz != 0 && cpuFrequency_ &&
+            !cpuFrequency_->setFrequencyMHz(execution_->code.cpuFrequencyMHz))
+            throw runtime::Error(runtime::ErrorCode::ServiceUnavailable,
+                                 "platform could not set requested CPU frequency");
         const auto status = runExecution(output, stop, instructionBudget);
         if (status == ExecutionStatus::Completed) execution_.reset();
         return status;
@@ -506,6 +510,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     auto& arrays = state.arrays;
     auto& selectStates = state.selectStates;
     auto& pc = state.pc;
+    const bool singlePrecision = code.numericPrecision == detail::NumericPrecision::Single;
+    const Instruction* activeInstruction = pc == 0 ? nullptr : &code[pc - 1];
+    auto quantizeNumeric = [&](double value, const Instruction* at = nullptr) {
+        if (!singlePrecision) return value;
+        const float rounded = static_cast<float>(value);
+        if (std::isfinite(value) && !std::isfinite(rounded)) {
+            if (at) runtimeError(*at, "single-precision numeric overflow");
+            throw runtime::Error(runtime::ErrorCode::NumericOverflow,
+                                 "single-precision numeric overflow");
+        }
+        return static_cast<double>(rounded);
+    };
     auto popEntry = [&]() -> StackEntry {
         if (stack.empty()) throw std::runtime_error("internal VM stack underflow");
         StackEntry value = std::move(stack.back());
@@ -518,8 +534,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (const auto* text = std::get_if<std::string>(&entry)) return *text;
         throw std::runtime_error("array reference used outside an array parameter");
     };
-    auto pushValue = [&](Value value) {
-        if (const auto* number = std::get_if<double>(&value)) stack.emplace_back(*number);
+    auto pushValue = [&](Value value, bool preserveInteger = false) {
+        if (const auto* number = std::get_if<double>(&value))
+            stack.emplace_back(preserveInteger ? *number :
+                               quantizeNumeric(*number, activeInstruction));
         else stack.emplace_back(std::get<std::string>(value));
     };
     auto storeInputValue = [&](const std::string& name, const std::string& text,
@@ -537,7 +555,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                  number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
                  number > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
                 runtimeError(at, "Int32 input out of range");
-            value = number;
+            value = name.empty() || name.back() != '%' ?
+                quantizeNumeric(number, &at) : number;
         }
         if (!callFrames.empty() && callFrames.back().locals.count(name))
             callFrames.back().locals[name] = std::move(value);
@@ -572,6 +591,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     };
     auto assignLoopValue = [&](const Instruction& instruction, double value) {
         if (!std::isfinite(value)) runtimeError(instruction, "numeric overflow");
+        if (instruction.name.empty() || instruction.name.back() != '%')
+            value = quantizeNumeric(value, &instruction);
         if (!instruction.name.empty() && instruction.name.back() == '%' &&
             (std::trunc(value) != value ||
              value < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
@@ -632,7 +653,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             MenuBuilder& menu = found->second;
             menu.hasResult = result->kind == ui::ResultKind::Selected;
             menu.selectedCommand = menu.hasResult ? result->commandId : 0;
-            stack.emplace_back(static_cast<double>(menu.selectedCommand));
+            pushValue(static_cast<double>(menu.selectedCommand));
         } else if (state.pendingUiKind == ui::RequestKind::Input) {
             if (result->kind != ui::ResultKind::Submitted || result->fields.empty() ||
                 !std::holds_alternative<std::string>(result->fields.front()))
@@ -651,6 +672,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (instructionBudget != 0 && instructionsExecuted >= instructionBudget)
             return ExecutionStatus::Yielded;
         const auto& instruction = code[pc++];
+        activeInstruction = &instruction;
         ++instructionsExecuted;
         switch (instruction.op) {
         case Op::Call: {
@@ -786,9 +808,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (!number) runtimeError(instruction, "numeric value required");
                     if (!std::isfinite(*number))
                         runtimeError(instruction, "argument must be finite");
-                    pushValue(instruction.name == "SIN" ? std::sin(*number) :
-                              instruction.name == "COS" ? std::cos(*number) :
-                              std::floor(*number));
+                    double result = 0;
+                    if (instruction.name == "SIN")
+                        result = singlePrecision ?
+                            static_cast<double>(std::sin(static_cast<float>(*number))) :
+                            std::sin(*number);
+                    else if (instruction.name == "COS")
+                        result = singlePrecision ?
+                            static_cast<double>(std::cos(static_cast<float>(*number))) :
+                            std::cos(*number);
+                    else
+                        result = std::floor(*number);
+                    pushValue(result);
                     break;
                 }
                 if (instruction.name == "BAND" || instruction.name == "BOR" ||
@@ -1298,22 +1329,27 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     break;
                 }
                 if (instruction.name == "INK" || instruction.name == "PAPER" ||
-                    instruction.name == "LINE" || instruction.name == "RECT" ||
+                    instruction.name == "PLOT" || instruction.name == "LINE" ||
+                    instruction.name == "RECT" ||
                     instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
                     instruction.name == "CLS" || instruction.name == "WINDOW" ||
                     instruction.name == "CLOSEWINDOW") {
                     const auto channel = selectedChannel.value_or(
                         resolveChannel(default_output_channel_));
                     bool nullSink = false;
-                    if (channel != 1 && channels_) {
+                    bool windowEndpoint = channel == 0 || channel == 1;
+                    if (channel > 1 && channels_) {
                         const auto endpoints = channels_->listOpen(session_id_);
-                        nullSink = std::any_of(endpoints.begin(), endpoints.end(),
-                            [&](const runtime::ChannelInfo& endpoint) {
-                                return endpoint.handle == channel &&
-                                       endpoint.type == runtime::ChannelType::Null;
+                        const auto endpoint = std::find_if(endpoints.begin(), endpoints.end(),
+                            [&](const runtime::ChannelInfo& candidate) {
+                                return candidate.handle == channel;
                             });
+                        if (endpoint != endpoints.end()) {
+                            windowEndpoint = endpoint->type == runtime::ChannelType::Window;
+                            nullSink = endpoint->type == runtime::ChannelType::Null;
+                        }
                     }
-                    if (channel != 1 && !nullSink)
+                    if (!windowEndpoint && !nullSink)
                         runtimeError(instruction, "selected channel is not a graphics window");
                     if (!nullSink && !graphics_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -1334,17 +1370,25 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         return graphics::Point{integerArgument(0, "pixel coordinate out of range"),
                                                integerArgument(1, "pixel coordinate out of range")};
                     };
+                    const auto fillRequested = [&](std::size_t index) {
+                        const auto fill = integerArgument(index, "fill flag must be 0 or 1");
+                        if (fill != 0 && fill != 1)
+                            runtimeError(instruction, "fill flag must be 0 or 1");
+                        return fill == 1;
+                    };
                     if (instruction.name == "CLOSEWINDOW") {
-                        graphics_->closeWindow(session_id_);
+                        graphics_->closeWindow(session_id_, channel);
                     } else if (instruction.name == "INK" || instruction.name == "PAPER") {
                         const auto color = integerArgument(0, "color index must be a nonnegative integer");
-                        const auto paletteSize = graphics_->windowInfo(session_id_).paletteSize;
+                        const auto paletteSize = graphics_->windowInfo(session_id_, channel).paletteSize;
                         if (color < 0 || static_cast<std::uint32_t>(color) >= paletteSize)
                             runtimeError(instruction, "color index exceeds the current window palette");
                         if (instruction.name == "INK")
-                            graphics_->setInk(session_id_, static_cast<graphics::ColorIndex>(color));
+                            graphics_->setInk(session_id_, channel,
+                                static_cast<graphics::ColorIndex>(color));
                         else
-                            graphics_->setPaper(session_id_, static_cast<graphics::ColorIndex>(color));
+                            graphics_->setPaper(session_id_, channel,
+                                static_cast<graphics::ColorIndex>(color));
                     } else if (instruction.name == "WINDOW") {
                         const auto x = integerArgument(0, "window position out of range");
                         const auto y = integerArgument(1, "window position out of range");
@@ -1352,34 +1396,44 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto height = integerArgument(3, "window size must be positive");
                         if (width <= 0 || height <= 0)
                             runtimeError(instruction, "window size must be positive");
-                        graphics_->setWindowBounds(session_id_,
+                        graphics_->setWindowBounds(session_id_, channel,
                             {x, y, static_cast<std::uint32_t>(width),
                              static_cast<std::uint32_t>(height)});
+                    } else if (instruction.name == "PLOT") {
+                        graphics_->pixel(session_id_, channel, pointArguments());
                     } else if (instruction.name == "LINE") {
                         const auto from = pointArguments();
                         const auto to = graphics::Point{
                             integerArgument(2, "pixel coordinate out of range"),
                             integerArgument(3, "pixel coordinate out of range")};
-                        graphics_->line(session_id_, from, to);
+                        graphics_->line(session_id_, channel, from, to);
                     } else if (instruction.name == "RECT") {
                         const auto topLeft = pointArguments();
                         const auto width = integerArgument(2, "rectangle size must be positive");
                         const auto height = integerArgument(3, "rectangle size must be positive");
                         if (width <= 0 || height <= 0)
                             runtimeError(instruction, "rectangle size must be positive");
-                        graphics_->rectangle(session_id_, topLeft, width, height);
+                        if (arguments.size() > 4 && fillRequested(4))
+                            graphics_->fillRectangle(session_id_, channel,
+                                                     topLeft, width, height);
+                        else
+                            graphics_->rectangle(session_id_, channel,
+                                                 topLeft, width, height);
                     } else if (instruction.name == "CIRCLE") {
                         const auto center = pointArguments();
                         const auto radius = integerArgument(2, "circle radius must be nonnegative");
                         if (radius < 0) runtimeError(instruction, "circle radius must be nonnegative");
-                        graphics_->circle(session_id_, center, radius);
+                        if (arguments.size() > 3 && fillRequested(3))
+                            graphics_->fillCircle(session_id_, channel, center, radius);
+                        else
+                            graphics_->circle(session_id_, channel, center, radius);
                     } else if (instruction.name == "TEXT") {
                         const auto position = pointArguments();
                         const auto* value = std::get_if<std::string>(&arguments[2]);
                         if (!value) runtimeError(instruction, "string value required");
-                        graphics_->text(session_id_, position, *value);
+                        graphics_->text(session_id_, channel, position, *value);
                     } else {
-                        graphics_->clear(session_id_);
+                        graphics_->clear(session_id_, channel);
                     }
                     }
                     break;
@@ -1407,12 +1461,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         if (!std::isfinite(*deviceNumber) ||
                             std::trunc(*deviceNumber) != *deviceNumber ||
                             *deviceNumber < static_cast<double>(runtime::ChannelDevice::File) ||
-                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Null))
+                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Window))
                             runtimeError(instruction, "invalid OPEN device kind");
                         device = static_cast<runtime::ChannelDevice>(
                             static_cast<std::uint64_t>(*deviceNumber));
-                        const std::size_t expected =
-                            device == runtime::ChannelDevice::File ? 3 : 1;
+                        const std::size_t expected = device == runtime::ChannelDevice::File ? 3 : 1;
                         if (arguments.size() != expected)
                             runtimeError(instruction, "incorrect OPEN parameter count");
                         if (device == runtime::ChannelDevice::File) {
@@ -1542,7 +1595,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         }
         case Op::ArrayGet: {
             auto [array, offset] = arrayOffset(instruction);
-            pushValue(array->values[offset]);
+            pushValue(array->values[offset],
+                      !instruction.name.empty() && instruction.name.back() == '%');
             break;
         }
         case Op::StringSlice: {
@@ -1671,7 +1725,12 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (variable == variables_.end()) runtimeError(instruction, "missing FOR variable");
             const double current = numeric(variable->second, instruction);
             const ForRange& range = state.ranges[state.item];
-            const double next = range.single ? current : current + range.step;
+            const double next = range.single ? current :
+                singlePrecision &&
+                        (instruction.name.empty() || instruction.name.back() != '%') ?
+                static_cast<double>(static_cast<float>(current) +
+                                    static_cast<float>(range.step)) :
+                current + range.step;
             if (!range.single && !std::isfinite(next))
                 runtimeError(instruction, "numeric overflow");
             if (!range.single && rangeContains(range, next)) {
@@ -1730,13 +1789,15 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (!callFrames.empty()) {
                 const auto local = callFrames.back().locals.find(instruction.name);
                 if (local != callFrames.back().locals.end()) {
-                    pushValue(local->second);
+                    pushValue(local->second,
+                              !instruction.name.empty() && instruction.name.back() == '%');
                     break;
                 }
             }
             const auto found = variables_.find(instruction.name);
             if (found != variables_.end()) {
-                pushValue(found->second);
+                pushValue(found->second,
+                          !instruction.name.empty() && instruction.name.back() == '%');
             } else if (!instruction.name.empty() && instruction.name.back() == '$') {
                 stack.emplace_back(std::string{});
             } else {
@@ -1770,7 +1831,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             break;
         }
         case Op::Negate: {
-            const double value = -numeric(pop(), instruction);
+            const double operand = numeric(pop(), instruction);
+            const double value = singlePrecision ?
+                static_cast<double>(-static_cast<float>(operand)) : -operand;
             if (!std::isfinite(value)) runtimeError(instruction, "numeric overflow");
             stack.push_back(value);
             break;
@@ -1800,12 +1863,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (instruction.op == Op::Power && a < 0 && std::trunc(b) != b)
                 runtimeError(instruction, "invalid exponent");
             double result = 0;
-            if (instruction.op == Op::Add) result = a + b;
-            else if (instruction.op == Op::Subtract) result = a - b;
-            else if (instruction.op == Op::Multiply) result = a * b;
-            else if (instruction.op == Op::Divide) result = a / b;
-            else if (instruction.op == Op::Power) result = std::pow(a, b);
-            else {
+            if (instruction.op == Op::IntegerDivide || instruction.op == Op::Modulo) {
                 if (std::trunc(a) != a || std::trunc(b) != b ||
                     a < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
                     a > static_cast<double>(std::numeric_limits<std::int32_t>::max()) ||
@@ -1828,7 +1886,20 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 } else {
                     result = static_cast<double>(remainder);
                 }
-            }
+            } else if (singlePrecision) {
+                const float lhs = static_cast<float>(a);
+                const float rhs = static_cast<float>(b);
+                if (instruction.op == Op::Add) result = static_cast<double>(lhs + rhs);
+                else if (instruction.op == Op::Subtract) result = static_cast<double>(lhs - rhs);
+                else if (instruction.op == Op::Multiply) result = static_cast<double>(lhs * rhs);
+                else if (instruction.op == Op::Divide) result = static_cast<double>(lhs / rhs);
+                else if (instruction.op == Op::Power)
+                    result = static_cast<double>(std::pow(lhs, rhs));
+            } else if (instruction.op == Op::Add) result = a + b;
+            else if (instruction.op == Op::Subtract) result = a - b;
+            else if (instruction.op == Op::Multiply) result = a * b;
+            else if (instruction.op == Op::Divide) result = a / b;
+            else if (instruction.op == Op::Power) result = std::pow(a, b);
             if (!std::isfinite(result)) runtimeError(instruction, "numeric overflow");
             stack.push_back(result);
             break;

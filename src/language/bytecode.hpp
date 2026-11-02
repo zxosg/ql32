@@ -3,6 +3,7 @@
 #include "ql32/interpreter.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <string>
@@ -12,6 +13,7 @@
 namespace ql32::detail {
 
 enum class PrintSeparator { None, Semicolon, Exclamation, Comma, Backslash };
+enum class NumericPrecision { Double, Single };
 enum class Op {
     Push, Load, Store, Add, Subtract, Multiply, Divide, IntegerDivide, Modulo,
     Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
@@ -171,7 +173,10 @@ struct Instruction {
 
 // Chunked instruction storage keeps bytecode growth from requiring one large
 // contiguous allocation on memory-constrained targets.
-using InstructionSequence = std::deque<Instruction>;
+struct InstructionSequence : std::deque<Instruction> {
+    NumericPrecision numericPrecision = NumericPrecision::Double;
+    std::uint16_t cpuFrequencyMHz = 0;
+};
 
 InstructionSequence compileSource(const std::string& source);
 std::string expandIncludes(const std::string& source, runtime::StorageService* storage);

@@ -1,7 +1,7 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-02):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` are included in the CYD firmware build; these new memory paths still need CYD hardware stress validation. Olimex ESP32-SBC-FabGL Rev B has its own profile (SD MISO GPIO 35) and has been built and flashed. Multiple workers, FIFO cancellation, heap recovery, and Mandelbrot after cancellation were verified on Olimex. Three concurrent workers plus Mandelbrot still exceed compiler memory. Full VGA, keyboard shortcuts, clock, and Wi-Fi acceptance on Olimex remain partly open.
+**Status (2026-11-02):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`; five worker launch/kill cycles ran. Their heap readings include retained task-result records and graphics-arena high-water capacity, so they do not isolate source-buffer recovery. Olimex ESP32-SBC-FabGL Rev B has its own profile (SD MISO GPIO 35) and has been built and flashed. Multiple workers, FIFO cancellation, heap recovery, and Mandelbrot after cancellation were verified on Olimex. Three concurrent workers plus Mandelbrot still exceed compiler memory. Full VGA, keyboard shortcuts, clock, and Wi-Fi acceptance on Olimex remain partly open.
 
 Supported build families are independent firmware targets:
 
@@ -9,7 +9,8 @@ Supported build families are independent firmware targets:
 | --- | --- | --- |
 | `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance on a LILYGO board pending |
 | `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2 | Built and flashed on Rev B; serial REPL, SD mount, PS/2 detection, and multi-task memory stress checked; full VGA and shortcut acceptance open |
-| `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; shared memory optimizations build, CYD stress validation pending |
+| `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; memory stress still needs isolated measurements |
+| `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Built and flashed; storage mounted, `startup.bas` loaded at boot, task launch/cancellation exercised |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
 | `linux` | Host adapter | Development and conformance host |
@@ -62,9 +63,11 @@ terminal is the line-oriented BASIC input device; BASIC `PRINT` uses a scrolling
 TFT console strip, with optional serial mirroring for diagnostics. Coordinate-
 based graphics draw independently on the same panel. The macOS PlatformIO
 build on 2026-11-01 uses 1,236,497 bytes of the 3.875 MiB app partition (30.4%)
-and 49,872 bytes static RAM; `firmware.bin` is 1,243,072 bytes. Both ESP32 profiles require 4 MiB flash, have no OTA or internal
-SPIFFS/LittleFS partition, and store BASIC files on SD. The CYD profile has a
-separate SPI bus configuration for the TFT and SD card. Hardware testing has
+and 49,872 bytes static RAM; `firmware.bin` is 1,243,072 bytes. The SD profile
+requires 4 MiB flash, has no OTA or internal SPIFFS/LittleFS partition, and
+stores BASIC files on SD. The separate `esp32_2432s028_spiffs` profile uses a
+1 MiB internal SPIFFS partition as `FFS`. The CYD SD profile has a separate SPI
+bus configuration for the TFT and SD card. Hardware testing has
 confirmed TFT output, serial input, BASIC `FOR`/`PRINT`, and an SD channel
 round-trip with successful readback and EOF detection. The board
 profile excludes touch until a specific unit's controller and calibration are
@@ -86,14 +89,31 @@ All values are free heap bytes. The 28,800-byte drop from 1-bit to 4-bit and
 38,400-byte drop from 4-bit to 8-bit match the additional storage for 76,800
 pixels. The depth was selected through the platform-neutral C++ adapter API;
 the BASIC language currently has no pixel-depth setter command. No rotation
-produced a further heap change at any tested depth. New shared memory
+produced a further heap change at any tested depth. Shared memory
 management uses the bounded compacting `WindowManager` canvas arena, ESP-IDF
 `FREE(1..2)` metrics, and graphics cleanup when a task returns to its prompt.
 The portable VM also compiles ordinary source without retaining an expanded
-copy, reducing compiler preparation peaks. Both CYD and Olimex builds include
-these paths; Olimex received the hardware stress test, while CYD currently has
-build and host-test coverage only. The
+copy, reducing compiler preparation peaks. The CYD SPIFFS firmware was flashed
+with scheduler source-buffer release and tested with five worker launch/kill
+cycles. A no-graphics worker source-buffer probe went from 225,304 free bytes,
+110,580 largest block, and 18 free blocks to 224,880, 110,580, and 22 after
+one kill. The small total-heap change includes retained task-result metadata.
+The graphics-worker run reduced total free heap from 203,556 to 163,816 during
+the five-cycle run while the largest block stayed at 110,580; the heap returned
+to 225,464 / 110,580 / 15 after reboot. That run also exercised the canvas
+arena's retained high-water capacity, so it does not isolate task source
+reclamation. The
 current CYD firmware's opened-endpoint registry was also exercised: serial text and byte output,
 null text/byte/graphics discard, type/count enumeration, and close/reopen all
 worked.
+
+The local working changes add module-level `OPTION KOptMathSingle` and
+`OPTION KOptMathDouble` (DOUBLE is the default), plus
+`OPTION KEspCpuFreq80`, `KEspCpuFreq160`, and `KEspCpuFreq240` for ESP32
+targets. The CPU request is device-wide and takes effect when a module starts;
+Linux and macOS accept but ignore it. An earlier CYD firmware run using SINGLE
+and 240 MHz animated without a reported VM error but was still slow by user
+observation. The run predates the latest upstream pull and did not measure
+frame duration or clock readback; rebuild and repeat before considering the
+current tree hardware-verified.
 

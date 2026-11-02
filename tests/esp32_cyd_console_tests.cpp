@@ -34,9 +34,10 @@ void testScrollingAndClear() {
     int regionClears = 0;
     for (const auto& call : display.calls)
         if (call.name == "fill_rect") ++regionClears;
-    require(regionClears > 1, "console did not scroll its output region");
+    require(regionClears == 1,
+            "scrolling console repainted an opaque rectangle over graphics");
     console.clear();
-    require(display.calls.back().name == "fill_rect",
+    require(display.calls.back().name == "fill_rect" && regionClears + 1 == 2,
             "clearing console did not clear its display region");
 }
 
@@ -57,11 +58,27 @@ void testReconfigureAfterRotation() {
             "console retained landscape geometry after display rotation");
 }
 
+void testConsoleBoundsCanFollowChannelWindow() {
+    Adafruit_ILI9341 display;
+    ql32::platform::esp32_cyd::TftTextConsole console(display);
+    console.setBounds({20, 100, 120, 24});
+    std::ostream output(&console);
+    output << "BOX";
+    bool usedRequestedBounds = false;
+    for (const auto& call : display.calls) {
+        if (call.name == "cursor" && call.values.size() == 2 &&
+            call.values[0] == 20 && call.values[1] == 100)
+            usedRequestedBounds = true;
+    }
+    require(usedRequestedBounds, "console text ignored the channel #0 window bounds");
+}
+
 } // namespace
 
 int main() {
     testPrintOutputAndWrapping();
     testScrollingAndClear();
     testReconfigureAfterRotation();
+    testConsoleBoundsCanFollowChannelWindow();
     return 0;
 }

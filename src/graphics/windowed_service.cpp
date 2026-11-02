@@ -51,6 +51,12 @@ Rect unite(Rect first, Rect second) {
 
 } // namespace
 
+std::size_t WindowedService::SurfaceKeyHash::operator()(const SurfaceKey& key) const noexcept {
+    const std::size_t session = std::hash<SessionId>{}(key.session);
+    const std::size_t channel = std::hash<ChannelId>{}(key.channel);
+    return session ^ (channel + 0x9e3779b9u + (session << 6) + (session >> 2));
+}
+
 WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screenHeight,
                                  std::shared_ptr<FramePresenter> presenter,
                                  std::size_t maximumWindows,
@@ -58,15 +64,18 @@ WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screen
     : manager_(screenWidth, screenHeight, maximumWindows, maximumCanvasBytes),
       presenter_(std::move(presenter)) {}
 
-WindowId WindowedService::ensureWindow(SessionId session) {
+WindowId WindowedService::ensureWindow(SessionId session, ChannelId channel) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
-    const auto found = sessionWindows_.find(session);
+    const SurfaceKey key{session, channel};
+    const auto found = sessionWindows_.find(key);
     if (found != sessionWindows_.end()) return found->second;
     discardPresentationBuffer();
-    const auto id = manager_.create(session, {0, 0, manager_.screenWidth(),
-                                              manager_.screenHeight()},
+    const auto defaultBounds = defaultWindowBounds_.find(channel);
+    const auto bounds = defaultBounds != defaultWindowBounds_.end() ? defaultBounds->second :
+        Rect{0, 0, manager_.screenWidth(), manager_.screenHeight()};
+    const auto id = manager_.create(session, bounds,
                                    PixelDepth::Four);
-    sessionWindows_.emplace(session, id);
+    sessionWindows_.emplace(key, id);
     return id;
 }
 
@@ -74,15 +83,22 @@ WindowId WindowedService::windowForSession(SessionId session) {
     return ensureWindow(session);
 }
 
-IndexedCanvas& WindowedService::canvas(SessionId session) {
-    return manager_.canvas(ensureWindow(session));
+void WindowedService::setDefaultWindowBounds(ChannelId channel, Rect bounds) {
+    if (bounds.width == 0 || bounds.height == 0)
+        throw std::invalid_argument("window size must be positive");
+    defaultWindowBounds_[channel] = bounds;
 }
 
-Rect WindowedService::screenRegion(SessionId session, std::int64_t x,
+IndexedCanvas& WindowedService::canvas(SessionId session, ChannelId channel) {
+    return manager_.canvas(ensureWindow(session, channel));
+}
+
+Rect WindowedService::screenRegion(SessionId session, ChannelId channel,
+                                   std::int64_t x,
                                    std::int64_t y, std::int64_t width,
                                    std::int64_t height) {
     if (width <= 0 || height <= 0) return {};
-    const auto id = ensureWindow(session);
+    const auto id = ensureWindow(session, channel);
     const auto& target = manager_.canvas(id);
     const auto state = manager_.windowState(id);
     const auto localLeft = std::max<std::int64_t>(0, x);
@@ -100,51 +116,121 @@ Rect WindowedService::screenRegion(SessionId session, std::int64_t x,
 }
 
 void WindowedService::setInk(SessionId session, ColorIndex color) {
-    canvas(session).setInk(color);
+    setInk(session, 1, color);
+}
+
+void WindowedService::setInk(SessionId session, ChannelId channel, ColorIndex color) {
+    auto& target = canvas(session, channel);
+    target.setInk(color);
+    if (channel == 0 && consoleColorsCallback_)
+        consoleColorsCallback_(target.ink(), target.paper());
 }
 
 void WindowedService::setPaper(SessionId session, ColorIndex color) {
-    canvas(session).setPaper(color);
+    setPaper(session, 1, color);
+}
+
+void WindowedService::setPaper(SessionId session, ChannelId channel, ColorIndex color) {
+    auto& target = canvas(session, channel);
+    target.setPaper(color);
+    if (channel == 0 && consoleColorsCallback_)
+        consoleColorsCallback_(target.ink(), target.paper());
 }
 
 void WindowedService::line(SessionId session, Point from, Point to) {
-    canvas(session).line(from, to);
+    line(session, 1, from, to);
+}
+
+void WindowedService::line(SessionId session, ChannelId channel, Point from, Point to) {
+    canvas(session, channel).line(from, to);
     const auto left = std::min<std::int64_t>(from.x, to.x);
     const auto top = std::min<std::int64_t>(from.y, to.y);
     const auto width = std::abs(static_cast<std::int64_t>(from.x) - to.x) + 1;
     const auto height = std::abs(static_cast<std::int64_t>(from.y) - to.y) + 1;
-    presentRegion(screenRegion(session, left, top, width, height));
+    presentRegion(screenRegion(session, channel, left, top, width, height));
+}
+
+void WindowedService::pixel(SessionId session, Point position) {
+    pixel(session, 1, position);
+}
+
+void WindowedService::pixel(SessionId session, ChannelId channel, Point position) {
+    auto& target = canvas(session, channel);
+    target.setPixel(position.x, position.y, target.ink());
+    presentRegion(screenRegion(session, channel, position.x, position.y, 1, 1));
 }
 
 void WindowedService::rectangle(SessionId session, Point topLeft,
                                 std::int32_t width, std::int32_t height) {
-    canvas(session).rectangle(topLeft, width, height);
-    presentRegion(screenRegion(session, topLeft.x, topLeft.y, width, height));
+    rectangle(session, 1, topLeft, width, height);
+}
+
+void WindowedService::rectangle(SessionId session, ChannelId channel, Point topLeft,
+                                std::int32_t width, std::int32_t height) {
+    canvas(session, channel).rectangle(topLeft, width, height, false);
+    presentRegion(screenRegion(session, channel, topLeft.x, topLeft.y, width, height));
+}
+
+void WindowedService::fillRectangle(SessionId session, Point topLeft,
+                                    std::int32_t width, std::int32_t height) {
+    fillRectangle(session, 1, topLeft, width, height);
+}
+
+void WindowedService::fillRectangle(SessionId session, ChannelId channel,
+                                    Point topLeft, std::int32_t width,
+                                    std::int32_t height) {
+    canvas(session, channel).rectangle(topLeft, width, height, true);
+    presentRegion(screenRegion(session, channel, topLeft.x, topLeft.y, width, height));
 }
 
 void WindowedService::circle(SessionId session, Point center, std::int32_t radius) {
-    canvas(session).circle(center, radius);
+    circle(session, 1, center, radius);
+}
+
+void WindowedService::circle(SessionId session, ChannelId channel, Point center,
+                             std::int32_t radius) {
+    canvas(session, channel).circle(center, radius, false);
     const auto extent = static_cast<std::int64_t>(radius);
-    presentRegion(screenRegion(session,
+    presentRegion(screenRegion(session, channel,
+        static_cast<std::int64_t>(center.x) - extent,
+        static_cast<std::int64_t>(center.y) - extent,
+        extent * 2 + 1, extent * 2 + 1));
+}
+
+void WindowedService::fillCircle(SessionId session, Point center, std::int32_t radius) {
+    fillCircle(session, 1, center, radius);
+}
+
+void WindowedService::fillCircle(SessionId session, ChannelId channel,
+                                 Point center, std::int32_t radius) {
+    canvas(session, channel).circle(center, radius, true);
+    const auto extent = static_cast<std::int64_t>(radius);
+    presentRegion(screenRegion(session, channel,
         static_cast<std::int64_t>(center.x) - extent,
         static_cast<std::int64_t>(center.y) - extent,
         extent * 2 + 1, extent * 2 + 1));
 }
 
 void WindowedService::text(SessionId session, Point topLeft, const std::string& value) {
-    canvas(session).text(topLeft, value);
-    presentRegion(screenRegion(session, topLeft.x, topLeft.y,
+    text(session, 1, topLeft, value);
+}
+
+void WindowedService::text(SessionId session, ChannelId channel, Point topLeft,
+                           const std::string& value) {
+    canvas(session, channel).text(topLeft, value);
+    presentRegion(screenRegion(session, channel, topLeft.x, topLeft.y,
         static_cast<std::int64_t>(value.size()) * 6, 8));
 }
 
 void WindowedService::writeText(SessionId session, const std::string& value) {
-    auto& cursor = textCursors_[session];
+    const SurfaceKey key{session, 1};
+    auto& cursor = textCursors_[key];
     const auto info = windowInfo(session);
     const auto columns = std::max<std::uint32_t>(1, info.width / 6);
     const auto rows = std::max<std::uint32_t>(1, info.height / 8);
     const auto maxX = static_cast<std::int32_t>(columns * 6);
     const auto maxY = static_cast<std::int32_t>(rows * 8);
-    const auto id = ensureWindow(session);
+    const auto id = ensureWindow(session, 1);
     const auto& bounds = manager_.windowState(id).bounds;
     auto& target = manager_.canvas(id);
     Rect dirty{};
@@ -183,29 +269,54 @@ void WindowedService::writeText(SessionId session, const std::string& value) {
 }
 
 void WindowedService::clear(SessionId session) {
-    canvas(session).clear();
-    textCursors_[session] = {};
-    const auto id = sessionWindows_.at(session);
+    clear(session, 1);
+}
+
+void WindowedService::clear(SessionId session, ChannelId channel) {
+    const SurfaceKey key{session, channel};
+    canvas(session, channel).clear();
+    textCursors_[key] = {};
+    if (channel == 0 && consoleClearCallback_) consoleClearCallback_();
+    const auto id = sessionWindows_.at(key);
     presentRegion(manager_.windowState(id).screenClip);
 }
 
 void WindowedService::closeWindow(SessionId session) {
-    const auto found = sessionWindows_.find(session);
+    closeWindow(session, 1);
+}
+
+void WindowedService::closeWindow(SessionId session, ChannelId channel) {
+    const SurfaceKey key{session, channel};
+    const auto found = sessionWindows_.find(key);
     if (found == sessionWindows_.end()) return;
     const auto oldBounds = manager_.windowState(found->second).screenClip;
     manager_.close(found->second);
     sessionWindows_.erase(found);
-    textCursors_.erase(session);
+    textCursors_.erase(key);
+    if (channel == 0 && consoleBoundsCallback_) {
+        const auto fallback = defaultWindowBounds_.find(channel);
+        if (fallback != defaultWindowBounds_.end())
+            consoleBoundsCallback_(fallback->second);
+    }
     presentRegion(oldBounds);
 }
 
 void WindowedService::closeSession(SessionId session) {
-    const auto found = sessionWindows_.find(session);
-    if (found == sessionWindows_.end()) return;
-    const auto oldBounds = manager_.windowState(found->second).screenClip;
-    manager_.close(found->second);
-    sessionWindows_.erase(found);
-    textCursors_.erase(session);
+    Rect oldBounds{};
+    bool hadWindow = false;
+    for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
+        if (found->first.session != session) {
+            ++found;
+            continue;
+        }
+        const auto clip = manager_.windowState(found->second).screenClip;
+        oldBounds = unite(oldBounds, clip);
+        hadWindow = true;
+        manager_.close(found->second);
+        textCursors_.erase(found->first);
+        found = sessionWindows_.erase(found);
+    }
+    if (!hadWindow) return;
     // Keep the last Linux frame available for inspection when the final
     // command-line session exits. Remaining sessions still trigger redraw.
     if (manager_.size() != 0) presentRegion(oldBounds);
@@ -223,7 +334,11 @@ void WindowedService::update(SessionId session) {
 }
 
 WindowInfo WindowedService::windowInfo(SessionId session) {
-    const auto id = ensureWindow(session);
+    return windowInfo(session, 1);
+}
+
+WindowInfo WindowedService::windowInfo(SessionId session, ChannelId channel) {
+    const auto id = ensureWindow(session, channel);
     const auto& window = manager_.canvas(id);
     const auto state = manager_.windowState(id);
     return {window.width(), window.height(), static_cast<std::uint8_t>(window.depth()),
@@ -239,18 +354,29 @@ RgbColor WindowedService::defaultPaletteColor(std::uint16_t index) {
 }
 
 RgbColor WindowedService::paletteColor(SessionId session, std::uint16_t index) {
-    const auto& window = canvas(session);
+    return paletteColor(session, 1, index);
+}
+
+RgbColor WindowedService::paletteColor(SessionId session, ChannelId channel,
+                                       std::uint16_t index) {
+    const auto& window = canvas(session, channel);
     if (index >= window.paletteSize()) throw std::out_of_range("palette index out of range");
     return defaultPaletteColor(index);
 }
 
 void WindowedService::setWindowBounds(SessionId session, Rect bounds) {
-    const auto found = sessionWindows_.find(session);
+    setWindowBounds(session, 1, bounds);
+}
+
+void WindowedService::setWindowBounds(SessionId session, ChannelId channel, Rect bounds) {
+    const SurfaceKey key{session, channel};
+    const auto found = sessionWindows_.find(key);
     if (found == sessionWindows_.end()) {
         if (session == 0) throw std::invalid_argument("graphics session must be valid");
         discardPresentationBuffer();
         const auto id = manager_.create(session, bounds, PixelDepth::Four);
-        sessionWindows_.emplace(session, id);
+        sessionWindows_.emplace(key, id);
+        if (channel == 0 && consoleBoundsCallback_) consoleBoundsCallback_(bounds);
         presentRegion(intersect(bounds,
             {0, 0, manager_.screenWidth(), manager_.screenHeight()}));
         return;
@@ -261,6 +387,7 @@ void WindowedService::setWindowBounds(SessionId session, Rect bounds) {
     if (bounds.width != current.width || bounds.height != current.height)
         discardPresentationBuffer();
     manager_.setBounds(id, bounds);
+    if (channel == 0 && consoleBoundsCallback_) consoleBoundsCallback_(bounds);
     const auto newBounds = intersect(bounds,
         {0, 0, manager_.screenWidth(), manager_.screenHeight()});
     presentRegion(unite(oldBounds, newBounds));
@@ -269,7 +396,7 @@ void WindowedService::setWindowBounds(SessionId session, Rect bounds) {
 void WindowedService::setRotation(SessionId session, std::uint16_t degrees) {
     if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270)
         throw std::invalid_argument("rotation must be 0, 90, 180, or 270 degrees");
-    const auto firstWindow = ensureWindow(session);
+    (void)ensureWindow(session, 1);
     const auto oldWidth = manager_.screenWidth();
     const auto oldHeight = manager_.screenHeight();
     if (!presenter_)
@@ -278,35 +405,34 @@ void WindowedService::setRotation(SessionId session, std::uint16_t degrees) {
     if (display.width == 0 || display.height == 0)
         throw std::runtime_error("display presenter returned invalid dimensions");
     manager_.setScreenSize(display.width, display.height);
-    for (const auto& [owner, id] : sessionWindows_) {
-        (void)owner;
+    for (const auto& [key, id] : sessionWindows_) {
+        (void)key;
         const auto state = manager_.windowState(id);
         if (state.bounds.x == 0 && state.bounds.y == 0 &&
             state.bounds.width == oldWidth && state.bounds.height == oldHeight)
             manager_.setBounds(id, {0, 0, display.width, display.height});
     }
     rotationDegrees_ = degrees;
-    (void)firstWindow;
     presentIfConfigured();
 }
 
 void WindowedService::setWindowPixelDepth(SessionId session, PixelDepth depth) {
     discardPresentationBuffer();
-    const auto id = ensureWindow(session);
+    const auto id = ensureWindow(session, 1);
     const auto dirty = manager_.windowState(id).screenClip;
     manager_.setPixelDepth(id, depth);
     presentRegion(dirty);
 }
 
 void WindowedService::setWindowVisible(SessionId session, bool visible) {
-    const auto id = ensureWindow(session);
+    const auto id = ensureWindow(session, 1);
     const auto dirty = manager_.windowState(id).screenClip;
     manager_.setVisible(id, visible);
     presentRegion(dirty);
 }
 
 void WindowedService::raiseWindow(SessionId session) {
-    manager_.raise(ensureWindow(session));
+    manager_.raise(ensureWindow(session, 1));
     presentIfConfigured();
 }
 

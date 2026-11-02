@@ -33,6 +33,16 @@ public:
                        std::int16_t width, std::int16_t height) {
         calls.push_back({"rgb_bitmap", {x, y, width, height}, {}});
     }
+    void startWrite() { calls.push_back({"start_write", {}, {}}); }
+    void setAddrWindow(std::uint16_t x, std::uint16_t y, std::uint16_t width,
+                       std::uint16_t height) {
+        calls.push_back({"addr_window", {x, y, width, height}, {}});
+    }
+    void writePixels(std::uint16_t*, std::uint32_t count, bool = true,
+                     bool = false) {
+        calls.push_back({"write_pixels", {static_cast<std::int32_t>(count)}, {}});
+    }
+    void endWrite() { calls.push_back({"end_write", {}, {}}); }
     void drawLine(std::int16_t x0, std::int16_t y0, std::int16_t x1,
                   std::int16_t y1, std::uint16_t color) {
         calls.push_back({"line", {x0, y0, x1, y1, color}, {}});
@@ -50,6 +60,9 @@ public:
     }
     void setTextColor(std::uint16_t foreground, std::uint16_t background) {
         calls.push_back({"text_color", {foreground, background}, {}});
+    }
+    void setTextColor(std::uint16_t foreground) {
+        calls.push_back({"text_color_transparent", {foreground}, {}});
     }
     void setTextSize(std::uint8_t size) {
         calls.push_back({"text_size", {size}, {}});
