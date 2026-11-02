@@ -5,10 +5,13 @@
 #include <fabgl.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <deque>
 #include <memory>
 #include <ostream>
 #include <optional>
 #include <streambuf>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -40,17 +43,91 @@ constexpr char kBoardName[] = "LILYGO VGA32 V1.4";
 
 namespace {
 
+constexpr std::uint32_t consoleRows = 2;
+constexpr std::uint32_t consoleCharacterHeight = 8;
+constexpr std::uint32_t consoleHeight = consoleRows * consoleCharacterHeight;
+
+class VgaConsole {
+public:
+    explicit VgaConsole(fabgl::Canvas& canvas) : canvas_(canvas) {
+        lines_.emplace_back();
+    }
+
+    void begin() {
+        columns_ = static_cast<std::size_t>(std::max(1, canvas_.getWidth() / 8));
+        firstRowY_ = canvas_.getHeight() - static_cast<int>(consoleHeight);
+        canvas_.selectFont(&fabgl::FONT_8x8);
+        redraw();
+    }
+
+    void write(const char* data, std::size_t size) {
+        bool changed = false;
+        for (std::size_t index = 0; index < size; ++index) {
+            const unsigned char character = static_cast<unsigned char>(data[index]);
+            if (character == '\r') continue;
+            if (character == '\n') {
+                lines_.emplace_back();
+                if (lines_.size() > consoleRows) lines_.pop_front();
+                changed = true;
+                continue;
+            }
+            if (character == '\b' || character == 127) {
+                if (!lines_.back().empty()) {
+                    lines_.back().pop_back();
+                    changed = true;
+                }
+                continue;
+            }
+            if (character < 32 || character >= 127) continue;
+            if (lines_.back().size() >= columns_) {
+                lines_.emplace_back();
+                if (lines_.size() > consoleRows) lines_.pop_front();
+                changed = true;
+            }
+            lines_.back().push_back(static_cast<char>(character));
+            changed = true;
+        }
+        if (changed) redraw();
+    }
+
+private:
+    void redraw() {
+        canvas_.beginUpdate();
+        canvas_.setBrushColor(0, 0, 0);
+        canvas_.fillRectangle(0, firstRowY_, canvas_.getWidth() - 1,
+                              canvas_.getHeight() - 1);
+        canvas_.selectFont(&fabgl::FONT_8x8);
+        canvas_.setPenColor(255, 255, 255);
+        canvas_.setBrushColor(0, 0, 0);
+        for (std::size_t row = 0; row < lines_.size(); ++row)
+            canvas_.drawText(0, firstRowY_ + static_cast<int>(row * consoleCharacterHeight),
+                             lines_[row].c_str());
+        canvas_.endUpdate();
+        canvas_.waitCompletion(true);
+    }
+
+    fabgl::Canvas& canvas_;
+    std::deque<std::string> lines_;
+    std::size_t columns_ = 1;
+    int firstRowY_ = 0;
+};
+
+extern VgaConsole screenConsole;
+
 class SerialOutputBuffer final : public std::streambuf {
 protected:
     int_type overflow(int_type character) override {
         if (traits_type::eq_int_type(character, traits_type::eof()))
             return traits_type::not_eof(character);
+        const char value = traits_type::to_char_type(character);
+        screenConsole.write(&value, 1);
         return Serial.write(static_cast<std::uint8_t>(character)) == 1
             ? character : traits_type::eof();
     }
 
     std::streamsize xsputn(const char* data, std::streamsize size) override {
         if (size <= 0) return 0;
+        screenConsole.write(data, static_cast<std::size_t>(size));
         return static_cast<std::streamsize>(Serial.write(
             reinterpret_cast<const std::uint8_t*>(data), static_cast<std::size_t>(size)));
     }
@@ -58,6 +135,7 @@ protected:
 
 fabgl::VGAController display;
 fabgl::Canvas canvas(&display);
+VgaConsole screenConsole(canvas);
 fabgl::PS2Controller ps2;
 std::shared_ptr<ql32::graphics::WindowedService> graphics;
 std::optional<ql32::platform::fabgl_vga::FabglKeyboard> keyboardInput;
@@ -89,16 +167,19 @@ void appendInputCharacter(char character) {
     if (inputLine.size() >= 256) return;
     inputLine.push_back(character);
     Serial.write(static_cast<std::uint8_t>(character));
+    screenConsole.write(&character, 1);
 }
 
 void eraseInputCharacter() {
     if (inputLine.empty()) return;
     inputLine.pop_back();
     Serial.print("\b \b");
+    screenConsole.write("\b", 1);
 }
 
 void submitInputLine() {
     Serial.println();
+    screenConsole.write("\n", 1);
     if (uiPresenter && uiPresenter->active()) {
         (void)uiPresenter->consumeLine(inputLine);
     } else if (scheduler && !inputLine.empty() &&
@@ -141,9 +222,18 @@ void advanceScheduler() {
     const auto tasks = scheduler->tasks();
     for (const auto& task : tasks) {
         const std::string error = scheduler->takeError(task.id);
-        if (!error.empty())
+        if (!error.empty()) {
             Serial.printf("BASIC session %llu VM error: %s\n",
                           static_cast<unsigned long long>(task.id), error.c_str());
+            char consoleError[256];
+            const int length = std::snprintf(consoleError, sizeof(consoleError),
+                "BASIC session %llu VM error: %s\n",
+                static_cast<unsigned long long>(task.id), error.c_str());
+            if (length > 0)
+                screenConsole.write(consoleError,
+                    std::min<std::size_t>(static_cast<std::size_t>(length),
+                                          sizeof(consoleError) - 1));
+        }
     }
 
     const bool sessionWaitingForUi = std::any_of(tasks.begin(), tasks.end(),
@@ -161,11 +251,23 @@ void advanceScheduler() {
         (!uiPresenter || !uiPresenter->active())) {
         if (!replReadyMessageShown) {
             Serial.println("BASIC REPL ready (USB serial and PS/2 keyboard)");
+            screenConsole.write("BASIC REPL ready\n", 17);
             replReadyMessageShown = true;
         }
         if (!replPromptShown) {
-            if (focused == replTask) Serial.print("> ");
-            else Serial.printf("task %llu> ", static_cast<unsigned long long>(focused));
+            if (focused == replTask) {
+                Serial.print("> ");
+                screenConsole.write("> ", 2);
+            } else {
+                char prompt[32];
+                const int length = std::snprintf(prompt, sizeof(prompt), "task %llu> ",
+                    static_cast<unsigned long long>(focused));
+                if (length > 0) {
+                    Serial.write(reinterpret_cast<const std::uint8_t*>(prompt),
+                                 static_cast<std::size_t>(length));
+                    screenConsole.write(prompt, static_cast<std::size_t>(length));
+                }
+            }
             replPromptShown = true;
         }
     } else {
@@ -224,13 +326,15 @@ void setup() {
         static_cast<gpio_num_t>(ql32_board::vgaVSync));
     display.setResolution(VGA_320x200_70Hz);
 
+    screenConsole.begin();
     auto framePresenter = std::make_shared<ql32::platform::fabgl_vga::FabglFramePresenter>(canvas);
     const auto screenWidth = static_cast<std::uint32_t>(canvas.getWidth());
     const auto screenHeight = static_cast<std::uint32_t>(canvas.getHeight());
     const std::size_t fullScreen4BitBytes =
         (static_cast<std::size_t>(screenWidth) * screenHeight + 1) / 2;
     graphics = std::make_shared<ql32::graphics::WindowedService>(
-        screenWidth, screenHeight, framePresenter, 4, fullScreen4BitBytes * 2);
+        screenWidth, screenHeight - consoleHeight, framePresenter, 4,
+        fullScreen4BitBytes * 2);
 
     ps2.begin(fabgl::PS2Preset::KeyboardPort0);
     if (auto* keyboard = fabgl::PS2Controller::keyboard()) {

@@ -6,7 +6,8 @@ namespace ql32::platform::fabgl_vga {
 
 void FabglFramePresenter::present(const graphics::Frame& frame) {
     if (frame.width != static_cast<std::uint32_t>(canvas_.getWidth()) ||
-        frame.height != static_cast<std::uint32_t>(canvas_.getHeight()) ||
+        frame.height == 0 ||
+        frame.height > static_cast<std::uint32_t>(canvas_.getHeight()) ||
         frame.pixels.size() != static_cast<std::size_t>(frame.width) * frame.height)
         throw std::invalid_argument("composed frame does not match VGA canvas geometry");
 
@@ -35,8 +36,8 @@ bool FabglFramePresenter::presentRowsRegion(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette, graphics::Rect region,
     const RowProvider& rowProvider) {
-    if (width != static_cast<std::uint32_t>(canvas_.getWidth()) ||
-        height != static_cast<std::uint32_t>(canvas_.getHeight()))
+    if (width != static_cast<std::uint32_t>(canvas_.getWidth()) || height == 0 ||
+        height > static_cast<std::uint32_t>(canvas_.getHeight()))
         throw std::invalid_argument("composed rows do not match VGA canvas geometry");
     if (region.x < 0 || region.y < 0 ||
         static_cast<std::uint64_t>(region.x) + region.width > width ||

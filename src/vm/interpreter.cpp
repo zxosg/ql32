@@ -1943,9 +1943,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 static_cast<std::size_t>(count)));
             if (instruction.targetVariable.empty() || instruction.targetVariable.back() != '$')
                 runtimeError(instruction, "binary IN target must be a string variable");
-            if (!callFrames.empty() && callFrames.back().locals.count(instruction.targetVariable))
-                callFrames.back().locals[instruction.targetVariable] = std::move(value);
-            else variables_[instruction.targetVariable] = std::move(value);
+            if (!callFrames.empty() && callFrames.back().locals.count(instruction.targetVariable.get()))
+                callFrames.back().locals[instruction.targetVariable.get()] = std::move(value);
+            else variables_[instruction.targetVariable.get()] = std::move(value);
             break;
         }
         case Op::ChannelWrite: {

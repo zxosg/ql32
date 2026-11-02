@@ -523,7 +523,7 @@ private:
                     if (found != lineTargets_.end()) target = &found->second;
                 }
             } else {
-                const auto found = labels_.find(instruction.ownerDefinition + "\x1f" + instruction.name);
+                const auto found = labels_.find(instruction.ownerDefinition.get() + "\x1f" + instruction.name);
                 if (found != labels_.end()) target = &found->second;
             }
             if (!target) {
@@ -531,9 +531,11 @@ private:
                 error(instruction, instruction.targetIsLineNumber ?
                       "GOTO line number does not exist" : "GOTO label does not exist");
             }
-            if (target->ownerDefinition != instruction.ownerDefinition)
+            if (target->ownerDefinition != instruction.ownerDefinition.get())
                 error(instruction, "GOTO cannot cross a procedure or function boundary");
-            if (target->scopes != instruction.jumpScopes)
+            if (target->scopes.size() != instruction.jumpScopes.size() ||
+                !std::equal(target->scopes.begin(), target->scopes.end(),
+                            instruction.jumpScopes.begin()))
                 error(instruction, "GOTO cannot enter or leave a structured loop or SELECT block");
             instruction.target = target->address;
         }
@@ -642,7 +644,7 @@ private:
                 }
                 if (tolerateUnresolvedCalls) continue;
                 if (!instruction.ownerDefinition.empty()) {
-                    const auto owner = definitions_.find(instruction.ownerDefinition);
+                    const auto owner = definitions_.find(instruction.ownerDefinition.get());
                     if (owner != definitions_.end() &&
                         std::find(owner->second.parameters.begin(), owner->second.parameters.end(),
                                   instruction.name) != owner->second.parameters.end())
@@ -674,7 +676,7 @@ private:
             propagated = false;
             for (Instruction& instruction : code_) {
                 if (instruction.op != Op::Call || instruction.ownerDefinition.empty()) continue;
-                const auto caller = definitions_.find(instruction.ownerDefinition);
+                const auto caller = definitions_.find(instruction.ownerDefinition.get());
                 const auto callee = definitions_.find(instruction.name);
                 if (caller == definitions_.end() || callee == definitions_.end()) continue;
                 for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
@@ -715,7 +717,7 @@ private:
         }
         for (Instruction& instruction : code_) {
             if (instruction.op == Op::Call && !instruction.ownerDefinition.empty()) {
-                const auto owner = definitions_.find(instruction.ownerDefinition);
+                const auto owner = definitions_.find(instruction.ownerDefinition.get());
                 if (owner != definitions_.end()) {
                     const auto parameter = std::find(owner->second.parameters.begin(),
                                                      owner->second.parameters.end(), instruction.name);
@@ -737,7 +739,7 @@ private:
                 }
             }
             if (instruction.op == Op::ArraySet && !instruction.ownerDefinition.empty()) {
-                const auto owner = definitions_.find(instruction.ownerDefinition);
+                const auto owner = definitions_.find(instruction.ownerDefinition.get());
                 if (owner != definitions_.end()) {
                     const auto parameter = std::find(owner->second.parameters.begin(),
                                                      owner->second.parameters.end(), instruction.name);
@@ -1424,18 +1426,16 @@ private:
                 if (!match(Kind::Comma))
                     error(peek(), "expected ',' after graphics channel selector");
             }
-            std::vector<ArrayArgumentCandidate> arrayCandidates;
-            const std::size_t arguments = commandArguments(&arrayCandidates);
-            emitCall(name, arguments, false, std::move(arrayCandidates), hasChannelArgument);
+            const std::size_t arguments = commandArguments();
+            emitCall(name, arguments, false, {}, hasChannelArgument);
             return;
         }
         if (check(Kind::BuiltinFunction) && peek().text == "TASK" &&
             current_ + 1 < tokens_.size() &&
             tokens_[current_ + 1].kind != Kind::LeftParen) {
             const Token name = advance();
-            std::vector<ArrayArgumentCandidate> arrayCandidates;
-            const std::size_t arguments = commandArguments(&arrayCandidates);
-            emitCall(name, arguments, false, std::move(arrayCandidates));
+            const std::size_t arguments = commandArguments();
+            emitCall(name, arguments, false);
             return;
         }
         if (check(Kind::BuiltinFunction))
@@ -1650,9 +1650,8 @@ private:
                 }
                 error(t, "built-in function requires parentheses");
             }
-            std::vector<ArrayArgumentCandidate> arrayCandidates;
-            const std::size_t arguments = callArguments(&arrayCandidates);
-            emitCall(t, arguments, true, std::move(arrayCandidates));
+            const std::size_t arguments = callArguments();
+            emitCall(t, arguments, true);
             return;
         }
         if (match(Kind::Identifier)) {
@@ -1675,9 +1674,14 @@ private:
                  startsStringSlice())) {
                 stringSlice(t);
             } else if (check(Kind::LeftParen)) {
-                std::vector<ArrayArgumentCandidate> arrayCandidates;
-                const std::size_t arguments = callArguments(&arrayCandidates);
-                emitCall(t, arguments, true, std::move(arrayCandidates));
+                if (declaredFunctions_.find(t.text) != declaredFunctions_.end()) {
+                    std::vector<ArrayArgumentCandidate> arrayCandidates;
+                    const std::size_t arguments = callArguments(&arrayCandidates);
+                    emitCall(t, arguments, true, std::move(arrayCandidates));
+                } else {
+                    const std::size_t arguments = callArguments();
+                    emitCall(t, arguments, true);
+                }
             } else {
                 emit(Op::Load, t, 0.0, t.text);
             }
@@ -2272,6 +2276,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             std::string listing = "SLICE " +
                 std::to_string(taskControl_->instructionBudget()) + " instructions\n";
             for (const auto& task : tasks) {
+                if (task.state == runtime::TaskState::Cancelled) continue;
                 listing += std::to_string(task.id) + " ";
                 if (task.supervisor) listing += "SUPERVISOR ";
                 else listing += "WORKER ";

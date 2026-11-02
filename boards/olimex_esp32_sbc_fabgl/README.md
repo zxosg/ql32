@@ -31,3 +31,7 @@ focused task, `Shift+Pause` pauses/resumes the BASIC VM, `Ctrl+Pause` (also
 `Ctrl+Space`) breaks the current program, and `Ctrl+Shift+Pause` stops workers
 and returns to the supervisor. `Ctrl+Alt+Delete` restarts the board. At the
 prompt, `REBOOT` performs the same software restart.
+
+The VGA screen reserves its bottom two 8-pixel text rows for console channel
+`#0`, including echoed interactive input. The default `#1` graphics window
+occupies the area above those rows; output continues to mirror to USB serial.
