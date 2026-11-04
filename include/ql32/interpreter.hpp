@@ -78,7 +78,9 @@ public:
     bool debugResume(runtime::DebugResumeMode mode);
     bool debugPause() noexcept;
     void debugSetDiagnostics(bool enabled, bool trace = false) noexcept;
+    void debugResetDiagnostics() noexcept;
     std::optional<runtime::DebugSnapshot> debugInspect() const;
+    std::vector<runtime::DebugBreakpointInfo> debugBreakpoints() const;
     std::optional<runtime::DebugValue> debugEvaluate(const std::string& expression) const;
     bool debugAddWatch(std::string expression);
     bool debugRemoveWatch(const std::string& expression);
@@ -97,6 +99,7 @@ private:
     std::unordered_map<std::string, Value> variables_;
     std::size_t output_column_ = 0;
     runtime::ChannelId default_output_channel_ = 1;
+    std::string current_directory_;
     // Logical channels point directly at the endpoint handle they currently
     // represent. No channel-to-channel route chains are retained.
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;

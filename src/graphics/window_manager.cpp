@@ -144,6 +144,10 @@ std::array<std::uint8_t, 5> glyph(char character) {
 
 } // namespace
 
+std::array<std::uint8_t, 5> classicGlyphColumns(char character) {
+    return glyph(character);
+}
+
 CanvasArena::Block& CanvasArena::find(std::uint64_t handle) {
     const auto found = std::find_if(blocks_.begin(), blocks_.end(),
         [handle](const Block& block) { return block.handle == handle; });

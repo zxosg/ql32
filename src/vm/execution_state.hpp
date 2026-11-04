@@ -18,6 +18,10 @@ struct ForRange { double start = 0; double end = 0; double step = 1; bool single
 struct ForState { std::vector<ForRange> ranges; std::size_t item = 0; };
 struct RuntimeFrame {
     std::size_t returnAddress = 0;
+    std::size_t callInstruction = 0;
+    int callSourceLine = 0;
+    int callSourceColumn = 0;
+    int callBasicLine = 0;
     bool function = false;
     std::string name;
     bool dynamicEvaluation = false;

@@ -10,14 +10,18 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <ostream>
 #include <optional>
+#include <stdexcept>
 #include <streambuf>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "capabilities.hpp"
 #include "pins.hpp"
@@ -27,12 +31,13 @@
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
 #include "ql32/platform/esp32/cpu_frequency.hpp"
-#include "ql32/platform/esp32/line_ui_presenter.hpp"
+#include "ql32/ui/graphic_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
 #include "ql32/platform/esp32/system_control.hpp"
 #include "ql32/platform/esp32/monitor_transfer.hpp"
+#include "ql32/platform/esp32/remote_debug_protocol.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/platform/fabgl_vga/graphics.hpp"
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
@@ -103,7 +108,36 @@ public:
     }
 
     void restoreOverlay(ql32::graphics::Rect region) {
+        if (invalidate_) return;
         redraw(false, region);
+    }
+
+    void setInvalidateCallback(std::function<void(ql32::graphics::Rect)> callback) {
+        invalidate_ = std::move(callback);
+    }
+
+    void composePaletteRegionRow(std::uint32_t y, std::uint32_t xOrigin,
+                                 std::vector<ql32::graphics::ColorIndex>& pixels) const {
+        if (y < static_cast<std::uint32_t>(bounds_.y) ||
+            y >= static_cast<std::uint32_t>(bounds_.y) + bounds_.height) return;
+        const auto localY = y - static_cast<std::uint32_t>(bounds_.y);
+        const auto textRow = localY / consoleCharacterHeight;
+        const auto glyphRow = localY % consoleCharacterHeight;
+        const std::string* line = textRow < lines_.size() ? &lines_[textRow] : nullptr;
+        for (std::uint32_t i = 0; i < pixels.size(); ++i) {
+            const auto x = xOrigin + i;
+            if (x < static_cast<std::uint32_t>(bounds_.x) ||
+                x >= static_cast<std::uint32_t>(bounds_.x) + bounds_.width) continue;
+            bool foreground = false;
+            const auto localX = x - static_cast<std::uint32_t>(bounds_.x);
+            const auto column = localX / consoleCharacterWidth;
+            const auto glyphColumn = localX % consoleCharacterWidth;
+            if (line && glyphRow < 7 && column < line->size() && glyphColumn < 5) {
+                const auto glyph = ql32::graphics::classicGlyphColumns((*line)[column]);
+                foreground = (glyph[glyphColumn] & (1u << glyphRow)) != 0;
+            }
+            pixels[i] = foreground ? ink_ : paper_;
+        }
     }
 
     void write(const char* data, std::size_t size) {
@@ -147,6 +181,10 @@ private:
     }
 
     void redraw(bool clearBackground, ql32::graphics::Rect region = {}) {
+        if (invalidate_) {
+            invalidate_(region.width ? region : bounds_);
+            return;
+        }
         if (bounds_.width == 0 || bounds_.height == 0) return;
         const auto left = std::max<std::int32_t>(bounds_.x, region.width ? region.x : bounds_.x);
         const auto top = std::max<std::int32_t>(bounds_.y, region.height ? region.y : bounds_.y);
@@ -186,6 +224,7 @@ private:
     ql32::graphics::Rect bounds_{};
     std::uint8_t ink_ = consoleInk;
     std::uint8_t paper_ = 0;
+    std::function<void(ql32::graphics::Rect)> invalidate_;
 };
 
 extern VgaConsole screenConsole;
@@ -253,36 +292,119 @@ std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
 ql32::vm::TaskId replTask = 0;
 std::shared_ptr<ql32::ui::QueuedService> uiService =
     std::make_shared<ql32::ui::QueuedService>();
-std::unique_ptr<ql32::platform::esp32::LineUiPresenter> uiPresenter;
+std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
+std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
 std::string inputLine;
+bool protocolInputLine = false;
 bool serialSawCarriageReturn = false;
 bool replReadyMessageShown = false;
 bool replPromptShown = false;
 
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+ql32::runtime::YModemSource screenCaptureSource() {
+    const auto width = static_cast<std::uint32_t>(canvas.getWidth());
+    const auto height = static_cast<std::uint32_t>(canvas.getHeight());
+    constexpr std::uint32_t headerSize = 54;
+    const std::uint32_t rowBytes = (width * 3 + 3) & ~3u;
+    const std::uint32_t imageSize = rowBytes * height;
+    std::array<std::uint8_t, headerSize> header{};
+    const auto put16 = [&header](std::size_t at, std::uint16_t value) {
+        header[at] = static_cast<std::uint8_t>(value);
+        header[at + 1] = static_cast<std::uint8_t>(value >> 8);
+    };
+    const auto put32 = [&header](std::size_t at, std::uint32_t value) {
+        for (unsigned byte = 0; byte < 4; ++byte)
+            header[at + byte] = static_cast<std::uint8_t>(value >> (byte * 8));
+    };
+    header[0] = 'B'; header[1] = 'M';
+    put32(2, headerSize + imageSize); put32(10, headerSize); put32(14, 40);
+    put32(18, width); put32(22, height); put16(26, 1); put16(28, 24);
+    put32(34, imageSize); put32(38, 2835); put32(42, 2835);
+    canvas.waitCompletion(true);
+    const std::string fileHeader(reinterpret_cast<const char*>(header.data()), header.size());
+    ql32::runtime::YModemSource source;
+    source.filename = "ql32-screen.bmp";
+    source.size = headerSize + imageSize;
+    source.read = [fileHeader, width, height, rowBytes, imageSize,
+                   row = std::vector<std::uint8_t>(rowBytes)](
+        std::uint64_t offset, std::uint8_t* destination, std::size_t count) mutable {
+        std::size_t written = 0;
+        while (written < count) {
+            if (offset < fileHeader.size()) {
+                const auto start = static_cast<std::size_t>(offset);
+                const auto part = std::min(count - written, fileHeader.size() - start);
+                std::memcpy(destination + written, fileHeader.data() + start, part);
+                offset += part; written += part; continue;
+            }
+            const auto bodyOffset = offset - fileHeader.size();
+            if (bodyOffset >= imageSize)
+                throw std::out_of_range("screen capture read exceeds BMP image size");
+            const auto bitmapRow = static_cast<std::uint32_t>(bodyOffset / rowBytes);
+            const auto y = static_cast<int>(height - 1 - bitmapRow);
+            const auto firstByte = static_cast<std::size_t>(bodyOffset % rowBytes);
+            std::fill(row.begin(), row.end(), 0);
+            for (std::uint32_t x = 0; x < width; ++x) {
+                const auto color = canvas.getPixel(static_cast<int>(x), y);
+                row[x * 3] = color.B;
+                row[x * 3 + 1] = color.G;
+                row[x * 3 + 2] = color.R;
+            }
+            const auto part = std::min(count - written, row.size() - firstByte);
+            std::memcpy(destination + written, row.data() + firstByte, part);
+            offset += part; written += part;
+        }
+    };
+    return source;
+}
+#endif
+
 void appendInputCharacter(char character) {
-    if (inputLine.size() >= 256) return;
+    if (inputLine.size() >= 1024) return;
+    if (inputLine.empty() && character == '@') protocolInputLine = true;
     inputLine.push_back(character);
-    Serial.write(static_cast<std::uint8_t>(character));
-    screenConsole.write(&character, 1);
+    if (!protocolInputLine) {
+        Serial.write(static_cast<std::uint8_t>(character));
+        screenConsole.write(&character, 1);
+    }
 }
 
 void eraseInputCharacter() {
     if (inputLine.empty()) return;
     inputLine.pop_back();
-    Serial.print("\b \b");
-    screenConsole.write("\b", 1);
+    if (!protocolInputLine) {
+        Serial.print("\b \b");
+        screenConsole.write("\b", 1);
+    }
 }
 
 void submitInputLine() {
     Serial.println();
-    screenConsole.write("\n", 1);
-    if (uiPresenter && uiPresenter->active()) {
+    if (!protocolInputLine) screenConsole.write("\n", 1);
+    if (remoteDebugger && remoteDebugger->handles(inputLine)) {
+#if defined(QL32_OLIMEX_USE_SPIFFS)
+        auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(flashStorage);
+#elif defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+        auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(idfSdStorage);
+#else
+        auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(sdStorage);
+#endif
+        remoteDebugger->handle(inputLine, *scheduler, protocolStorage, serialOutput,
+            [](std::string_view bytes) {
+                Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+                Serial.flush();
+            });
+    } else if (uiPresenter && uiPresenter->active()) {
         (void)uiPresenter->consumeLine(inputLine);
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
 #if defined(QL32_OLIMEX_USE_SPIFFS)
-                   inputLine, flashStorage, flashChannels, Serial)) {
+                   inputLine, flashStorage, flashChannels, Serial
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+                   , [] { return screenCaptureSource(); }
+#endif
+                   )) {
 #elif defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
-                   inputLine, idfSdStorage, idfSdChannels, Serial)) {
+                   inputLine, idfSdStorage, idfSdChannels, Serial,
+                   [] { return screenCaptureSource(); })) {
 #else
                    inputLine, sdStorage, sdChannels, Serial)) {
 #endif
@@ -291,12 +413,23 @@ void submitInputLine() {
         Serial.println("BASIC session is busy");
     }
     inputLine.clear();
+    protocolInputLine = false;
     replPromptShown = false;
 }
 
 void receiveSerialCharacter(char character) {
     if (character == '\n' && serialSawCarriageReturn) {
         serialSawCarriageReturn = false;
+        return;
+    }
+    if (uiPresenter && uiPresenter->graphicActive() && !protocolInputLine) {
+        if (character == '@' && inputLine.empty()) {
+            protocolInputLine = true;
+            appendInputCharacter(character);
+            return;
+        }
+        serialSawCarriageReturn = character == '\r';
+        uiPresenter->handleSerialByte(character, millis());
         return;
     }
     if (character == '\r' || character == '\n') {
@@ -307,7 +440,8 @@ void receiveSerialCharacter(char character) {
     serialSawCarriageReturn = false;
     if (character == '\b' || character == 127) {
         eraseInputCharacter();
-    } else if (character >= 32 && character <= 126) {
+    } else if ((character >= 32 && character <= 126) ||
+               (protocolInputLine && character == '\t')) {
         appendInputCharacter(character);
     }
 }
@@ -322,6 +456,7 @@ bool acceptsInput() {
 void advanceScheduler() {
     if (!scheduler) return;
     if (!scheduler->executionPaused()) (void)scheduler->tick();
+    if (uiPresenter) uiPresenter->refresh();
 
     const auto tasks = scheduler->tasks();
     for (const auto& task : tasks) {
@@ -581,20 +716,46 @@ void setup() {
         &boardMemory, [](ql32::runtime::MemoryService*) {});
     services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
         &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
-    uiPresenter = std::make_unique<ql32::platform::esp32::LineUiPresenter>(
-        uiService, serialOutput);
+    graphics->setConsoleLayer([](std::uint32_t y, std::uint32_t x,
+                                 std::vector<ql32::graphics::ColorIndex>& row) {
+        screenConsole.composePaletteRegionRow(y, x, row);
+    });
+    screenConsole.setInvalidateCallback([](ql32::graphics::Rect region) {
+        graphics->invalidateSystemRegion(region);
+    });
+    uiPresenter = std::make_unique<ql32::ui::GraphicPresenter>(uiService, graphics);
     scheduler = std::make_unique<ql32::vm::SessionScheduler>(std::move(services), 128);
+    ql32::platform::esp32::RemoteDebugCapabilities remoteCapabilities;
+    remoteCapabilities.board = kBoardName;
+#if defined(QL32_OLIMEX_USE_SPIFFS)
+    remoteCapabilities.storageRoots = {"FFS:/"};
+#elif defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    remoteCapabilities.storageRoots = {"SDC:/"};
+#else
+    remoteCapabilities.storageRoots = {"SDC:/"};
+#endif
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    remoteCapabilities.screenCapture = true;
+#endif
+    remoteDebugger = std::make_unique<ql32::platform::esp32::RemoteDebugProtocol>(
+        std::move(remoteCapabilities));
     replTask = scheduler->launchInteractive(serialOutput, std::move(startupProgram));
 }
 
 void loop() {
-    while (acceptsInput() && Serial.available() > 0) {
+    while (Serial.available() > 0) {
+        if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
         receiveSerialCharacter(static_cast<char>(Serial.read()));
     }
+    if (uiPresenter) uiPresenter->flushSerialEscape(millis());
 
     if (keyboardInput) {
         const auto event = keyboardInput->poll();
-        if (event && !handleKeyboardShortcut(*event) && event->pressed && scheduler &&
+        const bool shortcut = event && handleKeyboardShortcut(*event);
+        if (event && !shortcut && uiPresenter &&
+            uiPresenter->graphicActive()) {
+            (void)uiPresenter->handleKey(*event);
+        } else if (event && !shortcut && event->pressed && scheduler &&
             !scheduler->executionPaused() && acceptsInput()) {
             if (event->key == ql32::input::Key::Character &&
                 event->character >= 32 && event->character <= 126) {

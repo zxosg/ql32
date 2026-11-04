@@ -25,6 +25,12 @@ public:
     virtual std::uintmax_t size(const std::string& path) = 0;
     virtual void rename(const std::string& path, const std::string& newPath) = 0;
     virtual void remove(const std::string& path) = 0;
+    virtual void removeDirectory(const std::string&) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "storage: directory removal unavailable");
+    }
+    virtual void format(const std::string&) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "storage: format unavailable");
+    }
 };
 
 } // namespace ql32::runtime

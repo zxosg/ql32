@@ -180,7 +180,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
     if (instruction.name == "CIRCLE") return {3, false};
     if (instruction.name == "TEXT") return {3, false};
-    if (instruction.name == "CLS") return {0, false};
+    if (instruction.name == "CLS") return {2, false};
     if (instruction.name == "ROTATE") return {1, false};
     if (instruction.name == "WINDOW") return {4, false};
     if (instruction.name == "CLOSEWINDOW") return {0, false};
@@ -696,6 +696,9 @@ private:
                 } else if (instruction.name == "CIRCLE") {
                     if (passedArguments < 3 || passedArguments > 4)
                         error(instruction, "CIRCLE expects x, y, radius, and optional fill flag");
+                } else if (instruction.name == "CLS") {
+                    if (passedArguments != 0 && passedArguments != 2)
+                        error(instruction, "CLS expects no colors or ink and paper colors");
                 } else if (instruction.name != "IN" && instruction.name != "IOREAD" &&
                            instruction.name != "IOWRITE" && instruction.name != "POKE" &&
                            instruction.name != "OUT" && instruction.name != "XFER" &&
@@ -1568,8 +1571,14 @@ private:
             const bool hasChannelArgument = supportsChannelSelector && match(Kind::Hash);
             if (hasChannelArgument) {
                 expression();
-                if (!match(Kind::Comma))
+                const bool commaAfterChannel = match(Kind::Comma);
+                const bool channelOnlyCommand = name.text == "CLS" ||
+                    name.text == "CLOSEWINDOW";
+                if (!commaAfterChannel &&
+                    !(channelOnlyCommand && commandArgumentTerminator()))
                     error(peek(), "expected ',' after graphics channel selector");
+                if (channelOnlyCommand && commaAfterChannel && commandArgumentTerminator())
+                    error(peek(), "unexpected ',' after graphics channel selector");
             }
             const std::size_t arguments = commandArguments();
             emitCall(name, arguments, false, {}, hasChannelArgument);
@@ -2270,6 +2279,53 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                                      " path must be a quoted string or string variable");
         return std::get<std::string>(found->second);
     };
+    auto commandPathValue = [&](const std::string& text, const char* commandName) {
+        const std::string value = trim(text);
+        if (value.empty()) throw std::runtime_error(std::string(commandName) + " requires a path");
+        if (value.front() == '"') return parseQuotedPath(value, commandName);
+        std::string name = value;
+        std::transform(name.begin(), name.end(), name.begin(),
+            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        const auto found = variables_.find(name);
+        if (found != variables_.end() && std::holds_alternative<std::string>(found->second))
+            return std::get<std::string>(found->second);
+        return value;
+    };
+    auto normalizePath = [&](const std::string& inputPath) {
+        std::string path = inputPath;
+        std::string drive;
+        const auto colon = path.find(':');
+        if (colon != std::string::npos) {
+            drive = path.substr(0, colon + 1);
+            path.erase(0, colon + 1);
+            while (!path.empty() && path.front() == '/') path.erase(path.begin());
+        } else if (!path.empty() && path.front() != '/' && !current_directory_.empty()) {
+            path = current_directory_ + "/" + path;
+        }
+        std::vector<std::string> parts;
+        std::size_t start = 0;
+        while (start <= path.size()) {
+            const auto end = path.find('/', start);
+            const auto component = path.substr(start, end == std::string::npos ? end : end - start);
+            if (component.empty() || component == ".") {}
+            else if (component == "..") {
+                if (!parts.empty()) parts.pop_back();
+                else if (drive.empty())
+                    throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
+                                                "storage path cannot escape the configured root");
+            }
+            else parts.push_back(component);
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+        std::string result = drive;
+        if (!drive.empty()) result += "/";
+        for (const auto& part : parts) {
+            if (!result.empty() && result.back() != '/') result += "/";
+            result += part;
+        }
+        return result;
+    };
     auto splitRenamePaths = [&](const std::string& text) {
         bool quoted = false;
         std::size_t separator = std::string::npos;
@@ -2344,6 +2400,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
             word == "DELETE" || word.rfind("DELETE ", 0) == 0 ||
             word == "RENAME" || word.rfind("RENAME ", 0) == 0 ||
+            word == "FORMAT" || word.rfind("FORMAT ", 0) == 0 ||
+            word == "CD" || word.rfind("CD ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
             word == "DEBUG" || word.rfind("DEBUG ", 0) == 0 ||
             word == "BREAK" || word.rfind("BREAK ", 0) == 0 ||
@@ -2351,6 +2409,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "STEP" || word == "NEXT" || word == "CONTINUE" ||
             word == "WHERE" || word == "LOCALS" || word == "GLOBALS" ||
             word == "STACK" || word == "STATS" || word == "WATCHES" ||
+            word == "BREAKPOINTS" || word == "DIAGNOSTICS RESET" ||
             word == "WATCH" || word.rfind("WATCH ", 0) == 0 ||
             word == "UNWATCH" || word.rfind("UNWATCH ", 0) == 0 ||
             word == "EVAL" || word.rfind("EVAL ", 0) == 0 ||
@@ -2475,13 +2534,24 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         } else if (word == "DELETE" || word.rfind("DELETE ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
-            const std::string path = parsePathValue(normalizedLine.substr(6), "DELETE");
+            const std::string path = normalizePath(parsePathValue(normalizedLine.substr(6), "DELETE"));
             storage_->remove(path);
         } else if (word == "RENAME" || word.rfind("RENAME ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
             const auto paths = splitRenamePaths(normalizedLine.substr(6));
-            storage_->rename(paths.first, paths.second);
+            storage_->rename(normalizePath(paths.first), normalizePath(paths.second));
+        } else if (word == "FORMAT" || word.rfind("FORMAT ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const std::string path = normalizePath(commandPathValue(normalizedLine.substr(6), "FORMAT"));
+            storage_->format(path);
+        } else if (word == "CD" || word.rfind("CD ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const std::string path = normalizePath(commandPathValue(normalizedLine.substr(2), "CD"));
+            storage_->list(path);
+            current_directory_ = path;
         } else if (word == "DIR" || word.rfind("DIR ", 0) == 0 ||
                    word.rfind("DIR#", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2496,7 +2566,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                     trim(argument.substr(separator));
             }
             std::string path;
-            if (!argument.empty()) path = parseQuotedPath(argument, "DIR");
+            if (!argument.empty()) path = normalizePath(commandPathValue(argument, "DIR"));
+            else path = current_directory_;
             std::string listing;
             for (const auto& entry : storage_->list(path))
                 listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
@@ -2592,16 +2663,24 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 throw std::runtime_error("debug task is not paused");
             writeChannelText(0, word + " task " + std::to_string(debugTaskId_) + "\n");
         } else if (word == "DIAGNOSTICS ON" || word == "DIAGNOSTICS OFF" ||
+                   word == "DIAGNOSTICS RESET" ||
                    word == "TRACE ON" || word == "TRACE OFF") {
             if (!taskControl_ || debugTaskId_ == 0)
                 throw std::runtime_error("use DEBUG taskId first");
+            if (word == "DIAGNOSTICS RESET") {
+                if (!taskControl_->debugResetDiagnostics(debugTaskId_))
+                    throw std::runtime_error("debug task is unavailable");
+                writeChannelText(0, "Diagnostics reset\n");
+                continue;
+            }
             const bool enabled = word != "DIAGNOSTICS OFF";
             const bool trace = word == "TRACE ON";
             if (!taskControl_->debugSetDiagnostics(debugTaskId_, enabled, trace))
                 throw std::runtime_error("debug task is unavailable");
             writeChannelText(0, word + "\n");
         } else if (word == "WHERE" || word == "LOCALS" || word == "GLOBALS" ||
-                   word == "STACK" || word == "STATS" || word == "WATCHES") {
+                   word == "STACK" || word == "STATS" || word == "WATCHES" ||
+                   word == "BREAKPOINTS") {
             if (!taskControl_ || debugTaskId_ == 0)
                 throw std::runtime_error("use DEBUG taskId first");
             const auto snapshot = taskControl_->debugInspect(debugTaskId_);
@@ -2616,6 +2695,16 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                     listing << '\n';
                 }
             };
+            const auto printArrays = [&](const auto& arrays) {
+                for (const auto& [name, dimensions] : arrays) {
+                    listing << name << "(";
+                    for (std::size_t i = 0; i < dimensions.size(); ++i) {
+                        if (i != 0) listing << ",";
+                        listing << (dimensions[i] == 0 ? 0 : dimensions[i] - 1);
+                    }
+                    listing << ")\n";
+                }
+            };
             if (word == "WHERE") {
                 listing << (snapshot->paused ? "PAUSED " : "RUNNING ");
                 if (snapshot->location.basicLine != 0)
@@ -2625,14 +2714,34 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 if (!snapshot->frames.empty()) listing << "in " << snapshot->frames.back().name << '\n';
             } else if (word == "LOCALS") {
                 if (snapshot->frames.empty()) listing << "(no local frame)\n";
-                else printMap(snapshot->frames.back().locals);
+                else {
+                    printMap(snapshot->frames.back().locals);
+                    printArrays(snapshot->frames.back().arrays);
+                }
             } else if (word == "GLOBALS") {
                 printMap(snapshot->globals);
+                printArrays(snapshot->arrays);
             } else if (word == "STACK") {
                 if (snapshot->frames.empty()) listing << "(no call frames)\n";
                 for (std::size_t i = 0; i < snapshot->frames.size(); ++i)
                     listing << i << ": " << snapshot->frames[i].name <<
-                        (snapshot->frames[i].function ? " (function)\n" : " (procedure)\n");
+                        (snapshot->frames[i].function ? " (function)" : " (procedure)")
+                        << " called from source " <<
+                        snapshot->frames[i].returnLocation.sourceLine << ":" <<
+                        snapshot->frames[i].returnLocation.column << "\n";
+            } else if (word == "BREAKPOINTS") {
+                const auto breakpoints = taskControl_->debugBreakpoints(debugTaskId_);
+                if (breakpoints.empty()) listing << "(no breakpoints)\n";
+                for (const auto& breakpoint : breakpoints) {
+                    listing << (breakpoint.enabled ? "enabled " : "disabled ")
+                            << "line " << breakpoint.requestedLine;
+                    if (breakpoint.location)
+                        listing << " at source " << breakpoint.location->sourceLine << ":"
+                                << breakpoint.location->column << " bytecode "
+                                << breakpoint.location->instruction;
+                    else listing << " (pending compile)";
+                    listing << "\n";
+                }
             } else if (word == "WATCHES") {
                 if (snapshot->watches.empty()) listing << "(no watches)\n";
                 for (const auto& watch : snapshot->watches) {
@@ -2646,7 +2755,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 }
             } else {
                 listing << "Bytecodes: " << snapshot->bytecodes << '\n'
-                        << "Procedure calls: " << snapshot->procedureCalls << '\n'
+                        << "User calls: " << snapshot->userCalls << '\n'
                         << "IF true: " << snapshot->ifTrue << '\n'
                         << "IF false: " << snapshot->ifFalse << '\n'
                         << "Free memory: ";

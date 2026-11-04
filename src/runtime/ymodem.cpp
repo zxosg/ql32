@@ -226,35 +226,35 @@ void receiveProtocol(const YModemIo& io, ChannelService& channels, SessionId ses
 
 } // namespace
 
-void ymodemSendFile(const std::string& path, StorageService& storage,
-                    ChannelService& channels, SessionId session, const YModemIo& io) {
-    const std::uint64_t fileSize = storage.size(path);
-    const ChannelId channel = channels.open(session, path, ChannelMode::Read);
+void ymodemSendSource(const YModemSource& source, const YModemIo& io) {
+    if (source.filename.empty() || source.filename.find_first_of("/\\:") != std::string::npos)
+        throw std::runtime_error("YMODEM filename must be a non-empty basename");
+    if (!source.read) throw std::runtime_error("YMODEM source has no reader");
     try {
         if (io.ready) io.ready();
         waitFor(io, kCrcRequest, "YMODEM receiver did not request CRC mode");
         std::array<char, 128> header{};
-        const std::string name = baseName(path);
-        if (name.empty() || name.size() >= header.size())
+        if (source.filename.size() >= header.size())
             throw std::runtime_error("YMODEM filename is empty or too long");
-        std::memcpy(header.data(), name.data(), name.size());
-        const std::string length = std::to_string(fileSize);
-        if (name.size() + 1 + length.size() >= header.size())
+        std::memcpy(header.data(), source.filename.data(), source.filename.size());
+        const std::string length = std::to_string(source.size);
+        if (source.filename.size() + 1 + length.size() >= header.size())
             throw std::runtime_error("YMODEM metadata does not fit");
-        std::memcpy(header.data() + name.size() + 1, length.data(), length.size());
+        std::memcpy(header.data() + source.filename.size() + 1,
+                    length.data(), length.size());
         sendPacket(io, kSoh, 0, std::string_view(header.data(), header.size()));
         waitFor(io, kAck, "YMODEM file header was not acknowledged");
         waitFor(io, kCrcRequest, "YMODEM receiver did not request file data");
 
         std::array<char, kPacketSize> block{};
-        std::uint64_t remaining = fileSize;
+        std::uint64_t remaining = source.size;
+        std::uint64_t offset = 0;
         std::uint8_t sequence = 1;
         while (remaining != 0) {
             block.fill(static_cast<char>(0x1a));
             const std::size_t count = static_cast<std::size_t>(
                 std::min<std::uint64_t>(remaining, block.size()));
-            const std::string bytes = channels.readBytes(session, channel, count);
-            std::memcpy(block.data(), bytes.data(), count);
+            source.read(offset, reinterpret_cast<std::uint8_t*>(block.data()), count);
             bool acknowledged = false;
             for (unsigned attempt = 0; attempt < kMaxRetries; ++attempt) {
                 sendPacket(io, kStx, sequence,
@@ -266,6 +266,7 @@ void ymodemSendFile(const std::string& path, StorageService& storage,
             }
             if (!acknowledged) throw std::runtime_error("YMODEM data block retry limit exceeded");
             remaining -= count;
+            offset += count;
             ++sequence;
         }
         sendByte(io, kEot);
@@ -276,9 +277,30 @@ void ymodemSendFile(const std::string& path, StorageService& storage,
         header.fill(0);
         sendPacket(io, kSoh, 0, std::string_view(header.data(), header.size()));
         waitFor(io, kAck, "YMODEM batch end was not acknowledged");
-        channels.close(session, channel);
     } catch (...) {
         sendCancel(io);
+        throw;
+    }
+}
+
+void ymodemSendFile(const std::string& path, StorageService& storage,
+                    ChannelService& channels, SessionId session, const YModemIo& io) {
+    const std::uint64_t fileSize = storage.size(path);
+    const ChannelId channel = channels.open(session, path, ChannelMode::Read);
+    try {
+        YModemSource source;
+        source.filename = baseName(path);
+        source.size = fileSize;
+        source.read = [&channels, session, channel](
+            std::uint64_t, std::uint8_t* destination, std::size_t count) {
+            const std::string bytes = channels.readBytes(session, channel, count);
+            if (bytes.size() != count)
+                throw std::runtime_error("YMODEM source returned fewer bytes than requested");
+            std::memcpy(destination, bytes.data(), count);
+        };
+        ymodemSendSource(source, io);
+        channels.close(session, channel);
+    } catch (...) {
         try { channels.close(session, channel); } catch (...) {}
         throw;
     }

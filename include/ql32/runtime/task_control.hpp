@@ -5,6 +5,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <utility>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -58,7 +59,15 @@ struct DebugLocation {
 struct DebugFrameInfo {
     std::string name;
     bool function = false;
+    DebugLocation returnLocation;
     std::unordered_map<std::string, DebugValue> locals;
+    std::vector<std::pair<std::string, std::vector<std::size_t>>> arrays;
+};
+
+struct DebugBreakpointInfo {
+    int requestedLine = 0;
+    bool enabled = true;
+    std::optional<DebugLocation> location;
 };
 
 struct DebugWatchInfo {
@@ -74,12 +83,14 @@ struct DebugSnapshot {
     std::vector<DebugFrameInfo> frames;
     std::unordered_map<std::string, DebugValue> globals;
     std::uint64_t bytecodes = 0;
-    std::uint64_t procedureCalls = 0;
+    std::uint64_t userCalls = 0;
     std::uint64_t ifTrue = 0;
     std::uint64_t ifFalse = 0;
     std::optional<std::uint64_t> freeMemory;
     std::vector<std::string> trace;
     std::vector<DebugWatchInfo> watches;
+    std::vector<std::pair<std::string, std::vector<std::size_t>>> arrays;
+    std::vector<DebugBreakpointInfo> breakpoints;
 };
 
 struct ManagedTaskInfo {
@@ -118,7 +129,9 @@ public:
     virtual bool debugResume(TaskId, DebugResumeMode) { return false; }
     virtual bool debugPause(TaskId) { return false; }
     virtual bool debugSetDiagnostics(TaskId, bool, bool) { return false; }
+    virtual bool debugResetDiagnostics(TaskId) { return false; }
     virtual std::optional<DebugSnapshot> debugInspect(TaskId) const { return std::nullopt; }
+    virtual std::vector<DebugBreakpointInfo> debugBreakpoints(TaskId) const { return {}; }
     virtual std::optional<DebugValue> debugEvaluate(TaskId, const std::string&) const {
         return std::nullopt;
     }

@@ -80,7 +80,14 @@ public:
     void raiseWindow(SessionId session);
     void tileWindows();
     void present();
+    using RowLayer = std::function<void(std::uint32_t, std::uint32_t,
+                                        std::vector<ColorIndex>&)>;
+    void setConsoleLayer(RowLayer layer) { consoleLayer_ = std::move(layer); }
+    void setUiLayer(RowLayer layer) { uiLayer_ = std::move(layer); }
+    void invalidateSystemRegion(Rect region);
+    void composeDisplayRow(std::uint32_t y, std::vector<ColorIndex>& row) const;
     WindowManager& windowManager() noexcept { return manager_; }
+    static RgbColor defaultPaletteColor(std::uint16_t index);
 
 private:
     struct SurfaceKey {
@@ -96,17 +103,21 @@ private:
 
     WindowId ensureWindow(SessionId session, ChannelId channel = 1);
     IndexedCanvas& canvas(SessionId session, ChannelId channel = 1);
+    void discardFrozenWindows();
     Rect screenRegion(SessionId session, ChannelId channel, std::int64_t x,
                       std::int64_t y,
                       std::int64_t width, std::int64_t height);
-    static RgbColor defaultPaletteColor(std::uint16_t index);
     void discardPresentationBuffer();
     void presentRegion(Rect region);
+    void composeDisplayRegionRow(std::uint32_t y, std::uint32_t x,
+                                 std::uint32_t width,
+                                 std::vector<ColorIndex>& row) const;
     void presentIfConfigured();
 
     WindowManager manager_;
     std::shared_ptr<FramePresenter> presenter_;
     std::unordered_map<SurfaceKey, WindowId, SurfaceKeyHash> sessionWindows_;
+    std::vector<WindowId> frozenWindows_;
     std::unordered_map<SurfaceKey, Point, SurfaceKeyHash> textCursors_;
     std::unordered_map<ChannelId, Rect> defaultWindowBounds_;
     std::function<void(Rect)> consoleBoundsCallback_;
@@ -115,6 +126,8 @@ private:
     Frame frame_;
     std::uint16_t rotationDegrees_ = 0;
     UpdateMode updateMode_ = UpdateMode::Auto;
+    RowLayer consoleLayer_;
+    RowLayer uiLayer_;
 };
 
 } // namespace ql32::graphics

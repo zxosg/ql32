@@ -97,7 +97,9 @@ public:
     bool debugResume(TaskId id, runtime::DebugResumeMode mode);
     bool debugPause(TaskId id);
     bool debugSetDiagnostics(TaskId id, bool enabled, bool trace = false);
+    bool debugResetDiagnostics(TaskId id);
     std::optional<runtime::DebugSnapshot> debugInspect(TaskId id) const;
+    std::vector<runtime::DebugBreakpointInfo> debugBreakpoints(TaskId id) const;
     std::optional<runtime::DebugValue> debugEvaluate(
         TaskId id, const std::string& expression) const;
     bool debugAddWatch(TaskId id, std::string expression);

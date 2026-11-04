@@ -31,6 +31,7 @@ public:
     void flush() {}
     void close() { valid_ = false; }
     const char* name() const { return name_.c_str(); }
+    const char* path() const { return path_.c_str(); }
     File openNextFile();
 
 private:
@@ -83,6 +84,11 @@ public:
         return true;
     }
     bool remove(const char* path) { return files_.erase(path) != 0; }
+    bool rmdir(const char* path) {
+        const std::string key(path);
+        if (!directories_.contains(key) || key == "/" || !children(key).empty()) return false;
+        return directories_.erase(key) != 0;
+    }
     void setMounted(bool mounted) { mounted_ = mounted; }
     std::string& contents(const std::string& path) { return files_[path]; }
     std::vector<std::string> children(const std::string& path) const {

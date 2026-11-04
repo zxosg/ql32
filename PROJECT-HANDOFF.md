@@ -17,13 +17,11 @@ session.
 
 ## Repository state reviewed
 
-The current upstream baseline is `main` commit
-[`4a4586c`](https://github.com/zxosg/ql32/commit/4a4586c) (“Adjust VGA console
-size and ink”, 2 November 2026), following `8bdb180` and the earlier
-`4bfa26e`/`d1831f8` baselines. Local uncommitted math precision and ESP32 CPU
-frequency changes have been reapplied on top of this update. Check the actual
-checkout status before editing; those changes have not been revalidated
-against the latest upstream code yet.
+Reviewed 2026-11-04: the source baseline was
+[`de88fe5`](https://github.com/zxosg/ql32/commit/de88fe5) (“Add QL/32 language
+and runtime features”), matching `origin/main`. This review updates project
+status documents in the working tree. Math precision and ESP32 CPU frequency
+options are committed, not local-only changes.
 
 The latest implementation includes:
 
@@ -34,13 +32,15 @@ The latest implementation includes:
 - Host storage and session-owned channels, `LOAD`/`SAVE`/`DIR`, `OPEN`,
   line and exact-byte file I/O, and asynchronous UI requests. `ALERT`,
   `CONFIRM`, dialogs and menus suspend/resume only their calling session.
-- Retained indexed graphics windows, window movement/resizing, CYD rotation
+- Retained indexed graphics windows, `PLOT`, filled/outline primitives,
+  window movement/resizing, CYD rotation
   and palette queries, Linux PPM output, and CYD/VGA32 graphics adapters.
   `WINDOW #channel,x,y,w,h` now selects independent per-session channel
   surfaces, including a graphics surface for console channel `#0`; `PRINT #0`
   remains console output. CYD and FabGL console overlays follow `#0` bounds.
-  Linux, CYD, SPIFFS-CYD, and VGA32 builds pass; the new display behavior still
-  needs a board-level visual check.
+  Linux and all maintained ESP32 profiles build. CYD users have confirmed
+  compositor movement, resizing/clipping and rotations; visual confirmation of
+  the latest `PLOT` attractor remains open.
 - Cooperative weighted session scheduling and an embedded persistent REPL.
   Current supervisor/BASIC task APIs use `TASK`, `KILL`, `TASKRESULT`,
   `TASKCHANNELS`, `LOGON`, `LOGOFF`, `SUSPEND`, `RESUME`, `SLICE`,
@@ -54,18 +54,12 @@ The latest implementation includes:
   `COS`, `INT`; unsigned 32-bit `BAND`, `BOR`, `BXOR`, `BNOT`,
   `ROL`, `ROR`; `&H`/`&B` literals and `HEX$`/`BIN$`. Graphics
   refresh batching uses `GUPDATE`.
-- Local uncommitted `OPTION` additions select `KOptMathSingle` or
-  `KOptMathDouble` (DOUBLE default) and ESP32-wide `KEspCpuFreq80`,
-  `KEspCpuFreq160`, or `KEspCpuFreq240`. Host builds accept and ignore the
-  device clock setting. A CYD attractor run with SINGLE and 240 MHz was
-  animated but reported slow; that run preceded the latest upstream pull, and
-  frame duration/clock readback were not measured. Rebuild and retest after
-  integration.
-
-The handoff at the previous revision reported 53 CTest cases passing on Linux
-and macOS and both ESP32 profiles building. The latest commit adds more tests;
-rerun the current checkout's build, CTest suite and relevant target builds
-before relying on those results.
+The 2026-11-04 macOS review rebuilt the host target and passed all 57 CTest
+cases. It also built the four maintained PlatformIO environments:
+`lilygo_vga32`, `olimex_esp32_sbc_fabgl`, `esp32_2432s028`, and
+`esp32_2432s028_spiffs`. The machine is macOS, so the `build/linux` preset
+compiled and tested here is not native Linux evidence. Native Linux validation
+remains open.
 
 ## Decisions to preserve
 
@@ -88,58 +82,29 @@ before relying on those results.
 
 ## Milestone and hardware status
 
-- M1 BASIC core acceptance is complete.
-- M2 Linux storage, channel and asynchronous UI acceptance is complete.
-- M3/M4 software includes retained graphics, dialogs/menus and session
-  scheduling. CYD graphics, rotations, compositor behavior and multi-session
-  display have been exercised on hardware. The latest `TASK`/`KTaskWait`
-  API forms should receive a targeted CYD check before marking those exact
-  interactions hardware-verified.
-- M5 host and ESP32 software integration is present. CYD display, serial REPL,
-  BASIC loop, SD text round-trip, graphics behavior and memory behavior have
-  been verified on hardware. The Olimex ESP32-SBC-FabGL Rev B boots the VGA32
-  firmware; USB serial REPL and YMODEM file transfer over internal FFS are
-  verified. The PS/2 keyboard currently produces no input. VGA display, clock,
-  line UI and supervisor behavior remain unverified. The board has no SD card;
-  its Olimex profile uses a 1 MiB internal SPIFFS partition as `FFS`. The
-  supplied board PDF is local and not included in the public repository.
-- Olimex task/heap stress check (2026-11-02): `FREE()` reports total free
-  bytes, `FREE(1)` the largest contiguous block, and `FREE(2)` the free-block
-  count; `ql32.inc` defines `KFreeTotal`, `KFreeContiguous`, and
-  `KFreeFragments`. Earlier testing found a 104,808 / 69,620 / 15 baseline and
-  showed that Mandelbrot compilation fails below its memory peak. The
-  240x176 four-bit canvas itself needs 21,120 bytes.
-- Canvas arena and task-message hardware retest (2026-11-02): Olimex firmware
-  flashed successfully. Baseline was 106,224 / 69,620 / 12. `KILL` and
-  statement-form `TASK` acknowledgements now write to console channel `#0`;
-  this avoids allocating a full-screen supervisor graphics canvas. With the
-  fix, `TASK "worker-1.bas"` through worker 3 started as IDs 2–4 without the
-  prior worker line-2 OOM. All three active: 47,168 / 18,420 / 20. Mandelbrot
-  started as task 5 but failed during compilation at that pressure. FIFO kills
-  restored 102,880 / 69,620 / 26. Mandelbrot then completed and printed
-  `Mandelbrot complete`. A second three-worker cycle also started and killed
-  successfully; its largest block returned to 69,620. After task cycles, free
-  memory remained 5–10 KB below the reset baseline with a higher block count;
-  a reboot restored 106,244 / 69,620 / 16. Mandelbrot plus one worker started
-  and remained runnable without OOM, but did not complete during the test
-  window before the board was reset.
-- The window manager uses a bounded, lazily-growing canvas arena that compacts
-  blocks on close/resize and releases storage when the last canvas closes.
-  Focused host graphics tests pass; Olimex and CYD firmware builds pass. The
-  scheduler test reaches and passes the task-control channel tests, then fails
-  at the interactive BREAK variable-preservation assertion; that failure is
-  not yet isolated. The USB serial monitor was closed after testing, leaving
-  the board rebooted at the supervisor prompt.
-- CYD memory availability: CYD uses the same portable `WindowManager` arena,
-  VM/compiler, scheduler resource cleanup, task acknowledgements, and ESP32
-  `MemoryService` as Olimex. Its `WindowedService` cap is 76,800 bytes. The
-  CYD firmware builds (50,020 bytes static RAM, 1,298,805 bytes flash), but
-  the new multi-task heap/arena behavior has not yet been exercised on CYD
-  hardware.
-- M6 Wi-Fi works in host tests and both ESP32 profiles. CYD association,
-  status, address, signal and disconnect are verified; repeat on VGA32 when
-  available.
-- M7 BLE, enhanced UI and broader platform support are backlog.
+- Use the target-by-target matrix and ranked open work in
+  [QL32-SRS-001](docs/specification/QL32-SRS-001.md) as the current milestone
+  record. Earlier hardware measurements and detailed profile notes remain in
+  [QL32-PLAT-001](docs/specification/QL32-PLAT-001.md).
+- CYD acceptance already includes the TFT/serial REPL, BASIC execution, SD and
+  SPIFFS storage checks, rotation/compositor behavior, 1/4/8-bit rotation heap
+  stability, Wi-Fi station calls, multi-window workers, scheduling weights,
+  slice changes, suspend/resume, and worker cancellation. The latest attractor
+  using `PLOT` was uploaded/launched in window `#1` at `0,0,320,192`, but visual
+  confirmation of the plot is still pending. CYD serial `SCREEN` capture now
+  streams a reconstructed compositor and console snapshot as an 8-bit indexed
+  BMP over YMODEM without a full-frame allocation; a 320×240 capture was
+  received from hardware.
+- Olimex Rev B has earlier partial acceptance for USB serial REPL, internal
+  FFS/YMODEM, PS/2 detection, worker launch/cancellation, heap recovery, and
+  Mandelbrot after worker cancellation. Do not claim full VGA acceptance: the
+  display, PS/2 interaction/shortcuts, clock, line UI, task interaction, SD and
+  Wi-Fi still require board-level verification. VGA hardware is currently
+  unavailable, so defer those checks.
+- Known memory constraint: three concurrent workers plus Mandelbrot can fail
+  during compiler preparation. After worker cycles, free heap was 5–10 KiB
+  below the reset baseline while the largest block recovered; retained task
+  results and canvas-arena high-water storage were not isolated from a leak.
 
 See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 [QL32-PLAT-001](docs/specification/QL32-PLAT-001.md), and
@@ -147,81 +112,29 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. Build and flash the Olimex profile: `tools/build-target.sh olimex`, then
-   `pio run -e olimex_esp32_sbc_fabgl -t upload`. The board's SD wiring is
-   MOSI 12, MISO 35, SCK 14, CS 13; using the LILYGO profile (MISO 2) explains
-   the original mount failure. With a FAT32 card still failing after the
-   Olimex-profile flash, the target now uses ESP-IDF's SPI2/VFS SD-SPI mount
-   path from ESPectrum instead of Arduino `SD.begin()`. Report the startup
-   `SD diagnostic` line if it does not mount. The FatFs build has
-   `FF_FS_EXFAT=0`; do not use exFAT media.
-2. Verify the Olimex VGA layout: `#0` text and PS/2 input occupy the bottom
-   three 8-pixel rows using the 6x8 font and QL ink 4 (green), while the
-   default `#1` graphics area stops above them. Then
-   exercise the execution controls on Olimex PS/2: bare `Pause`,
-   `Shift+Pause`, `Ctrl+Pause`/`Ctrl+Space`, `Ctrl+Shift+Pause`, and
-   `Ctrl+Alt+Delete`; verify `REBOOT` from the prompt on embedded targets.
-   Both Olimex and CYD firmware profiles compile with the controls; physical
-   shortcut and reboot verification remains pending.
-3. Check native PS/2 keyboard detection on the Olimex profile. Port 0 uses
-   DATA GPIO 32 and CLK GPIO 33, matching the board schematic. The next firmware
-   build reports whether FabGL received a keyboard reset response. If detected
-   but keys still do nothing, add temporary serial output for queued key events
-   and trace the REPL input gate.
-4. Run the current Linux and macOS build/test workflows and all ESP32 profile
-   builds after the pull, including module math precision and CPU-frequency
-   option coverage. Do not assume the previous test count describes the
-   current tree.
-5. Continue VGA32 display, clock, SD/startup, line UI, supervisor and Wi-Fi
-   acceptance. Run targeted CYD checks for the current task command and
-   wait/result/error forms when practical.
-6. Keep deferred ideas as design backlog until specified: string splitting,
-   indirect procedure calls via a string name, slice assignment/string-array
-   slicing, palette updates/cycling, and network connections as channels.
-   Network channels are separate from the accepted Wi-Fi station service.
-7. Investigate retained heap after repeated worker cycles (about 5–10 KB below
-   reset baseline, with free-block count rising), and measure Mandelbrot with
-   exactly one worker active to completion. Three concurrent workers plus
-   Mandelbrot currently exceed compiler memory; after FIFO kills it completes.
-   Current Olimex firmware was built and flashed on 2026-11-02 (53,012 bytes
-   static RAM, 1,391,773 bytes flash). Serial monitor has been closed and the
-   board rebooted after testing.
-8. CYD storage and task-buffer check: the SD profile booted with `Storage
-   unavailable` because no card was mounted. The `esp32_2432s028_spiffs` profile
-   was flashed instead; internal `FFS` mounted and boot reported
-   `Running Storage:/startup.bas`. Five worker launch/kill cycles completed.
-   A no-graphics worker probe changed `FREE(0..2)` from 225,304 / 110,580 / 18
-   to 224,880 / 110,580 / 22; this includes retained task-result records. The
-   graphics-worker run reached 163,816 free bytes from 203,556 during the test,
-   while `FREE(1)` stayed 110,580; after reboot it returned to 225,464 / 110,580
-   / 15. Isolate the shared canvas arena's retained high-water capacity from
-   source-buffer and task-record memory in the next CYD memory stress run.
-9. Repeat the attractor check on CYD after rebuilding the pulled source. The
-   earlier run with `OPTION KOptMathSingle` and `OPTION KEspCpuFreq240` animated
-   but remained slow; frame duration and actual CPU clock were not measured.
-10. USB serial file transfer is implemented as single-file YMODEM with CRC-16
-    and 1 KiB data packets. Monitor commands `RECV "drive:/path"` and
-    `SEND "drive:/path"` take over serial and return to the REPL. The Python
-    `tools/ql32-ymodem.py` utility uses the REPL port and baud rate. Receive
-    backs up an existing destination as `.BAK`, refuses an existing backup,
-    restores it after failure, and removes it after success. `DELETE path$` and
-    `RENAME path$,newpath$` use the storage service. Linux, CYD SD/SPIFFS, and
-    Olimex builds compile. Olimex uses a 1 MiB internal FFS partition because
-    no SD card is available. On 2026-11-03 a 3,589-byte binary with embedded
-    control bytes was sent and received byte-for-byte over USB serial at 115200
-    baud. A 2,049-byte overwrite also round-tripped exactly, exercising
-    replacement and `.BAK` cleanup. After a firmware reflash configured with
-    non-formatting FFS mount, the file was downloaded and verified again; the
-    temporary test file was then deleted through the REPL.
-11. Add selectable portable bitmap fonts. `FONT fontID` should select a font
-    for the current graphics channel. `LOAD FONT filename$` should validate and
-    load a font file, select it, and report its assigned ID. Define a bounded,
-    platform-neutral font file format and decide later whether console `PRINT`
-    uses the same selected font or retains a separate console font.
-12. Add the REPL command `EDIT linenumber`. It should place the selected stored
-    line, including its line number, in the current input editor so the user can
-    revise it and press Enter to replace the stored line. An empty edited line
-    should follow the existing numbered-line rule and delete that line.
+1. **CYD regression:** visually confirm the `PLOT` attractor in `#1` resized to
+   `0,0,320,192`; note animation/clipping and console readability. `SCREEN`
+   currently snapshots retained QL/32 output and the console model, not pixels
+   drawn outside the compositor.
+2. **CYD task acceptance:** exercise `TASK` command/function with `KTaskWait`,
+   child failure/error propagation, and direct `PRIORITY id,0` baseline reset.
+3. **CYD memory characterization:** repeat worker/graphics launch-kill cycles
+   and isolate source buffers, task-result records, and canvas-arena high-water
+   storage using `FREE()`, `FREE(1)`, `FREE(2)`. Record the supported workload
+   boundary where Mandelbrot compilation exhausts memory.
+4. **Native Linux:** run `tools/build-target.sh linux` and all 57 CTest cases on
+   a Linux machine or CI runner; the two build directories in this Mac checkout
+   both ran on Darwin.
+5. **Deferred VGA acceptance:** when the physical board returns, use the current
+   `olimex_esp32_sbc_fabgl` profile and verify VGA/console layout, PS/2 key
+   input/shortcuts, `REBOOT`, startup/storage, line UI, task controls, clock,
+   and Wi-Fi. Keep LILYGO-specific physical acceptance separate.
+6. **Performance check:** time attractor frames and measure the selected CPU
+   clock for SINGLE/DOUBLE and 80/160/240 MHz.
+7. **Backlog:** specify bounded font assets and `FONT`/`LOAD FONT`; implement
+   REPL `EDIT linenumber`; later scope palette changes, task window tiling,
+   string splitting/slicing, indirect procedure calls, network channels, BLE,
+   and new hardware families.
 
 ## Starting a new chat
 

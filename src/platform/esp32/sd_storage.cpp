@@ -18,6 +18,23 @@ std::string fileName(const char* path) {
     return slash == std::string::npos ? value : value.substr(slash + 1);
 }
 
+std::string entryPathRelativeTo(const std::string& directory,
+                                const char* entryPath,
+                                const char* fallbackName) {
+    std::string path = entryPath ? entryPath : "";
+    if (path.empty() && fallbackName) path = fallbackName;
+
+    if (directory == "/") {
+        while (!path.empty() && path.front() == '/') path.erase(path.begin());
+        return path.empty() ? fileName(fallbackName) : path;
+    }
+
+    const std::string prefix = directory.back() == '/' ? directory : directory + "/";
+    if (path.rfind(prefix, 0) == 0) return path.substr(prefix.size());
+    if (!path.empty() && path.front() != '/') return path;
+    return fileName(path.c_str());
+}
+
 } // namespace
 
 void SdStorage::ensureAvailable() {
@@ -135,7 +152,10 @@ std::vector<runtime::FileEntry> SdStorage::list(const std::string& path) {
     std::vector<runtime::FileEntry> entries;
     while (fs::File entry = directory.openNextFile()) {
         runtime::FileEntry info;
-        info.name = fileName(entry.name());
+        // Keep the path from the queried directory. SPIFFS can enumerate
+        // entries from nested paths; reducing these to basenames creates
+        // duplicates and makes LOAD resolve to a directory with the same name.
+        info.name = entryPathRelativeTo(resolved, entry.path(), entry.name());
         info.isDirectory = entry.isDirectory();
         if (!info.isDirectory) info.size = entry.size();
         entry.close();
@@ -207,6 +227,33 @@ void SdStorage::remove(const std::string& path) {
     if (!filesystem_.remove(resolved.c_str()))
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: remove failed: " + path);
+}
+
+void SdStorage::removeDirectory(const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    fs::File directory = filesystem_.open(resolved.c_str(), FILE_READ);
+    if (!directory)
+        throw ServiceError(ServiceErrorCode::NotFound, "storage: directory not found: " + path);
+    const bool isDirectory = directory.isDirectory();
+    directory.close();
+    if (!isDirectory)
+        throw ServiceError(ServiceErrorCode::InvalidPath, "storage: path is not a directory: " + path);
+    if (!filesystem_.rmdir(resolved.c_str()))
+        throw ServiceError(ServiceErrorCode::IoError, "storage: directory is not empty: " + path);
+}
+
+void SdStorage::format(const std::string& path) {
+    const std::string resolved = resolve(path, true);
+    const std::string relative = resolved == "/" ? std::string{} : resolved.substr(1);
+    const auto entries = list(relative);
+    for (const auto& entry : entries) {
+        const std::string child = relative.empty() ? entry.name : relative + "/" + entry.name;
+        if (entry.isDirectory) {
+            format(child);
+            removeDirectory(child);
+        } else remove(child);
+    }
 }
 
 } // namespace ql32::platform::esp32

@@ -190,4 +190,10 @@ bool QueuedService::selectMenu(RequestId request, std::uint32_t commandId) {
     return false;
 }
 
+bool QueuedService::isOutstanding(RequestId request) {
+    std::lock_guard lock(mutex_);
+    const auto found = requests_.find(request);
+    return found != requests_.end() && !found->second.result;
+}
+
 } // namespace ql32::ui

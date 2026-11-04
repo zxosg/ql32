@@ -937,6 +937,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     code.push_back(std::move(finish));
                     RuntimeFrame frame;
                     frame.returnAddress = pc;
+                    frame.callInstruction = pc == 0 ? 0 : pc - 1;
+                    frame.callSourceLine = instruction.line;
+                    frame.callSourceColumn = instruction.column;
+                    frame.callBasicLine = instruction.basicLine;
                     frame.function = true;
                     frame.dynamicEvaluation = true;
                     frame.stringifyResult = instruction.name == "EVAL$";
@@ -1575,6 +1579,25 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto* value = std::get_if<std::string>(&arguments[2]);
                         if (!value) runtimeError(instruction, "string value required");
                         graphics_->text(session_id_, channel, position, *value);
+                    } else if (instruction.name == "CLS") {
+                        if (!arguments.empty()) {
+                            const auto ink = integerArgument(0,
+                                "ink color must be an integer in the active window palette");
+                            const auto paper = integerArgument(1,
+                                "paper color must be an integer in the active window palette");
+                            const auto paletteSize = graphics_->windowInfo(
+                                session_id_, channel).paletteSize;
+                            if (ink < 0 || paper < 0 ||
+                                static_cast<std::uint32_t>(ink) >= paletteSize ||
+                                static_cast<std::uint32_t>(paper) >= paletteSize)
+                                runtimeError(instruction,
+                                    "CLS color index exceeds the current window palette");
+                            graphics_->setInk(session_id_, channel,
+                                static_cast<graphics::ColorIndex>(ink));
+                            graphics_->setPaper(session_id_, channel,
+                                static_cast<graphics::ColorIndex>(paper));
+                        }
+                        graphics_->clear(session_id_, channel);
                     } else {
                         graphics_->clear(session_id_, channel);
                     }
@@ -1776,6 +1799,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
             RuntimeFrame frame;
             frame.returnAddress = pc;
+            frame.callInstruction = pc == 0 ? 0 : pc - 1;
+            frame.callSourceLine = instruction.line;
+            frame.callSourceColumn = instruction.column;
+            frame.callBasicLine = instruction.basicLine;
             frame.function = instruction.expectsValue;
             frame.name = instruction.name;
             for (std::size_t i = 0; i < instruction.parameters.size(); ++i) {
@@ -2448,6 +2475,15 @@ void Interpreter::debugSetDiagnostics(bool enabled, bool trace) noexcept {
     }
 }
 
+void Interpreter::debugResetDiagnostics() noexcept {
+    if (!execution_) return;
+    execution_->bytecodes = 0;
+    execution_->procedureCalls = 0;
+    execution_->ifTrue = 0;
+    execution_->ifFalse = 0;
+    execution_->trace.clear();
+}
+
 bool Interpreter::channelReadReady() const {
     if (!execution_ || !execution_->pendingChannelRead || !channels_) return false;
     try {
@@ -2466,7 +2502,7 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
     if (!execution_) return result;
     const detail::VMExecutionState& state = *execution_;
     result.bytecodes = state.bytecodes;
-    result.procedureCalls = state.procedureCalls;
+    result.userCalls = state.procedureCalls;
     result.ifTrue = state.ifTrue;
     result.ifFalse = state.ifFalse;
     result.trace = state.trace;
@@ -2491,8 +2527,22 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
         view.name = frame.name;
         view.function = frame.function;
         for (const auto& [name, value] : frame.locals) view.locals.emplace(name, value);
+        for (const auto& [localName, arrayName] : frame.arrayAliases) {
+            const auto array = state.arrays.find(arrayName);
+            if (array != state.arrays.end())
+                view.arrays.emplace_back(localName, array->second.lengths);
+        }
+        if (frame.returnAddress > 0 && frame.returnAddress <= state.code.size()) {
+            view.returnLocation.instruction = frame.callInstruction;
+            view.returnLocation.sourceLine = frame.callSourceLine;
+            view.returnLocation.column = frame.callSourceColumn;
+            view.returnLocation.basicLine = frame.callBasicLine;
+            view.returnLocation.procedure = frame.name;
+        }
         result.frames.push_back(std::move(view));
     }
+    for (const auto& [name, array] : state.arrays)
+        result.arrays.emplace_back(name, array.lengths);
     for (const std::string& expression : debugWatches_) {
         runtime::DebugWatchInfo watch;
         watch.expression = expression;
@@ -2503,6 +2553,34 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
             watch.error = error.what();
         }
         result.watches.push_back(std::move(watch));
+    }
+    for (std::size_t address : state.breakpoints) {
+        if (address >= state.code.size()) continue;
+        const auto& at = state.code[address];
+        runtime::DebugBreakpointInfo breakpoint;
+        breakpoint.requestedLine = at.basicLine != 0 ? at.basicLine : at.line;
+        breakpoint.location = runtime::DebugLocation{address, at.line, at.column,
+                                                       at.basicLine, {}};
+        result.breakpoints.push_back(std::move(breakpoint));
+    }
+    return result;
+}
+
+std::vector<runtime::DebugBreakpointInfo> Interpreter::debugBreakpoints() const {
+    std::vector<runtime::DebugBreakpointInfo> result;
+    if (!execution_) {
+        result.reserve(pendingBreakpoints_.size());
+        for (const auto& [line, enabled] : pendingBreakpoints_)
+            result.push_back({line, enabled, std::nullopt});
+        return result;
+    }
+    result.reserve(execution_->breakpoints.size());
+    for (std::size_t address : execution_->breakpoints) {
+        if (address >= execution_->code.size()) continue;
+        const auto& at = execution_->code[address];
+        result.push_back({at.basicLine != 0 ? at.basicLine : at.line, true,
+                          runtime::DebugLocation{address, at.line, at.column,
+                                                at.basicLine, {}}});
     }
     return result;
 }

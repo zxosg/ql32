@@ -73,8 +73,14 @@ public:
     bool debugSetDiagnostics(runtime::TaskId id, bool enabled, bool trace) override {
         return scheduler_.debugSetDiagnostics(id, enabled, trace);
     }
+    bool debugResetDiagnostics(runtime::TaskId id) override {
+        return scheduler_.debugResetDiagnostics(id);
+    }
     std::optional<runtime::DebugSnapshot> debugInspect(runtime::TaskId id) const override {
         return scheduler_.debugInspect(id);
+    }
+    std::vector<runtime::DebugBreakpointInfo> debugBreakpoints(runtime::TaskId id) const override {
+        return scheduler_.debugBreakpoints(id);
     }
     std::optional<runtime::DebugValue> debugEvaluate(
         runtime::TaskId id, const std::string& expression) const override {
@@ -447,11 +453,27 @@ bool SessionScheduler::debugSetDiagnostics(TaskId id, bool enabled, bool trace) 
     return false;
 }
 
+bool SessionScheduler::debugResetDiagnostics(TaskId id) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter) continue;
+        current->interpreter->debugResetDiagnostics();
+        return true;
+    }
+    return false;
+}
+
 std::optional<runtime::DebugSnapshot> SessionScheduler::debugInspect(TaskId id) const {
     for (const auto& current : tasks_)
         if (current->id == id && current->interpreter)
             return current->interpreter->debugInspect();
     return std::nullopt;
+}
+
+std::vector<runtime::DebugBreakpointInfo> SessionScheduler::debugBreakpoints(TaskId id) const {
+    for (const auto& current : tasks_)
+        if (current->id == id && current->interpreter)
+            return current->interpreter->debugBreakpoints();
+    return {};
 }
 
 std::optional<runtime::DebugValue> SessionScheduler::debugEvaluate(

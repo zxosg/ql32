@@ -11,6 +11,7 @@ add_library(ql32_portable
   src/runtime/channel_registry.cpp
   src/runtime/buffer.cpp
   src/runtime/ui_service.cpp
+  src/ui/graphic_presenter.cpp
   src/runtime/ymodem.cpp
   src/vm/interpreter.cpp
   src/vm/scheduler.cpp
@@ -27,6 +28,7 @@ add_library(ql32_host_adapters
   src/platform/linux/memory.cpp
   src/platform/linux/svg_graphics.cpp
   src/platform/linux/ppm_presenter.cpp
+  src/platform/esp32/remote_debug_protocol.cpp
 )
 target_link_libraries(ql32_host_adapters PUBLIC ql32_portable)
 
@@ -97,6 +99,9 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_debugger_tests tests/debugger_tests.cpp)
   target_link_libraries(ql32_debugger_tests PRIVATE ql32_host)
   add_test(NAME ql32_debugger_tests COMMAND ql32_debugger_tests)
+  add_executable(ql32_remote_debug_protocol_tests tests/remote_debug_protocol_tests.cpp)
+  target_link_libraries(ql32_remote_debug_protocol_tests PRIVATE ql32_host)
+  add_test(NAME ql32_remote_debug_protocol_tests COMMAND ql32_remote_debug_protocol_tests)
   add_executable(ql32_storage_tests tests/storage_tests.cpp)
   target_link_libraries(ql32_storage_tests PRIVATE ql32_host)
   add_test(NAME ql32_storage_tests COMMAND ql32_storage_tests)
@@ -121,6 +126,9 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_ui_service_tests tests/ui_service_tests.cpp)
   target_link_libraries(ql32_ui_service_tests PRIVATE ql32_host)
   add_test(NAME ql32_ui_service_tests COMMAND ql32_ui_service_tests)
+  add_executable(ql32_graphic_ui_tests tests/graphic_ui_tests.cpp)
+  target_link_libraries(ql32_graphic_ui_tests PRIVATE ql32_host)
+  add_test(NAME ql32_graphic_ui_tests COMMAND ql32_graphic_ui_tests)
   add_executable(ql32_graphics_tests tests/graphics_tests.cpp)
   target_link_libraries(ql32_graphics_tests PRIVATE ql32_host)
   add_test(NAME ql32_graphics_tests COMMAND ql32_graphics_tests)
@@ -195,6 +203,7 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_esp32_cyd_console_tests PRIVATE
     tests/fakes include)
   target_compile_features(ql32_esp32_cyd_console_tests PRIVATE cxx_std_17)
+  target_link_libraries(ql32_esp32_cyd_console_tests PRIVATE ql32_portable)
   add_test(NAME ql32_esp32_cyd_console_tests COMMAND ql32_esp32_cyd_console_tests)
 
   add_executable(ql32_line_ui_presenter_tests

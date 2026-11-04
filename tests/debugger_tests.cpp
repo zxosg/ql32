@@ -18,7 +18,8 @@ void testBreakStepEvalAndContinue() {
         "10 value=1: value=value+1\n"
         "20 IF value=2 THEN\n"
         "30 PRINT value\n"
-        "40 END IF\n", output);
+        "40 END IF\n"
+        "50 value=value+0\n", output);
     require(scheduler.debugAttach(task), "debugger failed to attach");
     require(scheduler.debugSetBreakpoint(task, 10), "breakpoint was not accepted before compile");
     require(scheduler.debugSetDiagnostics(task, true, true), "diagnostics could not be enabled");
@@ -77,6 +78,17 @@ void testBreakStepEvalAndContinue() {
             "STEP did not pause at the selected IF branch");
     require(snapshot->bytecodes > 0 && snapshot->ifTrue > 0 && !snapshot->trace.empty(),
             "execution diagnostics were not recorded");
+    scheduler.debugResetDiagnostics(task);
+    snapshot = scheduler.debugInspect(task);
+    require(snapshot && snapshot->bytecodes == 0 && snapshot->userCalls == 0 &&
+                snapshot->ifTrue == 0 && snapshot->ifFalse == 0 && snapshot->trace.empty(),
+            "diagnostics reset did not clear counters and trace");
+    require(scheduler.debugResume(task, ql32::runtime::DebugResumeMode::StepInto),
+            "STEP failed after diagnostics reset");
+    require(scheduler.tick(), "scheduler did not step after diagnostics reset");
+    snapshot = scheduler.debugInspect(task);
+    require(snapshot && snapshot->bytecodes > 0 && !snapshot->trace.empty(),
+            "diagnostics reset disabled future counter collection");
 
     require(scheduler.debugResume(task, ql32::runtime::DebugResumeMode::Continue),
             "CONTINUE failed");
@@ -133,6 +145,8 @@ void testStepIntoNextAndArrayReads() {
              (snapshot ? std::to_string(snapshot->location.basicLine) : "missing") +
              ", frames=" + (snapshot ? std::to_string(snapshot->frames.size()) : "missing")).c_str());
     require(snapshot->frames.back().name == "WORK", "call frame name is missing");
+    require(snapshot->frames.back().returnLocation.basicLine == 10,
+            "call frame did not report its caller source position");
     require(scheduler.debugResume(task, ql32::runtime::DebugResumeMode::StepOver),
             "NEXT within procedure setup failed");
     require(scheduler.tick(), "scheduler did not execute NEXT within procedure");
@@ -167,9 +181,18 @@ void testStepIntoNextAndArrayReads() {
     require(arrayScheduler.debugAttach(arrayTask), "array debugger attach failed");
     require(arrayScheduler.debugSetBreakpoint(arrayTask, 3), "physical source breakpoint failed");
     require(arrayScheduler.tick(), "array program did not reach its breakpoint");
+    const auto arraySnapshot = arrayScheduler.debugInspect(arrayTask);
+    require(arraySnapshot && arraySnapshot->arrays.size() == 1 &&
+                arraySnapshot->arrays.front().first == "DATA" &&
+                arraySnapshot->arrays.front().second == std::vector<std::size_t>{3},
+            "global array dimensions were not included in inspection");
     const auto arrayValue = arrayScheduler.debugEvaluate(arrayTask, "data(0)+1");
     require(arrayValue && std::get<double>(*arrayValue) == 8,
             "read-only EVAL did not support array reads");
+    const auto breakpoints = arrayScheduler.debugBreakpoints(arrayTask);
+    require(breakpoints.size() == 1 && breakpoints.front().requestedLine == 3 &&
+                breakpoints.front().location && breakpoints.front().location->sourceLine == 3,
+            "breakpoint listing did not include the resolved source position");
 }
 
 void testSupervisorDebuggerCommands() {
@@ -193,6 +216,40 @@ void testSupervisorDebuggerCommands() {
     require(scheduler.tick(), "WHERE command did not execute");
     require(supervisorOutput.str().find("BASIC line 10") != std::string::npos,
             "supervisor WHERE command did not display the stop location");
+    require(scheduler.submit(supervisor, "BREAKPOINTS\n"),
+            "supervisor rejected BREAKPOINTS command");
+    require(scheduler.tick(), "BREAKPOINTS command did not execute");
+    require(supervisorOutput.str().find("enabled line 10") != std::string::npos,
+            "supervisor did not list the active breakpoint");
+}
+
+void testDebuggerSupervisorDiagnosticsResetCommand() {
+    ql32::vm::SessionScheduler scheduler({}, 512);
+    std::ostringstream supervisorOutput, targetOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    const auto target = scheduler.launch("10 value=41\n20 PRINT value\n", targetOutput);
+    require(scheduler.setTaskPriority(target, 0), "could not hold target before reset test");
+    require(scheduler.submit(supervisor, "DEBUG " + std::to_string(target) + "\n"),
+            "supervisor rejected DEBUG command");
+    require(scheduler.tick(), "DEBUG command did not execute in reset test");
+    require(scheduler.submit(supervisor, "BREAK 20\n"), "supervisor rejected BREAK");
+    require(scheduler.tick(), "BREAK command did not execute in reset test");
+    require(scheduler.submit(supervisor, "DIAGNOSTICS ON\n"),
+            "supervisor rejected DIAGNOSTICS ON");
+    require(scheduler.tick(), "DIAGNOSTICS ON did not execute");
+    require(scheduler.setTaskPriority(target, 4), "could not run target in reset test");
+    for (int i = 0; i < 4 && scheduler.task(target)->status != ql32::vm::TaskStatus::DebugPaused; ++i)
+        require(scheduler.tick(), "target did not reach reset-test breakpoint");
+    require(scheduler.debugInspect(target)->bytecodes > 0,
+            "reset test did not accumulate diagnostic counters");
+    require(scheduler.submit(supervisor, "DIAGNOSTICS RESET\n"),
+            "supervisor rejected DIAGNOSTICS RESET");
+    require(scheduler.tick(), "DIAGNOSTICS RESET did not execute");
+    const auto snapshot = scheduler.debugInspect(target);
+    require(snapshot && snapshot->bytecodes == 0 && snapshot->userCalls == 0,
+            "supervisor diagnostics reset did not clear counters");
+    require(supervisorOutput.str().find("Diagnostics reset") != std::string::npos,
+            "supervisor did not acknowledge diagnostics reset");
 }
 
 void testPendingUiRequestSurvivesDebugPause() {
@@ -264,6 +321,7 @@ int main() {
         testSchedulerRunsOtherTasksWhileDebugPaused();
         testStepIntoNextAndArrayReads();
         testSupervisorDebuggerCommands();
+        testDebuggerSupervisorDiagnosticsResetCommand();
         testPendingUiRequestSurvivesDebugPause();
         testRepeatedBreakpointsAndUnreachedIfConditions();
     } catch (const std::exception& error) {

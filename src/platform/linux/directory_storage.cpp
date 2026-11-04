@@ -43,8 +43,13 @@ DirectoryStorage::DirectoryStorage(std::filesystem::path root) {
 
 std::filesystem::path DirectoryStorage::resolve(const std::string& path,
                                                 bool mayNotExist) const {
-    const std::filesystem::path relative(path);
-    if (relative.empty() || relative.is_absolute())
+    std::string normalized = path;
+    const auto colon = normalized.find(':');
+    if (colon != std::string::npos) normalized.erase(0, colon + 1);
+    while (!normalized.empty() && normalized.front() == '/') normalized.erase(normalized.begin());
+    const std::filesystem::path relative(normalized);
+    if (relative.empty()) return root_;
+    if (relative.is_absolute())
         throw ServiceError(ServiceErrorCode::InvalidPath, "storage path must be relative");
     for (const auto& component : relative) {
         if (component == "..")
@@ -179,6 +184,35 @@ void DirectoryStorage::remove(const std::string& path) {
         if (error) fail(resolved, error);
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: could not remove file: " + path);
+    }
+}
+
+void DirectoryStorage::removeDirectory(const std::string& path) {
+    const auto resolved = resolve(path, false);
+    if (resolved == root_)
+        throw ServiceError(ServiceErrorCode::InvalidPath, "storage: cannot remove storage root");
+    std::error_code error;
+    if (!std::filesystem::is_directory(resolved, error)) {
+        if (error) fail(resolved, error);
+        throw ServiceError(ServiceErrorCode::InvalidPath, "storage: path is not a directory: " + path);
+    }
+    if (!std::filesystem::remove(resolved, error)) {
+        if (error) fail(resolved, error);
+        throw ServiceError(ServiceErrorCode::IoError, "storage: directory is not empty: " + path);
+    }
+}
+
+void DirectoryStorage::format(const std::string& path) {
+    const auto resolved = path.empty() ? root_ : resolve(path, false);
+    std::error_code error;
+    if (!std::filesystem::is_directory(resolved, error)) {
+        if (error) fail(resolved, error);
+        throw ServiceError(ServiceErrorCode::InvalidPath, "storage: path is not a directory: " + path);
+    }
+    for (std::filesystem::directory_iterator it(resolved, error), end; it != end; it.increment(error)) {
+        if (error) fail(resolved, error);
+        std::filesystem::remove_all(it->path(), error);
+        if (error) fail(it->path(), error);
     }
 }
 

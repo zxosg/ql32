@@ -64,11 +64,25 @@ WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screen
     : manager_(screenWidth, screenHeight, maximumWindows, maximumCanvasBytes),
       presenter_(std::move(presenter)) {}
 
+void WindowedService::discardFrozenWindows() {
+    if (frozenWindows_.empty()) return;
+    Rect dirty{};
+    for (const auto id : frozenWindows_) {
+        dirty = unite(dirty, manager_.windowState(id).screenClip);
+        manager_.close(id);
+    }
+    frozenWindows_.clear();
+    presentRegion(dirty);
+}
+
 WindowId WindowedService::ensureWindow(SessionId session, ChannelId channel) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
     const SurfaceKey key{session, channel};
     const auto found = sessionWindows_.find(key);
     if (found != sessionWindows_.end()) return found->second;
+    // Completed tasks leave their last composed pixels visible on write-only
+    // displays. Keep those canvases for capture until a later session draws.
+    discardFrozenWindows();
     discardPresentationBuffer();
     const auto defaultBounds = defaultWindowBounds_.find(channel);
     const auto bounds = defaultBounds != defaultWindowBounds_.end() ? defaultBounds->second :
@@ -302,24 +316,15 @@ void WindowedService::closeWindow(SessionId session, ChannelId channel) {
 }
 
 void WindowedService::closeSession(SessionId session) {
-    Rect oldBounds{};
-    bool hadWindow = false;
     for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
         if (found->first.session != session) {
             ++found;
             continue;
         }
-        const auto clip = manager_.windowState(found->second).screenClip;
-        oldBounds = unite(oldBounds, clip);
-        hadWindow = true;
-        manager_.close(found->second);
+        frozenWindows_.push_back(found->second);
         textCursors_.erase(found->first);
         found = sessionWindows_.erase(found);
     }
-    if (!hadWindow) return;
-    // Keep the last Linux frame available for inspection when the final
-    // command-line session exits. Remaining sessions still trigger redraw.
-    if (manager_.size() != 0) presentRegion(oldBounds);
 }
 
 void WindowedService::setUpdateMode(SessionId session, UpdateMode mode) {
@@ -450,13 +455,19 @@ void WindowedService::present() {
     if (presenter_->presentRows(
             width, height, frame_.palette,
             [this](std::uint32_t y, std::vector<ColorIndex>& row) {
-                manager_.composeRowInto(y, row);
+                composeDisplayRow(y, row);
             })) {
         return;
     }
     frame_.width = manager_.screenWidth();
     frame_.height = manager_.screenHeight();
     manager_.composeInto(frame_.pixels);
+    std::vector<ColorIndex> row;
+    for (std::uint32_t y = 0; y < frame_.height; ++y) {
+        composeDisplayRow(y, row);
+        std::copy(row.begin(), row.end(), frame_.pixels.begin() +
+                  static_cast<std::size_t>(y) * frame_.width);
+    }
     presenter_->present(frame_);
 }
 
@@ -472,11 +483,36 @@ void WindowedService::presentRegion(Rect region) {
     const auto height = manager_.screenHeight();
     if (presenter_->presentRowsRegion(width, height, frame_.palette, region,
             [this, region](std::uint32_t y, std::vector<ColorIndex>& row) {
-                manager_.composeRegionRowInto(y,
+                composeDisplayRegionRow(y,
                     static_cast<std::uint32_t>(region.x), region.width, row);
             }))
         return;
     present();
+}
+
+void WindowedService::composeDisplayRegionRow(std::uint32_t y, std::uint32_t x,
+                                              std::uint32_t width,
+                                              std::vector<ColorIndex>& row) const {
+    manager_.composeRegionRowInto(y, x, width, row);
+    if (consoleLayer_) consoleLayer_(y, x, row);
+    if (uiLayer_) uiLayer_(y, x, row);
+}
+
+void WindowedService::composeDisplayRow(std::uint32_t y,
+                                        std::vector<ColorIndex>& row) const {
+    composeDisplayRegionRow(y, 0, manager_.screenWidth(), row);
+}
+
+void WindowedService::invalidateSystemRegion(Rect region) {
+    if (!presenter_) return;
+    region = intersect(region,
+        {0, 0, manager_.screenWidth(), manager_.screenHeight()});
+    if (region.width == 0 || region.height == 0) return;
+    const auto saved = updateMode_;
+    updateMode_ = UpdateMode::Auto;
+    try { presentRegion(region); }
+    catch (...) { updateMode_ = saved; throw; }
+    updateMode_ = saved;
 }
 
 void WindowedService::discardPresentationBuffer() {

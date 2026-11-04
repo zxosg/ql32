@@ -46,16 +46,26 @@ bool readPath(std::string_view input, std::string& path) {
 bool handleMonitorTransferCommand(std::string_view input,
                                   runtime::StorageService& storage,
                                   runtime::ChannelService& channels,
-                                  HardwareSerial& serial) {
+                                  HardwareSerial& serial,
+                                  const std::function<runtime::YModemSource()>&
+                                      screenCapture) {
     const std::string line = trim(std::string(input));
     const std::size_t separator = line.find_first_of(" \t");
     const std::string command = uppercase(line.substr(0, separator));
-    if (command != "RECV" && command != "SEND") return false;
+    if (command != "RECV" && command != "SEND" && command != "SCREEN") return false;
 
     std::string path;
     const std::string_view argument = separator == std::string::npos
         ? std::string_view{} : std::string_view(line).substr(separator + 1);
-    if (!readPath(argument, path)) {
+    if (command == "SCREEN" && !trim(std::string(argument)).empty()) {
+        serial.println("Usage: SCREEN");
+        return true;
+    }
+    if (command == "SCREEN" && !screenCapture) {
+        serial.println("Screen capture is unavailable on this target");
+        return true;
+    }
+    if (command != "SCREEN" && !readPath(argument, path)) {
         serial.println(command == "RECV"
             ? "Usage: RECV \"drive:/path\""
             : "Usage: SEND \"drive:/path\"");
@@ -88,12 +98,17 @@ bool handleMonitorTransferCommand(std::string_view input,
     try {
         if (command == "RECV")
             runtime::ymodemReceiveFile(path, storage, channels, transferSession, io);
-        else
+        else if (command == "SEND")
             runtime::ymodemSendFile(path, storage, channels, transferSession, io);
-        serial.println(command == "RECV" ? "Transfer received successfully" :
-                                           "Transfer sent successfully");
+        else
+            runtime::ymodemSendSource(screenCapture(), io);
+        if (command == "RECV") serial.println("Transfer received successfully");
+        else if (command == "SCREEN") serial.println("Screen capture sent successfully");
+        else serial.println("Transfer sent successfully");
     } catch (const std::exception& error) {
-        serial.printf("Transfer failed: %s\n", error.what());
+        const auto* message = error.what();
+        serial.printf("Transfer failed: %s\n",
+                      message && *message ? message : "unknown transfer error");
     }
     return true;
 }

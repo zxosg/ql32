@@ -107,7 +107,7 @@ current CYD firmware's opened-endpoint registry was also exercised: serial text 
 null text/byte/graphics discard, type/count enumeration, and close/reopen all
 worked.
 
-The local working changes add module-level `OPTION KOptMathSingle` and
+The current implementation includes module-level `OPTION KOptMathSingle` and
 `OPTION KOptMathDouble` (DOUBLE is the default), plus
 `OPTION KEspCpuFreq80`, `KEspCpuFreq160`, and `KEspCpuFreq240` for ESP32
 targets. The CPU request is device-wide and takes effect when a module starts;

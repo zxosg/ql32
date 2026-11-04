@@ -30,12 +30,16 @@ locals, arrays, `SELect ON`, numbered-line commands (`LIST`, `RUN`, `NEW`,
 also defines portable storage, session-owned text/binary file channels, line
 input, and asynchronous UI
 request services. BASIC `ALERT`/`CONFIRM` calls suspend and resume individual
-interpreter sessions through the async service. The Linux console presenter
-supports alerts, confirmations, typed dialogs, and menus. BASIC exposes
+interpreter sessions through the async service. Linux interactive sessions
+render graphical controls to `ql32-screen.ppm` and accept terminal responses;
+scripted runs retain the console presenter. BASIC exposes
 session-owned dialog and menu builders through `DINIT`/`DIALOG` and
 `MINIT`/`MENU`; [examples/ui.bas](examples/ui.bas) exercises typed results and
-stable menu IDs. Embedded ESP32 line presenters are integrated. The embedded
-REPL can also launch and manage worker sessions with `TASK`,
+stable menu IDs. CYD and VGA render graphical controls over the console strip,
+using serial and PS/2 input respectively. The panels share the console bitmap
+font, with bold white titles and a two-tone frame visible over dark or light
+backgrounds. The embedded REPL can also launch and manage worker sessions with
+`TASK`,
 `TASKS`, `TASKRESULT`, `TASKCHANNELS`, `LOGON`, `LOGOFF`, `KILL`, `SUSPEND`,
 and `RESUME`. Use `TASK "worker.bas"` to start asynchronously, or add
 `KTaskWait` to wait for completion. `TASKRESULT id` prints the available task
@@ -59,6 +63,8 @@ Use the supervisor REPL to attach to a running task and control it:
 ```text
 DEBUG 2
 BREAK 100
+BREAKPOINTS
+CLEARBREAK 100
 CONTINUE
 WHERE
 STEP
@@ -69,13 +75,20 @@ STACK
 EVAL A+B*2
 ```
 
-Breakpoints use BASIC line numbers in numbered programs and physical source
-lines in unnumbered programs. `STEP` advances one BASIC statement and enters
-procedures; `NEXT` runs through calls made by the current statement. `WATCH expr`
+`DEBUG id` attaches to and pauses the selected task immediately. Set breakpoints
+while paused, then use `CONTINUE` to run. Breakpoints use BASIC line numbers in
+numbered programs and physical source lines in unnumbered programs;
+`BREAKPOINTS` lists them and `CLEARBREAK line` removes one. `STEP` advances one
+BASIC statement and enters procedures; `NEXT` runs through calls made by the
+current statement. `WATCH expr`
 adds a safe expression watch, `WATCHES` displays its value while stopped, and
-`UNWATCH expr` removes it. `DIAGNOSTICS ON` enables per-task bytecode, procedure,
-and evaluated IF counters; `TRACE ON` also keeps a bounded recent instruction
-trace. `STATS` displays counters and available free-memory information. Debug
+`UNWATCH expr` removes it. `BREAKPOINTS` lists active breakpoints. `LOCALS` and
+`GLOBALS` also show array upper bounds, while `STACK` shows each call's source
+location. `DIAGNOSTICS ON` enables per-task bytecode, user-call, and evaluated IF
+counters; `DIAGNOSTICS RESET` clears the counters and trace without disabling
+diagnostics. Enable diagnostics before resuming if you want counts from that
+point onward. `TRACE ON` also keeps a bounded recent instruction trace. `STATS`
+displays counters and available free-memory information. Debug
 EVAL and watches allow literals, variable and array reads, and pure operators;
 function calls and writes are rejected. A debug-paused task keeps its VM state
 and does not consume scheduler instruction budget.
@@ -166,12 +179,43 @@ for you and uses the same serial port and baud rate as the REPL:
 ```bash
 python3 tools/ql32-ymodem.py send /dev/cu.usbserial-XXXX 115200 local.bin --device-path "SDC:/remote.bin"
 python3 tools/ql32-ymodem.py receive /dev/cu.usbserial-XXXX 115200 local.bin --device-path "SDC:/remote.bin"
+python3 tools/ql32-ymodem.py capture /dev/cu.usbserial-XXXX 115200 screen.bmp
 ```
 
 `send` uploads the local file; `receive` downloads the device file. Without
 `--device-path`, start `RECV` or `SEND` from an already-open monitor first.
 Transfers use CRC-16 and 1 KiB YMODEM data packets. A failed receive removes
 its partial file and restores any previous destination from `.BAK`.
+On CYD, `capture` sends an indexed BMP snapshot of the retained graphics compositor and
+text console without writing it to board storage. `SCREEN` is also available as
+a monitor command. Capture pauses BASIC scheduling while the image transfers.
+The image is reconstructed a row at a time, so it does not allocate a full
+screen buffer.
+
+### PC remote debugger
+
+The Python desktop client supports the ESP32-2432S028 CYD and Olimex
+ESP32-SBC-FabGL. Install its dependencies and launch it from the repository root:
+
+```bash
+python3 -m pip install -r tools/ql32_remote_debugger/requirements.txt
+python3 -m tools.ql32_remote_debugger
+```
+
+Connect to the QL/32 USB serial port at 115200 baud. The Files tab browses the
+device roots reported by the board, including `FFS:/` on SPIFFS builds. Upload,
+download, and screen capture share one serial owner and use the monitor's
+YMODEM flow; BASIC scheduling pauses for the duration of each transfer. The
+Debugger tab can download a selected source file and launch it paused, or attach
+to an existing task after selecting the source file to display. Click the
+editor gutter to toggle a breakpoint, then use Continue, Step, Next, and Pause.
+The panels show source position, locals, globals, arrays, watches, stack, and
+opt-in execution counters. EVAL and watches accept only side-effect-free
+expressions. Screen captures are on demand and can be saved as BMP files.
+
+The client deliberately reports other boards, including LILYGO VGA32, as
+unsupported. Firmware protocol requests use the versioned `@QL32DBG/1` serial
+frame; the existing monitor REPL and YMODEM commands remain available.
 
 On embedded targets, enter `REBOOT` at the interactive supervisor prompt to
 perform a software restart. The Olimex FabGL target also supports PS/2 execution
@@ -223,4 +267,11 @@ For a manual dialog and menu test, run
 values at the console prompts, accept or cancel the dialog, then select a menu
 item by number or shortcut. The example prints the submitted values and stable
 command ID.
+
+For an automated CYD serial-REPL memory acceptance run, build and flash the
+`esp32_2432s028_spiffs` profile, install `pyserial`, then run
+`python3 tools/ql32-memory-test.py /dev/cu.usbserial-XXXX`. The runner uploads
+its BASIC workers over YMODEM and writes relative heap measurements to
+`memory-test-report.json`. See [examples/memory-tests](examples/memory-tests/README.md)
+for the cases and pass criteria.
 

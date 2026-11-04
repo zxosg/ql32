@@ -5,8 +5,12 @@
 #include <Adafruit_ILI9341.h>
 
 #include <deque>
+#include <functional>
+#include <cstdint>
 #include <streambuf>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace ql32::platform::esp32_cyd {
 
@@ -20,6 +24,13 @@ public:
     void setBounds(graphics::Rect bounds);
     void setColors(graphics::ColorIndex ink, graphics::ColorIndex paper);
     void restoreOverlay(graphics::Rect region);
+    void composePaletteRow(std::uint32_t y, graphics::ColorIndex* destination,
+                           std::uint32_t width) const;
+    void composePaletteRegionRow(std::uint32_t y, std::uint32_t x,
+                                 std::vector<graphics::ColorIndex>& row) const;
+    void setInvalidateCallback(std::function<void(graphics::Rect)> callback) {
+        invalidate_ = std::move(callback);
+    }
 
 protected:
     int_type overflow(int_type character) override;
@@ -36,6 +47,9 @@ private:
     graphics::Rect bounds_{};
     std::uint16_t foregroundColor_ = 0xFFFF;
     std::uint16_t backgroundColor_ = 0x0000;
+    graphics::ColorIndex foregroundIndex_ = 7;
+    graphics::ColorIndex backgroundIndex_ = 0;
+    std::function<void(graphics::Rect)> invalidate_;
 
     void put(char character);
     void advanceLine();

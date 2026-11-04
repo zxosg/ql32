@@ -3,6 +3,7 @@
 #include "ql32/runtime/ymodem.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -129,8 +130,59 @@ void testBinaryRoundTripAndBackup() {
     std::filesystem::remove_all(root);
 }
 
+void testGeneratedSourceRoundTrip() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-ymodem-source-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        ql32::platform::linux_host::DirectoryStorage targetStorage(root);
+        ql32::platform::linux_host::DirectoryChannels targetChannels(root);
+        std::string expected(4267, '\0');
+        for (std::size_t i = 0; i < expected.size(); ++i)
+            expected[i] = static_cast<char>((i * 19) & 0xff);
+        ql32::runtime::YModemSource source;
+        source.filename = "screen.ppm";
+        source.size = expected.size();
+        source.read = [&expected](std::uint64_t offset, std::uint8_t* output,
+                                  std::size_t count) {
+            if (offset + count > expected.size())
+                throw std::out_of_range("generated source read out of bounds");
+            std::copy_n(reinterpret_cast<const std::uint8_t*>(expected.data() + offset),
+                        count, output);
+        };
+
+        Link link;
+        const auto senderIo = link.endpoint(true);
+        const auto receiverIo = link.endpoint(false);
+        std::string sendError;
+        std::string receiveError;
+        std::thread sender([&] {
+            try { ql32::runtime::ymodemSendSource(source, senderIo); }
+            catch (const std::exception& error) { sendError = error.what(); }
+        });
+        std::thread receiver([&] {
+            try { ql32::runtime::ymodemReceiveFile("screen.ppm", targetStorage,
+                    targetChannels, 9, receiverIo); }
+            catch (const std::exception& error) { receiveError = error.what(); }
+        });
+        sender.join();
+        receiver.join();
+        require(sendError.empty(), "YMODEM generated-source sender failed");
+        require(receiveError.empty(), "YMODEM generated-source receiver failed");
+        require(targetStorage.readText("screen.ppm") == expected,
+                "YMODEM changed generated source bytes");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 int main() {
     testBinaryRoundTripAndBackup();
+    testGeneratedSourceRoundTrip();
 }

@@ -98,6 +98,7 @@ public:
     bool submitDialog(RequestId request, std::vector<FieldValue> fields);
     bool submitInput(RequestId request, std::string line);
     bool selectMenu(RequestId request, std::uint32_t commandId);
+    bool isOutstanding(RequestId request);
 
 private:
     struct PendingRequest {

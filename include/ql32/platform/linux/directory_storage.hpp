@@ -17,6 +17,8 @@ public:
     std::uintmax_t size(const std::string& path) override;
     void rename(const std::string& path, const std::string& newPath) override;
     void remove(const std::string& path) override;
+    void removeDirectory(const std::string& path) override;
+    void format(const std::string& path) override;
 
 private:
     std::filesystem::path root_;

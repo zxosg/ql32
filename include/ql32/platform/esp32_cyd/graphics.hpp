@@ -34,6 +34,7 @@ public:
     void setRotationDegrees(std::uint16_t degrees) {
         setCydRotation(static_cast<std::uint8_t>(degrees / 90));
     }
+
 };
 
 // ILI9341 adapter that keeps the BASIC graphics contract's indexed QL colors.

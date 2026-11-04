@@ -281,6 +281,34 @@ void IdfSdStorage::remove(const std::string& path) {
         throw ServiceError(ServiceErrorCode::IoError, errorText("storage remove"));
 }
 
+void IdfSdStorage::removeDirectory(const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    struct stat status{};
+    if (::stat(fullPath.c_str(), &status) != 0) {
+        if (errno == ENOENT)
+            throw ServiceError(ServiceErrorCode::NotFound, "storage: directory not found: " + path);
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage stat"));
+    }
+    if (!S_ISDIR(status.st_mode))
+        throw ServiceError(ServiceErrorCode::InvalidPath, "storage: path is not a directory: " + path);
+    if (::rmdir(fullPath.c_str()) != 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage remove directory"));
+}
+
+void IdfSdStorage::format(const std::string& path) {
+    const std::string resolved = normalizePath(path, true, "storage");
+    const std::string relative = resolved == "/" ? std::string{} : resolved.substr(1);
+    const auto entries = list(relative);
+    for (const auto& entry : entries) {
+        const std::string child = relative.empty() ? entry.name : relative + "/" + entry.name;
+        if (entry.isDirectory) {
+            format(child);
+            removeDirectory(child);
+        } else remove(child);
+    }
+}
+
 IdfSdChannels::~IdfSdChannels() {
     std::lock_guard lock(mutex_);
     for (auto& [id, channel] : channels_) {

@@ -3,11 +3,15 @@
 #include "ql32/graphics/service.hpp"
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <vector>
 
 namespace ql32::graphics {
+
+// Five-column bitmap glyph used by retained text canvases.
+std::array<std::uint8_t, 5> classicGlyphColumns(char character);
 
 using WindowId = std::uint64_t;
 enum class PixelDepth : std::uint8_t { One = 1, Four = 4, Eight = 8 };

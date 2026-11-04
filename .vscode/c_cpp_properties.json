@@ -9,6 +9,7 @@
             "name": "PlatformIO",
             "includePath": [
                 "/Users/jan/GitHub/QL32/src",
+                "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                 "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/SPIFFS/src",
                 "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/SD/src",
                 "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
@@ -240,13 +241,13 @@
                 "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
                 "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                 "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
-                "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                 ""
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
                     "/Users/jan/GitHub/QL32/src",
+                    "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                     "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/SPIFFS/src",
                     "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/SD/src",
                     "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
@@ -478,7 +479,6 @@
                     "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
                     "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                     "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
-                    "/Users/jan/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                     ""
                 ]
             },

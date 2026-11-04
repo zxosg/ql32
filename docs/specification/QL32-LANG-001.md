@@ -587,7 +587,12 @@ example `PRINT #out, text$`, `LIST #out`, `PLOT #window, x, y`, or
 `CIRCLE #window, x, y, radius, 1`. `RECT` and `CIRCLE` accept an optional
 `fill` flag: omit it or use `0` for an outline, or use `1` for a solid shape.
 `PLOT` draws one pixel in the selected window's current ink color. Unqualified
-output uses the current output default. `CHANNEL #channel` changes the logical
+graphics commands use the current graphics output default; channel-qualified
+graphics commands use a `#channel` selector. The clear command accepts
+`CLS`, `CLS #channel`, `CLS ink,paper`, or `CLS #channel,ink,paper`; the color
+form leaves those colors active for subsequent drawing. `CLOSEWINDOW` accepts
+an optional `#channel` selector. Unqualified text output uses the current
+output default. `CHANNEL #channel` changes the logical
 default for all unqualified output operations, including text and graphics.
 `CHANNEL #source TO
 #destination` directly rebinds the source handle to the endpoint currently

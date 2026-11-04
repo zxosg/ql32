@@ -1,4 +1,5 @@
 #include "ql32/platform/esp32_cyd/text_console.hpp"
+#include "ql32/graphics/window_manager.hpp"
 
 #if defined(QL32_TFT_CONSOLE_SERIAL_MIRROR)
 #include <Arduino.h>
@@ -71,18 +72,62 @@ void TftTextConsole::setBounds(graphics::Rect bounds) {
 }
 
 void TftTextConsole::setColors(graphics::ColorIndex ink, graphics::ColorIndex paper) {
+    foregroundIndex_ = ink;
+    backgroundIndex_ = paper;
     foregroundColor_ = color565(ink);
     backgroundColor_ = color565(paper);
     clear();
 }
 
 void TftTextConsole::restoreOverlay(graphics::Rect region) {
+    if (invalidate_) return;
     redraw(region);
+}
+
+void TftTextConsole::composePaletteRow(std::uint32_t y,
+                                       graphics::ColorIndex* destination,
+                                       std::uint32_t width) const {
+    if (!destination) return;
+    std::vector<graphics::ColorIndex> row(destination, destination + width);
+    composePaletteRegionRow(y, 0, row);
+    std::copy(row.begin(), row.end(), destination);
+}
+
+void TftTextConsole::composePaletteRegionRow(
+    std::uint32_t y, std::uint32_t xOrigin,
+    std::vector<graphics::ColorIndex>& row) const {
+    if (y >= static_cast<std::uint32_t>(display_.height())) return;
+    const auto left = static_cast<std::uint32_t>(std::max<std::int32_t>(0, bounds_.x));
+    const auto right = left + bounds_.width;
+    if (y < static_cast<std::uint32_t>(std::max<std::int32_t>(0, bounds_.y)) ||
+        y >= static_cast<std::uint32_t>(bounds_.y + bounds_.height) || left >= right)
+        return;
+
+    const auto localY = y - static_cast<std::uint32_t>(bounds_.y);
+    const auto textRow = localY / characterHeight;
+    const auto glyphRow = localY % characterHeight;
+    const std::string* line = textRow < lines_.size() ? &lines_[textRow] : nullptr;
+    for (std::uint32_t i = 0; i < row.size(); ++i) {
+        const auto x = xOrigin + i;
+        if (x < left || x >= right) continue;
+        bool foreground = false;
+        if (line && glyphRow < 7 && x >= left) {
+            const auto localX = x - left;
+            const auto column = localX / characterWidth;
+            const auto glyphColumn = localX % characterWidth;
+            if (column < line->size() && glyphColumn < 5) {
+                const auto glyph = graphics::classicGlyphColumns((*line)[column]);
+                foreground = (glyph[glyphColumn] & (1u << glyphRow)) != 0;
+            }
+        }
+        row[i] = foreground ? foregroundIndex_ : backgroundIndex_;
+    }
 }
 
 void TftTextConsole::clear() {
     lines_.clear();
     lines_.emplace_back();
+    if (invalidate_) { invalidate_(bounds_); return; }
     display_.fillRect(firstColumnX_, firstRowY_,
                       static_cast<std::int16_t>(bounds_.width),
                       static_cast<std::int16_t>(bounds_.height),
@@ -118,6 +163,12 @@ void TftTextConsole::put(char character) {
 
     const auto row = lines_.size() - 1;
     const auto column = lines_.back().size() - 1;
+    if (invalidate_) {
+        invalidate_({firstColumnX_ + static_cast<std::int32_t>(column * characterWidth),
+                     firstRowY_ + static_cast<std::int32_t>(row * characterHeight),
+                     characterWidth, characterHeight});
+        return;
+    }
     display_.setCursor(static_cast<std::int16_t>(firstColumnX_ + column * characterWidth),
                        static_cast<std::int16_t>(firstRowY_ + row * characterHeight));
     display_.setTextSize(1);
@@ -138,6 +189,7 @@ void TftTextConsole::redraw() {
 }
 
 void TftTextConsole::redraw(graphics::Rect region) {
+    if (invalidate_) { invalidate_(region); return; }
     const auto left = std::max<std::int32_t>(bounds_.x, region.x);
     const auto top = std::max<std::int32_t>(bounds_.y, region.y);
     const auto right = std::min<std::int32_t>(bounds_.x + static_cast<std::int32_t>(bounds_.width),

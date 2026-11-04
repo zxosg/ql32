@@ -31,12 +31,26 @@ std::optional<double> parseNumber(const std::string& value) {
 } // namespace
 
 ConsoleUi::ConsoleUi(std::shared_ptr<ui::QueuedService> service,
-                     std::istream& input, std::ostream& output)
+                     std::istream& input, std::ostream& output,
+                     std::shared_ptr<graphics::WindowedService> graphics)
     : service_(std::move(service)), input_(input), output_(output) {
     if (!service_) throw std::invalid_argument("console UI requires a request service");
+    if (graphics) graphic_ = std::make_unique<ui::GraphicPresenter>(service_, graphics);
 }
 
 bool ConsoleUi::dispatchNext() {
+    if (graphic_) {
+        if (!graphic_->beginNext()) return false;
+        std::string line;
+        while (graphic_->active()) {
+            output_ << "UI (enter, up, down, left, right, cancel, or value)> " << std::flush;
+            if (!std::getline(input_, line)) { graphic_->cancelActive(); break; }
+            (void)graphic_->consumeLine(line);
+            graphic_->refresh();
+        }
+        output_ << '\n';
+        return true;
+    }
     const auto request = service_->takeNextRequest();
     if (!request) return false;
     std::string response;

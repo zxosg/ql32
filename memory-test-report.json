@@ -1,0 +1,1063 @@
+{
+  "schema": "ql32-memory-test-v1",
+  "board_profile": "esp32_2432s028",
+  "firmware_revision": "de88fe5-dirty",
+  "started_at": "2026-11-04T23:18:26.262632+00:00",
+  "cycles": 5,
+  "metrics": [
+    "FREE(0): total",
+    "FREE(1): largest block",
+    "FREE(2): free block count"
+  ],
+  "cases": [
+    {
+      "name": "array",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 2,
+          "before": {
+            "total": 158700,
+            "largest": 51188,
+            "blocks": 22
+          },
+          "active_report": {
+            "total": 138048,
+            "largest": 51188,
+            "blocks": 20
+          },
+          "released_report": null,
+          "during": {
+            "total": 133816,
+            "largest": 51188,
+            "blocks": 19
+          },
+          "after": {
+            "total": 158288,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "active_total_drop": 20652,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -464,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 3,
+          "before": {
+            "total": 158284,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "active_report": {
+            "total": 137752,
+            "largest": 51188,
+            "blocks": 20
+          },
+          "released_report": null,
+          "during": {
+            "total": 133516,
+            "largest": 51188,
+            "blocks": 19
+          },
+          "after": {
+            "total": 158040,
+            "largest": 51188,
+            "blocks": 21
+          },
+          "active_total_drop": 20532,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -712,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 4,
+          "before": {
+            "total": 158040,
+            "largest": 51188,
+            "blocks": 21
+          },
+          "active_report": {
+            "total": 137540,
+            "largest": 51188,
+            "blocks": 18
+          },
+          "released_report": null,
+          "during": {
+            "total": 133316,
+            "largest": 51188,
+            "blocks": 19
+          },
+          "after": {
+            "total": 157852,
+            "largest": 51188,
+            "blocks": 23
+          },
+          "active_total_drop": 20500,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -900,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 5,
+          "before": {
+            "total": 157848,
+            "largest": 51188,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 137340,
+            "largest": 51188,
+            "blocks": 19
+          },
+          "released_report": null,
+          "during": {
+            "total": 133116,
+            "largest": 51188,
+            "blocks": 20
+          },
+          "after": {
+            "total": 157104,
+            "largest": 51188,
+            "blocks": 23
+          },
+          "active_total_drop": 20508,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1648,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 6,
+          "before": {
+            "total": 157100,
+            "largest": 51188,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 136584,
+            "largest": 51188,
+            "blocks": 22
+          },
+          "released_report": null,
+          "during": {
+            "total": 132360,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "after": {
+            "total": 156892,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_total_drop": 20516,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1860,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": -1396
+    },
+    {
+      "name": "channel",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 7,
+          "before": {
+            "total": 156876,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "active_report": {
+            "total": 145460,
+            "largest": 51188,
+            "blocks": 21
+          },
+          "released_report": {
+            "total": 149968,
+            "largest": 51188,
+            "blocks": 23
+          },
+          "during": {
+            "total": 145628,
+            "largest": 51188,
+            "blocks": 23
+          },
+          "after": {
+            "total": 157124,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "active_total_drop": 11416,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1628,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 8,
+          "before": {
+            "total": 157132,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "active_report": {
+            "total": 145752,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "released_report": {
+            "total": 150260,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "during": {
+            "total": 145924,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "after": {
+            "total": 156928,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "active_total_drop": 11380,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1824,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 9,
+          "before": {
+            "total": 156916,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "active_report": {
+            "total": 149484,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "released_report": {
+            "total": 150012,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "during": {
+            "total": 145668,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "after": {
+            "total": 156692,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_total_drop": 7432,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2060,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 10,
+          "before": {
+            "total": 156684,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_report": {
+            "total": 145288,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "released_report": {
+            "total": 149784,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "during": {
+            "total": 145452,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "after": {
+            "total": 155956,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "active_total_drop": 11396,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2796,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 11,
+          "before": {
+            "total": 155952,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_report": {
+            "total": 144576,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "released_report": {
+            "total": 149072,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "during": {
+            "total": 144740,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "after": {
+            "total": 155708,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_total_drop": 11376,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -3044,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": -1416
+    },
+    {
+      "name": "graphics",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 12,
+          "before": {
+            "total": 155704,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "active_report": {
+            "total": 147472,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "released_report": {
+            "total": 147576,
+            "largest": 51188,
+            "blocks": 30
+          },
+          "during": {
+            "total": 143244,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "after": {
+            "total": 156032,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_total_drop": 8232,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2720,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 13,
+          "before": {
+            "total": 156032,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_report": {
+            "total": 147764,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "released_report": {
+            "total": 147872,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "during": {
+            "total": 143544,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "after": {
+            "total": 155812,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_total_drop": 8268,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2940,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 14,
+          "before": {
+            "total": 155812,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_report": {
+            "total": 147548,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "released_report": {
+            "total": 147664,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "during": {
+            "total": 143328,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "after": {
+            "total": 155592,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "active_total_drop": 8264,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -3160,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 15,
+          "before": {
+            "total": 155592,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "active_report": {
+            "total": 147352,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "released_report": {
+            "total": 147456,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "during": {
+            "total": 143136,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "after": {
+            "total": 155392,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_total_drop": 8240,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -3360,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 16,
+          "before": {
+            "total": 155392,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_report": {
+            "total": 147144,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "released_report": {
+            "total": 147240,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "during": {
+            "total": 142904,
+            "largest": 51188,
+            "blocks": 30
+          },
+          "after": {
+            "total": 154656,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_total_drop": 8248,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -4096,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": -1376
+    },
+    {
+      "name": "debugger",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 17,
+          "before": {
+            "total": 154656,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "active_report": {
+            "total": 142396,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "released_report": null,
+          "during": {
+            "total": 138700,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "after": {
+            "total": 154908,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_total_drop": 12260,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -3844,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 17\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 2,
+          "task_id": 18,
+          "before": {
+            "total": 154908,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_report": {
+            "total": 142708,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "released_report": null,
+          "during": {
+            "total": 138468,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "after": {
+            "total": 154660,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_total_drop": 12200,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -4092,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 18\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 3,
+          "task_id": 19,
+          "before": {
+            "total": 154660,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_report": {
+            "total": 142464,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "released_report": null,
+          "during": {
+            "total": 138252,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "after": {
+            "total": 153944,
+            "largest": 51188,
+            "blocks": 30
+          },
+          "active_total_drop": 12196,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -4808,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 19\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 4,
+          "task_id": 20,
+          "before": {
+            "total": 153944,
+            "largest": 51188,
+            "blocks": 30
+          },
+          "active_report": {
+            "total": 141700,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "released_report": null,
+          "during": {
+            "total": 137984,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "after": {
+            "total": 154244,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "active_total_drop": 12244,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -4508,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 20\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 5,
+          "task_id": 21,
+          "before": {
+            "total": 154240,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "active_report": {
+            "total": 142048,
+            "largest": 51188,
+            "blocks": 25
+          },
+          "released_report": null,
+          "during": {
+            "total": 137820,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "after": {
+            "total": 154016,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_total_drop": 12192,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -4736,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 21\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        }
+      ],
+      "post_run_total_drift": -892
+    },
+    {
+      "name": "combined",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 22,
+          "before": {
+            "total": 154012,
+            "largest": 51188,
+            "blocks": 29
+          },
+          "active_report": {
+            "total": 125092,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "released_report": {
+            "total": 125724,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "during": {
+            "total": 121476,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "after": {
+            "total": 153808,
+            "largest": 51188,
+            "blocks": 33
+          },
+          "active_total_drop": 28920,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -4944,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 23,
+          "before": {
+            "total": 153792,
+            "largest": 51188,
+            "blocks": 32
+          },
+          "active_report": {
+            "total": 120876,
+            "largest": 51188,
+            "blocks": 24
+          },
+          "released_report": {
+            "total": 125476,
+            "largest": 51188,
+            "blocks": 26
+          },
+          "during": {
+            "total": 121244,
+            "largest": 51188,
+            "blocks": 27
+          },
+          "after": {
+            "total": 153588,
+            "largest": 51188,
+            "blocks": 32
+          },
+          "active_total_drop": 32916,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -5164,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 24,
+          "before": {
+            "total": 153580,
+            "largest": 51188,
+            "blocks": 32
+          },
+          "active_report": {
+            "total": 120700,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "released_report": {
+            "total": 125292,
+            "largest": 51188,
+            "blocks": 30
+          },
+          "during": {
+            "total": 121060,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "after": {
+            "total": 152868,
+            "largest": 51188,
+            "blocks": 36
+          },
+          "active_total_drop": 32880,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -5884,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 25,
+          "before": {
+            "total": 152860,
+            "largest": 51188,
+            "blocks": 36
+          },
+          "active_report": {
+            "total": 123892,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "released_report": {
+            "total": 124528,
+            "largest": 51188,
+            "blocks": 31
+          },
+          "during": {
+            "total": 120292,
+            "largest": 51188,
+            "blocks": 33
+          },
+          "after": {
+            "total": 152640,
+            "largest": 51188,
+            "blocks": 34
+          },
+          "active_total_drop": 28968,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -6112,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 26,
+          "before": {
+            "total": 152632,
+            "largest": 51188,
+            "blocks": 34
+          },
+          "active_report": {
+            "total": 119716,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "released_report": {
+            "total": 124308,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "during": {
+            "total": 120060,
+            "largest": 51188,
+            "blocks": 28
+          },
+          "after": {
+            "total": 152956,
+            "largest": 51188,
+            "blocks": 35
+          },
+          "active_total_drop": 32916,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -5796,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": -852
+    }
+  ],
+  "warnings": [],
+  "passed": true,
+  "baseline": {
+    "warmup": [
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      },
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      },
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      }
+    ],
+    "samples": [
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      },
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      },
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      },
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      },
+      {
+        "total": 158752,
+        "largest": 51188,
+        "blocks": 21
+      }
+    ],
+    "median": {
+      "total": 158752,
+      "largest": 51188,
+      "blocks": 21
+    },
+    "idle_spread_bytes": 0,
+    "recovery_tolerance_bytes": 2048
+  },
+  "restart_check": {
+    "warmup": [
+      {
+        "total": 158700,
+        "largest": 51188,
+        "blocks": 22
+      },
+      {
+        "total": 158700,
+        "largest": 51188,
+        "blocks": 22
+      },
+      {
+        "total": 158700,
+        "largest": 51188,
+        "blocks": 22
+      }
+    ],
+    "samples": [
+      {
+        "total": 158696,
+        "largest": 51188,
+        "blocks": 23
+      },
+      {
+        "total": 158696,
+        "largest": 51188,
+        "blocks": 23
+      },
+      {
+        "total": 158696,
+        "largest": 51188,
+        "blocks": 23
+      },
+      {
+        "total": 158696,
+        "largest": 51188,
+        "blocks": 23
+      },
+      {
+        "total": 158696,
+        "largest": 51188,
+        "blocks": 23
+      }
+    ],
+    "median": {
+      "total": 158696,
+      "largest": 51188,
+      "blocks": 23
+    },
+    "recovered_total": true,
+    "recovered_largest_block": true
+  },
+  "finished_at": "2026-11-04T23:18:53.694110+00:00"
+}

@@ -54,12 +54,16 @@ which configures the ILI9341 as 320x240 at rotation 0. Rotation 0 and its
 the ILI9341 BGR-order flag; the user confirmed the red palette entry now
 renders red on this panel.
 
-The async alert, confirmation, dialog, and menu presenter prints prompts to the
-TFT console and accepts each response through serial input. Use
-`examples/embedded_ui.bas` on the card as `startup.bas` to exercise the full
-flow. Replies are entered one line at a time; menus accept item numbers or
-shortcuts, choices accept their numbered position, and dialogs accept blank
-input to keep a field's current value.
+Alerts, confirmations, dialogs, and menus appear as graphical panels on the
+TFT. Panel text matches the console's 6×8 bitmap font. Titles are bold white
+on black, with a white outer edge and black inner edge around the panel so it
+remains visible on dark or light graphics. Use a serial terminal for input:
+arrow keys or Tab move focus, Enter accepts, Esc cancels, and Backspace edits a
+value. Menus also accept shortcut keys; confirmations accept Y or N. `INPUT`
+remains line-oriented. Use `examples/embedded_ui.bas` on the card as
+`startup.bas` to exercise the flow.
+The serial monitor command `@SCREEN` captures the composed display while a
+panel is open, including the panel itself.
 
 M6 BASIC network commands are `GETNET ssid$, password$` and `DISNET`; status
 functions are `NETSTAT$()`, `NETADDR$()`, and `NETSIGNAL()`. The connection starts
@@ -92,7 +96,7 @@ There is no OTA slot or internal SPIFFS/LittleFS partition; BASIC files use SD.
 Current build-size and RAM measurements are kept in
 [QL32-PLAT-001](../../docs/specification/QL32-PLAT-001.md). The user has verified TFT
 output, the serial REPL, and a small BASIC `FOR` loop printing to the LCD on
-the board. The async line presenter for alerts, confirmations, dialogs, and
+the board. The graphical presenter for alerts, confirmations, dialogs, and
 menus is compiled into the image. The SD channel round-trip is verified on
 hardware: written text read back successfully and `EOF` returned `1`. Define
 `QL32_TFT_CONSOLE_SERIAL_MIRROR` in this environment's `build_flags` to mirror

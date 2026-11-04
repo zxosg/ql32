@@ -46,6 +46,11 @@ void testDirectoryStorage() {
         require(rootEntries.size() == 1 && rootEntries.front().name == "subdir" &&
                     rootEntries.front().isDirectory,
                 "root directory listing omitted its directory");
+        std::filesystem::create_directories(root / "subdir" / "nested");
+        storage.writeText("subdir/nested.txt", "nested");
+        storage.writeText("subdir/nested/child.txt", "child");
+        storage.format("subdir");
+        require(storage.list("subdir").empty(), "format did not clear a directory recursively");
 
         bool escaped = false;
         try {
@@ -95,6 +100,27 @@ void testInteractiveFileCommands() {
         interpreter.executeInteractive("NEW\nLOAD \"demo.bas\"\nLIST\nRUN\nDIR\n", output);
         require(output.str() == "10 PRINT \"loaded\"\nloaded\ndemo.bas\n",
                 "LOAD, LIST, RUN, or DIR returned unexpected output");
+
+        std::filesystem::create_directories(root / "work" / "child");
+        storage->writeText("work/child/item.bas", "10 PRINT \"item\"\n");
+        interpreter.executeInteractive("CD \"work/child\"\nDIR\n", output);
+        require(output.str().size() >= 9 &&
+                    output.str().compare(output.str().size() - 9, 9, "item.bas\n") == 0,
+                "CD or DIR did not use the current directory");
+        interpreter.executeInteractive("CD ..\nDIR\n", output);
+        require(output.str().size() >= 7 &&
+                    output.str().compare(output.str().size() - 7, 7, "child/\n") == 0,
+                "CD .. did not walk to the parent directory");
+        interpreter.executeInteractive("CD child\nDELETE \"item.bas\"\nCD ../..\n", output);
+        require(!storage->exists("work/child/item.bas"), "DELETE did not resolve relative to CD");
+        storage->writeText("work/child/item.bas", "content");
+        interpreter.executeInteractive("CD work/child\nRENAME \"item.bas\", \"moved.bas\"\n", output);
+        require(storage->exists("work/child/moved.bas") && !storage->exists("work/child/item.bas"),
+                "RENAME did not resolve both paths relative to CD");
+        storage->writeText("work/child/item.bas", "content");
+        interpreter.execute("drive$ = \"SDC:/\"\n", output);
+        interpreter.executeInteractive("FORMAT drive$\n", output);
+        require(storage->list("").empty(), "FORMAT drive path did not erase storage recursively");
 
         storage->writeText("plain.bas",
             "PRINT \"first\"\n\nPRINT \"second\"\n");

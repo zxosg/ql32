@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
                 640, 480, presenter, 4);
             auto memory = std::make_shared<ql32::platform::linux_host::MemoryService>();
             ql32::Interpreter interpreter(storage, channels, ui, graphics, {}, memory);
-            ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout);
+            ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout, graphics);
             interpreter.runRepl(std::cin, std::cout, std::cerr, true,
                                 [&] { return console.dispatchNext(); });
             return 0;
@@ -86,7 +86,14 @@ int main(int argc, char** argv) {
         auto memory = std::make_shared<ql32::platform::linux_host::MemoryService>();
         ql32::Interpreter interpreter(storage, channels, ui, graphics, {}, memory);
         if (hasProgram) {
-            ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout);
+            ql32::platform::linux_host::ConsoleUi console(
+                ui, std::cin, std::cout,
+#if defined(__unix__) || defined(__APPLE__)
+                ::isatty(STDIN_FILENO) ? std::dynamic_pointer_cast<ql32::graphics::WindowedService>(graphics) : nullptr
+#else
+                nullptr
+#endif
+            );
             auto status = interpreter.executeResumable(source, std::cout);
             while (status == ql32::ExecutionStatus::Suspended) {
                 if (!console.dispatchNext())

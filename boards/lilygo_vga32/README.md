@@ -24,9 +24,12 @@ the current line.
 Enter `RUN` to execute a numbered program. If serial input appears twice,
 disable local echo in the terminal.
 
-Alerts, confirmations, dialogs, and menus use a non-blocking line presenter on
-serial output. Responses can be entered through the serial terminal or PS/2
-keyboard. `examples/embedded_ui.bas` exercises the complete flow.
+Alerts, confirmations, dialogs, and menus use a non-blocking graphical
+presenter. Panels use the console's 6×8 bitmap font, bold white titles, and a
+white outer edge with a black inner edge for visibility on either background.
+Responses can be entered through the serial terminal or PS/2 keyboard; `INPUT`
+remains line-oriented. `examples/embedded_ui.bas` exercises
+the complete flow.
 
 The M6 Wi-Fi station commands are `GETNET ssid$, password$` and `DISNET`; the
 status functions are `NETSTAT$()`, `NETADDR$()`, and `NETSIGNAL()`. Joining a network is
@@ -65,7 +68,7 @@ VGA graphics uses the shared retained indexed canvases and compositor. Each
 window defaults to 4-bit pixels; the built-in palette is quantized to the
 board's 8-color VGA output. The board adapter redraws the composed frame with
 FabGL. The configured canvas budget allows two full-screen 4-bit windows; the
-composed frame also occupies one byte per screen pixel. The line presenter for
+composed frame also occupies one byte per screen pixel. The graphical presenter for
 alerts, confirmations, dialogs, and menus is integrated and can accept input
 from serial or PS/2; physical verification is still pending. The exact
 physical unit revision, PSRAM behavior, and monitor

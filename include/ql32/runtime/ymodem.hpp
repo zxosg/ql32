@@ -17,7 +17,17 @@ struct YModemIo {
     std::function<void()> ready;
 };
 
+using YModemReadSource =
+    std::function<void(std::uint64_t, std::uint8_t*, std::size_t)>;
+
+struct YModemSource {
+    std::string filename;
+    std::uint64_t size = 0;
+    YModemReadSource read;
+};
+
 // Single-file YMODEM using CRC-16 and 1024-byte data packets.
+void ymodemSendSource(const YModemSource& source, const YModemIo& io);
 void ymodemSendFile(const std::string& path, StorageService& storage,
                     ChannelService& channels, SessionId session, const YModemIo& io);
 void ymodemReceiveFile(const std::string& path, StorageService& storage,

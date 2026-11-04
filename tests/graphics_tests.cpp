@@ -42,8 +42,14 @@ public:
     void setInk(SessionId session, ColorIndex color) override {
         events.push_back({"INK", session, {}, {}, color});
     }
+    void setInk(SessionId session, ChannelId channel, ColorIndex color) override {
+        events.push_back({"INK", session, {}, {}, color, 0, {}, channel});
+    }
     void setPaper(SessionId session, ColorIndex color) override {
         events.push_back({"PAPER", session, {}, {}, color});
+    }
+    void setPaper(SessionId session, ChannelId channel, ColorIndex color) override {
+        events.push_back({"PAPER", session, {}, {}, color, 0, {}, channel});
     }
     void line(SessionId session, Point from, Point to) override {
         events.push_back({"LINE", session, from, to});
@@ -81,8 +87,14 @@ public:
     void clear(SessionId session) override {
         events.push_back({"CLS", session});
     }
+    void clear(SessionId session, ChannelId channel) override {
+        events.push_back({"CLS", session, {}, {}, 0, 0, {}, channel});
+    }
     void closeWindow(SessionId session) override {
         events.push_back({"CLOSEWINDOW", session});
+    }
+    void closeWindow(SessionId session, ChannelId channel) override {
+        events.push_back({"CLOSEWINDOW", session, {}, {}, 0, 0, {}, channel});
     }
     void closeSession(SessionId session) override {
         events.push_back({"CLOSE_SESSION", session});
@@ -270,6 +282,55 @@ void testDrawingArgumentValidation() {
     }
     require(missingArguments, "CIRCLE accepted too many arguments");
     require(graphics->events.empty(), "invalid drawing call reached the service");
+}
+
+void testClsChannelAndColorSyntax() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "CLS\n"
+        "CLS #0\n"
+        "CLS #1,2,3\n"
+        "CLS 4,5\n"
+        "CHANNEL #0\n"
+        "CLS 6,7\n"
+        "CLOSEWINDOW #0\n", output);
+    require(graphics->events.size() == 12 &&
+                graphics->events[0].name == "CLS" && graphics->events[0].channel == 1 &&
+                graphics->events[1].name == "CLS" && graphics->events[1].channel == 0 &&
+                graphics->events[2].name == "INK" && graphics->events[2].channel == 1 &&
+                graphics->events[2].a == 2 &&
+                graphics->events[3].name == "PAPER" && graphics->events[3].channel == 1 &&
+                graphics->events[3].a == 3 &&
+                graphics->events[4].name == "CLS" && graphics->events[4].channel == 1 &&
+                graphics->events[5].name == "INK" && graphics->events[5].channel == 1 &&
+                graphics->events[5].a == 4 &&
+                graphics->events[6].name == "PAPER" && graphics->events[6].channel == 1 &&
+                graphics->events[6].a == 5 &&
+                graphics->events[7].name == "CLS" && graphics->events[7].channel == 1 &&
+                graphics->events[8].name == "INK" && graphics->events[8].channel == 0 &&
+                graphics->events[8].a == 6 &&
+                graphics->events[9].name == "PAPER" && graphics->events[9].channel == 0 &&
+                graphics->events[9].a == 7 &&
+                graphics->events[10].name == "CLS" && graphics->events[10].channel == 0 &&
+                graphics->events[11].name == "CLOSEWINDOW" &&
+                graphics->events[11].channel == 0,
+            "CLS channel selection or optional ink/paper colors were incorrect");
+}
+
+void testClsColorArgumentsClearWithNewPaper() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(12, 10, presenter, 2);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute("INK 1\nPLOT 3,4\nCLS 2,3\n", output);
+    const auto states = graphics->windowManager().compositionOrder();
+    require(states.size() == 1, "CLS did not create the default graphics window");
+    const auto& canvas = graphics->windowManager().canvas(states.front().id);
+    require(canvas.ink() == 2 && canvas.paper() == 3 &&
+                canvas.pixel(3, 4) == 3 && canvas.pixel(0, 0) == 3,
+            "CLS ink,paper did not set drawing colors and clear to the paper color");
 }
 
 void testPixelAndFilledShapesRenderOnRetainedCanvas() {
@@ -580,6 +641,33 @@ void testCloseWindowReleasesCanvasAndAllowsReuse() {
             "released canvas budget could not be reused");
 }
 
+void testCompletedSessionRemainsAvailableForCapture() {
+    using namespace ql32::graphics;
+    WindowedService graphics(8, 8, nullptr, 4, 0);
+    graphics.setInk(31, 2);
+    graphics.pixel(31, {2, 2});
+    graphics.setInk(31, 4);
+    graphics.pixel(31, {3, 3});
+
+    graphics.closeSession(31);
+    std::vector<ColorIndex> row(8);
+    graphics.composeDisplayRow(2, row);
+    require(row[2] == 2,
+            "completed session graphics disappeared before screen capture");
+    graphics.composeDisplayRow(3, row);
+    require(row[3] == 4,
+            "completed session did not retain all drawn colors for capture");
+
+    graphics.setInk(32, 6);
+    graphics.pixel(32, {4, 4});
+    graphics.composeDisplayRow(2, row);
+    require(row[2] == 0,
+            "starting a new drawing session did not discard the frozen image");
+    graphics.composeDisplayRow(4, row);
+    require(row[4] == 6,
+            "new graphics session did not draw after frozen image cleanup");
+}
+
 void testCanvasArenaCompactsAndReusesStorage() {
     using namespace ql32::graphics;
     WindowManager manager(16, 8, 5, 32);
@@ -631,6 +719,8 @@ int main() {
     testGraphicsUpdateCommandDispatch();
     testWindowedGraphicsUpdateBatching();
     testDrawingArgumentValidation();
+    testClsChannelAndColorSyntax();
+    testClsColorArgumentsClearWithNewPaper();
     testPixelAndFilledShapesRenderOnRetainedCanvas();
     testDisplayCommands();
     testPrintChannelRouting();
@@ -640,6 +730,7 @@ int main() {
     testWindowMovementRestoresCoveredContent();
     testCanvasReshapeReusesFullScreenStorage();
     testCloseWindowReleasesCanvasAndAllowsReuse();
+    testCompletedSessionRemainsAvailableForCapture();
     testCanvasArenaCompactsAndReusesStorage();
     testCloseWindowCommandDispatch();
 }
