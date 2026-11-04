@@ -182,6 +182,17 @@ which is useful when converting drawing positions to pixel coordinates. These
 functions are available for later language slices and are not part of the M1
 compatibility claim.
 
+`VAL(string$)` converts a complete decimal numeric value, including exponent
+notation, to the selected numeric precision. Leading and trailing whitespace
+is ignored; trailing nonnumeric text, expression syntax, and non-finite values
+are errors. `EVAL(expression$)` compiles and evaluates one QL/32 expression at
+runtime in the current session and call context, including user-defined
+functions; its result must be numeric. `EVAL$(expression$)` evaluates the same
+expression syntax and returns a string result unchanged, or formats a numeric
+result with the normal `PRINT` number formatting. Both honor the active math
+precision option. These dynamic functions are QL/32-specific and do not claim
+Psion OPL compatibility.
+
 Precedence from highest to lowest is:
 
 | Level | Operators | Associativity |
@@ -382,8 +393,9 @@ parentheses in expressions: `value = Square(4)`.
 
 `DIM array%(upper)` and multidimensional variants are implemented. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. The host allocation limit is one million elements per array; board-specific limits remain to be measured. Dimensioned arrays can be passed to procedure/function parameters by reference.
 
-Scalar string variables support SuperBASIC-style, one-based inclusive
-slices: `text$(4 TO 8)`, `text$(TO 10)`, and `text$(10 TO)`. A single index
+String values, including scalar string variables and quoted string literals,
+support SuperBASIC-style, one-based inclusive slices: `text$(4 TO 8)`,
+`text$(TO 10)`, `text$(10 TO)`, and `"ahoj"(1 TO 2)`. A single index
 selects one character, and an empty `text$()` selects the whole string. QL/32
 uses start 1 and the string length as the defaults for omitted bounds; an end
 past the length is clipped to the string length. Indices count UTF-8 code
@@ -464,8 +476,8 @@ multi-line structures can be entered incrementally; unresolved procedure and
 function calls are bound when `RUN` compiles the complete program. Unnumbered
 statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
-interactive program. The REPL command processor provides `LOAD`, `SAVE`, and
-`DIR`. `LOAD "path.bas"` accepts either numbered BASIC source or unnumbered
+interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
+`DELETE`, and `RENAME`. `LOAD "path.bas"` accepts either numbered BASIC source or unnumbered
 source. Unnumbered non-empty lines receive line numbers 10, 20, and so on in
 file order; blank lines are skipped. A file cannot mix numbered and unnumbered
 source lines. After loading, use `LIST` to inspect the numbered program and
@@ -478,7 +490,10 @@ For example, `DIR "FFS:/"`, `LOAD "SDC:/mandelbrot.bas"`, and
 colon marks the drive root; paths remain inside that drive, and `..` cannot
 escape its root. A drive prefix can be used by any operation that accepts a
 storage path, including `LOAD`, `SAVE`, `DIR`, `INCLUDE`, `TASK`, and file
-channels. Relative include paths stay on the drive of the including file.
+channels, as well as `DELETE path$` and `RENAME path$,newpath$`. The file
+commands accept quoted paths or string variables. Rename fails if the
+destination already exists; delete applies to files, not directories. Relative
+include paths stay on the drive of the including file.
 Unprefixed paths continue to use the platform's default storage drive.
 Attempting to use a drive that is not mounted reports a storage-unavailable
 error. These names describe logical storage roles; a platform may implement
@@ -648,7 +663,9 @@ call bare `GUPDATE` once to present the batch.
 Prompt expressions must evaluate to strings. Keyboard input
 suspends only its BASIC session and resumes when the UI presenter submits a
 line. File-channel `INPUT` reads one line synchronously and raises an error at
-EOF. Serial and null input endpoints are not implemented yet.
+EOF. Configured serial hardware channels support asynchronous line reads as
+specified in [QL32-HW-001](QL32-HW-001.md); the legacy zero-argument serial
+output endpoint and null channels do not support input.
 
 Exact binary I/O and random access use channel-context forms:
 
@@ -667,6 +684,51 @@ but text operations such as slicing and printing assume UTF-8. `APPEND`
 channels are sequential and cannot be repositioned.
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
+
+## 8.1 Hardware channels and binary memory operations
+
+QL/32 hardware access uses session-owned channel handles. Programs open a
+device with `OPEN`, use common channel operations, and release the endpoint with
+`CLOSE`. The portable runtime validates handles and buffer ownership; platform
+C++ adapters initialize the selected hardware and perform the device operations.
+This API is QL/32-specific. The current Linux/macOS virtual adapter and ESP32
+Arduino profiles implement GPIO, ADC, SPI, I2C, serial, parallel GPIO,
+capacitive touch, and timers. IrDA is reserved but unavailable. See
+[QL32-HW-001](QL32-HW-001.md) for the complete parameter contract and examples.
+
+The scalar operations are `IN(channel)` and `IN(channel, register)`, plus
+`OUT channel, value` and `OUT channel, register, value`. Binary transfer uses
+managed buffers and these signatures:
+
+```basic
+buffer = ALLOC(byteCount)
+POKE buffer, byte1, byte2, byte3
+value = PEEK(buffer)
+word = PEEK_W(buffer)
+long = PEEK_L(buffer)
+POKE_W buffer, word
+POKE_L buffer, long
+count = IOREAD(channel, register, buffer)
+status = IOWRITE(channel, register, buffer)
+XFER #channel, txAddress, txLength, rxAddress, rxLength
+DEALLOC buffer
+```
+
+`PEEK`/`POKE` operate on bytes; `_W` and `_L` operations use native target
+byte order. The byte-list form of `POKE` writes bytes in source order. Device
+transfers never byte-swap. `ALLOC` buffers belong to the current session, are
+bounds-checked, and are released explicitly with `DEALLOC` or automatically
+when the session ends. `IOREAD` returns the number of bytes read or a negative
+error code; `IOWRITE` returns zero on success or a negative error code.
+`XFER` is the raw SPI operation with separate transmit and receive buffers.
+No `IN$` function is defined. `READ$` remains the line-reading form for
+configured serial channels and waits asynchronously for a complete line.
+
+The device-kind constants and common selectors are declared in `ql32.inc`;
+board-specific pin and bus assignments are supplied by board include files.
+Hardware initialization, pin reservation, bus ownership, and rollback on failed
+open are responsibilities of the platform adapters. Scalar `IN` and `OUT` do
+not repeat initialization.
 
 ## 9. UI boundary and deferrals
 

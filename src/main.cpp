@@ -1,5 +1,6 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/platform/linux/directory_channels.hpp"
+#include "ql32/platform/linux/virtual_hardware.hpp"
 #include "ql32/platform/linux/directory_storage.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
 #include "ql32/graphics/windowed_service.hpp"
@@ -40,11 +41,13 @@ int main(int argc, char** argv) {
                 std::filesystem::current_path());
             auto fileChannels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
                 std::filesystem::current_path());
+            auto hardware = std::make_shared<ql32::platform::linux_host::VirtualHardware>();
+            hardware->setSerialLoopback(true);
             auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(
                 fileChannels, [](std::string_view bytes) {
                     std::cout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
                     std::cout.flush();
-                });
+                }, hardware);
             auto ui = std::make_shared<ql32::ui::QueuedService>();
             auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
                 "ql32-screen.ppm");
@@ -66,11 +69,13 @@ int main(int argc, char** argv) {
             std::filesystem::current_path());
         auto fileChannels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(
             std::filesystem::current_path());
+        auto hardware = std::make_shared<ql32::platform::linux_host::VirtualHardware>();
+        hardware->setSerialLoopback(true);
         auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(
             fileChannels, [](std::string_view bytes) {
                 std::cout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
                 std::cout.flush();
-            });
+            }, hardware);
         auto ui = std::make_shared<ql32::ui::QueuedService>();
         auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
             "ql32-screen.ppm");

@@ -129,6 +129,10 @@ public:
     std::vector<ql32::runtime::FileEntry> list(const std::string&) override {
         return {{"demo.bas", 0, false}};
     }
+    bool exists(const std::string&) override { return false; }
+    std::uintmax_t size(const std::string&) override { return 0; }
+    void rename(const std::string&, const std::string&) override {}
+    void remove(const std::string&) override {}
 };
 
 void testDrawingCallsAndSessionOwnership() {

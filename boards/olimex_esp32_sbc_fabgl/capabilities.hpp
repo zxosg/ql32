@@ -16,7 +16,14 @@ constexpr platform::Capabilities capabilities() {
             platform::capabilityBit(platform::ServiceKind::Storage) |
             platform::capabilityBit(platform::ServiceKind::Network) |
             platform::capabilityBit(platform::ServiceKind::Clock) |
-            platform::capabilityBit(platform::ServiceKind::Channels),
+            platform::capabilityBit(platform::ServiceKind::Channels) |
+            platform::capabilityBit(platform::ServiceKind::Gpio) |
+            platform::capabilityBit(platform::ServiceKind::Analog) |
+            platform::capabilityBit(platform::ServiceKind::Buses) |
+            platform::capabilityBit(platform::ServiceKind::Serial) |
+            platform::capabilityBit(platform::ServiceKind::Parallel) |
+            platform::capabilityBit(platform::ServiceKind::CapTouch) |
+            platform::capabilityBit(platform::ServiceKind::Timer),
         platform::inputBit(platform::InputKind::Ps2)
     };
 }

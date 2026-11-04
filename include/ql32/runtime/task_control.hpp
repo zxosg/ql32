@@ -3,7 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
+#include <optional>
 #include <string>
+#include <unordered_map>
+#include <variant>
 #include <vector>
 #include "ql32/runtime/channel.hpp"
 #include "ql32/runtime/error.hpp"
@@ -18,7 +21,9 @@ enum class TaskState {
     Runnable,
     WaitingUi,
     WaitingInput,
+    WaitingChannel,
     WaitingTask,
+    DebugPaused,
     Completed,
     Failed,
     Cancelled
@@ -37,6 +42,44 @@ enum class TaskResultField : std::uint32_t {
     Kind = 5,
     Priority = 6,
     ResumePriority = 7
+};
+
+enum class DebugResumeMode { Continue, StepInto, StepOver };
+using DebugValue = std::variant<double, std::string>;
+
+struct DebugLocation {
+    std::size_t instruction = 0;
+    int sourceLine = 0;
+    int column = 0;
+    int basicLine = 0;
+    std::string procedure;
+};
+
+struct DebugFrameInfo {
+    std::string name;
+    bool function = false;
+    std::unordered_map<std::string, DebugValue> locals;
+};
+
+struct DebugWatchInfo {
+    std::string expression;
+    std::optional<DebugValue> value;
+    std::string error;
+};
+
+struct DebugSnapshot {
+    bool attached = false;
+    bool paused = false;
+    DebugLocation location;
+    std::vector<DebugFrameInfo> frames;
+    std::unordered_map<std::string, DebugValue> globals;
+    std::uint64_t bytecodes = 0;
+    std::uint64_t procedureCalls = 0;
+    std::uint64_t ifTrue = 0;
+    std::uint64_t ifFalse = 0;
+    std::optional<std::uint64_t> freeMemory;
+    std::vector<std::string> trace;
+    std::vector<DebugWatchInfo> watches;
 };
 
 struct ManagedTaskInfo {
@@ -70,6 +113,17 @@ public:
     virtual bool setTaskPriority(TaskId id, std::uint32_t priority) = 0;
     virtual std::vector<ManagedTaskInfo> listTasks() const = 0;
     virtual std::vector<ChannelInfo> listChannels(TaskId id) const = 0;
+    virtual bool debugAttach(TaskId) { return false; }
+    virtual bool debugSetBreakpoint(TaskId, int, bool) { return false; }
+    virtual bool debugResume(TaskId, DebugResumeMode) { return false; }
+    virtual bool debugPause(TaskId) { return false; }
+    virtual bool debugSetDiagnostics(TaskId, bool, bool) { return false; }
+    virtual std::optional<DebugSnapshot> debugInspect(TaskId) const { return std::nullopt; }
+    virtual std::optional<DebugValue> debugEvaluate(TaskId, const std::string&) const {
+        return std::nullopt;
+    }
+    virtual bool debugAddWatch(TaskId, std::string) { return false; }
+    virtual bool debugRemoveWatch(TaskId, const std::string&) { return false; }
 };
 
 inline const char* taskStateName(TaskState state) noexcept {
@@ -77,7 +131,9 @@ inline const char* taskStateName(TaskState state) noexcept {
     case TaskState::Runnable: return "RUNNABLE";
     case TaskState::WaitingUi: return "WAITING_UI";
     case TaskState::WaitingInput: return "WAITING_INPUT";
+    case TaskState::WaitingChannel: return "WAITING_CHANNEL";
     case TaskState::WaitingTask: return "WAITING_TASK";
+    case TaskState::DebugPaused: return "DEBUG_PAUSED";
     case TaskState::Completed: return "COMPLETED";
     case TaskState::Failed: return "FAILED";
     case TaskState::Cancelled: return "CANCELLED";

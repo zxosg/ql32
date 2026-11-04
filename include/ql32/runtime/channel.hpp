@@ -10,6 +10,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include <variant>
 
 #include "ql32/runtime/storage.hpp"
 
@@ -20,9 +21,14 @@ using ChannelId = std::uint64_t;
 
 enum class ChannelMode { Read, Write, Append };
 
-enum class ChannelType { Console, Window, File, Serial, Network, Null };
+enum class ChannelType { Console, Window, File, Serial, Network, Null, Hardware };
 
-enum class ChannelDevice : std::uint64_t { File = 1, Serial = 2, Null = 3, Window = 4 };
+enum class ChannelDevice : std::uint64_t {
+    File = 1, Serial = 2, Null = 3, Window = 4, Gpio = 5, Adc = 6,
+    Spi = 7, I2c = 8, Parallel = 9, Infrared = 10, CapTouch = 11, Timer = 12
+};
+
+using DeviceArgument = std::variant<double, std::string>;
 
 struct ChannelInfo {
     ChannelId handle = 0;
@@ -37,6 +43,7 @@ inline const char* channelTypeName(ChannelType type) noexcept {
     case ChannelType::Serial: return "SERIAL";
     case ChannelType::Network: return "NETWORK";
     case ChannelType::Null: return "NULL";
+    case ChannelType::Hardware: return "HARDWARE";
     }
     return "UNKNOWN";
 }
@@ -66,8 +73,39 @@ public:
                                 "OPEN mode must be READ, WRITE, or APPEND");
         return open(session, parameters[0], fileMode);
     }
+    virtual ChannelId openTypedDevice(SessionId session, ChannelDevice device,
+                                     const std::vector<DeviceArgument>& parameters) {
+        std::vector<std::string> strings;
+        strings.reserve(parameters.size());
+        for (const auto& value : parameters) {
+            if (const auto* text = std::get_if<std::string>(&value)) strings.push_back(*text);
+            else strings.push_back(std::to_string(std::get<double>(value)));
+        }
+        return openDevice(session, device, strings);
+    }
+    virtual double readValue(SessionId, ChannelId, std::optional<double> = std::nullopt) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "device input is unavailable");
+    }
+    virtual void writeValue(SessionId, ChannelId, double,
+                            std::optional<double> = std::nullopt) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "device output is unavailable");
+    }
+    virtual std::size_t readDeviceBytes(SessionId, ChannelId,
+                                        std::optional<double>, std::uint8_t*, std::size_t) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "device byte input is unavailable");
+    }
+    virtual void writeDeviceBytes(SessionId, ChannelId, std::optional<double>,
+                                  const std::uint8_t*, std::size_t) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "device byte output is unavailable");
+    }
+    virtual void transfer(SessionId, ChannelId, const std::uint8_t*, std::size_t,
+                          std::uint8_t*, std::size_t) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "device transfer is unavailable");
+    }
     virtual std::optional<std::string> readLine(SessionId session,
                                                 ChannelId channel) = 0;
+    virtual bool lineAvailable(SessionId, ChannelId) { return false; }
+    virtual bool isHardwareChannel(SessionId, ChannelId) const { return false; }
     // Binary transfers preserve every byte, including NUL and invalid UTF-8.
     // Seek positions are zero-based absolute offsets and are supported only
     // by seekable endpoints.
@@ -88,6 +126,29 @@ public:
     virtual std::vector<ChannelInfo> listOpen(SessionId) { return {}; }
 };
 
+// Hardware implementations are injected by platform startup. The BASIC VM
+// sees only the portable channel operations above, never vendor GPIO/bus APIs.
+class HardwareChannelService {
+public:
+    virtual ~HardwareChannelService() = default;
+    virtual ChannelId open(SessionId, ChannelDevice,
+                           const std::vector<DeviceArgument>&) = 0;
+    virtual double readValue(SessionId, ChannelId, std::optional<double>) = 0;
+    virtual void writeValue(SessionId, ChannelId, double, std::optional<double>) = 0;
+    virtual std::size_t readBytes(SessionId, ChannelId, std::optional<double>,
+                                  std::uint8_t*, std::size_t) = 0;
+    virtual void writeBytes(SessionId, ChannelId, std::optional<double>,
+                            const std::uint8_t*, std::size_t) = 0;
+    virtual void transfer(SessionId, ChannelId, const std::uint8_t*, std::size_t,
+                          std::uint8_t*, std::size_t) = 0;
+    virtual std::optional<std::string> readLine(SessionId, ChannelId) = 0;
+    virtual bool lineAvailable(SessionId, ChannelId) = 0;
+    virtual void writeText(SessionId, ChannelId, std::string_view) = 0;
+    virtual void close(SessionId, ChannelId) = 0;
+    virtual void closeSession(SessionId) = 0;
+    virtual ChannelType type(ChannelId) const = 0;
+};
+
 // Central per-session handle registry. File operations are forwarded to the
 // platform file adapter; serial and null endpoints live in the registry.
 class ChannelRegistry final : public ChannelService {
@@ -95,15 +156,32 @@ public:
     using SerialWriter = std::function<void(std::string_view)>;
 
     explicit ChannelRegistry(std::shared_ptr<ChannelService> files,
-                             SerialWriter serialWriter = {});
+                             SerialWriter serialWriter = {},
+                             std::shared_ptr<HardwareChannelService> hardware = {});
     ~ChannelRegistry() override;
 
     ChannelId open(SessionId session, const std::string& path,
                    ChannelMode mode) override;
     ChannelId openDevice(SessionId session, ChannelDevice device,
                          const std::vector<std::string>& parameters) override;
+    ChannelId openTypedDevice(SessionId session, ChannelDevice device,
+                              const std::vector<DeviceArgument>& parameters) override;
+    double readValue(SessionId session, ChannelId channel,
+                     std::optional<double> reg = std::nullopt) override;
+    void writeValue(SessionId session, ChannelId channel, double value,
+                    std::optional<double> reg = std::nullopt) override;
+    std::size_t readDeviceBytes(SessionId session, ChannelId channel,
+                                std::optional<double> reg, std::uint8_t* buffer,
+                                std::size_t capacity) override;
+    void writeDeviceBytes(SessionId session, ChannelId channel,
+                          std::optional<double> reg, const std::uint8_t* buffer,
+                          std::size_t length) override;
+    void transfer(SessionId session, ChannelId channel, const std::uint8_t* tx,
+                  std::size_t txLength, std::uint8_t* rx, std::size_t rxLength) override;
     std::optional<std::string> readLine(SessionId session,
                                         ChannelId channel) override;
+    bool lineAvailable(SessionId session, ChannelId channel) override;
+    bool isHardwareChannel(SessionId session, ChannelId channel) const override;
     std::string readBytes(SessionId session, ChannelId channel,
                           std::size_t count) override;
     void writeBytes(SessionId session, ChannelId channel,
@@ -124,6 +202,7 @@ private:
     };
     std::shared_ptr<ChannelService> files_;
     SerialWriter serialWriter_;
+    std::shared_ptr<HardwareChannelService> hardware_;
     std::unordered_map<ChannelId, Endpoint> endpoints_;
     ChannelId nextId_ = 2;
     mutable std::mutex mutex_;

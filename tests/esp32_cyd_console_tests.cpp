@@ -32,12 +32,17 @@ void testScrollingAndClear() {
     std::ostream output(&console);
     for (int line = 0; line < 10; ++line) output << "line" << line << '\n';
     int regionClears = 0;
-    for (const auto& call : display.calls)
-        if (call.name == "fill_rect") ++regionClears;
-    require(regionClears == 1,
+    for (const auto& call : display.calls) {
+        if (call.name != "fill_rect") continue;
+        ++regionClears;
+        require(call.values.size() == 5 && call.values[1] >= 176 &&
+                    call.values[1] + call.values[3] <= 240,
+                "scrolling console repainted outside its text strip");
+    }
+    require(regionClears == 4,
             "scrolling console repainted an opaque rectangle over graphics");
     console.clear();
-    require(display.calls.back().name == "fill_rect" && regionClears + 1 == 2,
+    require(display.calls.back().name == "fill_rect" && regionClears + 1 == 5,
             "clearing console did not clear its display region");
 }
 

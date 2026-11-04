@@ -383,11 +383,42 @@ void printSeparator(PrintSeparator separator, std::ostream& output, std::size_t&
     }
 }
 
+const char* opcodeName(Op op) {
+    switch (op) {
+    case Op::Push: return "PUSH"; case Op::Load: return "LOAD"; case Op::Store: return "STORE";
+    case Op::Add: return "ADD"; case Op::Subtract: return "SUBTRACT";
+    case Op::Multiply: return "MULTIPLY"; case Op::Divide: return "DIVIDE";
+    case Op::IntegerDivide: return "INTEGER_DIVIDE"; case Op::Modulo: return "MODULO";
+    case Op::Power: return "POWER"; case Op::Equal: return "EQUAL";
+    case Op::NotEqual: return "NOT_EQUAL"; case Op::Less: return "LESS";
+    case Op::LessEqual: return "LESS_EQUAL"; case Op::Greater: return "GREATER";
+    case Op::GreaterEqual: return "GREATER_EQUAL"; case Op::And: return "AND";
+    case Op::Or: return "OR"; case Op::Xor: return "XOR"; case Op::Negate: return "NEGATE";
+    case Op::Not: return "NOT"; case Op::PrintBegin: return "PRINT_BEGIN";
+    case Op::PrintChannel: return "PRINT_CHANNEL"; case Op::Print: return "PRINT";
+    case Op::PrintSeparator: return "PRINT_SEPARATOR"; case Op::PrintEnd: return "PRINT_END";
+    case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
+    case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
+    case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Input: return "INPUT";
+    case Op::JumpIfFalse: return "JUMP_IF_FALSE"; case Op::Jump: return "JUMP";
+    case Op::ForInit: return "FOR_INIT"; case Op::ForNext: return "FOR_NEXT";
+    case Op::LoopNext: return "LOOP_NEXT"; case Op::ExitLoop: return "EXIT_LOOP";
+    case Op::Call: return "CALL"; case Op::Return: return "RETURN";
+    case Op::FunctionEnd: return "FUNCTION_END"; case Op::DimArray: return "DIM_ARRAY";
+    case Op::ArrayGet: return "ARRAY_GET"; case Op::ArraySet: return "ARRAY_SET";
+    case Op::StringSlice: return "STRING_SLICE"; case Op::PushArrayRef: return "PUSH_ARRAY_REF";
+    case Op::SelectBegin: return "SELECT_BEGIN"; case Op::SelectMatch: return "SELECT_MATCH";
+    case Op::SelectRemainder: return "SELECT_REMAINDER"; case Op::SelectEnd: return "SELECT_END";
+    }
+    return "UNKNOWN";
+}
+
 } // namespace
 
 void Interpreter::execute(const std::string& source, std::ostream& output,
                           runtime::CancellationToken stop) {
-    if (executeResumable(source, output, stop) == ExecutionStatus::Suspended)
+    const auto status = executeResumable(source, output, stop);
+    if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel)
         throw std::runtime_error("execution suspended; use executeResumable() and resume()");
 }
 
@@ -414,6 +445,24 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
             execution_->code = detail::compileSource(source);
         }
         verifyBytecode(execution_->code);
+        execution_->debuggerAttached = debuggerAttached_;
+        execution_->debugPaused = debugPauseRequested_;
+        execution_->diagnosticsEnabled = diagnosticsEnabled_;
+        execution_->traceEnabled = traceEnabled_;
+        const bool numbered = std::any_of(execution_->code.begin(), execution_->code.end(),
+            [](const Instruction& instruction) {
+                return instruction.statementStart && instruction.basicLine != 0;
+            });
+        for (const auto& [line, enabled] : pendingBreakpoints_) {
+            for (std::size_t address = 0; address < execution_->code.size(); ++address) {
+                const Instruction& instruction = execution_->code[address];
+                if (!instruction.statementStart ||
+                    (numbered ? instruction.basicLine != line : instruction.line != line)) continue;
+                if (enabled) execution_->breakpoints.insert(address);
+                else execution_->breakpoints.erase(address);
+                break;
+            }
+        }
         preparingProgram = false;
         if (execution_->code.cpuFrequencyMHz != 0 && cpuFrequency_ &&
             !cpuFrequency_->setFrequencyMHz(execution_->code.cpuFrequencyMHz))
@@ -510,6 +559,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     auto& arrays = state.arrays;
     auto& selectStates = state.selectStates;
     auto& pc = state.pc;
+    if (state.debuggerAttached && state.debugPaused)
+        return ExecutionStatus::DebugPaused;
     const bool singlePrecision = code.numericPrecision == detail::NumericPrecision::Single;
     const Instruction* activeInstruction = pc == 0 ? nullptr : &code[pc - 1];
     auto quantizeNumeric = [&](double value, const Instruction* at = nullptr) {
@@ -671,11 +722,37 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
         if (instructionBudget != 0 && instructionsExecuted >= instructionBudget)
             return ExecutionStatus::Yielded;
+        const Instruction& nextInstruction = code[pc];
+        if (state.debuggerAttached && nextInstruction.statementStart) {
+            if (state.skipBreakpointAddress == pc) {
+                state.skipBreakpointAddress = static_cast<std::size_t>(-1);
+            } else if (state.debugMode != runtime::DebugResumeMode::Continue &&
+                       state.stepStarted &&
+                       (state.debugMode == runtime::DebugResumeMode::StepInto ||
+                        callFrames.size() <= state.stepCallDepth)) {
+                state.debugPaused = true;
+                return ExecutionStatus::DebugPaused;
+            } else if (state.debugMode == runtime::DebugResumeMode::Continue &&
+                       state.breakpoints.count(pc) != 0) {
+                state.debugPaused = true;
+                return ExecutionStatus::DebugPaused;
+            }
+        }
         const auto& instruction = code[pc++];
         activeInstruction = &instruction;
         ++instructionsExecuted;
+        if (state.diagnosticsEnabled) ++state.bytecodes;
+        if (state.traceEnabled) {
+            state.trace.push_back(std::to_string(instruction.line) + ":" +
+                std::to_string(instruction.column) + " " + opcodeName(instruction.op) +
+                (instruction.name.empty() ? "" : " " + instruction.name));
+            if (state.trace.size() > 32) state.trace.erase(state.trace.begin());
+        }
+        if (state.debugMode != runtime::DebugResumeMode::Continue &&
+            !state.stepStarted) state.stepStarted = true;
         switch (instruction.op) {
         case Op::Call: {
+            if (state.diagnosticsEnabled && !instruction.builtin) ++state.procedureCalls;
             std::vector<StackEntry> arguments(instruction.argCount);
             for (std::size_t i = instruction.argCount; i-- > 0;)
                 arguments[i] = popEntry();
@@ -800,6 +877,72 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 }
                 if (instruction.name == "ERRX$") {
                     pushValue(errorDetail_);
+                    break;
+                }
+                if (instruction.name == "VAL") {
+                    const auto* text = std::get_if<std::string>(&arguments[0]);
+                    if (!text) runtimeError(instruction, "VAL requires a numeric string");
+                    std::size_t first = 0;
+                    std::size_t last = text->size();
+                    while (first < last && std::isspace(static_cast<unsigned char>((*text)[first])))
+                        ++first;
+                    while (last > first && std::isspace(static_cast<unsigned char>((*text)[last - 1])))
+                        --last;
+                    std::size_t index = first;
+                    if (index < last && ((*text)[index] == '+' || (*text)[index] == '-')) ++index;
+                    bool digits = false;
+                    while (index < last && std::isdigit(static_cast<unsigned char>((*text)[index]))) {
+                        digits = true;
+                        ++index;
+                    }
+                    if (index < last && (*text)[index] == '.') {
+                        ++index;
+                        while (index < last && std::isdigit(static_cast<unsigned char>((*text)[index]))) {
+                            digits = true;
+                            ++index;
+                        }
+                    }
+                    if (index < last && ((*text)[index] == 'e' || (*text)[index] == 'E')) {
+                        ++index;
+                        if (index < last && ((*text)[index] == '+' || (*text)[index] == '-')) ++index;
+                        const std::size_t exponentStart = index;
+                        while (index < last && std::isdigit(static_cast<unsigned char>((*text)[index])))
+                            ++index;
+                        if (index == exponentStart) digits = false;
+                    }
+                    if (!digits || index != last)
+                        runtimeError(instruction, "VAL requires one complete numeric value");
+                    const std::string numericText = text->substr(first, last - first);
+                    char* end = nullptr;
+                    const double number = std::strtod(numericText.c_str(), &end);
+                    if (end != numericText.c_str() + numericText.size() || !std::isfinite(number))
+                        runtimeError(instruction, "VAL numeric value is invalid or out of range");
+                    pushValue(number);
+                    break;
+                }
+                if (instruction.name == "EVAL" || instruction.name == "EVAL$") {
+                    const auto* expressionText = std::get_if<std::string>(&arguments[0]);
+                    if (!expressionText) runtimeError(instruction, "EVAL requires an expression string");
+                    if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
+                    detail::InstructionSequence expression;
+                    try {
+                        expression = detail::compileExpression(*expressionText, code);
+                    } catch (const runtime::Error& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                    const std::size_t start = code.size();
+                    code.insert(code.end(), expression.begin(), expression.end());
+                    Instruction finish{Op::Return, 0.0, {}, instruction.line, instruction.column};
+                    finish.expectsValue = true;
+                    code.push_back(std::move(finish));
+                    RuntimeFrame frame;
+                    frame.returnAddress = pc;
+                    frame.function = true;
+                    frame.dynamicEvaluation = true;
+                    frame.stringifyResult = instruction.name == "EVAL$";
+                    frame.dynamicCodeStart = start;
+                    callFrames.push_back(std::move(frame));
+                    pc = start;
                     break;
                 }
                 if (instruction.name == "SIN" || instruction.name == "COS" ||
@@ -1451,35 +1594,90 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         runtimeError(instruction, "invalid channel number");
                     return static_cast<runtime::ChannelId>(value);
                 };
+                const auto integerArgument = [&](std::size_t index, const char* label,
+                                                 double minimum, double maximum) {
+                    const auto* number = std::get_if<double>(&arguments[index]);
+                    if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
+                        *number < minimum || *number > maximum)
+                        runtimeError(instruction, label);
+                    return static_cast<std::uint64_t>(*number);
+                };
                 if (instruction.name == "OPEN") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "channel service unavailable");
                     runtime::ChannelDevice device = runtime::ChannelDevice::File;
-                    std::vector<std::string> parameters;
+                    std::vector<runtime::DeviceArgument> parameters;
                     if (const auto* deviceNumber = std::get_if<double>(&arguments[0])) {
                         if (!std::isfinite(*deviceNumber) ||
                             std::trunc(*deviceNumber) != *deviceNumber ||
                             *deviceNumber < static_cast<double>(runtime::ChannelDevice::File) ||
-                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Window))
+                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Timer))
                             runtimeError(instruction, "invalid OPEN device kind");
                         device = static_cast<runtime::ChannelDevice>(
                             static_cast<std::uint64_t>(*deviceNumber));
-                        const std::size_t expected = device == runtime::ChannelDevice::File ? 3 : 1;
-                        if (arguments.size() != expected)
-                            runtimeError(instruction, "incorrect OPEN parameter count");
-                        if (device == runtime::ChannelDevice::File) {
-                            parameters.push_back(textArgument(1));
-                            parameters.push_back(textArgument(2));
+                        for (std::size_t index = 1; index < arguments.size(); ++index) {
+                            if (const auto* text = std::get_if<std::string>(&arguments[index]))
+                                parameters.emplace_back(*text);
+                            else parameters.emplace_back(std::get<double>(arguments[index]));
                         }
                     } else {
                         if (arguments.size() != 2)
                             runtimeError(instruction, "legacy OPEN requires a path and mode");
-                        parameters.push_back(textArgument(0));
-                        parameters.push_back(textArgument(1));
+                        parameters.emplace_back(textArgument(0));
+                        parameters.emplace_back(textArgument(1));
                     }
-                    const auto id = channels_->openDevice(session_id_, device, parameters);
+                    const auto id = channels_->openTypedDevice(session_id_, device, parameters);
                     pushValue(static_cast<double>(id));
+                } else if (instruction.name == "IN") {
+                    if (!channels_) throw runtime::ServiceError(
+                        runtime::ServiceErrorCode::Unavailable, "channel service unavailable");
+                    const auto channel = resolveChannel(channelArgument(0));
+                    std::optional<double> reg;
+                    if (arguments.size() == 2) reg = std::get<double>(arguments[1]);
+                    pushValue(channels_->readValue(session_id_, channel, reg));
+                } else if (instruction.name == "ALLOC") {
+                    const auto size = integerArgument(0, "ALLOC size must be a positive integer",
+                                                      1, 16 * 1024 * 1024);
+                    pushValue(static_cast<double>(buffers_.allocate(static_cast<std::size_t>(size))));
+                } else if (instruction.name == "PEEK" || instruction.name == "PEEK_W" ||
+                           instruction.name == "PEEK_L") {
+                    const auto address = integerArgument(0, "invalid buffer address", 0,
+                        9007199254740991.0);
+                    const std::size_t width = instruction.name == "PEEK" ? 1 :
+                        instruction.name == "PEEK_W" ? 2 : 4;
+                    const auto value = width == 1 ? buffers_.peek(address) :
+                        buffers_.peekWord(address, width);
+                    pushValue(static_cast<double>(value));
+                } else if (instruction.name == "IOREAD" || instruction.name == "IOWRITE") {
+                    if (!channels_) throw runtime::ServiceError(
+                        runtime::ServiceErrorCode::Unavailable, "channel service unavailable");
+                    try {
+                        const auto channel = resolveChannel(channelArgument(0));
+                        const bool hasRegister = arguments.size() == 3;
+                        const std::optional<double> reg = hasRegister ?
+                            std::optional<double>(std::get<double>(arguments[1])) : std::nullopt;
+                        const std::size_t addressIndex = hasRegister ? 2 : 1;
+                        const auto address = integerArgument(addressIndex,
+                            "invalid buffer address", 0, 9007199254740991.0);
+                        const auto size = buffers_.allocationSize(address);
+                        std::vector<std::uint8_t> bytes(size);
+                        if (instruction.name == "IOWRITE") {
+                            buffers_.read(address, bytes.data(), bytes.size());
+                            channels_->writeDeviceBytes(session_id_, channel, reg,
+                                bytes.data(), bytes.size());
+                            pushValue(0.0);
+                        } else {
+                            const auto count = channels_->readDeviceBytes(session_id_, channel,
+                                reg, bytes.data(), bytes.size());
+                            if (count > bytes.size()) runtimeError(instruction,
+                                "device returned more bytes than the buffer can hold");
+                            buffers_.write(address, bytes.data(), count);
+                            pushValue(static_cast<double>(count));
+                        }
+                    } catch (const runtime::ServiceError& error) {
+                        pushValue(-static_cast<double>(error.languageCode()));
+                    }
                 } else if (instruction.name == "READ$") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -1489,6 +1687,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (inputChannel <= 1)
                         runtimeError(instruction, "selected channel does not support line input");
                     const auto line = channels_->readLine(session_id_, inputChannel);
+                    if (!line && channels_->isHardwareChannel(session_id_, inputChannel)) {
+                        state.pendingChannelRead = inputChannel;
+                        stack.emplace_back(static_cast<double>(inputChannel));
+                        --pc;
+                        return ExecutionStatus::WaitingChannel;
+                    }
+                    state.pendingChannelRead.reset();
                     pushValue(line ? Value(*line) : Value(std::string{}));
                 } else if (instruction.name == "EOF") {
                     if (!channels_)
@@ -1516,6 +1721,55 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     }
                 } else if (instruction.name == "CLOSE") {
                     closeChannel(channelArgument(0));
+                } else if (instruction.name == "DEALLOC") {
+                    buffers_.deallocate(integerArgument(0, "invalid buffer address", 0,
+                        9007199254740991.0));
+                } else if (instruction.name == "POKE" || instruction.name == "POKE_W" ||
+                           instruction.name == "POKE_L") {
+                    const auto address = integerArgument(0, "invalid buffer address", 0,
+                        9007199254740991.0);
+                    const std::size_t width = instruction.name == "POKE" ? 1 :
+                        instruction.name == "POKE_W" ? 2 : 4;
+                    if (width > 1) {
+                        const auto value = integerArgument(1, "POKE value is out of range", 0,
+                            width == 2 ? 65535 : 4294967295.0);
+                        buffers_.pokeWord(address, width, value);
+                    } else {
+                        for (std::size_t index = 1; index < arguments.size(); ++index) {
+                            const auto value = integerArgument(index,
+                                "POKE byte must be an integer from 0 to 255", 0, 255);
+                            buffers_.poke(address + index - 1, static_cast<std::uint8_t>(value));
+                        }
+                    }
+                } else if (instruction.name == "OUT") {
+                    if (!channels_) throw runtime::ServiceError(
+                        runtime::ServiceErrorCode::Unavailable, "channel service unavailable");
+                    const auto channel = resolveChannel(channelArgument(0));
+                    const bool hasRegister = arguments.size() == 3;
+                    const std::optional<double> reg = hasRegister ?
+                        std::optional<double>(std::get<double>(arguments[1])) : std::nullopt;
+                    const double value = std::get<double>(arguments[hasRegister ? 2 : 1]);
+                    channels_->writeValue(session_id_, channel, value, reg);
+                } else if (instruction.name == "XFER") {
+                    if (!channels_ || !selectedChannel)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "hardware channel service unavailable");
+                    const auto channel = resolveChannel(*selectedChannel);
+                    const auto txAddress = integerArgument(0, "invalid transmit buffer address", 0,
+                        9007199254740991.0);
+                    const auto txLength = integerArgument(1, "invalid transmit length", 0,
+                        16 * 1024 * 1024);
+                    const auto rxAddress = integerArgument(2, "invalid receive buffer address", 0,
+                        9007199254740991.0);
+                    const auto rxLength = integerArgument(3, "invalid receive length", 0,
+                        16 * 1024 * 1024);
+                    std::vector<std::uint8_t> tx(static_cast<std::size_t>(txLength));
+                    std::vector<std::uint8_t> rx(static_cast<std::size_t>(rxLength));
+                    if (txLength != 0) buffers_.read(txAddress, tx.data(), tx.size());
+                    if (rxLength != 0) buffers_.write(rxAddress, rx.data(), rx.size());
+                    channels_->transfer(session_id_, channel, tx.data(), tx.size(),
+                                        rx.data(), rx.size());
+                    if (rxLength != 0) buffers_.write(rxAddress, rx.data(), rx.size());
                 }
                 break;
             }
@@ -1523,6 +1777,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             RuntimeFrame frame;
             frame.returnAddress = pc;
             frame.function = instruction.expectsValue;
+            frame.name = instruction.name;
             for (std::size_t i = 0; i < instruction.parameters.size(); ++i) {
                 const std::string& parameter = instruction.parameters[i];
                 if (const auto* array = std::get_if<ArrayReference>(&arguments[i])) {
@@ -1565,7 +1820,21 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             pc = frame.returnAddress;
             const bool returnsValue = frame.function;
+            const bool dynamicEvaluation = frame.dynamicEvaluation;
+            const bool stringifyResult = frame.stringifyResult;
+            const std::size_t dynamicCodeStart = frame.dynamicCodeStart;
+            if (dynamicEvaluation) {
+                if (stringifyResult) {
+                    if (const auto* number = std::get_if<double>(&result))
+                        result = formatNumber(*number);
+                } else if (!std::holds_alternative<double>(result)) {
+                    runtimeError(instruction, "EVAL expression must return a number");
+                }
+            }
             callFrames.pop_back();
+            if (dynamicEvaluation)
+                code.erase(code.begin() + static_cast<std::ptrdiff_t>(dynamicCodeStart),
+                           code.end());
             if (returnsValue) pushValue(std::move(result));
             break;
         }
@@ -1778,7 +2047,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             pc = instruction.target;
             break;
         case Op::JumpIfFalse:
-            if (numeric(pop(), instruction) == 0) pc = instruction.target;
+            if (numeric(pop(), instruction) == 0) {
+                if (state.diagnosticsEnabled) ++state.ifFalse;
+                pc = instruction.target;
+            } else if (state.diagnosticsEnabled) ++state.ifTrue;
             break;
         case Op::Jump:
             pc = instruction.target;
@@ -1786,14 +2058,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         case Op::Push: pushValue(instruction.value); break;
         case Op::PushArrayRef: stack.emplace_back(ArrayReference{instruction.name}); break;
         case Op::Load: {
-            if (!callFrames.empty()) {
-                const auto local = callFrames.back().locals.find(instruction.name);
-                if (local != callFrames.back().locals.end()) {
+            bool foundLocal = false;
+            for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
+                if (frame->dynamicEvaluation) continue;
+                const auto local = frame->locals.find(instruction.name);
+                if (local != frame->locals.end()) {
                     pushValue(local->second,
                               !instruction.name.empty() && instruction.name.back() == '%');
-                    break;
+                    foundLocal = true;
                 }
+                break;
             }
+            if (foundLocal) break;
             const auto found = variables_.find(instruction.name);
             if (found != variables_.end()) {
                 pushValue(found->second,
@@ -2105,6 +2381,310 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         }
     }
     return ExecutionStatus::Completed;
+}
+
+bool Interpreter::debugAttach() noexcept {
+    debuggerAttached_ = true;
+    if (execution_) {
+        execution_->debuggerAttached = true;
+        execution_->debugPaused = true;
+    } else {
+        debugPauseRequested_ = true;
+    }
+    return true;
+}
+
+bool Interpreter::debugSetBreakpoint(int line, bool enabled) {
+    if (line < 1 || line > 32767) return false;
+    if (!execution_) {
+        auto found = std::find_if(pendingBreakpoints_.begin(), pendingBreakpoints_.end(),
+            [line](const auto& item) { return item.first == line; });
+        if (found == pendingBreakpoints_.end()) pendingBreakpoints_.emplace_back(line, enabled);
+        else found->second = enabled;
+        if (enabled) debugPauseRequested_ = false;
+        return true;
+    }
+    const bool numbered = std::any_of(execution_->code.begin(), execution_->code.end(),
+        [](const Instruction& instruction) {
+            return instruction.statementStart && instruction.basicLine != 0;
+        });
+    bool matched = false;
+    for (std::size_t address = 0; address < execution_->code.size(); ++address) {
+        const Instruction& instruction = execution_->code[address];
+        if (!instruction.statementStart ||
+            (numbered ? instruction.basicLine != line : instruction.line != line)) continue;
+        matched = true;
+        if (enabled) execution_->breakpoints.insert(address);
+        else execution_->breakpoints.erase(address);
+        break;
+    }
+    return matched;
+}
+
+bool Interpreter::debugResume(runtime::DebugResumeMode mode) {
+    if (!execution_ || !execution_->debuggerAttached || !execution_->debugPaused)
+        return false;
+    execution_->debugPaused = false;
+    debugPauseRequested_ = false;
+    execution_->debugMode = mode;
+    execution_->stepCallDepth = execution_->callFrames.size();
+    execution_->stepStarted = false;
+    execution_->skipBreakpointAddress = execution_->pc;
+    return true;
+}
+
+bool Interpreter::debugPause() noexcept {
+    if (!execution_ || !debuggerAttached_) return false;
+    execution_->debugPaused = true;
+    return true;
+}
+
+void Interpreter::debugSetDiagnostics(bool enabled, bool trace) noexcept {
+    diagnosticsEnabled_ = enabled;
+    traceEnabled_ = enabled && trace;
+    if (execution_) {
+        execution_->diagnosticsEnabled = diagnosticsEnabled_;
+        execution_->traceEnabled = traceEnabled_;
+    }
+}
+
+bool Interpreter::channelReadReady() const {
+    if (!execution_ || !execution_->pendingChannelRead || !channels_) return false;
+    try {
+        return channels_->lineAvailable(session_id_, *execution_->pendingChannelRead);
+    } catch (...) {
+        return true;
+    }
+}
+
+std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
+    if (!debuggerAttached_) return std::nullopt;
+    runtime::DebugSnapshot result;
+    result.attached = true;
+    result.paused = execution_ && execution_->debugPaused;
+    for (const auto& [name, value] : variables_) result.globals.emplace(name, value);
+    if (!execution_) return result;
+    const detail::VMExecutionState& state = *execution_;
+    result.bytecodes = state.bytecodes;
+    result.procedureCalls = state.procedureCalls;
+    result.ifTrue = state.ifTrue;
+    result.ifFalse = state.ifFalse;
+    result.trace = state.trace;
+    if (memory_) result.freeMemory = memory_->freeBytes();
+    const std::size_t address = std::min(state.pc, state.code.size());
+    result.location.instruction = address;
+    if (!state.callFrames.empty())
+        result.location.procedure = state.callFrames.back().name;
+    if (address < state.code.size()) {
+        const detail::Instruction& at = state.code[address];
+        result.location.sourceLine = at.line;
+        result.location.column = at.column;
+        result.location.basicLine = at.basicLine;
+    } else if (address != 0 && address <= state.code.size()) {
+        const detail::Instruction& at = state.code[address - 1];
+        result.location.sourceLine = at.line;
+        result.location.column = at.column;
+        result.location.basicLine = at.basicLine;
+    }
+    for (const auto& frame : state.callFrames) {
+        runtime::DebugFrameInfo view;
+        view.name = frame.name;
+        view.function = frame.function;
+        for (const auto& [name, value] : frame.locals) view.locals.emplace(name, value);
+        result.frames.push_back(std::move(view));
+    }
+    for (const std::string& expression : debugWatches_) {
+        runtime::DebugWatchInfo watch;
+        watch.expression = expression;
+        try {
+            watch.value = debugEvaluate(expression);
+            if (!watch.value) watch.error = "task is not paused";
+        } catch (const std::exception& error) {
+            watch.error = error.what();
+        }
+        result.watches.push_back(std::move(watch));
+    }
+    return result;
+}
+
+std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
+    const std::string& expression) const {
+    if (!execution_ || !execution_->debuggerAttached || !execution_->debugPaused)
+        return std::nullopt;
+    const auto code = detail::compileExpression(expression, execution_->code);
+    std::vector<runtime::DebugValue> values;
+    const auto popValue = [&]() -> runtime::DebugValue {
+        if (values.empty()) throw std::runtime_error("debug EVAL stack underflow");
+        auto value = std::move(values.back());
+        values.pop_back();
+        return value;
+    };
+    const auto number = [](const runtime::DebugValue& value) {
+        const auto* result = std::get_if<double>(&value);
+        if (!result) throw std::runtime_error("debug EVAL requires a numeric value");
+        return *result;
+    };
+    for (const detail::Instruction& instruction : code) {
+        using detail::Op;
+        switch (instruction.op) {
+        case Op::Push:
+            if (const auto* literal = std::get_if<double>(&instruction.value)) {
+                const double rounded = execution_->code.numericPrecision ==
+                    detail::NumericPrecision::Single ?
+                    static_cast<double>(static_cast<float>(*literal)) : *literal;
+                values.emplace_back(rounded);
+            } else values.push_back(instruction.value);
+            break;
+        case Op::Load: {
+            bool found = false;
+            for (auto frame = execution_->callFrames.rbegin();
+                 frame != execution_->callFrames.rend(); ++frame) {
+                if (frame->dynamicEvaluation) continue;
+                const auto local = frame->locals.find(instruction.name);
+                if (local != frame->locals.end()) {
+                    values.push_back(local->second);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                const auto global = variables_.find(instruction.name);
+                if (global != variables_.end()) values.push_back(global->second);
+                else {
+                    const auto constant = execution_->code.constants.find(instruction.name);
+                    if (constant == execution_->code.constants.end())
+                        throw std::runtime_error("unknown variable in debug EVAL: " + instruction.name);
+                    values.push_back(constant->second);
+                }
+            }
+            break;
+        }
+        case Op::ArrayGet: {
+            std::string name = instruction.name;
+            for (auto frame = execution_->callFrames.rbegin();
+                 frame != execution_->callFrames.rend(); ++frame) {
+                const auto alias = frame->arrayAliases.find(name);
+                if (alias != frame->arrayAliases.end()) { name = alias->second; break; }
+            }
+            const auto array = execution_->arrays.find(name);
+            if (array == execution_->arrays.end())
+                throw std::runtime_error("array is not available in debug EVAL");
+            std::size_t offset = 0, stride = 1;
+            std::vector<std::size_t> indexes(instruction.rank);
+            for (std::size_t i = instruction.rank; i-- > 0;) {
+                const double index = number(popValue());
+                if (!std::isfinite(index) || std::trunc(index) != index || index < 0 ||
+                    index >= static_cast<double>(array->second.lengths.at(i)))
+                    throw std::runtime_error("debug EVAL array index out of bounds");
+                indexes[i] = static_cast<std::size_t>(index);
+            }
+            for (std::size_t i = instruction.rank; i-- > 0;) {
+                offset += indexes[i] * stride;
+                stride *= array->second.lengths[i];
+            }
+            values.push_back(array->second.values.at(offset));
+            break;
+        }
+        case Op::Negate: values.emplace_back(-number(popValue())); break;
+        case Op::Not: values.emplace_back(number(popValue()) == 0 ? 1.0 : 0.0); break;
+        case Op::Add: case Op::Subtract: case Op::Multiply: case Op::Divide:
+        case Op::IntegerDivide: case Op::Modulo: case Op::Power:
+        case Op::Equal: case Op::NotEqual: case Op::Less: case Op::LessEqual:
+        case Op::Greater: case Op::GreaterEqual: case Op::And: case Op::Or: case Op::Xor: {
+            const auto right = popValue();
+            const auto left = popValue();
+            if (instruction.op == Op::Add && std::holds_alternative<std::string>(left) &&
+                std::holds_alternative<std::string>(right)) {
+                values.emplace_back(std::get<std::string>(left) + std::get<std::string>(right));
+                break;
+            }
+            if (instruction.op == Op::Equal || instruction.op == Op::NotEqual) {
+                if (left.index() != right.index()) throw std::runtime_error("debug EVAL type mismatch");
+                bool equal = left == right;
+                values.emplace_back((instruction.op == Op::Equal ? equal : !equal) ? 1.0 : 0.0);
+                break;
+            }
+            if (instruction.op == Op::Less || instruction.op == Op::LessEqual ||
+                instruction.op == Op::Greater || instruction.op == Op::GreaterEqual) {
+                if (std::holds_alternative<std::string>(left) ||
+                    std::holds_alternative<std::string>(right))
+                    throw std::runtime_error("debug EVAL relational comparison requires numbers");
+                const double a = number(left), b = number(right);
+                const bool result = instruction.op == Op::Less ? a < b :
+                    instruction.op == Op::LessEqual ? a <= b :
+                    instruction.op == Op::Greater ? a > b : a >= b;
+                values.emplace_back(result ? 1.0 : 0.0);
+                break;
+            }
+            const double a = number(left), b = number(right);
+            if (instruction.op == Op::Power && a == 0 && b < 0)
+                throw std::runtime_error("debug EVAL division by zero");
+            if (instruction.op == Op::Power && a < 0 && std::trunc(b) != b)
+                throw std::runtime_error("debug EVAL invalid exponent");
+            double result = 0;
+            switch (instruction.op) {
+            case Op::Add: result = a + b; break;
+            case Op::Subtract: result = a - b; break;
+            case Op::Multiply: result = a * b; break;
+            case Op::Divide: if (b == 0) throw std::runtime_error("debug EVAL division by zero"); result = a / b; break;
+            case Op::IntegerDivide: case Op::Modulo: {
+                if (b == 0) throw std::runtime_error("debug EVAL division by zero");
+                if (std::trunc(a) != a || std::trunc(b) != b ||
+                    a < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
+                    a > static_cast<double>(std::numeric_limits<std::int32_t>::max()) ||
+                    b < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
+                    b > static_cast<double>(std::numeric_limits<std::int32_t>::max()))
+                    throw std::runtime_error("debug EVAL integer operation requires Int32 operands");
+                const auto lhs = static_cast<std::int64_t>(a);
+                const auto rhs = static_cast<std::int64_t>(b);
+                std::int64_t quotient = lhs / rhs;
+                std::int64_t remainder = lhs % rhs;
+                if (remainder != 0 && ((lhs < 0) != (rhs < 0))) {
+                    --quotient;
+                    remainder += rhs;
+                }
+                if (instruction.op == Op::IntegerDivide) {
+                    if (quotient < std::numeric_limits<std::int32_t>::min() ||
+                        quotient > std::numeric_limits<std::int32_t>::max())
+                        throw std::runtime_error("debug EVAL integer result out of range");
+                    result = static_cast<double>(quotient);
+                } else result = static_cast<double>(remainder);
+                break;
+            }
+            case Op::Power: result = std::pow(a, b); break;
+            case Op::And: result = (a != 0 && b != 0) ? 1 : 0; break;
+            case Op::Or: result = (a != 0 || b != 0) ? 1 : 0; break;
+            case Op::Xor: result = ((a != 0) != (b != 0)) ? 1 : 0; break;
+            default: break;
+            }
+            if (!std::isfinite(result)) throw std::runtime_error("debug EVAL numeric overflow");
+            if (execution_->code.numericPrecision == detail::NumericPrecision::Single &&
+                instruction.op != Op::IntegerDivide && instruction.op != Op::Modulo)
+                result = static_cast<double>(static_cast<float>(result));
+            values.emplace_back(result);
+            break;
+        }
+        default:
+            throw std::runtime_error("debug EVAL only permits literals, reads, and pure operators");
+        }
+    }
+    if (values.size() != 1) throw std::runtime_error("debug EVAL did not produce one value");
+    return values.back();
+}
+
+bool Interpreter::debugAddWatch(std::string expression) {
+    if (!execution_ || !execution_->debugPaused || expression.empty()) return false;
+    (void)debugEvaluate(expression);
+    if (std::find(debugWatches_.begin(), debugWatches_.end(), expression) == debugWatches_.end())
+        debugWatches_.push_back(std::move(expression));
+    return true;
+}
+
+bool Interpreter::debugRemoveWatch(const std::string& expression) {
+    const auto found = std::find(debugWatches_.begin(), debugWatches_.end(), expression);
+    if (found == debugWatches_.end()) return false;
+    debugWatches_.erase(found);
+    return true;
 }
 
 

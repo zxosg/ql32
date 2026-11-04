@@ -18,6 +18,7 @@
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/vm/scheduler.hpp"
 #include "ql32/platform/esp32/clock.hpp"
+#include "ql32/platform/esp32/arduino_hardware.hpp"
 #include "ql32/platform/esp32/cpu_frequency.hpp"
 #include "ql32/platform/esp32/line_ui_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
@@ -25,6 +26,7 @@
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
 #include "ql32/platform/esp32/system_control.hpp"
+#include "ql32/platform/esp32/monitor_transfer.hpp"
 #include "ql32/platform/esp32_cyd/graphics.hpp"
 #include "ql32/platform/esp32_cyd/frame_presenter.hpp"
 #include "ql32/platform/esp32_cyd/text_console.hpp"
@@ -37,17 +39,20 @@ ql32::platform::esp32_cyd::CydIli9341Display display(&tftBus,
     ql32::boards::esp32_2432s028::tftDataCommand,
     ql32::boards::esp32_2432s028::tftChipSelect, -1);
 std::shared_ptr<ql32::graphics::WindowedService> graphics;
+ql32::platform::esp32::ArduinoHardware hardwareAdapter(
+    &tftBus, &sdBus, &Wire, 22, 27, 17, 16, 26, 25,
+    {14, 12, 13, 15, 2, 21, 18, 19, 23, 5, 22, 27});
 ql32::platform::esp32::Clock boardClock;
 ql32::platform::esp32::CpuFrequency boardCpuFrequency;
 ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
 #if defined(QL32_CYD_USE_SPIFFS)
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS);
-ql32::platform::esp32::SdChannels sdChannels(SPIFFS);
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS");
+ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
 #else
-ql32::platform::esp32::SdStorage sdStorage(SD);
-ql32::platform::esp32::SdChannels sdChannels(SD);
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC");
+ql32::platform::esp32::SdChannels sdChannels(SD, "SDC");
 #endif
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;
 std::unique_ptr<std::ostream> basicOutput;
@@ -77,6 +82,8 @@ void submitInputLine() {
     Serial.println();
     if (uiPresenter && uiPresenter->active()) {
         (void)uiPresenter->consumeLine(inputLine);
+    } else if (ql32::platform::esp32::handleMonitorTransferCommand(
+                   inputLine, sdStorage, sdChannels, Serial)) {
     } else if (scheduler && !inputLine.empty() &&
                !scheduler->submit(scheduler->focusedTask(), inputLine + "\n")) {
         Serial.println("BASIC session is busy");
@@ -194,6 +201,10 @@ void setup() {
     });
 
 #if defined(QL32_CYD_USE_SPIFFS)
+    sdBus.begin(ql32::boards::esp32_2432s028::sdSck,
+                ql32::boards::esp32_2432s028::sdMiso,
+                ql32::boards::esp32_2432s028::sdMosi,
+                ql32::boards::esp32_2432s028::sdChipSelect);
     const bool storageReady = SPIFFS.begin(true);
     if (storageReady && !SPIFFS.exists("/supervisor"))
         (void)SPIFFS.mkdir("/supervisor");
@@ -252,7 +263,8 @@ void setup() {
     services.channels = std::make_shared<ql32::runtime::ChannelRegistry>(
         std::move(fileChannels), [](std::string_view bytes) {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
-        });
+        }, std::shared_ptr<ql32::runtime::HardwareChannelService>(
+            &hardwareAdapter, [](ql32::runtime::HardwareChannelService*) {}));
     services.ui = uiService;
     services.graphics = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(

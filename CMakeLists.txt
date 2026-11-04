@@ -9,7 +9,9 @@ add_library(ql32_portable
   src/graphics/window_manager.cpp
   src/graphics/windowed_service.cpp
   src/runtime/channel_registry.cpp
+  src/runtime/buffer.cpp
   src/runtime/ui_service.cpp
+  src/runtime/ymodem.cpp
   src/vm/interpreter.cpp
   src/vm/scheduler.cpp
 )
@@ -18,6 +20,7 @@ target_compile_features(ql32_portable PUBLIC cxx_std_17)
 
 add_library(ql32_host_adapters
   src/platform/linux/directory_channels.cpp
+  src/platform/linux/virtual_hardware.cpp
   src/platform/linux/directory_storage.cpp
   src/platform/linux/console_ui.cpp
   src/platform/linux/system_clock.cpp
@@ -91,12 +94,30 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_scheduler_tests tests/scheduler_tests.cpp)
   target_link_libraries(ql32_scheduler_tests PRIVATE ql32_host)
   add_test(NAME ql32_scheduler_tests COMMAND ql32_scheduler_tests)
+  add_executable(ql32_debugger_tests tests/debugger_tests.cpp)
+  target_link_libraries(ql32_debugger_tests PRIVATE ql32_host)
+  add_test(NAME ql32_debugger_tests COMMAND ql32_debugger_tests)
   add_executable(ql32_storage_tests tests/storage_tests.cpp)
   target_link_libraries(ql32_storage_tests PRIVATE ql32_host)
   add_test(NAME ql32_storage_tests COMMAND ql32_storage_tests)
+  add_executable(ql32_ymodem_tests tests/ymodem_tests.cpp)
+  target_link_libraries(ql32_ymodem_tests PRIVATE ql32_host)
+  add_test(NAME ql32_ymodem_tests COMMAND ql32_ymodem_tests)
   add_executable(ql32_channel_tests tests/channel_tests.cpp)
   target_link_libraries(ql32_channel_tests PRIVATE ql32_host)
   add_test(NAME ql32_channel_tests COMMAND ql32_channel_tests)
+  add_executable(ql32_hardware_tests tests/hardware_tests.cpp)
+  target_link_libraries(ql32_hardware_tests PRIVATE ql32_host)
+  add_test(NAME ql32_hardware_tests COMMAND ql32_hardware_tests)
+  add_test(
+    NAME ql32_hardware_repl
+    COMMAND ${CMAKE_COMMAND}
+      -DQL32_EXECUTABLE=$<TARGET_FILE:ql32>
+      -DINPUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/cli/hardware_repl.in
+      -DEXPECTED_STDOUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/cli/hardware_repl.out
+      -DWORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_repl_test.cmake
+  )
   add_executable(ql32_ui_service_tests tests/ui_service_tests.cpp)
   target_link_libraries(ql32_ui_service_tests PRIVATE ql32_host)
   add_test(NAME ql32_ui_service_tests COMMAND ql32_ui_service_tests)

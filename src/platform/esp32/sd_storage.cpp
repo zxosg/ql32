@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <utility>
 
 namespace ql32::platform::esp32 {
@@ -23,11 +24,26 @@ void SdStorage::ensureAvailable() {
     fs::File root = filesystem_.open("/", FILE_READ);
     if (!root || !root.isDirectory())
         throw ServiceError(ServiceErrorCode::Unavailable,
-                           "storage: SD filesystem is not mounted");
+                           "storage: filesystem is not mounted");
     root.close();
 }
 
-std::string SdStorage::resolve(const std::string& path, bool allowRoot) {
+std::string SdStorage::resolve(const std::string& input, bool allowRoot) const {
+    std::string path = input;
+    const auto colon = path.find(':');
+    if (colon != std::string::npos) {
+        std::string drive = path.substr(0, colon);
+        std::transform(drive.begin(), drive.end(), drive.begin(),
+            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        std::string expected = drive_;
+        std::transform(expected.begin(), expected.end(), expected.begin(),
+            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (drive != expected)
+            throw ServiceError(ServiceErrorCode::Unavailable,
+                               "storage drive is not available: " + drive);
+        path.erase(0, colon + 1);
+        if (!path.empty() && path.front() == '/') path.erase(path.begin());
+    }
     if (path.find('\0') != std::string::npos || path.find('\\') != std::string::npos ||
         (!path.empty() && path.front() == '/'))
         throw ServiceError(ServiceErrorCode::InvalidPath,
@@ -130,6 +146,67 @@ std::vector<runtime::FileEntry> SdStorage::list(const std::string& path) {
         return left.name < right.name;
     });
     return entries;
+}
+
+bool SdStorage::exists(const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    return filesystem_.exists(resolved.c_str());
+}
+
+std::uintmax_t SdStorage::size(const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    fs::File file = filesystem_.open(resolved.c_str(), FILE_READ);
+    if (!file)
+        throw ServiceError(ServiceErrorCode::NotFound,
+                           "storage: file not found: " + path);
+    if (file.isDirectory()) {
+        file.close();
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path names a directory: " + path);
+    }
+    const std::uintmax_t result = file.size();
+    file.close();
+    return result;
+}
+
+void SdStorage::rename(const std::string& path, const std::string& newPath) {
+    const std::string source = resolve(path, false);
+    const std::string destination = resolve(newPath, false);
+    ensureAvailable();
+    if (!filesystem_.exists(source.c_str()))
+        throw ServiceError(ServiceErrorCode::NotFound,
+                           "storage: file not found: " + path);
+    fs::File sourceFile = filesystem_.open(source.c_str(), FILE_READ);
+    const bool sourceIsDirectory = sourceFile && sourceFile.isDirectory();
+    if (sourceFile) sourceFile.close();
+    if (sourceIsDirectory)
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path names a directory: " + path);
+    if (filesystem_.exists(destination.c_str()))
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: destination already exists: " + newPath);
+    if (!filesystem_.rename(source.c_str(), destination.c_str()))
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: rename failed: " + path);
+}
+
+void SdStorage::remove(const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    fs::File file = filesystem_.open(resolved.c_str(), FILE_READ);
+    if (!file)
+        throw ServiceError(ServiceErrorCode::NotFound,
+                           "storage: file not found: " + path);
+    const bool directory = file.isDirectory();
+    file.close();
+    if (directory)
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path names a directory: " + path);
+    if (!filesystem_.remove(resolved.c_str()))
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: remove failed: " + path);
 }
 
 } // namespace ql32::platform::esp32

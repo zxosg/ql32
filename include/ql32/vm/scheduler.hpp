@@ -20,7 +20,9 @@ enum class TaskStatus {
     Runnable,
     WaitingUi,
     WaitingInput,
+    WaitingChannel,
     WaitingTask,
+    DebugPaused,
     Completed,
     Failed,
     Cancelled
@@ -90,6 +92,16 @@ public:
     std::size_t instructionBudget() const noexcept { return instructionBudget_; }
     bool setInstructionBudget(std::size_t budget) noexcept;
     bool setTaskPriority(TaskId id, std::uint32_t priority) noexcept;
+    bool debugAttach(TaskId id);
+    bool debugSetBreakpoint(TaskId id, int line, bool enabled = true);
+    bool debugResume(TaskId id, runtime::DebugResumeMode mode);
+    bool debugPause(TaskId id);
+    bool debugSetDiagnostics(TaskId id, bool enabled, bool trace = false);
+    std::optional<runtime::DebugSnapshot> debugInspect(TaskId id) const;
+    std::optional<runtime::DebugValue> debugEvaluate(
+        TaskId id, const std::string& expression) const;
+    bool debugAddWatch(TaskId id, std::string expression);
+    bool debugRemoveWatch(TaskId id, const std::string& expression);
     std::vector<runtime::ChannelInfo> taskChannels(TaskId id) const;
     std::string takeError(TaskId id);
     bool tick();

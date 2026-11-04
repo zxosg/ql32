@@ -52,6 +52,34 @@ The [embedded supervisor demo](examples/supervisor/README.md) shows three
 workers in side-by-side display windows. See
 [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md).
 
+### Debugger
+
+Use the supervisor REPL to attach to a running task and control it:
+
+```text
+DEBUG 2
+BREAK 100
+CONTINUE
+WHERE
+STEP
+NEXT
+LOCALS
+GLOBALS
+STACK
+EVAL A+B*2
+```
+
+Breakpoints use BASIC line numbers in numbered programs and physical source
+lines in unnumbered programs. `STEP` advances one BASIC statement and enters
+procedures; `NEXT` runs through calls made by the current statement. `WATCH expr`
+adds a safe expression watch, `WATCHES` displays its value while stopped, and
+`UNWATCH expr` removes it. `DIAGNOSTICS ON` enables per-task bytecode, procedure,
+and evaluated IF counters; `TRACE ON` also keeps a bounded recent instruction
+trace. `STATS` displays counters and available free-memory information. Debug
+EVAL and watches allow literals, variable and array reads, and pure operators;
+function calls and writes are rejected. A debug-paused task keeps its VM state
+and does not consume scheduler instruction budget.
+
 ### Math precision and ESP32 CPU frequency
 
 Programs default to DOUBLE precision. Include `ql32.inc` and put module
@@ -127,6 +155,23 @@ pio run -e lilygo_vga32 -t upload
 pio run -e olimex_esp32_sbc_fabgl -t upload
 pio run -e esp32_2432s028 -t upload
 ```
+
+### Serial file transfer
+
+The monitor accepts `RECV "SDC:/path"` and `SEND "SDC:/path"` (use
+`FFS:/path` on the SPIFFS profile). Install the utility dependency with
+`python3 -m pip install pyserial`. The utility can enter the monitor command
+for you and uses the same serial port and baud rate as the REPL:
+
+```bash
+python3 tools/ql32-ymodem.py send /dev/cu.usbserial-XXXX 115200 local.bin --device-path "SDC:/remote.bin"
+python3 tools/ql32-ymodem.py receive /dev/cu.usbserial-XXXX 115200 local.bin --device-path "SDC:/remote.bin"
+```
+
+`send` uploads the local file; `receive` downloads the device file. Without
+`--device-path`, start `RECV` or `SEND` from an already-open monitor first.
+Transfers use CRC-16 and 1 KiB YMODEM data packets. A failed receive removes
+its partial file and restores any previous destination from `.BAK`.
 
 On embedded targets, enter `REBOOT` at the interactive supervisor prompt to
 perform a software restart. The Olimex FabGL target also supports PS/2 execution

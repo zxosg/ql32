@@ -350,13 +350,15 @@ void testSuperBasicStringSlices() {
         "PRINT text$(10 TO)\n"
         "PRINT text$(4 TO 40)\n"
         "PRINT text$(2 + 2 TO 5 + 3)\n"
+        "PRINT \"Hello world\"(1 TO 5)\n"
+        "PRINT \"Hello world\"(1)\n"
         "unicode$ = \"café🙂\"\n"
         "PRINT unicode$(4 TO 5)\n"
         "PRINT LEN(text$)\n"
         "PRINT LEN(unicode$)\n"
         "PRINT LEN(text$(TO 5))\n"
         "PRINT LEN(\"\")\n", output);
-    require(output.str() == "H\nHello\nHello\nld\nlo world\nlo wo\né🙂\n"
+    require(output.str() == "H\nHello\nHello\nld\nlo world\nlo wo\nHello\nH\né🙂\n"
                             "11\n5\n5\n0\n",
             "SuperBASIC-style string slicing returned incorrect text");
 
@@ -369,6 +371,64 @@ void testSuperBasicStringSlices() {
         "END DEFine\n", functionOutput);
     require(functionOutput.str() == "Hello QL/32\n",
             "string slicing parsing broke forward string-function calls");
+}
+
+void testValAndDynamicEvaluation() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "text$ = \"ahoj\"\n"
+        "expression$ = \"text$(1 TO 2)\"\n"
+        "PRINT EVAL$(expression$)\n"
+        "expression$ = \"\"\"ahoj\"\"(1 TO 2)\"\n"
+        "PRINT EVAL$(expression$)\n"
+        "PRINT VAL(\"1.25E2\")\n"
+        "PRINT EVAL(\"2 + 3 * 4\")\n"
+        "PRINT EVAL$(\"2 + 3\")\n"
+        "PRINT EVAL$(\"LEFT$(text$, 2)\")\n"
+        "expression$ = \"TakeTwo$(text$)\"\n"
+        "PRINT EVAL$(expression$)\n"
+        "PRINT Calculate(4)\n"
+        "DEFine FuNction TakeTwo$(value$)\n"
+        "RETurn LEFT$(value$, 2)\n"
+        "END DEFine\n"
+        "DEFine FuNction Calculate(x)\n"
+        "LOCal expression$\n"
+        "expression$ = \"x + 1\"\n"
+        "RETurn EVAL(expression$)\n"
+        "END DEFine\n", output);
+    require(output.str() == "ah\nah\n125\n14\n5\nah\nah\n5\n",
+            "VAL, EVAL, or EVAL$ returned an incorrect result");
+
+    ql32::Interpreter doublePrecision;
+    std::ostringstream doubleOutput;
+    doublePrecision.execute("PRINT EVAL(\"16777216 + 1 - 16777216\")\n", doubleOutput);
+    require(doubleOutput.str() == "1\n",
+            "EVAL did not preserve double-precision expression semantics");
+    ql32::Interpreter singlePrecision;
+    std::ostringstream singleOutput;
+    singlePrecision.execute(
+        "CONST KOptMathDouble = 0\n"
+        "CONST KOptMathSingle = 1\n"
+        "OPTION KOptMathSingle\n"
+        "PRINT EVAL(\"16777216 + 1 - 16777216\")\n", singleOutput);
+    require(singleOutput.str() == "0\n",
+            "EVAL did not honor single-precision expression semantics");
+
+    for (const std::string& source : {
+             "PRINT VAL(\"5.6.7\")\n",
+             "PRINT VAL(\"45.6*3.1\")\n",
+             "PRINT EVAL(\"1 +\")\n",
+             "PRINT EVAL(\"\"\"text\"\"\")\n"}) {
+        bool rejected = false;
+        try {
+            std::ostringstream ignored;
+            interpreter.execute(source, ignored);
+        } catch (const ql32::runtime::Error&) {
+            rejected = true;
+        }
+        require(rejected, "VAL or EVAL accepted invalid input or result type");
+    }
 }
 
 void testStringExtractionFunctions() {
@@ -722,6 +782,7 @@ int main() {
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
         testSuperBasicStringSlices();
+        testValAndDynamicEvaluation();
         testStringExtractionFunctions();
         testUnsignedBitFunctionsAndRadixLiterals();
         testTrigonometricFunctionsUseRadians();

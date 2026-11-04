@@ -16,6 +16,7 @@ extern "C" {
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <limits>
 #include <utility>
 
@@ -36,17 +37,29 @@ std::string joinPath(const std::string& root, const std::string& relative) {
 
 std::string normalizePath(const std::string& path, bool allowRoot,
                           const char* subject) {
-    if (path.find('\0') != std::string::npos || path.find('\\') != std::string::npos ||
-        (!path.empty() && path.front() == '/'))
+    std::string relative = path;
+    const auto colon = relative.find(':');
+    if (colon != std::string::npos) {
+        std::string drive = relative.substr(0, colon);
+        std::transform(drive.begin(), drive.end(), drive.begin(),
+            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (drive != "SDC")
+            throw ServiceError(ServiceErrorCode::Unavailable,
+                               std::string(subject) + " drive is not available: " + drive);
+        relative.erase(0, colon + 1);
+        if (!relative.empty() && relative.front() == '/') relative.erase(relative.begin());
+    }
+    if (relative.find('\0') != std::string::npos || relative.find('\\') != std::string::npos ||
+        (!relative.empty() && relative.front() == '/'))
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            std::string(subject) + " path must be relative to the SD root");
 
     std::string result;
     std::size_t start = 0;
-    while (start <= path.size()) {
-        const auto end = path.find('/', start);
-        const auto length = (end == std::string::npos ? path.size() : end) - start;
-        const std::string component = path.substr(start, length);
+    while (start <= relative.size()) {
+        const auto end = relative.find('/', start);
+        const auto length = (end == std::string::npos ? relative.size() : end) - start;
+        const std::string component = relative.substr(start, length);
         if (component == "..")
             throw ServiceError(ServiceErrorCode::InvalidPath,
                                std::string(subject) + " path cannot escape the SD root");
@@ -201,6 +214,71 @@ std::vector<runtime::FileEntry> IdfSdStorage::list(const std::string& path) {
         return left.name < right.name;
     });
     return entries;
+}
+
+bool IdfSdStorage::exists(const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    struct stat status{};
+    if (::stat(fullPath.c_str(), &status) == 0) return true;
+    if (errno == ENOENT) return false;
+    throw ServiceError(ServiceErrorCode::IoError, errorText("storage stat"));
+}
+
+std::uintmax_t IdfSdStorage::size(const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    struct stat status{};
+    if (::stat(fullPath.c_str(), &status) != 0) {
+        if (errno == ENOENT)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage stat"));
+    }
+    if (!S_ISREG(status.st_mode))
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path is not a file: " + path);
+    return static_cast<std::uintmax_t>(status.st_size);
+}
+
+void IdfSdStorage::rename(const std::string& path, const std::string& newPath) {
+    ensureAvailable();
+    const std::string source = resolve(path, false);
+    const std::string destination = resolve(newPath, false);
+    struct stat status{};
+    if (::stat(source.c_str(), &status) != 0) {
+        if (errno == ENOENT)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage stat"));
+    }
+    if (S_ISDIR(status.st_mode))
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path is a directory: " + path);
+    if (::stat(destination.c_str(), &status) == 0)
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: destination already exists: " + newPath);
+    if (errno != ENOENT)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage stat"));
+    if (::rename(source.c_str(), destination.c_str()) != 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage rename"));
+}
+
+void IdfSdStorage::remove(const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    struct stat status{};
+    if (::stat(fullPath.c_str(), &status) != 0) {
+        if (errno == ENOENT)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage stat"));
+    }
+    if (!S_ISREG(status.st_mode))
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path is not a file: " + path);
+    if (::unlink(fullPath.c_str()) != 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage remove"));
 }
 
 IdfSdChannels::~IdfSdChannels() {

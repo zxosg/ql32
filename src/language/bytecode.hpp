@@ -7,6 +7,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -167,8 +168,17 @@ struct Instruction {
     OptionalVector<SelectItemSpec> selectItems;
     bool sourceJump = false;
     bool targetIsLineNumber = false;
+    bool statementStart = false;
+    int basicLine = 0;
     int sourceLineTarget = 0;
     OptionalVector<std::size_t> jumpScopes;
+};
+
+struct FunctionMetadata {
+    std::size_t address = 0;
+    bool function = false;
+    std::vector<std::string> parameters;
+    std::vector<std::string> locals;
 };
 
 // Chunked instruction storage keeps bytecode growth from requiring one large
@@ -176,9 +186,14 @@ struct Instruction {
 struct InstructionSequence : std::deque<Instruction> {
     NumericPrecision numericPrecision = NumericPrecision::Double;
     std::uint16_t cpuFrequencyMHz = 0;
+    std::unordered_map<std::string, FunctionMetadata> functions;
+    std::unordered_map<std::string, std::size_t> arrays;
+    std::unordered_map<std::string, Value> constants;
 };
 
 InstructionSequence compileSource(const std::string& source);
+InstructionSequence compileExpression(const std::string& source,
+                                      const InstructionSequence& enclosing);
 std::string expandIncludes(const std::string& source, runtime::StorageService* storage);
 
 } // namespace ql32::detail

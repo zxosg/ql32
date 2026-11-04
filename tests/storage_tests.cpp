@@ -33,6 +33,15 @@ void testDirectoryStorage() {
         require(entries.size() == 1 && entries.front().name == "program.bas" &&
                     entries.front().size == 17 && !entries.front().isDirectory,
                 "directory listing returned incorrect file metadata");
+        require(storage.exists("subdir/program.bas") &&
+                    storage.size("subdir/program.bas") == 17,
+                "storage existence or size query returned incorrect metadata");
+        storage.rename("subdir/program.bas", "subdir/renamed.bas");
+        require(!storage.exists("subdir/program.bas") &&
+                    storage.readText("subdir/renamed.bas") == "20 PRINT \"saved\"\n",
+                "storage rename did not move the file");
+        storage.remove("subdir/renamed.bas");
+        require(!storage.exists("subdir/renamed.bas"), "storage delete did not remove file");
         const auto rootEntries = storage.list("");
         require(rootEntries.size() == 1 && rootEntries.front().name == "subdir" &&
                     rootEntries.front().isDirectory,
@@ -73,6 +82,15 @@ void testInteractiveFileCommands() {
         interpreter.executeInteractive("10 PRINT \"loaded\"\nSAVE \"demo.bas\"\n", output);
         require(storage->readText("demo.bas") == "10 PRINT \"loaded\"\n",
                 "SAVE did not serialize the numbered program");
+
+        interpreter.execute("source$ = \"demo.bas\"\ndestination$ = \"renamed.bas\"\n", output);
+        interpreter.executeInteractive("RENAME source$, destination$\n", output);
+        require(!storage->exists("demo.bas") && storage->exists("renamed.bas"),
+                "RENAME string variables did not move the file");
+        interpreter.execute("source$ = \"renamed.bas\"\n", output);
+        interpreter.executeInteractive("DELETE source$\n", output);
+        require(!storage->exists("renamed.bas"), "DELETE string variable did not remove file");
+        storage->writeText("demo.bas", "10 PRINT \"loaded\"\n");
 
         interpreter.executeInteractive("NEW\nLOAD \"demo.bas\"\nLIST\nRUN\nDIR\n", output);
         require(output.str() == "10 PRINT \"loaded\"\nloaded\ndemo.bas\n",

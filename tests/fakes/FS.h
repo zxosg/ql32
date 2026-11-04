@@ -71,6 +71,18 @@ public:
     bool isDirectory(const std::string& path) const {
         return directories_.contains(path);
     }
+    bool exists(const char* path) const {
+        const std::string key(path);
+        return files_.contains(key) || directories_.contains(key);
+    }
+    bool rename(const char* from, const char* to) {
+        const auto found = files_.find(from);
+        if (found == files_.end() || exists(to) || !directories_.contains(parent(to))) return false;
+        files_.emplace(to, std::move(found->second));
+        files_.erase(found);
+        return true;
+    }
+    bool remove(const char* path) { return files_.erase(path) != 0; }
     void setMounted(bool mounted) { mounted_ = mounted; }
     std::string& contents(const std::string& path) { return files_[path]; }
     std::vector<std::string> children(const std::string& path) const {

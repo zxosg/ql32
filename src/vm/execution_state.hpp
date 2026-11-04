@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -18,6 +19,10 @@ struct ForState { std::vector<ForRange> ranges; std::size_t item = 0; };
 struct RuntimeFrame {
     std::size_t returnAddress = 0;
     bool function = false;
+    std::string name;
+    bool dynamicEvaluation = false;
+    bool stringifyResult = false;
+    std::size_t dynamicCodeStart = 0;
     std::unordered_map<std::string, Value> locals;
     std::unordered_map<std::string, std::string> arrayAliases;
 };
@@ -51,9 +56,24 @@ struct VMExecutionState {
     std::uint64_t printChannel = 1;
     std::size_t printChannelColumn = 0;
     std::optional<ui::RequestId> pendingUiRequest;
+    std::optional<runtime::ChannelId> pendingChannelRead;
     ui::RequestKind pendingUiKind = ui::RequestKind::Alert;
     std::uint64_t pendingUiBuilderHandle = 0;
     std::string pendingInputVariable;
+    bool debuggerAttached = false;
+    bool debugPaused = false;
+    runtime::DebugResumeMode debugMode = runtime::DebugResumeMode::Continue;
+    std::set<std::size_t> breakpoints;
+    std::size_t skipBreakpointAddress = static_cast<std::size_t>(-1);
+    std::size_t stepCallDepth = 0;
+    bool stepStarted = false;
+    bool diagnosticsEnabled = false;
+    bool traceEnabled = false;
+    std::uint64_t bytecodes = 0;
+    std::uint64_t procedureCalls = 0;
+    std::uint64_t ifTrue = 0;
+    std::uint64_t ifFalse = 0;
+    std::vector<std::string> trace;
 };
 
 struct UISessionState {

@@ -127,4 +127,59 @@ std::vector<runtime::FileEntry> DirectoryStorage::list(const std::string& path) 
     return entries;
 }
 
+bool DirectoryStorage::exists(const std::string& path) {
+    const auto resolved = resolve(path, true);
+    std::error_code error;
+    const bool found = std::filesystem::exists(resolved, error);
+    if (error) fail(resolved, error);
+    return found;
+}
+
+std::uintmax_t DirectoryStorage::size(const std::string& path) {
+    const auto resolved = resolve(path, false);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(resolved, error)) {
+        if (error) fail(resolved, error);
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path is not a file: " + path);
+    }
+    const auto result = std::filesystem::file_size(resolved, error);
+    if (error) fail(resolved, error);
+    return result;
+}
+
+void DirectoryStorage::rename(const std::string& path, const std::string& newPath) {
+    const auto source = resolve(path, false);
+    const auto destination = resolve(newPath, true);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(source, error)) {
+        if (error) fail(source, error);
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path is not a file: " + path);
+    }
+    if (std::filesystem::exists(destination, error)) {
+        if (error) fail(destination, error);
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: destination already exists: " + newPath);
+    }
+    if (error) fail(destination, error);
+    std::filesystem::rename(source, destination, error);
+    if (error) fail(source, error);
+}
+
+void DirectoryStorage::remove(const std::string& path) {
+    const auto resolved = resolve(path, false);
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(resolved, error)) {
+        if (error) fail(resolved, error);
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path is not a file: " + path);
+    }
+    if (!std::filesystem::remove(resolved, error)) {
+        if (error) fail(resolved, error);
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: could not remove file: " + path);
+    }
+}
+
 } // namespace ql32::platform::linux_host

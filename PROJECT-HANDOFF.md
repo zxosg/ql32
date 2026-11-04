@@ -97,16 +97,12 @@ before relying on those results.
   interactions hardware-verified.
 - M5 host and ESP32 software integration is present. CYD display, serial REPL,
   BASIC loop, SD text round-trip, graphics behavior and memory behavior have
-  been verified on hardware. The VGA32 firmware has been flashed and boots;
-  USB serial REPL was verified earlier, but the PS/2 keyboard currently
-  produces no input. With an SD card inserted, startup reports
-  `SD storage unavailable`; its capacity and filesystem are not yet known.
-  VGA display, clock, SD/startup, line UI and supervisor behavior remain
-  unverified. The user clarified that the tested board is Olimex
-  ESP32-SBC-FabGL Rev B, not LILYGO VGA32. The LILYGO image had been flashed on
-  the Olimex board. A separate Olimex profile now selects its SD MISO GPIO 35;
-  the LILYGO profile retains MISO GPIO 2. The supplied board PDF is local and
-  not included in the public repository.
+  been verified on hardware. The Olimex ESP32-SBC-FabGL Rev B boots the VGA32
+  firmware; USB serial REPL and YMODEM file transfer over internal FFS are
+  verified. The PS/2 keyboard currently produces no input. VGA display, clock,
+  line UI and supervisor behavior remain unverified. The board has no SD card;
+  its Olimex profile uses a 1 MiB internal SPIFFS partition as `FFS`. The
+  supplied board PDF is local and not included in the public repository.
 - Olimex task/heap stress check (2026-11-02): `FREE()` reports total free
   bytes, `FREE(1)` the largest contiguous block, and `FREE(2)` the free-block
   count; `ql32.inc` defines `KFreeTotal`, `KFreeContiguous`, and
@@ -203,12 +199,20 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 9. Repeat the attractor check on CYD after rebuilding the pulled source. The
    earlier run with `OPTION KOptMathSingle` and `OPTION KEspCpuFreq240` animated
    but remained slow; frame duration and actual CPU clock were not measured.
-10. Improve host-to-board and board-to-host file transfer over USB serial.
-    Prefer YMODEM with CRC and a small Mac-friendly host utility over line-by-line
-    REPL entry. Add monitor transfer commands such as `RECV "path"` and
-    `SEND "path"`; use the storage service, bounded buffers, acknowledgements,
-    and clear success/error reporting. Confirm baud-rate limits and support the
-    available SD and flash filesystems.
+10. USB serial file transfer is implemented as single-file YMODEM with CRC-16
+    and 1 KiB data packets. Monitor commands `RECV "drive:/path"` and
+    `SEND "drive:/path"` take over serial and return to the REPL. The Python
+    `tools/ql32-ymodem.py` utility uses the REPL port and baud rate. Receive
+    backs up an existing destination as `.BAK`, refuses an existing backup,
+    restores it after failure, and removes it after success. `DELETE path$` and
+    `RENAME path$,newpath$` use the storage service. Linux, CYD SD/SPIFFS, and
+    Olimex builds compile. Olimex uses a 1 MiB internal FFS partition because
+    no SD card is available. On 2026-11-03 a 3,589-byte binary with embedded
+    control bytes was sent and received byte-for-byte over USB serial at 115200
+    baud. A 2,049-byte overwrite also round-tripped exactly, exercising
+    replacement and `.BAK` cleanup. After a firmware reflash configured with
+    non-formatting FFS mount, the file was downloaded and verified again; the
+    temporary test file was then deleted through the REPL.
 11. Add selectable portable bitmap fonts. `FONT fontID` should select a font
     for the current graphics channel. `LOAD FONT filename$` should validate and
     load a font file, select it, and report its assigned ID. Define a bounded,

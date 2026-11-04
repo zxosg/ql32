@@ -8,7 +8,8 @@
 namespace ql32::platform {
 
 enum class ServiceKind : std::uint8_t {
-    Display, Input, Storage, Audio, Network, Gpio, Clock, Channels
+    Display, Input, Storage, Audio, Network, Gpio, Clock, Channels,
+    Analog, Buses, Serial, Parallel, CapTouch, Timer
 };
 
 enum class InputKind : std::uint8_t { Keyboard, Touch, Buttons, Ps2, UsbHid, Serial };
@@ -54,7 +55,7 @@ struct Capabilities {
 
     bool valid() const {
         if (profile.empty()) return false;
-        constexpr std::uint32_t knownServices = (std::uint32_t{1} << 8) - 1;
+        constexpr std::uint32_t knownServices = (std::uint32_t{1} << 14) - 1;
         constexpr std::uint32_t knownInputs = (std::uint32_t{1} << 6) - 1;
         if ((services & ~knownServices) != 0 || (inputs & ~knownInputs) != 0) return false;
         if (has(ServiceKind::Display) != display.has_value()) return false;

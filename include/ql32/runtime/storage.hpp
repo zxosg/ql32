@@ -21,6 +21,10 @@ public:
     virtual std::string readText(const std::string& path) = 0;
     virtual void writeText(const std::string& path, const std::string& contents) = 0;
     virtual std::vector<FileEntry> list(const std::string& path) = 0;
+    virtual bool exists(const std::string& path) = 0;
+    virtual std::uintmax_t size(const std::string& path) = 0;
+    virtual void rename(const std::string& path, const std::string& newPath) = 0;
+    virtual void remove(const std::string& path) = 0;
 };
 
 } // namespace ql32::runtime

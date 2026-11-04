@@ -1,0 +1,24 @@
+INCLUDE "ql32.inc"
+button=OPEN(KDeviceGPIO,12,KPinInput,KPullUp)
+PRINT IN(button)
+bytes=ALLOC(4)
+POKE bytes,17,34,51,68
+PRINT PEEK(bytes+1)
+i2c=OPEN(KDeviceI2C,0,104)
+OUT i2c,10,85
+PRINT IN(i2c,10)
+tx=ALLOC(2)
+rx=ALLOC(2)
+POKE tx,165,90
+status=IOWRITE(i2c,32,tx)
+count=IOREAD(i2c,32,rx)
+PRINT status;count;PEEK(rx);PEEK(rx+1)
+spi=OPEN(KDeviceSPI,0,11,1000000,0)
+XFER #spi,tx,2,rx,2
+PRINT PEEK(rx);PEEK(rx+1)
+CLOSE button
+CLOSE i2c
+CLOSE spi
+DEALLOC bytes
+DEALLOC tx
+DEALLOC rx

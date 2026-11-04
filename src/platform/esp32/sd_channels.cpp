@@ -1,6 +1,8 @@
 #include "ql32/platform/esp32/sd_channels.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <limits>
 
 namespace ql32::platform::esp32 {
@@ -23,11 +25,26 @@ void SdChannels::ensureAvailable() {
     fs::File root = filesystem_.open("/", FILE_READ);
     if (!root || !root.isDirectory())
         throw ServiceError(ServiceErrorCode::Unavailable,
-                           "channel: SD filesystem is not mounted");
+                           "channel: filesystem is not mounted");
     root.close();
 }
 
-std::string SdChannels::resolve(const std::string& path) {
+std::string SdChannels::resolve(const std::string& input) const {
+    std::string path = input;
+    const auto colon = path.find(':');
+    if (colon != std::string::npos) {
+        std::string drive = path.substr(0, colon);
+        std::transform(drive.begin(), drive.end(), drive.begin(),
+            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        std::string expected = drive_;
+        std::transform(expected.begin(), expected.end(), expected.begin(),
+            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (drive != expected)
+            throw ServiceError(ServiceErrorCode::Unavailable,
+                               "channel drive is not available: " + drive);
+        path.erase(0, colon + 1);
+        if (!path.empty() && path.front() == '/') path.erase(path.begin());
+    }
     if (path.empty() || path.find('\0') != std::string::npos ||
         path.find('\\') != std::string::npos || path.front() == '/')
         throw ServiceError(ServiceErrorCode::InvalidPath,

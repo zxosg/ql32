@@ -12,7 +12,9 @@ runtime::TaskState taskState(TaskStatus status) {
     case TaskStatus::Runnable: return runtime::TaskState::Runnable;
     case TaskStatus::WaitingUi: return runtime::TaskState::WaitingUi;
     case TaskStatus::WaitingInput: return runtime::TaskState::WaitingInput;
+    case TaskStatus::WaitingChannel: return runtime::TaskState::WaitingChannel;
     case TaskStatus::WaitingTask: return runtime::TaskState::WaitingTask;
+    case TaskStatus::DebugPaused: return runtime::TaskState::DebugPaused;
     case TaskStatus::Completed: return runtime::TaskState::Completed;
     case TaskStatus::Failed: return runtime::TaskState::Failed;
     case TaskStatus::Cancelled: return runtime::TaskState::Cancelled;
@@ -59,6 +61,30 @@ public:
 
     std::vector<runtime::ChannelInfo> listChannels(runtime::TaskId id) const override {
         return scheduler_.taskChannels(id);
+    }
+    bool debugAttach(runtime::TaskId id) override { return scheduler_.debugAttach(id); }
+    bool debugSetBreakpoint(runtime::TaskId id, int line, bool enabled) override {
+        return scheduler_.debugSetBreakpoint(id, line, enabled);
+    }
+    bool debugResume(runtime::TaskId id, runtime::DebugResumeMode mode) override {
+        return scheduler_.debugResume(id, mode);
+    }
+    bool debugPause(runtime::TaskId id) override { return scheduler_.debugPause(id); }
+    bool debugSetDiagnostics(runtime::TaskId id, bool enabled, bool trace) override {
+        return scheduler_.debugSetDiagnostics(id, enabled, trace);
+    }
+    std::optional<runtime::DebugSnapshot> debugInspect(runtime::TaskId id) const override {
+        return scheduler_.debugInspect(id);
+    }
+    std::optional<runtime::DebugValue> debugEvaluate(
+        runtime::TaskId id, const std::string& expression) const override {
+        return scheduler_.debugEvaluate(id, expression);
+    }
+    bool debugAddWatch(runtime::TaskId id, std::string expression) override {
+        return scheduler_.debugAddWatch(id, std::move(expression));
+    }
+    bool debugRemoveWatch(runtime::TaskId id, const std::string& expression) override {
+        return scheduler_.debugRemoveWatch(id, expression);
     }
 
     std::vector<runtime::ManagedTaskInfo> listTasks() const override {
@@ -366,6 +392,90 @@ bool SessionScheduler::setTaskPriority(TaskId id,
     return false;
 }
 
+bool SessionScheduler::debugAttach(TaskId id) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter ||
+            current->status == TaskStatus::Completed || current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled) continue;
+        current->interpreter->debugAttach();
+        const auto snapshot = current->interpreter->debugInspect();
+        if (current->started && snapshot && snapshot->paused)
+            current->status = TaskStatus::DebugPaused;
+        return true;
+    }
+    return false;
+}
+
+bool SessionScheduler::debugSetBreakpoint(TaskId id, int line, bool enabled) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter) continue;
+        return current->interpreter->debugSetBreakpoint(line, enabled);
+    }
+    return false;
+}
+
+bool SessionScheduler::debugResume(TaskId id, runtime::DebugResumeMode mode) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter ||
+            current->status != TaskStatus::DebugPaused) continue;
+        if (!current->interpreter->debugResume(mode)) return false;
+        current->status = TaskStatus::Runnable;
+        policy_.resetCredits();
+        return true;
+    }
+    return false;
+}
+
+bool SessionScheduler::debugPause(TaskId id) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter || !current->started ||
+            (current->status != TaskStatus::Runnable && current->status != TaskStatus::WaitingUi))
+            continue;
+        if (!current->interpreter->debugPause()) return false;
+        current->status = TaskStatus::DebugPaused;
+        return true;
+    }
+    return false;
+}
+
+bool SessionScheduler::debugSetDiagnostics(TaskId id, bool enabled, bool trace) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter) continue;
+        current->interpreter->debugSetDiagnostics(enabled, trace);
+        return true;
+    }
+    return false;
+}
+
+std::optional<runtime::DebugSnapshot> SessionScheduler::debugInspect(TaskId id) const {
+    for (const auto& current : tasks_)
+        if (current->id == id && current->interpreter)
+            return current->interpreter->debugInspect();
+    return std::nullopt;
+}
+
+std::optional<runtime::DebugValue> SessionScheduler::debugEvaluate(
+    TaskId id, const std::string& expression) const {
+    for (const auto& current : tasks_)
+        if (current->id == id && current->interpreter)
+            return current->interpreter->debugEvaluate(expression);
+    return std::nullopt;
+}
+
+bool SessionScheduler::debugAddWatch(TaskId id, std::string expression) {
+    for (auto& current : tasks_)
+        if (current->id == id && current->interpreter)
+            return current->interpreter->debugAddWatch(std::move(expression));
+    return false;
+}
+
+bool SessionScheduler::debugRemoveWatch(TaskId id, const std::string& expression) {
+    for (auto& current : tasks_)
+        if (current->id == id && current->interpreter)
+            return current->interpreter->debugRemoveWatch(expression);
+    return false;
+}
+
 std::vector<runtime::ChannelInfo> SessionScheduler::taskChannels(TaskId id) const {
     for (const auto& current : tasks_)
         if (current->id == id && current->interpreter)
@@ -411,8 +521,13 @@ bool SessionScheduler::tick() {
         if (candidate.status == TaskStatus::Completed ||
             candidate.status == TaskStatus::Failed ||
             candidate.status == TaskStatus::Cancelled ||
-            candidate.status == TaskStatus::WaitingTask || candidate.paused)
+            candidate.status == TaskStatus::WaitingTask ||
+            candidate.status == TaskStatus::DebugPaused || candidate.paused)
             continue;
+        if (candidate.status == TaskStatus::WaitingChannel) {
+            if (!candidate.interpreter || !candidate.interpreter->channelReadReady()) continue;
+            candidate.status = TaskStatus::Runnable;
+        }
         if (candidate.status == TaskStatus::WaitingInput &&
             !candidate.hasPendingSource)
             continue;
@@ -482,6 +597,12 @@ bool SessionScheduler::tick() {
         } else if (result == ExecutionStatus::Suspended) {
             current.started = true;
             current.status = TaskStatus::WaitingUi;
+        } else if (result == ExecutionStatus::WaitingChannel) {
+            current.started = true;
+            current.status = TaskStatus::WaitingChannel;
+        } else if (result == ExecutionStatus::DebugPaused) {
+            current.started = true;
+            current.status = TaskStatus::DebugPaused;
         } else {
             current.started = true;
             current.status = TaskStatus::Runnable;

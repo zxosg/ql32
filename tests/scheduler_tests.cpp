@@ -28,6 +28,13 @@ public:
     std::vector<ql32::runtime::FileEntry> list(const std::string&) override {
         return {};
     }
+    bool exists(const std::string& path) override { return files.count(path) != 0; }
+    std::uintmax_t size(const std::string& path) override { return files.at(path).size(); }
+    void rename(const std::string& path, const std::string& newPath) override {
+        files[newPath] = std::move(files.at(path));
+        files.erase(path);
+    }
+    void remove(const std::string& path) override { files.erase(path); }
 
     std::unordered_map<std::string, std::string> files;
 };
@@ -590,7 +597,7 @@ void testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor() {
     std::ostringstream supervisorOutput;
     const auto supervisor = scheduler.launchInteractive(supervisorOutput);
     require(scheduler.submit(supervisor,
-                "x=7\nREPeat forever\nx=x+1\nEND REPeat forever\n"),
+                "x=7\nREPeat forever\ny=y+1\nEND REPeat forever\n"),
             "supervisor did not accept the long-running program");
     for (int tick = 0; tick < 8; ++tick) (void)scheduler.tick();
     require(scheduler.breakTaskExecution(supervisor),

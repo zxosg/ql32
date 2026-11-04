@@ -5,6 +5,7 @@
 
 #include <FS.h>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 namespace ql32::platform::esp32 {
@@ -12,7 +13,8 @@ namespace ql32::platform::esp32 {
 // Session-owned text channels backed by an Arduino filesystem (normally SD).
 class SdChannels final : public runtime::ChannelService {
 public:
-    explicit SdChannels(fs::FS& filesystem) : filesystem_(filesystem) {}
+    explicit SdChannels(fs::FS& filesystem, std::string drive = "SDC")
+        : filesystem_(filesystem), drive_(std::move(drive)) {}
     ~SdChannels() override;
 
     runtime::ChannelId open(runtime::SessionId session, const std::string& path,
@@ -40,12 +42,13 @@ private:
     };
 
     fs::FS& filesystem_;
+    std::string drive_;
     std::unordered_map<runtime::ChannelId, OpenChannel> channels_;
     runtime::ChannelId nextId_ = 2;
     std::mutex mutex_;
 
     void ensureAvailable();
-    static std::string resolve(const std::string& path);
+    std::string resolve(const std::string& path) const;
     OpenChannel& owned(runtime::SessionId session, runtime::ChannelId channel);
 };
 

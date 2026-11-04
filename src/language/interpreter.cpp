@@ -87,7 +87,8 @@ constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
     "INK", "PAPER", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
-    "CLOSEWINDOW", "GUPDATE", "KILL"
+    "CLOSEWINDOW", "GUPDATE", "KILL", "OUT", "POKE", "POKE_W", "POKE_L",
+    "DEALLOC", "XFER"
 };
 
 bool isBuiltinCommandName(std::string_view name) {
@@ -106,11 +107,15 @@ bool isBuiltinFunctionName(std::string_view name) {
     return name == "TASK" || name == "TASKRESULT" || name == "ERR" ||
            name == "ERR$" || name == "ERRX$" || name == "LEN" ||
            name == "LEFT$" || name == "RIGHT$" || name == "MID$" ||
+           name == "VAL" || name == "EVAL" || name == "EVAL$" ||
            name == "BAND" || name == "BOR" || name == "BXOR" || name == "BNOT" ||
            name == "ROL" || name == "ROR" || name == "HEX$" || name == "BIN$" || name == "FREE" ||
            name == "SIN" || name == "COS" ||
            name == "INT" ||
            name == "OPEN" || name == "READ$" || name == "EOF" ||
+           name == "IN" || name == "ALLOC" || name == "PEEK" ||
+           name == "PEEK_W" || name == "PEEK_L" || name == "IOREAD" ||
+           name == "IOWRITE" ||
            name == "CONFIRM" || name == "DIALOG" || name == "DINIT" ||
            name == "DGET" || name == "DGET$" || name == "MINIT" || name == "MENU" ||
            name == "NETSTAT$" || name == "NETADDR$" || name == "NETSIGNAL" ||
@@ -132,6 +137,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "ERR$") return {1, true};
     if (instruction.name == "ERRX$") return {0, true};
     if (instruction.name == "LEN") return {1, true};
+    if (instruction.name == "VAL" || instruction.name == "EVAL" ||
+        instruction.name == "EVAL$") return {1, true};
     if (instruction.name == "LEFT$" || instruction.name == "RIGHT$") return {2, true};
     if (instruction.name == "MID$") return {2, true};
     if (instruction.name == "BAND" || instruction.name == "BOR" ||
@@ -150,6 +157,12 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "ALERT") return {2, false};
     if (instruction.name == "CONFIRM") return {2, true};
     if (instruction.name == "OPEN") return {2, true};
+    if (instruction.name == "IN" || instruction.name == "IOREAD" ||
+        instruction.name == "IOWRITE") return {1, true};
+    if (instruction.name == "ALLOC" || instruction.name == "PEEK" ||
+        instruction.name == "PEEK_W" || instruction.name == "PEEK_L") return {1, true};
+    if (instruction.name == "DEALLOC") return {1, false};
+    if (instruction.name == "POKE_W" || instruction.name == "POKE_L") return {2, false};
     if (instruction.name == "READ$" || instruction.name == "EOF") return {1, true};
     if (instruction.name == "WRITE") return {2, false};
     if (instruction.name == "CLOSE") return {1, false};
@@ -434,7 +447,20 @@ struct SourceTarget {
 
 class Compiler {
 public:
-    explicit Compiler(std::vector<Token> tokens) : tokens_(std::move(tokens)) {
+    explicit Compiler(std::vector<Token> tokens,
+                      const InstructionSequence* enclosing = nullptr)
+        : tokens_(std::move(tokens)) {
+        if (enclosing) {
+            enclosingFunctions_ = enclosing->functions;
+            arrays_ = enclosing->arrays;
+            constants_ = enclosing->constants;
+            for (const auto& [name, function] : enclosing->functions) {
+                definitions_.emplace(name, DefinitionInfo{function.address,
+                    function.function, function.parameters, function.locals,
+                    std::vector<std::size_t>(function.parameters.size())});
+                declaredFunctions_.insert(name);
+            }
+        }
         for (std::size_t i = 0; i + 2 < tokens_.size(); ++i) {
             if (tokens_[i].kind == Kind::Define && tokens_[i + 1].kind == Kind::Function &&
                 tokens_[i + 2].kind == Kind::Identifier)
@@ -461,6 +487,23 @@ public:
         }
         resolveSourceJumps(tolerateUnresolvedSourceJumps);
         resolveCalls(tolerateUnresolvedCalls);
+        for (const auto& [name, definition] : definitions_) {
+            code_.functions.emplace(name, detail::FunctionMetadata{
+                definition.address, definition.function, definition.parameters,
+                definition.locals});
+        }
+        code_.arrays = arrays_;
+        code_.constants = constants_;
+        return std::move(code_);
+    }
+
+    InstructionSequence compileExpression() {
+        expression();
+        if (!check(Kind::End)) error(peek(), "unexpected text after expression");
+        resolveCalls(false);
+        code_.functions = enclosingFunctions_;
+        code_.arrays = arrays_;
+        code_.constants = constants_;
         return std::move(code_);
     }
 
@@ -471,6 +514,7 @@ private:
     std::unordered_map<std::string, std::size_t> arrays_;
     std::unordered_map<std::string, Value> constants_;
     std::unordered_set<std::string> declaredFunctions_;
+    std::unordered_map<std::string, detail::FunctionMetadata> enclosingFunctions_;
     std::unordered_map<int, SourceTarget> lineTargets_;
     std::unordered_map<std::string, SourceTarget> labels_;
     std::vector<std::size_t> controlScopes_;
@@ -490,6 +534,7 @@ private:
     bool moduleCodeStarted_ = false;
     bool numericPrecisionDeclared_ = false;
     bool cpuFrequencyDeclared_ = false;
+    int currentBasicLine_ = 0;
     std::string currentDefinitionName_;
 
     std::string scopedLabel(const std::string& name) const {
@@ -504,6 +549,7 @@ private:
             error(token, "program line number must be in 1..32767");
         if (!lineTargets_.emplace(static_cast<int>(number), currentSourceTarget(token)).second)
             error(token, "duplicate program line number");
+        currentBasicLine_ = static_cast<int>(number);
     }
     bool labelDeclaration() const {
         return check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
@@ -618,8 +664,23 @@ private:
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "GETCHANNEL expects one or two arguments");
                 } else if (instruction.name == "OPEN") {
-                    if (passedArguments < 1 || passedArguments > 3)
-                        error(instruction, "OPEN expects one to three arguments");
+                    if (passedArguments < 1 || passedArguments > 20)
+                        error(instruction, "OPEN expects a device and up to nineteen parameters");
+                } else if (instruction.name == "IN") {
+                    if (passedArguments < 1 || passedArguments > 2)
+                        error(instruction, "IN expects a channel and optional register");
+                } else if (instruction.name == "IOREAD" || instruction.name == "IOWRITE") {
+                    if (passedArguments != 2 && passedArguments != 3)
+                        error(instruction, "IOREAD/IOWRITE expects a channel, optional register, and buffer");
+                } else if (instruction.name == "POKE") {
+                    if (passedArguments < 2)
+                        error(instruction, "POKE expects an address and one or more byte values");
+                } else if (instruction.name == "OUT") {
+                    if (passedArguments != 2 && passedArguments != 3)
+                        error(instruction, "OUT expects a channel and value, optionally with a register");
+                } else if (instruction.name == "XFER") {
+                    if (!instruction.channelArgument || passedArguments != 4)
+                        error(instruction, "XFER expects #channel, tx address/length, and rx address/length");
                 } else if (instruction.name == "TASK") {
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "TASK expects a filename and optional flags");
@@ -635,7 +696,10 @@ private:
                 } else if (instruction.name == "CIRCLE") {
                     if (passedArguments < 3 || passedArguments > 4)
                         error(instruction, "CIRCLE expects x, y, radius, and optional fill flag");
-                } else if (passedArguments != arguments) {
+                } else if (instruction.name != "IN" && instruction.name != "IOREAD" &&
+                           instruction.name != "IOWRITE" && instruction.name != "POKE" &&
+                           instruction.name != "OUT" && instruction.name != "XFER" &&
+                           passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
                 if (instruction.expectsValue != returnsValue)
@@ -1058,9 +1122,22 @@ private:
         while (match(Kind::Newline)) {}
         std::vector<std::string> locals;
         while (true) {
-            if (check(Kind::Number) && isLineNumber()) advance();
-            while (match(Kind::Newline)) {}
+            std::size_t numberedLineStart = current_;
+            int localBasicLine = 0;
+            if (check(Kind::Number) && isLineNumber()) {
+                const Token numberedLine = advance();
+                localBasicLine = static_cast<int>(numberedLine.number);
+                while (match(Kind::Newline)) {}
+                if (!check(Kind::Local)) {
+                    current_ = numberedLineStart;
+                    break;
+                }
+            } else {
+                while (match(Kind::Newline)) {}
+                if (!check(Kind::Local)) break;
+            }
             if (!match(Kind::Local)) break;
+            if (localBasicLine != 0) currentBasicLine_ = localBasicLine;
             if (!check(Kind::Identifier)) error(peek(), "expected local variable name");
             do {
                 if (!check(Kind::Identifier)) error(peek(), "expected local variable name");
@@ -1249,6 +1326,15 @@ private:
         code_.push_back(std::move(jump));
     }
     void statement(bool moduleScope = false) {
+        const std::size_t first = code_.size();
+        const int basicLine = currentBasicLine_;
+        statementBody(moduleScope);
+        if (first < code_.size()) {
+            code_[first].statementStart = true;
+            code_[first].basicLine = basicLine;
+        }
+    }
+    void statementBody(bool moduleScope) {
         if (check(Kind::Option)) {
             const Token keyword = advance();
             if (!moduleScope || inDefinition_)
@@ -1340,7 +1426,10 @@ private:
         if (match(Kind::Hash)) {
             const Token marker = previous();
             expression();
-            if (!check(Kind::Identifier)) error(peek(), "expected AT, IN, or OUT after channel handle");
+            if (!check(Kind::Identifier) &&
+                !(check(Kind::BuiltinFunction) && peek().text == "IN") &&
+                !(check(Kind::BuiltinCommand) && peek().text == "OUT"))
+                error(peek(), "expected AT, IN, or OUT after channel handle");
             const Token operation = advance();
             const std::string operationName = uppercaseAscii(operation.text);
             Instruction instruction{Op::ChannelSeek, 0.0, operationName,
@@ -1474,7 +1563,8 @@ private:
                 name.text == "INK" || name.text == "PAPER" || name.text == "PLOT" ||
                 name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
-                name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW";
+                name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW" ||
+                name.text == "XFER";
             const bool hasChannelArgument = supportsChannelSelector && match(Kind::Hash);
             if (hasChannelArgument) {
                 expression();
@@ -1660,7 +1750,10 @@ private:
     void stringSlice(const Token& name) {
         const Token open = advance();
         emit(Op::Load, name, 0.0, name.text);
-        Instruction slice{Op::StringSlice, 0.0, name.text, open.line, open.column};
+        stringSliceSuffix(open);
+    }
+    void stringSliceSuffix(const Token& open) {
+        Instruction slice{Op::StringSlice, 0.0, {}, open.line, open.column};
         if (!check(Kind::To) && !check(Kind::RightParen)) {
             expression();
             slice.sliceHasStart = true;
@@ -1679,7 +1772,12 @@ private:
     }
     void primary() {
         if (match(Kind::Number)) { const Token t = previous(); emit(Op::Push, t, t.number); return; }
-        if (match(Kind::String)) { const Token t = previous(); emit(Op::Push, t, t.text); return; }
+        if (match(Kind::String)) {
+            const Token t = previous();
+            emit(Op::Push, t, t.text);
+            if (check(Kind::LeftParen)) stringSliceSuffix(advance());
+            return;
+        }
         if (match(Kind::Hash)) {
             const Token marker = previous();
             if (match(Kind::Number)) {
@@ -2084,6 +2182,12 @@ detail::InstructionSequence detail::compileSource(const std::string& source) {
     return compiler.compile();
 }
 
+detail::InstructionSequence detail::compileExpression(
+    const std::string& source, const InstructionSequence& enclosing) {
+    Compiler compiler(Lexer(source).scan(), &enclosing);
+    return compiler.compileExpression();
+}
+
 std::string detail::expandIncludes(const std::string& source,
                                    runtime::StorageService* storage) {
     std::vector<std::string> activePaths;
@@ -2092,7 +2196,8 @@ std::string detail::expandIncludes(const std::string& source,
 }
 
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
-    if (executeInteractiveResumable(source, output) == ExecutionStatus::Suspended)
+    const auto status = executeInteractiveResumable(source, output);
+    if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel)
         throw std::runtime_error("execution suspended; use executeResumable() and resume()");
 }
 
@@ -2151,6 +2256,42 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             throw std::runtime_error("invalid quoted file command path");
         return path;
     };
+    auto parsePathValue = [&](const std::string& text, const char* commandName) {
+        const std::string value = trim(text);
+        if (value.empty())
+            throw std::runtime_error(std::string(commandName) + " requires a path");
+        if (value.front() == '"') return parseQuotedPath(value, commandName);
+        std::string name = value;
+        std::transform(name.begin(), name.end(), name.begin(),
+            [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        const auto found = variables_.find(name);
+        if (found == variables_.end() || !std::holds_alternative<std::string>(found->second))
+            throw std::runtime_error(std::string(commandName) +
+                                     " path must be a quoted string or string variable");
+        return std::get<std::string>(found->second);
+    };
+    auto splitRenamePaths = [&](const std::string& text) {
+        bool quoted = false;
+        std::size_t separator = std::string::npos;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == '"') {
+                if (quoted && i + 1 < text.size() && text[i + 1] == '"') {
+                    ++i;
+                    continue;
+                }
+                quoted = !quoted;
+            } else if (text[i] == ',' && !quoted) {
+                if (separator != std::string::npos)
+                    throw std::runtime_error("RENAME requires exactly two paths");
+                separator = i;
+            }
+        }
+        if (separator == std::string::npos)
+            throw std::runtime_error("RENAME requires source and destination paths");
+        return std::pair<std::string, std::string>{
+            parsePathValue(text.substr(0, separator), "RENAME"),
+            parsePathValue(text.substr(separator + 1), "RENAME")};
+    };
     auto parseChannelSelector = [&](std::string selector, const char* commandName) {
         selector = trim(std::move(selector));
         if (selector.empty() || selector.front() != '#')
@@ -2201,7 +2342,20 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
             word.rfind("SAVE ", 0) == 0 || word == "DIR" ||
             word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
+            word == "DELETE" || word.rfind("DELETE ", 0) == 0 ||
+            word == "RENAME" || word.rfind("RENAME ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
+            word == "DEBUG" || word.rfind("DEBUG ", 0) == 0 ||
+            word == "BREAK" || word.rfind("BREAK ", 0) == 0 ||
+            word == "CLEARBREAK" || word.rfind("CLEARBREAK ", 0) == 0 ||
+            word == "STEP" || word == "NEXT" || word == "CONTINUE" ||
+            word == "WHERE" || word == "LOCALS" || word == "GLOBALS" ||
+            word == "STACK" || word == "STATS" || word == "WATCHES" ||
+            word == "WATCH" || word.rfind("WATCH ", 0) == 0 ||
+            word == "UNWATCH" || word.rfind("UNWATCH ", 0) == 0 ||
+            word == "EVAL" || word.rfind("EVAL ", 0) == 0 ||
+            word == "DIAGNOSTICS" || word.rfind("DIAGNOSTICS ", 0) == 0 ||
+            word == "TRACE" || word.rfind("TRACE ", 0) == 0 ||
             word == "KILL" || word.rfind("KILL ", 0) == 0 ||
             word == "TASKRESULT" || word.rfind("TASKRESULT ", 0) == 0 ||
             word == "SUSPEND" || word.rfind("SUSPEND ", 0) == 0 ||
@@ -2318,6 +2472,16 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             for (const auto& [number, body] : program_)
                 contents += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
             storage_->writeText(path, contents);
+        } else if (word == "DELETE" || word.rfind("DELETE ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const std::string path = parsePathValue(normalizedLine.substr(6), "DELETE");
+            storage_->remove(path);
+        } else if (word == "RENAME" || word.rfind("RENAME ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const auto paths = splitRenamePaths(normalizedLine.substr(6));
+            storage_->rename(paths.first, paths.second);
         } else if (word == "DIR" || word.rfind("DIR ", 0) == 0 ||
                    word.rfind("DIR#", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2388,6 +2552,135 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 listing += "#" + std::to_string(channel.handle) + " " +
                     runtime::channelTypeName(channel.type) + "\n";
             writeChannelText(0, listing);
+        } else if (word == "DEBUG" || word.rfind("DEBUG ", 0) == 0) {
+            if (!taskControl_) throw std::runtime_error("debugger service unavailable");
+            const std::string argument = trim(normalizedLine.substr(5));
+            std::uint64_t id = 0;
+            const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), id);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size())
+                throw std::runtime_error("DEBUG requires a task ID");
+            if (!taskControl_->debugAttach(id))
+                throw std::runtime_error("task cannot be attached to the debugger");
+            debugTaskId_ = id;
+            writeChannelText(0, "Debugger attached to task " + std::to_string(id) + "\n");
+        } else if (word == "BREAK" || word.rfind("BREAK ", 0) == 0 ||
+                   word == "CLEARBREAK" || word.rfind("CLEARBREAK ", 0) == 0) {
+            if (!taskControl_ || debugTaskId_ == 0)
+                throw std::runtime_error("use DEBUG taskId first");
+            const bool enable = word.rfind("BREAK", 0) == 0 &&
+                word.rfind("CLEARBREAK", 0) != 0;
+            const std::size_t prefix = enable ? 5 : 10;
+            const std::string argument = trim(normalizedLine.substr(prefix));
+            int line = 0;
+            const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), line);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size() || line < 1 || line > 32767)
+                throw std::runtime_error(enable ? "BREAK requires a BASIC line number" :
+                                                  "CLEARBREAK requires a BASIC line number");
+            if (!taskControl_->debugSetBreakpoint(debugTaskId_, line, enable))
+                throw std::runtime_error("no executable statement at that source line");
+            writeChannelText(0, std::string(enable ? "Breakpoint set at " :
+                                                   "Breakpoint cleared at ") +
+                                 std::to_string(line) + "\n");
+        } else if (word == "STEP" || word == "NEXT" || word == "CONTINUE") {
+            if (!taskControl_ || debugTaskId_ == 0)
+                throw std::runtime_error("use DEBUG taskId first");
+            const runtime::DebugResumeMode mode = word == "STEP" ? runtime::DebugResumeMode::StepInto :
+                word == "NEXT" ? runtime::DebugResumeMode::StepOver : runtime::DebugResumeMode::Continue;
+            if (!taskControl_->debugResume(debugTaskId_, mode))
+                throw std::runtime_error("debug task is not paused");
+            writeChannelText(0, word + " task " + std::to_string(debugTaskId_) + "\n");
+        } else if (word == "DIAGNOSTICS ON" || word == "DIAGNOSTICS OFF" ||
+                   word == "TRACE ON" || word == "TRACE OFF") {
+            if (!taskControl_ || debugTaskId_ == 0)
+                throw std::runtime_error("use DEBUG taskId first");
+            const bool enabled = word != "DIAGNOSTICS OFF";
+            const bool trace = word == "TRACE ON";
+            if (!taskControl_->debugSetDiagnostics(debugTaskId_, enabled, trace))
+                throw std::runtime_error("debug task is unavailable");
+            writeChannelText(0, word + "\n");
+        } else if (word == "WHERE" || word == "LOCALS" || word == "GLOBALS" ||
+                   word == "STACK" || word == "STATS" || word == "WATCHES") {
+            if (!taskControl_ || debugTaskId_ == 0)
+                throw std::runtime_error("use DEBUG taskId first");
+            const auto snapshot = taskControl_->debugInspect(debugTaskId_);
+            if (!snapshot) throw std::runtime_error("debug task is unavailable");
+            std::ostringstream listing;
+            const auto printMap = [&](const std::unordered_map<std::string, runtime::DebugValue>& values) {
+                if (values.empty()) { listing << "(none)\n"; return; }
+                for (const auto& [name, value] : values) {
+                    listing << name << " = ";
+                    if (const auto* number = std::get_if<double>(&value)) listing << *number;
+                    else listing << '"' << std::get<std::string>(value) << '"';
+                    listing << '\n';
+                }
+            };
+            if (word == "WHERE") {
+                listing << (snapshot->paused ? "PAUSED " : "RUNNING ");
+                if (snapshot->location.basicLine != 0)
+                    listing << "BASIC line " << snapshot->location.basicLine << " ";
+                listing << "source " << snapshot->location.sourceLine << ":" <<
+                    snapshot->location.column << " bytecode " << snapshot->location.instruction << '\n';
+                if (!snapshot->frames.empty()) listing << "in " << snapshot->frames.back().name << '\n';
+            } else if (word == "LOCALS") {
+                if (snapshot->frames.empty()) listing << "(no local frame)\n";
+                else printMap(snapshot->frames.back().locals);
+            } else if (word == "GLOBALS") {
+                printMap(snapshot->globals);
+            } else if (word == "STACK") {
+                if (snapshot->frames.empty()) listing << "(no call frames)\n";
+                for (std::size_t i = 0; i < snapshot->frames.size(); ++i)
+                    listing << i << ": " << snapshot->frames[i].name <<
+                        (snapshot->frames[i].function ? " (function)\n" : " (procedure)\n");
+            } else if (word == "WATCHES") {
+                if (snapshot->watches.empty()) listing << "(no watches)\n";
+                for (const auto& watch : snapshot->watches) {
+                    listing << watch.expression << " = ";
+                    if (!watch.error.empty()) listing << "<" << watch.error << ">";
+                    else if (watch.value) {
+                        if (const auto* number = std::get_if<double>(&*watch.value)) listing << *number;
+                        else listing << '"' << std::get<std::string>(*watch.value) << '"';
+                    } else listing << "<unavailable>";
+                    listing << '\n';
+                }
+            } else {
+                listing << "Bytecodes: " << snapshot->bytecodes << '\n'
+                        << "Procedure calls: " << snapshot->procedureCalls << '\n'
+                        << "IF true: " << snapshot->ifTrue << '\n'
+                        << "IF false: " << snapshot->ifFalse << '\n'
+                        << "Free memory: ";
+                if (snapshot->freeMemory) listing << *snapshot->freeMemory << " bytes\n";
+                else listing << "unavailable\n";
+                for (const auto& entry : snapshot->trace) listing << entry << '\n';
+            }
+            writeChannelText(0, listing.str());
+        } else if (word == "WATCH" || word.rfind("WATCH ", 0) == 0 ||
+                   word == "UNWATCH" || word.rfind("UNWATCH ", 0) == 0) {
+            if (!taskControl_ || debugTaskId_ == 0)
+                throw std::runtime_error("use DEBUG taskId first");
+            const bool add = word.rfind("WATCH", 0) == 0 && word.rfind("UNWATCH", 0) != 0;
+            const std::string expression = trim(normalizedLine.substr(add ? 5 : 7));
+            if (expression.empty()) throw std::runtime_error(add ?
+                "WATCH requires an expression" : "UNWATCH requires an expression");
+            const bool changed = add ? taskControl_->debugAddWatch(debugTaskId_, expression) :
+                                       taskControl_->debugRemoveWatch(debugTaskId_, expression);
+            if (!changed) throw std::runtime_error(add ?
+                "watch requires a paused task and a safe expression" : "watch was not found");
+            writeChannelText(0, std::string(add ? "Watching " : "Stopped watching ") +
+                                expression + "\n");
+        } else if (word == "EVAL" || word.rfind("EVAL ", 0) == 0) {
+            if (!taskControl_ || debugTaskId_ == 0)
+                throw std::runtime_error("use DEBUG taskId first");
+            const std::string expression = trim(normalizedLine.substr(4));
+            if (expression.empty()) throw std::runtime_error("EVAL requires an expression");
+            const auto value = taskControl_->debugEvaluate(debugTaskId_, expression);
+            if (!value) throw std::runtime_error("debug task is not paused");
+            std::ostringstream listing;
+            if (const auto* number = std::get_if<double>(&*value)) listing << *number;
+            else listing << std::get<std::string>(*value);
+            listing << '\n';
+            writeChannelText(0, listing.str());
         } else if (word == "KILL" || word.rfind("KILL ", 0) == 0) {
             if (!taskControl_)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2590,6 +2883,7 @@ void Interpreter::clear() {
     execution_.reset();
     *uiSession_ = detail::UISessionState{};
     variables_.clear();
+    buffers_.clear();
     output_column_ = 0;
 }
 

@@ -5,11 +5,14 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 #include "ql32/runtime/cancellation.hpp"
 #include "ql32/runtime/channel.hpp"
+#include "ql32/runtime/buffer.hpp"
 #include "ql32/runtime/storage.hpp"
 #include "ql32/runtime/network.hpp"
 #include "ql32/runtime/memory.hpp"
@@ -25,7 +28,7 @@ namespace ql32 {
 namespace detail { struct VMExecutionState; struct UISessionState; }
 
 using Value = std::variant<double, std::string>;
-enum class ExecutionStatus { Completed, Suspended, WaitingTask, Yielded };
+enum class ExecutionStatus { Completed, Suspended, WaitingChannel, WaitingTask, Yielded, DebugPaused };
 
 class Interpreter {
 public:
@@ -63,12 +66,22 @@ public:
                  bool showPrompt = false,
                  std::function<bool()> dispatchUiRequest = {});
     std::vector<runtime::ChannelInfo> channelInventory() const;
+    bool channelReadReady() const;
     std::size_t openChannelCount() const;
     void setErrorContext(runtime::ErrorCode code, std::string detail = {});
     void abortExecution() noexcept;
     // Release retained display memory while keeping this interpreter session
     // available for the next interactive command.
     void releaseGraphicsResources() noexcept;
+    bool debugAttach() noexcept;
+    bool debugSetBreakpoint(int line, bool enabled = true);
+    bool debugResume(runtime::DebugResumeMode mode);
+    bool debugPause() noexcept;
+    void debugSetDiagnostics(bool enabled, bool trace = false) noexcept;
+    std::optional<runtime::DebugSnapshot> debugInspect() const;
+    std::optional<runtime::DebugValue> debugEvaluate(const std::string& expression) const;
+    bool debugAddWatch(std::string expression);
+    bool debugRemoveWatch(const std::string& expression);
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
     const std::string& errorDetail() const noexcept { return errorDetail_; }
     void clear();
@@ -91,6 +104,7 @@ private:
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;
     std::shared_ptr<runtime::ChannelService> channels_;
+    runtime::BufferManager buffers_;
     std::shared_ptr<ui::Service> ui_;
     std::shared_ptr<graphics::Service> graphics_;
     std::shared_ptr<runtime::NetworkService> network_;
@@ -103,6 +117,13 @@ private:
     runtime::ErrorCode errorCode_ = runtime::ErrorCode::None;
     std::string errorDetail_;
     std::unique_ptr<detail::VMExecutionState> execution_;
+    bool debuggerAttached_ = false;
+    bool diagnosticsEnabled_ = false;
+    bool traceEnabled_ = false;
+    bool debugPauseRequested_ = false;
+    std::vector<std::pair<int, bool>> pendingBreakpoints_;
+    runtime::TaskId debugTaskId_ = 0;
+    std::vector<std::string> debugWatches_;
 };
 
 } // namespace ql32

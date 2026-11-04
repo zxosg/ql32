@@ -51,6 +51,10 @@ public:
     std::string readText(const std::string& path) override;
     void writeText(const std::string& path, const std::string& contents) override;
     std::vector<runtime::FileEntry> list(const std::string& path) override;
+    bool exists(const std::string& path) override;
+    std::uintmax_t size(const std::string& path) override;
+    void rename(const std::string& path, const std::string& newPath) override;
+    void remove(const std::string& path) override;
 
 private:
     const IdfSdCard& card_;
