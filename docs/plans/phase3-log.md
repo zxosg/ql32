@@ -277,3 +277,80 @@
   record buffer; its largest-block impact has not been measured on hardware.
   Linux host validation remains outstanding because this Darwin host has no
   Docker, Podman, or Lima runtime.
+
+## 2026-11-05 — B4 test-plan execution
+
+- **Reference/candidate:** REF is the exact B3 parent `58bf799`
+  (`pre-b4` tag created at that commit); CAND is B4 commit `cd5d6b5`.
+  REF was archived into `/private/tmp/ql32-b4-test-ref` and built there so the
+  candidate worktree stayed untouched.
+- **T1 / AC1:** both REF and CAND rebuilt and passed all 61 CTest cases in
+  Debug and ASan+UBSan configurations (61/61 in each run; no skips).
+- **T2 / AC2:** the 11 curated corpus cases were run directly on both binaries.
+  Stdout, stderr, and exit codes matched byte-for-byte in all 11 cases. The
+  expected files were not changed. The plan's separate `tests/golden/` directory
+  is not present; this used the existing `ql32_golden_corpus` fixtures.
+- **T3 / AC3:** incomplete. `tests/language/` contains no B4 cases and there is
+  no opcode-coverage guard, so the required every-op differential matrix was
+  not run.
+- **T4 / AC4:** partial. Existing runtime tests cover 16-byte records,
+  round-trip of a representative instruction stream, dynamic append/erase, and
+  wide source-column fallback. The VM's `verifyBytecode()` does run after
+  lowering, but operand/index boundary cases, full semantic field comparison,
+  and checked-narrowing tests are absent; acceptance is not established.
+- **T5 / AC5:** existing debugger tests pass on both binaries, but the required
+  40-case error differential, complete line-metadata comparison, and scripted
+  debugger session differential were not present and remain unverified.
+- **T6 / AC6:** partial. Existing allocation-failure tests exercise DIM payload
+  failure and interpreter recovery. The compile-allocation sweep, large-load
+  failure sweep, repeated EVAL lifecycle, concurrent compile, and task/code
+  allocation accounting were not run.
+- **T7 / AC7:** not run; no grammar generator or mutation fuzzer is present.
+- **T8 / AC8:** five-run benchmark comparisons and additional workload results
+  are recorded in `phase3-metrics.md`. The existing suite and 1M-loop / 100k
+  procedure-call additions stay within the 110% runtime target. The 2,000-line
+  `ql32_sizecheck` compile/lowering proxy is 126.5% of REF, above the 120%
+  target but below 150%; it needs a pure compile/lower timer because sizecheck
+  includes diagnostic accounting. The 2,000-line execution workload is 155.0%
+  of REF and **fails T8's >150% stop threshold**. Read-only macOS sampling of a
+  longer straight-line workload shows repeated `Instruction` materialization
+  in `verifyBytecode()` and pre-execution scans through
+  `CompactProgram::const_iterator::operator*()`; the VM dispatch loop itself
+  uses the reusable `instructionAt()` scratch path. This points first to
+  by-value iterator scans, but a fix waits for REF-first coverage tests. At
+  recursion depth 1,000 both builds produce the identical `call stack limit
+  exceeded` error; retain this as an expected compatibility case and time the
+  deepest successful baseline recursion separately.
+- **T9 / AC9:** the 10-line and 2,000-line synthetic thresholds pass, but AC9
+  is **blocked** by the real attractor sample growing after encoding. The
+  structural estimate is 33,581 B versus 29,652 B for REF; a host allocation
+  tracker measured 40,068 B retained versus 28,364 B. The sidecar vector has
+  67 elements and capacity 128; a temporary `shrink_to_fit()` experiment
+  reduces the encoded estimate to 19,429 B. This implicates geometric
+  sidecar-capacity waste, which must be corrected and remeasured before AC9 is
+  accepted. The tracker is a host probe, not an ESP32 allocator measurement.
+- **Compile peak:** a read-only global-`operator new` allocation tracker on the
+  2,000-line source measured an identical 2,666,800 B peak for REF and CAND
+  during rich compilation. CAND then retains 140,112 B after lowering, but
+  lowering does not reduce the already-observed compile peak. Compact records
+  must be emitted during compilation, after the REF-first tests exist, to
+  reduce peak heap. On the attractor sample the lowering step itself peaks at
+  54,948 B versus the 51,404 B rich-compile peak.
+- **T10 / AC10:** `pio run` succeeded for all three profiles that built before
+  B4: `lilygo_vga32`, `olimex_esp32_sbc_fabgl`, and `esp32_2432s028`. Static
+  RAM is unchanged from B3; flash images are each smaller than B3. No new
+  VM/compiler warnings appeared in these builds.
+- **T11 / AC11:** pending. The CYD candidate firmware boots to `BASIC REPL
+  ready`, but reports `Storage unavailable`; the plan's `tools/hw_soak.py` is
+  absent, and the existing CYD memory harness requires storage fixtures. No
+  B3 image was flashed for comparison and no soak result is claimed.
+- **Commands:** `cmake --build build --parallel 4`; `ctest --test-dir build
+  --output-on-failure`; corresponding commands for `build-asan`, REF
+  `build-ref`, and REF `build-ref-asan`; `python3 tools/run-vm-benchmarks.py
+  <binary> --runs 5`; `ql32_sizecheck <sample.bas>`; and the three `pio run -e
+  <profile>` commands. Temporary benchmark sources were created only under
+  `/private/tmp`; random/fuzz seeds were not applicable because T7 was not run.
+- **Overall:** AC1, AC2, and AC10 pass. AC8 fails its >150% stop threshold on
+  the 2,000-line execution case; AC9 is blocked by the attractor growth. AC3,
+  AC4, AC5, AC6, and AC7 are incomplete; AC11 is pending. B4 is not ready for
+  mainline merge under the stated criteria.

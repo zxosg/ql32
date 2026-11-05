@@ -266,3 +266,90 @@ or runtime largest-block measurements.
 | `lilygo_vga32` | 53,616 B | 1,556,129 B | −56 B |
 | `olimex_esp32_sbc_fabgl` | 54,252 B | 1,630,785 B | +24 B |
 | `esp32_2432s028` | 51,252 B | 1,495,741 B | −88 B |
+
+### B4 test-plan REF/CAND measurements — 2026-11-05
+
+Host: macOS, AppleClang 21, Debug. REF is `58bf799` (B3); CAND is `cd5d6b5`
+(B4). The timed workloads use five process runs per binary; listed values are
+median wall times. REF and CAND were run sequentially with the same input files.
+
+| Workload | REF | CAND | CAND / REF |
+|---|---:|---:|---:|
+| 10,000 loop iterations | 0.019631 s | 0.020789 s | 105.9% |
+| Recursive function depth 200 | 0.004980 s | 0.004684 s | 94.1% |
+| Fill 10,000-element numeric array | 0.015396 s | 0.015721 s | 102.1% |
+| 1,000 string concatenations | 0.005798 s | 0.006049 s | 104.3% |
+| 40×28 Mandelbrot iteration | 0.200182 s | 0.202510 s | 101.2% |
+| Tight FOR loop, 1,000,000 iterations | 1.615154 s | 1.628333 s | 100.8% |
+| 100,000 function calls in a loop | 0.383066 s | 0.386004 s | 100.8% |
+| `ql32_sizecheck` on 2,000-line source | 0.019233 s | 0.024325 s | 126.5% |
+
+The sizecheck timing includes compilation/lowering and diagnostic probes, so it
+is a proxy rather than a pure compile timer. A full `ql32 --console` run of the
+2,000-line PRINT source took 0.022056 s on REF and 0.034192 s on CAND (155.0%);
+that includes executing all 2,000 PRINT statements and is not the plan's
+compile-only measurement. Both builds fail the attempted depth-1,000 recursive
+workload with the same call-stack-limit error; successful recursion timing is
+therefore reported at depth 200 from the curated runner.
+
+The following size figures use `ql32_sizecheck` on identical source files. The
+compact estimate includes record/sidecar/literal capacities and program maps,
+but is not an allocator-level heap census.
+
+| Sample | REF estimated sequence | CAND encoded program | CAND / REF |
+|---|---:|---:|---:|
+| 10-line sample (40 instructions) | 10,456 B | 848 B | 8.1% |
+| 2,000-line PRINT sample (8,000 instructions) | 2,056,176 B | 128,208 B | 6.2% |
+| `examples/mandelbrot.bas` (142 instructions) | 36,722 B | 34,026 B | 92.7% |
+| `benchmarks/mandelbrot.bas` (80 instructions) | 20,742 B | 17,292 B | 83.3% |
+| `examples/attractor.bas` (114 instructions) | 29,652 B | 33,581 B | 113.3% |
+
+The two synthetic targets pass the plan's ≤50% tiny and ≤30% 2,000-line
+thresholds. The attractor sample is 13.3% larger in the structural estimate.
+The candidate stores 67 sidecars in a vector with capacity 128; the unused 61
+records account for 14,152 B at `sizeof(Instruction) == 232`. In a read-only
+temporary-object experiment, `shrink_to_fit()` changed the encoded estimate
+from 33,581 B to 19,429 B. The exact-reserve change is not yet applied.
+
+### B4 compile peak and allocation measurements — 2026-11-05
+
+A temporary host harness overrode global `operator new`/`delete`, counted live
+allocated bytes while `compileSource()` ran, then continued tracking while the
+candidate lowered the rich sequence. The source string was loaded before
+tracking. This captures standard-library allocation peak on this macOS host;
+it does not emulate ESP32 allocator metadata or board concurrency.
+
+| Workload | REF rich-compile peak | CAND rich-compile peak | CAND lowering peak total | CAND final encoded live |
+|---|---:|---:|---:|---:|
+| 2,000-line PRINT source | 2,666,800 B | 2,666,800 B | 2,004,856 B | 140,112 B |
+| `examples/attractor.bas` | 51,404 B | 51,404 B | 54,948 B | 40,068 B |
+| `benchmarks/mandelbrot.bas` | 30,038 B | 30,038 B | 31,966 B | 24,510 B |
+
+The rich-compile peak is unchanged by B4. This confirms that compile-time heap
+still pays for the old instruction builder before lowering; direct compact
+emission is needed to reduce that peak. Attractor's tracked final allocation is
+41.3% above REF; exact sidecar capacity would remove the observed capacity
+waste, but the code change and full regression run remain pending.
+
+### B4 execution profile — 2026-11-05
+
+Read-only macOS `sample` profiles were collected from REF and CAND on a
+repeated straight-line PRINT workload. In the candidate stack samples,
+`verifyBytecode()` and `std::any_of` traverse `CompactProgram` through its
+by-value const iterator, whose dereference constructs/returns a rich
+`Instruction`. The hot VM loop instead calls `instructionAt(pc, scratch)`.
+This is a profile lead for the >150% 2,000-line result, not proof of its exact
+share; instrumented timing and a pure execution workload are still required.
+
+#### B4 ESP32 profile verification
+
+Fresh `pio run` results compared with the recorded B3 values:
+
+| Environment | B3 static RAM | CAND static RAM | B3 flash | CAND flash | Flash delta |
+|---|---:|---:|---:|---:|---:|
+| `lilygo_vga32` | 53,616 B | 53,616 B | 1,556,521 B | 1,556,129 B | −392 B |
+| `olimex_esp32_sbc_fabgl` | 54,252 B | 54,252 B | 1,631,101 B | 1,630,785 B | −316 B |
+| `esp32_2432s028` | 51,252 B | 51,252 B | 1,496,161 B | 1,495,741 B | −420 B |
+
+All three builds succeeded; static RAM did not increase and no new compiler
+warnings appeared in VM/compiler sources.
