@@ -196,3 +196,31 @@ A0 baseline above.
 | Array fill | 0.021055 s | 0.020877 s | −0.8% |
 | String concat | 0.006180 s | 0.006306 s | +2.0% |
 | Mandelbrot iteration | 0.238021 s | 0.236258 s | −0.7% |
+
+### B3 managed buffer index probe
+
+On the host used for `ql32_sizecheck`, the `BufferManager` record is 32 B and
+the map value estimate is 40 B (the key duplicates the base already stored in
+the record). For 1,000 allocations:
+
+| Index representation | Estimated structural bytes |
+|---|---:|
+| Map values plus four pointer widths per estimated tree node | 72,000 B |
+| Sorted vector records at capacity 1,024 | 32,768 B |
+
+This is a structural estimate, not an allocator census. Actual tree node layout,
+allocator rounding, vector growth, and payload buffers depend on the STL and
+workload. The vector removes per-node allocation and duplicate base metadata;
+deallocation now shifts following records.
+
+### After B3 firmware sizes
+
+All three supported PlatformIO profiles built with the sorted-vector index.
+Values below are PlatformIO firmware image size and static RAM, not free heap
+or runtime largest-block measurements.
+
+| Environment | Static RAM | Flash image | Flash delta from B1 |
+|---|---:|---:|---:|
+| `lilygo_vga32` | 53,616 B | 1,556,521 B | +336 B |
+| `olimex_esp32_sbc_fabgl` | 54,252 B | 1,631,101 B | +340 B |
+| `esp32_2432s028` | 51,252 B | 1,496,161 B | +332 B |

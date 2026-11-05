@@ -13,48 +13,60 @@ std::uint64_t BufferManager::allocate(std::size_t size) {
         throw ServiceError(ServiceErrorCode::Unavailable, "buffer address space exhausted");
     const auto base = nextAddress_;
     Allocation allocation{base, std::vector<std::uint8_t>(size, 0)};
-    allocations_.emplace(base, std::move(allocation));
+    const auto position = std::lower_bound(allocations_.begin(), allocations_.end(), base,
+        [](const Allocation& candidate, std::uint64_t key) { return candidate.base < key; });
+    allocations_.insert(position, std::move(allocation));
     nextAddress_ += static_cast<std::uint64_t>(size) + 16;
     return base;
 }
 
+void BufferManager::clear() noexcept {
+    std::vector<Allocation>().swap(allocations_);
+}
+
 void BufferManager::deallocate(std::uint64_t address) {
-    if (allocations_.erase(address) == 0)
+    const auto found = std::lower_bound(allocations_.begin(), allocations_.end(), address,
+        [](const Allocation& candidate, std::uint64_t key) { return candidate.base < key; });
+    if (found == allocations_.end() || found->base != address)
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "DEALLOC requires an allocation base address");
+    allocations_.erase(found);
 }
 
 std::pair<const BufferManager::Allocation*, std::size_t>
 BufferManager::locate(std::uint64_t address, std::size_t count) const {
-    auto found = allocations_.upper_bound(address);
+    auto found = std::upper_bound(allocations_.begin(), allocations_.end(), address,
+        [](std::uint64_t key, const Allocation& candidate) { return key < candidate.base; });
     if (found == allocations_.begin())
         throw ServiceError(ServiceErrorCode::InvalidHandle, "buffer address is not allocated");
     --found;
-    const auto offset64 = address - found->first;
-    if (offset64 > found->second.bytes.size() ||
-        count > found->second.bytes.size() - static_cast<std::size_t>(offset64))
+    const auto offset64 = address - found->base;
+    if (offset64 > found->bytes.size() ||
+        count > found->bytes.size() - static_cast<std::size_t>(offset64))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "buffer access exceeds allocation");
-    return {&found->second, static_cast<std::size_t>(offset64)};
+    return {&*found, static_cast<std::size_t>(offset64)};
 }
 
 std::pair<BufferManager::Allocation*, std::size_t>
 BufferManager::locate(std::uint64_t address, std::size_t count) {
-    auto found = allocations_.upper_bound(address);
+    auto found = std::upper_bound(allocations_.begin(), allocations_.end(), address,
+        [](std::uint64_t key, const Allocation& candidate) { return key < candidate.base; });
     if (found == allocations_.begin())
         throw ServiceError(ServiceErrorCode::InvalidHandle, "buffer address is not allocated");
     --found;
-    const auto offset64 = address - found->first;
-    if (offset64 > found->second.bytes.size() ||
-        count > found->second.bytes.size() - static_cast<std::size_t>(offset64))
+    const auto offset64 = address - found->base;
+    if (offset64 > found->bytes.size() ||
+        count > found->bytes.size() - static_cast<std::size_t>(offset64))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "buffer access exceeds allocation");
-    return {&found->second, static_cast<std::size_t>(offset64)};
+    return {&*found, static_cast<std::size_t>(offset64)};
 }
 
 std::size_t BufferManager::allocationSize(std::uint64_t address) const {
-    auto found = allocations_.find(address);
-    if (found == allocations_.end())
+    const auto found = std::lower_bound(allocations_.begin(), allocations_.end(), address,
+        [](const Allocation& candidate, std::uint64_t key) { return candidate.base < key; });
+    if (found == allocations_.end() || found->base != address)
         throw ServiceError(ServiceErrorCode::InvalidHandle, "buffer address is not an allocation base");
-    return found->second.bytes.size();
+    return found->bytes.size();
 }
 
 std::uint8_t BufferManager::peek(std::uint64_t address) const {

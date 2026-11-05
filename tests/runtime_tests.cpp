@@ -1,5 +1,6 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
+#include "ql32/runtime/buffer.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -103,6 +104,36 @@ void testInterpreterSessions() {
     require(secondOutput.str() == "0\n", "session variables leaked into another interpreter");
     first.execute("PRINT value\n", firstOutput);
     require(firstOutput.str() == "42\n", "interpreter did not retain its own variables");
+}
+
+void testBufferManagerAllocationIndex() {
+    ql32::runtime::BufferManager buffers;
+    const auto first = buffers.allocate(4);
+    const auto second = buffers.allocate(3);
+    buffers.poke(first + 3, 0xA5);
+    buffers.poke(second, 0x5A);
+    require(buffers.peek(first + 3) == 0xA5 && buffers.peek(second) == 0x5A,
+            "buffer allocation lookup crossed allocation boundaries");
+    require(buffers.allocationSize(first) == 4 && buffers.allocationSize(second) == 3,
+            "buffer base lookup returned the wrong allocation size");
+
+    buffers.deallocate(first);
+    bool freedAddressRejected = false;
+    try { (void)buffers.peek(first); }
+    catch (const ql32::runtime::ServiceError&) { freedAddressRejected = true; }
+    require(freedAddressRejected, "freed buffer address remained accessible");
+    require(buffers.peek(second) == 0x5A,
+            "deallocating one allocation invalidated a later allocation");
+
+    bool interiorBaseRejected = false;
+    try { buffers.deallocate(second + 1); }
+    catch (const ql32::runtime::ServiceError&) { interiorBaseRejected = true; }
+    require(interiorBaseRejected, "DEALLOC accepted an interior address");
+    buffers.clear();
+    bool clearedAddressRejected = false;
+    try { (void)buffers.peek(second); }
+    catch (const ql32::runtime::ServiceError&) { clearedAddressRejected = true; }
+    require(clearedAddressRejected, "cleared buffer allocation remained accessible");
 }
 
 void testGotoLineNumbersAndLabels() {
@@ -877,6 +908,7 @@ void testDialogMenuBasicCallsSuspendAndResume() {
 
 int main() {
     try {
+        testBufferManagerAllocationIndex();
         testInterpreterSessions();
         testMemoryBudgetFailures();
         testGotoLineNumbersAndLabels();

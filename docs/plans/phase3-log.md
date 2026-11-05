@@ -210,3 +210,29 @@
 - **Open risks:** no target-board heap census of string-heavy workloads exists;
   the probe is a structural estimate and cannot establish embedded allocator
   behavior.
+
+## 2026-11-05 — B3 complete (compact BufferManager index)
+
+- **Step:** Track B3, allocator measurements and per-session allocation
+  overhead. No general size-class pool was added: this repository has no
+  evidence that pooled payload allocation would improve fragmentation, while
+  B2 showed that pooling can regress unique small values.
+- **Measurement:** extended `ql32_sizecheck` with an explicitly structural
+  comparison for 1,000 managed buffers. On this host, a map value is 40 B;
+  estimating four pointer widths for tree links gives 72,000 B, compared with
+  32,768 B for 1,000 32-byte records in vector capacity 1,024. This excludes
+  payload byte vectors, allocator rounding, and STL-specific node layout.
+- **Change:** replaced `BufferManager`'s map with a sorted vector. Allocation
+  bases increase monotonically, so insertion appends in normal use and
+  `lower_bound`/`upper_bound` retain logarithmic lookup. This removes a key/base
+  duplicate and per-node tree overhead. `clear()` releases vector capacity as
+  the former map clear released its nodes; allocation addresses are not reset.
+- **Tests:** added direct coverage for neighboring buffers, exact base sizes,
+  access after freeing an adjacent allocation, invalid interior DEALLOC, and
+  clear invalidation. Debug and ASan+UBSan CTest each passed 61/61. All three
+  supported PlatformIO profiles compiled; firmware and static RAM are recorded
+  in `phase3-metrics.md`. No hardware was flashed.
+- **Tradeoff:** DEALLOC shifts later metadata records in O(n), while allocate
+  appends and address lookup remains O(log n). Payload buffers remain separate
+  vectors. General allocation pools and task-history retention remain
+  unchanged because neither has measured evidence for a beneficial redesign.

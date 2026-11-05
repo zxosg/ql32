@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <vector>
 
 #include "ql32/runtime/error.hpp"
@@ -21,7 +20,7 @@ public:
     void write(std::uint64_t address, const std::uint8_t* source, std::size_t count);
     std::uint64_t peekWord(std::uint64_t address, std::size_t width) const;
     void pokeWord(std::uint64_t address, std::size_t width, std::uint64_t value);
-    void clear() noexcept { allocations_.clear(); }
+    void clear() noexcept;
 
 private:
     struct Allocation { std::uint64_t base; std::vector<std::uint8_t> bytes; };
@@ -29,7 +28,10 @@ private:
                                                       std::size_t count) const;
     std::pair<Allocation*, std::size_t> locate(std::uint64_t address,
                                                std::size_t count);
-    std::map<std::uint64_t, Allocation> allocations_;
+    // Allocation bases are monotonically increasing. A sorted vector avoids
+    // one tree node allocation per BASIC ALLOC while retaining logarithmic
+    // address lookup. Entries are never exposed, so vector relocation is safe.
+    std::vector<Allocation> allocations_;
     std::uint64_t nextAddress_ = 0x10000;
 };
 

@@ -10,6 +10,7 @@
 #include <string>
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -27,6 +28,16 @@ struct StringPoolEntryProbe {
 struct StringInternNodeProbe {
     std::string text;
     std::uint32_t stringId = 0;
+};
+
+struct BufferAllocationProbe {
+    std::uint64_t base = 0;
+    std::vector<std::uint8_t> bytes;
+};
+
+struct BufferMapValueProbe {
+    std::uint64_t key = 0;
+    BufferAllocationProbe allocation;
 };
 
 std::string readSource(int argc, char** argv) {
@@ -73,6 +84,21 @@ void printStringPoolTradeoff() {
                  "and hashing scratch; this is a representation comparison, not a measured heap census\n";
 }
 
+void printBufferIndexTradeoff() {
+    constexpr std::size_t allocationCount = 1000;
+    constexpr std::size_t vectorCapacity = 1024;
+    const std::size_t mapNodes = allocationCount *
+        (sizeof(BufferMapValueProbe) + 4 * sizeof(void*));
+    const std::size_t vectorRecords = vectorCapacity * sizeof(BufferAllocationProbe);
+    std::cout << "buffer allocation index probe (structural host estimate, 1000 allocations):\n"
+              << "  allocation record: " << sizeof(BufferAllocationProbe) << " bytes\n"
+              << "  map value estimate: " << sizeof(BufferMapValueProbe) << " bytes\n"
+              << "  current tree nodes, including estimated links: " << mapNodes << " bytes\n"
+              << "  sorted vector records at capacity 1024: " << vectorRecords << " bytes\n"
+              << "  caveat: tree links, allocator rounding, and vector growth vary by STL; "
+                 "payload byte vectors are excluded\n";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -95,6 +121,7 @@ int main(int argc, char** argv) {
                  "allocator bookkeeping and deque block slack\n";
 
     printStringPoolTradeoff();
+    printBufferIndexTradeoff();
 
     ql32::vm::SessionScheduler scheduler({}, 1024);
     std::ostringstream output;
