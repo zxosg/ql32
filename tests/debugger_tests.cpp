@@ -78,6 +78,9 @@ void testBreakStepEvalAndContinue() {
             "STEP did not pause at the selected IF branch");
     require(snapshot->bytecodes > 0 && snapshot->ifTrue > 0 && !snapshot->trace.empty(),
             "execution diagnostics were not recorded");
+    require(snapshot->bytecodeStorageBytes > 0 && snapshot->globalStorageBytes > 0 &&
+                snapshot->stackHighWater > 0,
+            "VM storage and operand stack measurements were not recorded");
     scheduler.debugResetDiagnostics(task);
     snapshot = scheduler.debugInspect(task);
     require(snapshot && snapshot->bytecodes == 0 && snapshot->userCalls == 0 &&
@@ -134,6 +137,8 @@ void testStepIntoNextAndArrayReads() {
         "140 END DEFINE\n";
     const auto task = scheduler.launch(procedureSource, output);
     require(scheduler.debugAttach(task), "debugger attach failed");
+    require(scheduler.debugSetDiagnostics(task, true, false),
+            "procedure memory diagnostics could not be enabled");
     require(scheduler.debugSetBreakpoint(task, 10), "procedure breakpoint setup failed");
     require(scheduler.tick(), "scheduler did not enter procedure call");
     require(scheduler.debugResume(task, ql32::runtime::DebugResumeMode::StepInto),
@@ -147,6 +152,8 @@ void testStepIntoNextAndArrayReads() {
     require(snapshot->frames.back().name == "WORK", "call frame name is missing");
     require(snapshot->frames.back().returnLocation.basicLine == 10,
             "call frame did not report its caller source position");
+    require(snapshot->frameHighWater >= 1,
+            "call-frame high-water mark did not include the active procedure");
     require(scheduler.debugResume(task, ql32::runtime::DebugResumeMode::StepOver),
             "NEXT within procedure setup failed");
     require(scheduler.tick(), "scheduler did not execute NEXT within procedure");
@@ -186,6 +193,8 @@ void testStepIntoNextAndArrayReads() {
                 arraySnapshot->arrays.front().first == "DATA" &&
                 arraySnapshot->arrays.front().second == std::vector<std::size_t>{3},
             "global array dimensions were not included in inspection");
+    require(arraySnapshot->arrayStorageBytes >= 3 * sizeof(ql32::Value),
+            "array payload storage estimate omitted its elements");
     const auto arrayValue = arrayScheduler.debugEvaluate(arrayTask, "data(0)+1");
     require(arrayValue && std::get<double>(*arrayValue) == 8,
             "read-only EVAL did not support array reads");
@@ -216,6 +225,12 @@ void testSupervisorDebuggerCommands() {
     require(scheduler.tick(), "WHERE command did not execute");
     require(supervisorOutput.str().find("BASIC line 10") != std::string::npos,
             "supervisor WHERE command did not display the stop location");
+    require(scheduler.submit(supervisor, "STATS\n"),
+            "supervisor rejected STATS command");
+    require(scheduler.tick(), "STATS command did not execute");
+    require(supervisorOutput.str().find("Bytecode storage estimate:") != std::string::npos &&
+                supervisorOutput.str().find("Operand stack high-water:") != std::string::npos,
+            "STATS command did not report VM memory diagnostics");
     require(scheduler.submit(supervisor, "BREAKPOINTS\n"),
             "supervisor rejected BREAKPOINTS command");
     require(scheduler.tick(), "BREAKPOINTS command did not execute");

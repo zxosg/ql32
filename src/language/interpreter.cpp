@@ -2365,6 +2365,55 @@ std::string detail::expandIncludes(const std::string& source,
     return expandIncludesRecursive(source, storage, {}, activePaths, 0, expandedBytes);
 }
 
+std::size_t detail::estimateInstructionSequenceBytes(
+    const InstructionSequence& code) noexcept {
+    const auto stringBytes = [](const std::string& value) {
+        return value.capacity() + 1;
+    };
+    const auto stringVectorBytes = [&](const std::vector<std::string>& values) {
+        std::size_t bytes = values.capacity() * sizeof(std::string);
+        for (const auto& value : values) bytes += stringBytes(value);
+        return bytes;
+    };
+
+    std::size_t bytes = sizeof(code) + code.size() * sizeof(Instruction);
+    for (const Instruction& instruction : code) {
+        bytes += stringBytes(instruction.name);
+        if (const auto* text = std::get_if<std::string>(&instruction.value))
+            bytes += stringBytes(*text);
+        bytes += instruction.forItems.capacity() * sizeof(ForItemSpec);
+        bytes += instruction.parameters.capacity() * sizeof(std::string);
+        for (const auto& value : instruction.parameters) bytes += stringBytes(value);
+        bytes += instruction.localNames.capacity() * sizeof(std::string);
+        for (const auto& value : instruction.localNames) bytes += stringBytes(value);
+        bytes += instruction.arrayArgumentCandidates.capacity() * sizeof(ArrayArgumentCandidate);
+        for (const auto& value : instruction.arrayArgumentCandidates)
+            bytes += stringBytes(value.name);
+        bytes += instruction.ownerDefinition.capacity() + 1;
+        bytes += instruction.targetVariable.capacity() + 1;
+        bytes += instruction.selectItems.capacity() * sizeof(SelectItemSpec);
+        bytes += instruction.jumpScopes.capacity() * sizeof(std::size_t);
+    }
+
+    bytes += code.functions.bucket_count() * sizeof(void*);
+    for (const auto& [name, metadata] : code.functions) {
+        bytes += sizeof(decltype(code.functions)::value_type) + stringBytes(name);
+        bytes += stringVectorBytes(metadata.parameters);
+        bytes += stringVectorBytes(metadata.locals);
+    }
+    bytes += code.arrays.bucket_count() * sizeof(void*);
+    for (const auto& [name, rank] : code.arrays) {
+        (void)rank;
+        bytes += sizeof(decltype(code.arrays)::value_type) + stringBytes(name);
+    }
+    bytes += code.constants.bucket_count() * sizeof(void*);
+    for (const auto& [name, value] : code.constants) {
+        bytes += sizeof(decltype(code.constants)::value_type) + stringBytes(name);
+        if (const auto* text = std::get_if<std::string>(&value)) bytes += stringBytes(*text);
+    }
+    return bytes;
+}
+
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
     const auto status = executeInteractiveResumable(source, output);
     if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel ||
@@ -2996,6 +3045,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                         << "User calls: " << snapshot->userCalls << '\n'
                         << "IF true: " << snapshot->ifTrue << '\n'
                         << "IF false: " << snapshot->ifFalse << '\n'
+                        << "Bytecode storage estimate: " << snapshot->bytecodeStorageBytes << " bytes\n"
+                        << "Global storage estimate: " << snapshot->globalStorageBytes << " bytes\n"
+                        << "Active local storage estimate: " << snapshot->localStorageBytes << " bytes\n"
+                        << "Array storage estimate: " << snapshot->arrayStorageBytes << " bytes\n"
+                        << "Operand stack high-water: " << snapshot->stackHighWater << " entries\n"
+                        << "Call frame high-water: " << snapshot->frameHighWater << " frames\n"
                         << "Free memory: ";
                 if (snapshot->freeMemory) listing << *snapshot->freeMemory << " bytes\n";
                 else listing << "unavailable\n";

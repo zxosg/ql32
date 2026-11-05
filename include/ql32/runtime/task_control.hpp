@@ -87,6 +87,12 @@ struct DebugSnapshot {
     std::uint64_t ifTrue = 0;
     std::uint64_t ifFalse = 0;
     std::optional<std::uint64_t> freeMemory;
+    std::size_t bytecodeStorageBytes = 0;
+    std::size_t globalStorageBytes = 0;
+    std::size_t localStorageBytes = 0;
+    std::size_t arrayStorageBytes = 0;
+    std::size_t stackHighWater = 0;
+    std::size_t frameHighWater = 0;
     std::vector<std::string> trace;
     std::vector<DebugWatchInfo> watches;
     std::vector<std::pair<std::string, std::vector<std::size_t>>> arrays;

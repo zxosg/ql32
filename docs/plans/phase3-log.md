@@ -50,3 +50,31 @@
   numeric iteration algorithm without drawing, to keep VM timings independent
   of the presenter.
 - **Open risks:** device runtime heap measurements remain pending.
+
+## 2026-11-05 — A1 complete
+
+- **Step:** Track A1, measurement.
+- **Commit:** pending commit of this step.
+- **Changes:** added `ql32_sizecheck`; added estimates for compiled bytecode,
+  scalar globals/locals, arrays, and diagnostic-only operand-stack/call-frame
+  high-water marks. Exposed these values through debugger `STATS` and the
+  existing remote-debug stats object. High-water updates only run when
+  diagnostics are enabled.
+- **Host measurements:** recorded in `phase3-metrics.md`. The 2,000-instruction
+  synthetic program has 448,000 B of instruction records and a 498,176 B
+  estimated sequence footprint.
+- **Tests:** Debug and ASan+UBSan CTest passed 61/61, including new assertions
+  for storage estimates, high-water marks, and `STATS` output. `ql32_sizecheck`
+  completed its compile-time and live-runtime probes.
+- **Benchmarks:** post-A1 medians are recorded in `phase3-metrics.md`; compared
+  with A0, all changes were below 7%. No regression crossed the 10%
+  investigate threshold.
+- **ESP32:** all three environments compiled. Updated flash/static RAM figures
+  are in `phase3-metrics.md`.
+- **Hardware:** pending board identification; no flash attempted.
+- **Estimate limits:** string capacity accounting includes inline-capacity
+  strings; allocator bookkeeping, deque block slack, and other allocator
+  metadata are excluded. Treat sequence bytes as a repeatable host estimate,
+  not an exact allocator measurement or board heap claim.
+- **Open risks:** runtime free heap and largest-block measurements on physical
+  boards remain pending.

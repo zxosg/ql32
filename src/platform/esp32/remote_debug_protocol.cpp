@@ -190,6 +190,12 @@ std::string snapshotJson(const runtime::DebugSnapshot& snapshot) {
         ",\"user_calls\":" + std::to_string(snapshot.userCalls) +
         ",\"if_true\":" + std::to_string(snapshot.ifTrue) +
         ",\"if_false\":" + std::to_string(snapshot.ifFalse) +
+        ",\"bytecode_storage_bytes\":" + std::to_string(snapshot.bytecodeStorageBytes) +
+        ",\"global_storage_bytes\":" + std::to_string(snapshot.globalStorageBytes) +
+        ",\"local_storage_bytes\":" + std::to_string(snapshot.localStorageBytes) +
+        ",\"array_storage_bytes\":" + std::to_string(snapshot.arrayStorageBytes) +
+        ",\"stack_high_water\":" + std::to_string(snapshot.stackHighWater) +
+        ",\"frame_high_water\":" + std::to_string(snapshot.frameHighWater) +
         ",\"free_memory\":" +
         (snapshot.freeMemory ? std::to_string(*snapshot.freeMemory) : "null") + "},\"trace\":[";
     for (std::size_t i = 0; i < snapshot.trace.size(); ++i) {

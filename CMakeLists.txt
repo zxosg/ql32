@@ -49,6 +49,10 @@ target_link_libraries(ql32_host INTERFACE ql32_portable ql32_host_adapters)
 add_executable(ql32 src/main.cpp)
 target_link_libraries(ql32 PRIVATE ql32_host)
 
+add_executable(ql32_sizecheck tools/sizecheck.cpp)
+target_include_directories(ql32_sizecheck PRIVATE src)
+target_link_libraries(ql32_sizecheck PRIVATE ql32_portable)
+
 if(QL32_BUILD_TESTS)
   enable_testing()
   function(add_cli_conformance_test name)

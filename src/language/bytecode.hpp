@@ -74,6 +74,7 @@ public:
 
     bool empty() const noexcept { return !values_ || values_->empty(); }
     std::size_t size() const noexcept { return values_ ? values_->size() : 0; }
+    std::size_t capacity() const noexcept { return values_ ? values_->capacity() : 0; }
     iterator begin() { return values_ ? values_->begin() : emptyVector().begin(); }
     iterator end() { return values_ ? values_->end() : emptyVector().end(); }
     const_iterator begin() const { return values_ ? values_->begin() : emptyVector().begin(); }
@@ -126,6 +127,7 @@ public:
         return *this;
     }
     bool empty() const noexcept { return !value_ || value_->empty(); }
+    std::size_t capacity() const noexcept { return value_ ? value_->capacity() : 0; }
     char back() const { return get().back(); }
     const std::string& get() const {
         static const std::string emptyValue;
@@ -194,6 +196,9 @@ struct InstructionSequence : std::deque<Instruction> {
 InstructionSequence compileSource(const std::string& source);
 InstructionSequence compileExpression(const std::string& source,
                                       const InstructionSequence& enclosing);
+// Counts container objects, element storage and string capacities owned by the
+// sequence. Allocator bookkeeping and deque block slack are implementation-specific.
+std::size_t estimateInstructionSequenceBytes(const InstructionSequence& code) noexcept;
 std::string expandIncludes(const std::string& source, runtime::StorageService* storage);
 
 } // namespace ql32::detail

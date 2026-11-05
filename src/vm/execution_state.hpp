@@ -77,6 +77,8 @@ struct VMExecutionState {
     std::uint64_t procedureCalls = 0;
     std::uint64_t ifTrue = 0;
     std::uint64_t ifFalse = 0;
+    std::size_t stackHighWater = 0;
+    std::size_t frameHighWater = 0;
     std::vector<std::string> trace;
 };
 

@@ -553,6 +553,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                                            runtime::CancellationToken stop,
                                            std::size_t instructionBudget) {
     auto& state = *execution_;
+    if (state.diagnosticsEnabled) {
+        state.stackHighWater = std::max(state.stackHighWater, state.stack.size());
+        state.frameHighWater = std::max(state.frameHighWater, state.callFrames.size());
+    }
     auto& code = state.code;
     auto& stack = state.stack;
     auto& forStates = state.forStates;
@@ -2407,6 +2411,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             break;
         }
         }
+        if (state.diagnosticsEnabled) {
+            state.stackHighWater = std::max(state.stackHighWater, stack.size());
+            state.frameHighWater = std::max(state.frameHighWater, callFrames.size());
+        }
     }
     return ExecutionStatus::Completed;
 }
@@ -2482,6 +2490,8 @@ void Interpreter::debugResetDiagnostics() noexcept {
     execution_->procedureCalls = 0;
     execution_->ifTrue = 0;
     execution_->ifFalse = 0;
+    execution_->stackHighWater = 0;
+    execution_->frameHighWater = 0;
     execution_->trace.clear();
 }
 
@@ -2508,6 +2518,34 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
     result.ifFalse = state.ifFalse;
     result.trace = state.trace;
     if (memory_) result.freeMemory = memory_->freeBytes();
+    result.bytecodeStorageBytes = detail::estimateInstructionSequenceBytes(state.code);
+    result.stackHighWater = state.stackHighWater;
+    result.frameHighWater = state.frameHighWater;
+    const auto valueStorageBytes = [](const Value& value) {
+        const auto* text = std::get_if<std::string>(&value);
+        return text ? text->capacity() + 1 : std::size_t{0};
+    };
+    result.globalStorageBytes = sizeof(variables_) +
+        variables_.bucket_count() * sizeof(void*);
+    for (const auto& entry : variables_)
+        result.globalStorageBytes += sizeof(decltype(variables_)::value_type) +
+            entry.first.capacity() + 1 + valueStorageBytes(entry.second);
+    for (const auto& frame : state.callFrames) {
+        result.localStorageBytes += sizeof(frame.locals) +
+            frame.locals.bucket_count() * sizeof(void*);
+        for (const auto& entry : frame.locals)
+            result.localStorageBytes += sizeof(decltype(frame.locals)::value_type) +
+                entry.first.capacity() + 1 + valueStorageBytes(entry.second);
+    }
+    result.arrayStorageBytes = sizeof(state.arrays) +
+        state.arrays.bucket_count() * sizeof(void*);
+    for (const auto& [name, array] : state.arrays) {
+        result.arrayStorageBytes += sizeof(decltype(state.arrays)::value_type) +
+            name.capacity() + 1 + array.lengths.capacity() * sizeof(std::size_t) +
+            array.values.capacity() * sizeof(Value);
+        for (const auto& value : array.values)
+            result.arrayStorageBytes += valueStorageBytes(value);
+    }
     const std::size_t address = std::min(state.pc, state.code.size());
     result.location.instruction = address;
     if (!state.callFrames.empty())
