@@ -27,6 +27,9 @@ add_library(ql32_portable
 )
 target_include_directories(ql32_portable PUBLIC include)
 target_compile_features(ql32_portable PUBLIC cxx_std_17)
+if(QL32_BUILD_TESTS)
+  target_compile_definitions(ql32_portable PUBLIC QL32_TEST_LEGACY_COMPILER)
+endif()
 
 add_library(ql32_host_adapters
   src/platform/linux/directory_channels.cpp

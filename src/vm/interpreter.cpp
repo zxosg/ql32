@@ -491,16 +491,15 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         if (source.size() <= std::numeric_limits<std::size_t>::max() / 4)
             memoryBudget_.preflight(source.size() * 4, "program compilation");
         execution_ = std::make_unique<detail::VMExecutionState>();
-        detail::InstructionSequence compiled;
+        detail::CompactProgram compact;
         if (mayContainInclude(source)) {
             const std::string expanded = detail::expandIncludes(source, storage_.get());
-            compiled = detail::compileSource(expanded);
+            compact = detail::compileSourceCompact(expanded);
         } else {
-            // Compile ordinary programs directly from their source. Avoid
-            // retaining an expanded duplicate while tokens and bytecode grow.
-            compiled = detail::compileSource(source);
+            // Emit compact records directly so the rich instruction sequence
+            // never coexists with the compiler token vector.
+            compact = detail::compileSourceCompact(source);
         }
-        detail::CompactProgram compact(std::move(compiled));
         bindProgramSymbols(compact);
         verifyBytecode(compact);
         execution_->code = std::move(compact);
@@ -1019,17 +1018,22 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto* expressionText = std::get_if<std::string>(&arguments[0]);
                     if (!expressionText) runtimeError(instruction, "EVAL requires an expression string");
                     if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
-                    detail::InstructionSequence expression;
+                    detail::CompactProgram expression;
                     try {
-                        expression = detail::compileExpression(*expressionText, code);
+                        expression = detail::compileExpressionCompact(*expressionText, code);
                     } catch (const runtime::Error& error) {
                         runtimeError(instruction, error.what());
                     }
-                    for (Instruction& dynamicInstruction : expression) {
+                    Instruction expressionScratch;
+                    for (std::size_t index = 0; index < expression.size(); ++index) {
+                        const Instruction& dynamicInstruction = expression.instructionAt(
+                            index, expressionScratch);
                         if (dynamicInstruction.op != Op::Load &&
                             dynamicInstruction.op != Op::ArrayGet &&
                             dynamicInstruction.op != Op::ArraySet &&
                             dynamicInstruction.op != Op::PushArrayRef) continue;
+                        std::uint32_t localSlot = Instruction::NoSymbolSlot;
+                        std::uint32_t symbolSlot = Instruction::NoSymbolSlot;
                         for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
                             if (frame->dynamicEvaluation) continue;
                             const auto symbols = localSymbolTables_.find(frame->name);
@@ -1037,16 +1041,20 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             const auto local = std::find(symbols->second.begin(),
                                 symbols->second.end(), dynamicInstruction.name);
                             if (local != symbols->second.end()) {
-                                dynamicInstruction.localSlot = static_cast<std::uint32_t>(
+                                localSlot = static_cast<std::uint32_t>(
                                     local - symbols->second.begin());
                                 break;
                             }
                             break;
                         }
-                        if (dynamicInstruction.localSlot == Instruction::NoSymbolSlot) {
+                        if (localSlot == Instruction::NoSymbolSlot) {
                             const auto global = findGlobalSymbol(dynamicInstruction.name);
-                            if (global) dynamicInstruction.symbolSlot = *global;
+                            if (global) symbolSlot = *global;
                         }
+                        expression.updateAt(index, [&](Instruction& updated) {
+                            updated.localSlot = localSlot;
+                            updated.symbolSlot = symbolSlot;
+                        });
                     }
                     Instruction callInstruction = instruction;
                     activeInstructionScratch = callInstruction;
@@ -2884,7 +2892,7 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
     if (!execution_ || !execution_->debuggerAttached || !execution_->debugPaused)
         return std::nullopt;
     try {
-    const auto code = detail::compileExpression(expression, execution_->code);
+    const auto code = detail::compileExpressionCompact(expression, execution_->code);
     std::vector<runtime::DebugValue> values;
     const auto popValue = [&]() -> runtime::DebugValue {
         if (values.empty()) throw std::runtime_error("debug EVAL stack underflow");

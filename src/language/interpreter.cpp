@@ -28,6 +28,10 @@ namespace {
 static_assert(std::is_nothrow_move_constructible<detail::Instruction>::value,
               "compact program append depends on no-throw sidecar moves");
 std::atomic<runtime::SessionId> nextInterpreterSessionId{1};
+#ifdef QL32_TEST_LEGACY_COMPILER
+std::atomic<std::size_t> emissionFailureAfter{0};
+std::atomic<std::size_t> emissionCheckpointCount{0};
+#endif
 
 using detail::ArrayArgumentCandidate;
 using detail::ForItemSpec;
@@ -526,8 +530,9 @@ struct SourceTarget {
 class Compiler {
 public:
     explicit Compiler(std::vector<Token> tokens,
-                      const ProgramMetadata* enclosing = nullptr)
-        : tokens_(std::move(tokens)) {
+                      const ProgramMetadata* enclosing = nullptr,
+                      bool compactEmission = false)
+        : tokens_(std::move(tokens)), code_(compactEmission) {
         if (enclosing) {
             enclosingFunctions_ = enclosing->functions;
             arrays_ = enclosing->arrays;
@@ -549,6 +554,33 @@ public:
     InstructionSequence compile(bool tolerateUnresolvedCalls = false,
                                  bool tolerateIncompleteBlocks = false,
                                  bool tolerateUnresolvedSourceJumps = false) {
+        compileProgram(tolerateUnresolvedCalls, tolerateIncompleteBlocks,
+                       tolerateUnresolvedSourceJumps);
+        return code_.takeRich();
+    }
+
+    detail::CompactProgram compileCompact(bool tolerateUnresolvedCalls = false,
+                                           bool tolerateIncompleteBlocks = false,
+                                           bool tolerateUnresolvedSourceJumps = false) {
+        compileProgram(tolerateUnresolvedCalls, tolerateIncompleteBlocks,
+                       tolerateUnresolvedSourceJumps);
+        return code_.takeCompact();
+    }
+
+    InstructionSequence compileExpression() {
+        compileExpressionProgram();
+        return code_.takeRich();
+    }
+
+    detail::CompactProgram compileExpressionCompact() {
+        compileExpressionProgram();
+        return code_.takeCompact();
+    }
+
+private:
+    void compileProgram(bool tolerateUnresolvedCalls,
+                        bool tolerateIncompleteBlocks,
+                        bool tolerateUnresolvedSourceJumps) {
         try {
             block(true);
             if (!check(Kind::End)) error(peek(), "unexpected block terminator");
@@ -561,7 +593,7 @@ public:
                 message.find("expected END SELECT") != std::string::npos ||
                 message.find("SELECT requires at least one arm") != std::string::npos;
             if (!tolerateIncompleteBlocks || !incomplete || !check(Kind::End)) throw;
-            return {};
+            return;
         }
         resolveSourceJumps(tolerateUnresolvedSourceJumps);
         resolveCalls(tolerateUnresolvedCalls);
@@ -575,22 +607,19 @@ public:
         }
         code_.arrays = arrays_;
         code_.constants = constants_;
-        return std::move(code_);
     }
 
-    InstructionSequence compileExpression() {
+    void compileExpressionProgram() {
         expression();
         if (!check(Kind::End)) error(peek(), "unexpected text after expression");
         resolveCalls(false);
         code_.functions = enclosingFunctions_;
         code_.arrays = arrays_;
         code_.constants = constants_;
-        return std::move(code_);
     }
 
-private:
     std::vector<Token> tokens_;
-    InstructionSequence code_;
+    detail::CompilerCode code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
     std::unordered_map<std::string, std::size_t> arrays_;
     std::unordered_map<std::string, Value> constants_;
@@ -643,8 +672,8 @@ private:
             error(label, "duplicate label");
     }
     void resolveSourceJumps(bool tolerateUnresolved) {
-        for (Instruction& instruction : code_) {
-            if (!instruction.sourceJump) continue;
+        code_.forEachMutable([&](Instruction& instruction) {
+            if (!instruction.sourceJump) return;
             const SourceTarget* target = nullptr;
             if (instruction.targetIsLineNumber) {
                 static const SourceTarget beginning{};
@@ -658,7 +687,7 @@ private:
                 if (found != labels_.end()) target = &found->second;
             }
             if (!target) {
-                if (tolerateUnresolved) continue;
+                if (tolerateUnresolved) return;
                 error(instruction, instruction.targetIsLineNumber ?
                       "GOTO line number does not exist" : "GOTO label does not exist");
             }
@@ -669,7 +698,7 @@ private:
                             instruction.jumpScopes.begin()))
                 error(instruction, "GOTO cannot enter or leave a structured loop or SELECT block");
             instruction.target = target->address;
-        }
+        });
     }
 
     bool isCurrentParameter(const std::string& name) const {
@@ -732,8 +761,8 @@ private:
         code_.push_back(std::move(instruction));
     }
     void resolveCalls(bool tolerateUnresolvedCalls) {
-        for (Instruction& instruction : code_) {
-            if (instruction.op != Op::Call) continue;
+        code_.forEachMutable([&](Instruction& instruction) {
+            if (instruction.op != Op::Call) return;
             if (isBuiltinName(instruction.name)) {
                 const auto [arguments, returnsValue] = builtinSignature(instruction);
                 if (instruction.channelArgument && instruction.argCount == 0)
@@ -791,7 +820,7 @@ private:
                 if (instruction.expectsValue != returnsValue)
                     error(instruction, "built-in used in the wrong context");
                 instruction.builtin = true;
-                continue;
+                return;
             }
             if (instruction.channelArgument)
                 error(instruction, "channel selectors are only valid on built-in output commands");
@@ -803,15 +832,15 @@ private:
                         error(instruction, "incorrect array rank");
                     instruction.op = Op::ArrayGet;
                     instruction.rank = array->second;
-                    continue;
+                    return;
                 }
-                if (tolerateUnresolvedCalls) continue;
+                if (tolerateUnresolvedCalls) return;
                 if (!instruction.ownerDefinition.empty()) {
                     const auto owner = definitions_.find(instruction.ownerDefinition.get());
                     if (owner != definitions_.end() &&
                         std::find(owner->second.parameters.begin(), owner->second.parameters.end(),
                                   instruction.name) != owner->second.parameters.end())
-                        continue;
+                        return;
                 }
                 error(instruction, "undefined procedure or function");
             }
@@ -831,17 +860,19 @@ private:
                 if (parameterRank != 0 && parameterRank != array->second)
                     error(instruction, "array parameter is called with inconsistent ranks");
                 parameterRank = array->second;
-                code_[argument.loadInstruction].op = Op::PushArrayRef;
+                code_.updateAt(argument.loadInstruction, [](Instruction& load) {
+                    load.op = Op::PushArrayRef;
+                });
             }
-        }
+        });
         bool propagated = true;
         while (propagated) {
             propagated = false;
-            for (Instruction& instruction : code_) {
-                if (instruction.op != Op::Call || instruction.ownerDefinition.empty()) continue;
+            code_.forEachMutable([&](Instruction& instruction) {
+                if (instruction.op != Op::Call || instruction.ownerDefinition.empty()) return;
                 const auto caller = definitions_.find(instruction.ownerDefinition.get());
                 const auto callee = definitions_.find(instruction.name);
-                if (caller == definitions_.end() || callee == definitions_.end()) continue;
+                if (caller == definitions_.end() || callee == definitions_.end()) return;
                 for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
                     const auto parameter = std::find(caller->second.parameters.begin(),
                                                      caller->second.parameters.end(), argument.name);
@@ -858,14 +889,16 @@ private:
                         targetRank = rank;
                         propagated = true;
                     }
-                    code_[argument.loadInstruction].op = Op::PushArrayRef;
+                    code_.updateAt(argument.loadInstruction, [](Instruction& load) {
+                        load.op = Op::PushArrayRef;
+                    });
                 }
-            }
+            });
         }
-        for (const Instruction& instruction : code_) {
-            if (instruction.op != Op::Call) continue;
+        code_.forEachMutable([&](Instruction& instruction) {
+            if (instruction.op != Op::Call) return;
             const auto callee = definitions_.find(instruction.name);
-            if (callee == definitions_.end()) continue;
+            if (callee == definitions_.end()) return;
             for (std::size_t i = 0; i < callee->second.parameterArrayRanks.size(); ++i) {
                 if (callee->second.parameterArrayRanks[i] == 0) continue;
                 const auto argument = std::find_if(instruction.arrayArgumentCandidates.begin(),
@@ -874,11 +907,11 @@ private:
                         return candidate.parameterIndex == i;
                     });
                 if (argument == instruction.arrayArgumentCandidates.end() ||
-                    code_[argument->loadInstruction].op != Op::PushArrayRef)
+                    code_.readAt(argument->loadInstruction).op != Op::PushArrayRef)
                     error(instruction, "array argument required for array parameter");
             }
-        }
-        for (Instruction& instruction : code_) {
+        });
+        code_.forEachMutable([&](Instruction& instruction) {
             if (instruction.op == Op::Call && !instruction.ownerDefinition.empty()) {
                 const auto owner = definitions_.find(instruction.ownerDefinition.get());
                 if (owner != definitions_.end()) {
@@ -897,7 +930,7 @@ private:
                                 std::to_string(rank) + ")");
                         instruction.op = Op::ArrayGet;
                         instruction.rank = rank;
-                        continue;
+                        return;
                     }
                 }
             }
@@ -915,7 +948,7 @@ private:
                     }
                 }
             }
-        }
+        });
     }
     void block(bool moduleScope = false) {
         while (!check(Kind::End) && !check(Kind::Else) && !check(Kind::EndKeyword)) {
@@ -957,16 +990,22 @@ private:
             const Token elseToken = previous();
             const std::size_t skipElse = code_.size();
             emit(Op::Jump, elseToken);
-            code_[branch].target = code_.size();
+            code_.updateAt(branch, [&](Instruction& instruction) {
+                instruction.target = code_.size();
+            });
             if (check(Kind::If)) {
                 blockIf();
             } else {
                 requireLineBreak();
                 block();
             }
-            code_[skipElse].target = code_.size();
+            code_.updateAt(skipElse, [&](Instruction& instruction) {
+                instruction.target = code_.size();
+            });
         } else {
-            code_[branch].target = code_.size();
+            code_.updateAt(branch, [&](Instruction& instruction) {
+                instruction.target = code_.size();
+            });
         }
         while (match(Kind::Newline) || match(Kind::Colon)) {}
         if (!match(Kind::EndKeyword)) error(peek(), "expected END IF");
@@ -1149,7 +1188,9 @@ private:
             code_.push_back(std::move(skip));
             endJumps.push_back(code_.size() - 1);
             if (falseJump != code_.size() - 1 && !hasRemainder)
-                code_[falseJump].target = code_.size();
+                code_.updateAt(falseJump, [&](Instruction& instruction) {
+                    instruction.target = code_.size();
+                });
             while (match(Kind::Newline) || match(Kind::Colon)) {}
         }
         if (armCount == 0) error(peek(), "SELECT requires at least one arm");
@@ -1159,8 +1200,11 @@ private:
         Instruction finish{Op::SelectEnd, 0.0, {}, keyword.line, keyword.column};
         code_.push_back(std::move(finish));
         if (remainderFalseJump != std::numeric_limits<std::size_t>::max())
-            code_[remainderFalseJump].target = selectEnd;
-        for (const std::size_t jump : endJumps) code_[jump].target = selectEnd;
+            code_.updateAt(remainderFalseJump, [&](Instruction& instruction) {
+                instruction.target = selectEnd;
+            });
+        for (const std::size_t jump : endJumps)
+            code_.updateAt(jump, [&](Instruction& instruction) { instruction.target = selectEnd; });
         controlScopes_.pop_back();
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
@@ -1255,7 +1299,9 @@ private:
         Instruction finish{isFunction ? Op::FunctionEnd : Op::Return,
                            0.0, name.text, defineKeyword.line, defineKeyword.column};
         code_.push_back(std::move(finish));
-        code_[skipIndex].target = code_.size();
+        code_.updateAt(skipIndex, [&](Instruction& instruction) {
+            instruction.target = code_.size();
+        });
         definitions_[name.text].locals = std::move(locals);
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
@@ -1292,8 +1338,9 @@ private:
         init.forItems = std::move(items);
         code_.push_back(std::move(init));
         const std::size_t body = code_.size();
-        controlScopes_.push_back(code_[initIndex].loopId);
-        loops_.push_back({code_[initIndex].loopId, variable.text, body, true, {}, {}});
+        const std::size_t initLoopId = code_.readAt(initIndex).loopId;
+        controlScopes_.push_back(initLoopId);
+        loops_.push_back({initLoopId, variable.text, body, true, {}, {}});
 
         if (match(Kind::Colon)) {
             // Inline bodies end at NEXT. Nested inline loops are deliberately excluded.
@@ -1313,11 +1360,17 @@ private:
             if (nextVariable.text != variable.text)
                 error(nextVariable, "NEXT variable does not match FOR");
             emitForNext(nextToken, nextVariable);
-            code_[initIndex].target = code_.size();
+            code_.updateAt(initIndex, [&](Instruction& instruction) {
+                instruction.target = code_.size();
+            });
             for (const std::size_t index : loops_.back().nextInstructions)
-                code_[index].exitTarget = code_.size();
+                code_.updateAt(index, [&](Instruction& instruction) {
+                    instruction.exitTarget = code_.size();
+                });
             for (const std::size_t index : loops_.back().exitInstructions)
-                code_[index].target = code_.size();
+                code_.updateAt(index, [&](Instruction& instruction) {
+                    instruction.target = code_.size();
+                });
             loops_.pop_back();
             controlScopes_.pop_back();
             return;
@@ -1333,11 +1386,17 @@ private:
         if (endVariable.text != variable.text)
             error(endVariable, "END FOR variable does not match FOR");
         emitForNext(endVariable, endVariable);
-        code_[initIndex].target = code_.size();
+        code_.updateAt(initIndex, [&](Instruction& instruction) {
+            instruction.target = code_.size();
+        });
         for (const std::size_t index : loops_.back().nextInstructions)
-            code_[index].exitTarget = code_.size();
+            code_.updateAt(index, [&](Instruction& instruction) {
+                instruction.exitTarget = code_.size();
+            });
         for (const std::size_t index : loops_.back().exitInstructions)
-            code_[index].target = code_.size();
+            code_.updateAt(index, [&](Instruction& instruction) {
+                instruction.target = code_.size();
+            });
         loops_.pop_back();
         controlScopes_.pop_back();
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
@@ -1366,7 +1425,9 @@ private:
             code_.push_back(std::move(jump));
             const std::size_t exit = code_.size();
             for (const std::size_t index : loops_.back().exitInstructions)
-                code_[index].target = exit;
+                code_.updateAt(index, [exit](Instruction& instruction) {
+                    instruction.target = exit;
+                });
             loops_.pop_back();
             controlScopes_.pop_back();
             return;
@@ -1385,7 +1446,9 @@ private:
         code_.push_back(std::move(jump));
         const std::size_t exit = code_.size();
         for (const std::size_t index : loops_.back().exitInstructions)
-            code_[index].target = exit;
+            code_.updateAt(index, [exit](Instruction& instruction) {
+                instruction.target = exit;
+            });
         loops_.pop_back();
         controlScopes_.pop_back();
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
@@ -1418,8 +1481,10 @@ private:
         const int basicLine = currentBasicLine_;
         statementBody(moduleScope);
         if (first < code_.size()) {
-            code_[first].statementStart = true;
-            code_[first].basicLine = basicLine;
+            code_.updateAt(first, [basicLine](Instruction& instruction) {
+                instruction.statementStart = true;
+                instruction.basicLine = basicLine;
+            });
         }
     }
     void statementBody(bool moduleScope) {
@@ -2553,6 +2618,24 @@ void detail::CompactProgram::appendRange(const detail::InstructionSequence& inst
     compactRecordCount_ += addition.compactRecordCount_;
 }
 
+void detail::CompactProgram::appendRange(const detail::CompactProgram& instructions) {
+    records_.reserve(records_.size() + instructions.records_.size());
+    sidecars_.reserve(sidecars_.size() + instructions.sidecars_.size());
+    stringLiterals_.reserve(stringLiterals_.size() + instructions.stringLiterals_.size());
+    const std::uint64_t sidecarBase = sidecars_.size();
+    const std::uint64_t stringBase = stringLiterals_.size();
+    for (detail::CompactInstruction record : instructions.records_) {
+        if (record.flags == UINT8_MAX) record.payload.sidecarIndex += sidecarBase;
+        else if ((record.flags & 0x20) != 0) record.payload.sidecarIndex += stringBase;
+        records_.push_back(record);
+    }
+    sidecars_.insert(sidecars_.end(), instructions.sidecars_.begin(),
+                     instructions.sidecars_.end());
+    stringLiterals_.insert(stringLiterals_.end(), instructions.stringLiterals_.begin(),
+                           instructions.stringLiterals_.end());
+    compactRecordCount_ += instructions.compactRecordCount_;
+}
+
 void detail::CompactProgram::eraseFrom(std::size_t first) {
     if (first >= records_.size()) return;
     std::size_t discardedSidecars = 0;
@@ -2580,7 +2663,9 @@ const detail::Instruction& detail::CompactProgram::decode(
             throw std::runtime_error("invalid compact bytecode sidecar index");
         const auto& instruction = sidecars_[record.payload.sidecarIndex];
         if (record.opcode != static_cast<std::uint8_t>(instruction.op))
-            throw std::runtime_error("compact bytecode opcode and sidecar disagree");
+            throw std::runtime_error("compact bytecode opcode and sidecar disagree at " +
+                std::to_string(index) + " (record " + std::to_string(record.opcode) +
+                ", sidecar " + std::to_string(static_cast<unsigned>(instruction.op)) + ")");
         return instruction;
     }
     if (record.opcode > static_cast<std::uint8_t>(detail::Op::SelectEnd))
@@ -2618,6 +2703,78 @@ const detail::Instruction& detail::CompactProgram::instructionAt(
     return decode(index, scratch);
 }
 
+void detail::CompactProgram::updateAtImpl(
+    std::size_t index, const std::function<void(detail::Instruction&)>& function) {
+    if (index >= records_.size()) throw std::out_of_range("bytecode address out of range");
+    auto& record = records_[index];
+    if (record.flags == UINT8_MAX) {
+        const auto sidecarIndex = static_cast<std::size_t>(record.payload.sidecarIndex);
+        if (sidecarIndex >= sidecars_.size())
+            throw std::runtime_error("invalid compact bytecode sidecar index");
+        function(sidecars_[sidecarIndex]);
+        record.opcode = static_cast<std::uint8_t>(sidecars_[sidecarIndex].op);
+        return;
+    }
+
+    const bool wasString = (record.flags & 0x20) != 0;
+    const std::size_t previousStringIndex = wasString ?
+        static_cast<std::size_t>(record.payload.sidecarIndex) : 0;
+    detail::Instruction instruction;
+    decode(index, instruction);
+    function(instruction);
+    if (!compactableInstruction(instruction)) {
+        if (wasString) {
+            if (previousStringIndex >= stringLiterals_.size())
+                throw std::runtime_error("invalid compact string literal index");
+            stringLiterals_.erase(stringLiterals_.begin() + previousStringIndex);
+            for (auto& existing : records_)
+                if (existing.flags != UINT8_MAX && (existing.flags & 0x20) != 0 &&
+                    existing.payload.sidecarIndex > previousStringIndex)
+                    --existing.payload.sidecarIndex;
+        }
+        std::size_t sidecarIndex = 0;
+        for (std::size_t before = 0; before < index; ++before)
+            if (records_[before].flags == UINT8_MAX) ++sidecarIndex;
+        sidecars_.insert(sidecars_.begin() + sidecarIndex, std::move(instruction));
+        for (std::size_t after = index + 1; after < records_.size(); ++after)
+            if (records_[after].flags == UINT8_MAX &&
+                records_[after].payload.sidecarIndex >= sidecarIndex)
+                ++records_[after].payload.sidecarIndex;
+        record.flags = UINT8_MAX;
+        record.line = 1;
+        record.column = 1;
+        record.basicLine = 0;
+        record.payload.sidecarIndex = sidecarIndex;
+        --compactRecordCount_;
+        return;
+    }
+
+    const bool stringLiteral = instruction.op == detail::Op::Push &&
+        std::holds_alternative<std::string>(instruction.value);
+    record.opcode = static_cast<std::uint8_t>(instruction.op);
+    record.flags = (instruction.statementStart ? 0x01 : 0) |
+        (instruction.explicitNext ? 0x02 : 0) |
+        (static_cast<std::uint8_t>(instruction.separator) << 2) |
+        (stringLiteral ? 0x20 : 0);
+    record.line = static_cast<std::uint16_t>(instruction.line);
+    record.column = static_cast<std::uint16_t>(instruction.column);
+    record.basicLine = static_cast<std::uint16_t>(instruction.basicLine);
+    if (stringLiteral) {
+        if (wasString) {
+            if (previousStringIndex >= stringLiterals_.size())
+                throw std::runtime_error("invalid compact string literal index");
+            stringLiterals_[previousStringIndex] = std::move(
+                std::get<std::string>(instruction.value));
+            record.payload.sidecarIndex = previousStringIndex;
+        } else {
+            record.payload.sidecarIndex = stringLiterals_.size();
+            stringLiterals_.push_back(std::move(std::get<std::string>(instruction.value)));
+        }
+    } else {
+        record.payload.number = std::get<double>(instruction.value);
+    }
+}
+
 detail::Instruction detail::CompactProgram::const_iterator::operator*() const {
     detail::Instruction scratch;
     return program_->decode(index_, scratch);
@@ -2653,15 +2810,44 @@ std::size_t detail::CompactProgram::encodedStorageBytes() const noexcept {
     return bytes;
 }
 
+#ifdef QL32_TEST_LEGACY_COMPILER
 detail::InstructionSequence detail::compileSource(const std::string& source) {
     Compiler compiler(Lexer(source).scan());
     return compiler.compile();
 }
+#endif
 
+detail::CompactProgram detail::compileSourceCompact(const std::string& source) {
+    Compiler compiler(Lexer(source).scan(), nullptr, true);
+    return compiler.compileCompact();
+}
+
+#ifdef QL32_TEST_LEGACY_COMPILER
+void detail::failCompactEmissionAfterForTest(std::size_t instructionCount) {
+    emissionCheckpointCount.store(0, std::memory_order_relaxed);
+    emissionFailureAfter.store(instructionCount, std::memory_order_relaxed);
+}
+
+void detail::compilerEmissionCheckpointForTest() {
+    const std::size_t failAt = emissionFailureAfter.load(std::memory_order_relaxed);
+    if (failAt != 0 &&
+        emissionCheckpointCount.fetch_add(1, std::memory_order_relaxed) + 1 == failAt)
+        throw std::bad_alloc();
+}
+#endif
+
+#ifdef QL32_TEST_LEGACY_COMPILER
 detail::InstructionSequence detail::compileExpression(
     const std::string& source, const ProgramMetadata& enclosing) {
     Compiler compiler(Lexer(source).scan(), &enclosing);
     return compiler.compileExpression();
+}
+#endif
+
+detail::CompactProgram detail::compileExpressionCompact(
+    const std::string& source, const ProgramMetadata& enclosing) {
+    Compiler compiler(Lexer(source).scan(), &enclosing, true);
+    return compiler.compileExpressionCompact();
 }
 
 std::string detail::expandIncludes(const std::string& source,

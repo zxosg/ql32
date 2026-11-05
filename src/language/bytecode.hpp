@@ -5,8 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <iterator>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -251,12 +253,28 @@ public:
     explicit CompactProgram(InstructionSequence&& rich);
     std::size_t size() const noexcept { return records_.size(); }
     bool empty() const noexcept { return records_.empty(); }
+    bool isSidecar(std::size_t index) const {
+        if (index >= records_.size()) throw std::out_of_range("bytecode address out of range");
+        return records_[index].flags == UINT8_MAX;
+    }
     Instruction operator[](std::size_t index) const;
     Instruction at(std::size_t index) const;
     const Instruction& instructionAt(std::size_t index, Instruction& scratch) const;
     const_iterator begin() const { return const_iterator(this, 0); }
     const_iterator end() const { return const_iterator(this, size()); }
+    const std::vector<CompactInstruction>& encodedRecords() const noexcept { return records_; }
+    const std::vector<Instruction>& encodedSidecars() const noexcept { return sidecars_; }
+    const std::vector<std::string>& encodedStringLiterals() const noexcept {
+        return stringLiterals_;
+    }
     void appendRange(const InstructionSequence& instructions);
+    void appendRange(const CompactProgram& instructions);
+    void push_back(Instruction instruction) { appendOne(std::move(instruction)); }
+    template <typename Function>
+    void updateAt(std::size_t index, Function&& function) {
+        updateAtImpl(index, std::function<void(Instruction&)>(
+            std::forward<Function>(function)));
+    }
     void eraseFrom(std::size_t first);
     template <typename Function>
     void forEachSidecar(Function&& function) {
@@ -268,6 +286,8 @@ public:
 
 private:
     const Instruction& decode(std::size_t index, Instruction& scratch) const;
+    void updateAtImpl(std::size_t index,
+                      const std::function<void(Instruction&)>& function);
     void appendOne(Instruction instruction);
     std::vector<CompactInstruction> records_;
     std::vector<Instruction> sidecars_;
@@ -275,9 +295,88 @@ private:
     std::size_t compactRecordCount_ = 0;
 };
 
+// Compiler storage that can keep either the legacy rich sequence or emit into
+// compact records as instructions are produced. Metadata is shared by both
+// modes; mutable compact instructions are promoted to sidecars on demand.
+#ifdef QL32_TEST_LEGACY_COMPILER
+void compilerEmissionCheckpointForTest();
+#endif
+class CompilerCode : public ProgramMetadata {
+public:
+    explicit CompilerCode(bool compactEmission = false)
+        : compactEmission_(compactEmission) {}
+
+    std::size_t size() const noexcept {
+        return compactEmission_ ? compact_.size() : rich_.size();
+    }
+    void push_back(Instruction instruction) {
+#ifdef QL32_TEST_LEGACY_COMPILER
+        if (compactEmission_) compilerEmissionCheckpointForTest();
+#endif
+        if (compactEmission_) compact_.push_back(std::move(instruction));
+        else rich_.push_back(std::move(instruction));
+    }
+    Instruction readAt(std::size_t index) const {
+        return compactEmission_ ? compact_.at(index) : rich_.at(index);
+    }
+    template <typename Function>
+    void updateAt(std::size_t index, Function&& function) {
+        if (compactEmission_) compact_.updateAt(index, std::forward<Function>(function));
+        else function(rich_.at(index));
+    }
+    template <typename Function>
+    void forEachMutable(Function&& function) {
+        if (!compactEmission_) {
+            for (Instruction& instruction : rich_) function(instruction);
+            return;
+        }
+        Instruction scratch;
+        for (std::size_t index = 0; index < compact_.size(); ++index) {
+            if (!compact_.isSidecar(index)) continue;
+            Instruction instruction = compact_.instructionAt(index, scratch);
+            function(instruction);
+            compact_.updateAt(index, [&](Instruction& current) {
+                current = std::move(instruction);
+            });
+        }
+    }
+    InstructionSequence takeRich() {
+        InstructionSequence result;
+        static_cast<std::deque<Instruction>&>(result) = std::move(rich_);
+        static_cast<ProgramMetadata&>(result) = std::move(
+            static_cast<ProgramMetadata&>(*this));
+        return result;
+    }
+    CompactProgram takeCompact() {
+        if (!compactEmission_) {
+            CompactProgram result;
+            for (Instruction& instruction : rich_)
+                result.push_back(std::move(instruction));
+            rich_.clear();
+            static_cast<ProgramMetadata&>(result) = std::move(
+                static_cast<ProgramMetadata&>(*this));
+            return result;
+        }
+        static_cast<ProgramMetadata&>(compact_) = std::move(
+            static_cast<ProgramMetadata&>(*this));
+        return std::move(compact_);
+    }
+
+private:
+    bool compactEmission_ = false;
+    std::deque<Instruction> rich_;
+    CompactProgram compact_;
+};
+
+CompactProgram compileSourceCompact(const std::string& source);
+#ifdef QL32_TEST_LEGACY_COMPILER
 InstructionSequence compileSource(const std::string& source);
 InstructionSequence compileExpression(const std::string& source,
                                       const ProgramMetadata& enclosing);
+void failCompactEmissionAfterForTest(std::size_t instructionCount);
+#endif
+CompactProgram compileExpressionCompact(const std::string& source,
+                                        const ProgramMetadata& enclosing);
 // Counts container objects, element storage and string capacities owned by the
 // sequence. Allocator bookkeeping and deque block slack are implementation-specific.
 std::size_t estimateInstructionSequenceBytes(const InstructionSequence& code) noexcept;
