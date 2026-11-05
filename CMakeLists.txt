@@ -114,6 +114,36 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_runtime_tests PRIVATE src)
   target_link_libraries(ql32_runtime_tests PRIVATE ql32_host)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
+  add_executable(ql32_b4_opcode_coverage tests/language/b4_opcode_coverage.cpp)
+  target_include_directories(ql32_b4_opcode_coverage PRIVATE src)
+  target_compile_definitions(ql32_b4_opcode_coverage PRIVATE QL32_TEST_COMPACT)
+  target_link_libraries(ql32_b4_opcode_coverage PRIVATE ql32_portable)
+  add_test(NAME ql32_b4_opcode_coverage
+    COMMAND ql32_b4_opcode_coverage ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(ql32_b4_footprint_tests tests/language/b4_footprint_tests.cpp)
+  target_include_directories(ql32_b4_footprint_tests PRIVATE src)
+  target_compile_definitions(ql32_b4_footprint_tests PRIVATE QL32_TEST_COMPACT)
+  target_link_libraries(ql32_b4_footprint_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_b4_footprint_tests
+    COMMAND ql32_b4_footprint_tests ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME cli_b4_extra_opcodes
+    COMMAND ${CMAKE_COMMAND}
+      -DQL32_EXECUTABLE=$<TARGET_FILE:ql32>
+      -DTEST_NAME=cli_file
+      -DSOURCE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/language/b4_extra_opcodes.bas
+      -DEXPECTED_STDOUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/language/b4_extra_opcodes.out
+      -DEXPECTED_STDERR_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/language/b4_extra_opcodes.err
+      -DEXPECTED_EXIT_CODE=1
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_test.cmake)
+  add_test(NAME cli_b4_call_depth_limit
+    COMMAND ${CMAKE_COMMAND}
+      -DQL32_EXECUTABLE=$<TARGET_FILE:ql32>
+      -DTEST_NAME=cli_file
+      -DSOURCE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/language/b4_call_depth_limit.bas
+      -DEXPECTED_STDOUT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/language/b4_call_depth_limit.out
+      -DEXPECTED_STDERR_FILE=${CMAKE_CURRENT_SOURCE_DIR}/tests/language/b4_call_depth_limit.err
+      -DEXPECTED_EXIT_CODE=1
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_test.cmake)
   add_executable(ql32_scheduler_tests tests/scheduler_tests.cpp)
   target_link_libraries(ql32_scheduler_tests PRIVATE ql32_host)
   add_test(NAME ql32_scheduler_tests COMMAND ql32_scheduler_tests)

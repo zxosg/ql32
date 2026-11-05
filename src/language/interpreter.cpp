@@ -2470,6 +2470,18 @@ std::size_t richInstructionDynamicBytes(const detail::Instruction& instruction) 
 detail::CompactProgram::CompactProgram(detail::InstructionSequence&& rich)
     : detail::ProgramMetadata(std::move(static_cast<detail::ProgramMetadata&>(rich))) {
     records_.reserve(rich.size());
+    const auto sidecarCount = static_cast<std::size_t>(std::count_if(
+        rich.begin(), rich.end(), [](const detail::Instruction& instruction) {
+            return !compactableInstruction(instruction);
+        }));
+    const auto stringLiteralCount = static_cast<std::size_t>(std::count_if(
+        rich.begin(), rich.end(), [](const detail::Instruction& instruction) {
+            return compactableInstruction(instruction) &&
+                instruction.op == detail::Op::Push &&
+                std::holds_alternative<std::string>(instruction.value);
+        }));
+    sidecars_.reserve(sidecarCount);
+    stringLiterals_.reserve(stringLiteralCount);
     while (!rich.empty()) {
         detail::Instruction instruction = std::move(rich.front());
         rich.pop_front();
@@ -2509,6 +2521,18 @@ void detail::CompactProgram::appendOne(detail::Instruction instruction) {
 void detail::CompactProgram::appendRange(const detail::InstructionSequence& instructions) {
     detail::CompactProgram addition;
     addition.records_.reserve(instructions.size());
+    const auto sidecarCount = static_cast<std::size_t>(std::count_if(
+        instructions.begin(), instructions.end(), [](const detail::Instruction& instruction) {
+            return !compactableInstruction(instruction);
+        }));
+    const auto stringLiteralCount = static_cast<std::size_t>(std::count_if(
+        instructions.begin(), instructions.end(), [](const detail::Instruction& instruction) {
+            return compactableInstruction(instruction) &&
+                instruction.op == detail::Op::Push &&
+                std::holds_alternative<std::string>(instruction.value);
+        }));
+    addition.sidecars_.reserve(sidecarCount);
+    addition.stringLiterals_.reserve(stringLiteralCount);
     for (const detail::Instruction& instruction : instructions)
         addition.appendOne(instruction);
 

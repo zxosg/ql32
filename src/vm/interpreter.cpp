@@ -66,7 +66,9 @@ void verifyBytecode(const Code& code) {
     const auto validTarget = [&](const Instruction& instruction, std::size_t target) {
         if (target > code.size()) invalid(instruction, "jump target is outside the program");
     };
-    for (const Instruction& instruction : code) {
+    Instruction scanScratch;
+    for (std::size_t address = 0; address < code.size(); ++address) {
+        const Instruction& instruction = code.instructionAt(address, scanScratch);
         if (instruction.line < 1 || instruction.column < 1)
             invalid(instruction, "source location is invalid");
         switch (instruction.op) {
@@ -159,11 +161,14 @@ void verifyBytecode(const Code& code) {
     };
     stackDepth[0] = 0;
     pending.push_back(0);
-    for (const Instruction& instruction : code) {
+    Instruction callScratch;
+    for (std::size_t address = 0; address < code.size(); ++address) {
+        const Instruction& instruction = code.instructionAt(address, callScratch);
         if (instruction.op == Op::Call && !instruction.builtin)
             merge(instruction.target, 0, instruction);
     }
 
+    Instruction instructionScratch;
     while (!pending.empty()) {
         const std::size_t pc = pending.front();
         pending.pop_front();
@@ -173,7 +178,7 @@ void verifyBytecode(const Code& code) {
                 throw std::runtime_error("invalid bytecode: program exits with values on the stack");
             continue;
         }
-        const Instruction& instruction = code[pc];
+        const Instruction& instruction = code.instructionAt(pc, instructionScratch);
         std::size_t consumed = 0;
         std::size_t produced = 0;
         switch (instruction.op) {
@@ -503,13 +508,20 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         execution_->debugPaused = debugPauseRequested_;
         execution_->diagnosticsEnabled = diagnosticsEnabled_;
         execution_->traceEnabled = traceEnabled_;
-        const bool numbered = std::any_of(execution_->code.begin(), execution_->code.end(),
-            [](const Instruction& instruction) {
-                return instruction.statementStart && instruction.basicLine != 0;
-            });
+        bool numbered = false;
+        Instruction lineScratch;
+        for (std::size_t address = 0; address < execution_->code.size(); ++address) {
+            const Instruction& instruction = execution_->code.instructionAt(address, lineScratch);
+            if (instruction.statementStart && instruction.basicLine != 0) {
+                numbered = true;
+                break;
+            }
+        }
+        Instruction breakpointScratch;
         for (const auto& [line, enabled] : pendingBreakpoints_) {
             for (std::size_t address = 0; address < execution_->code.size(); ++address) {
-                const Instruction& instruction = execution_->code[address];
+                const Instruction& instruction = execution_->code.instructionAt(
+                    address, breakpointScratch);
                 if (!instruction.statementStart ||
                     (numbered ? instruction.basicLine != line : instruction.line != line)) continue;
                 if (enabled) execution_->breakpoints.insert(address);
@@ -2646,13 +2658,20 @@ bool Interpreter::debugSetBreakpoint(int line, bool enabled) {
         if (enabled) debugPauseRequested_ = false;
         return true;
     }
-    const bool numbered = std::any_of(execution_->code.begin(), execution_->code.end(),
-        [](const Instruction& instruction) {
-            return instruction.statementStart && instruction.basicLine != 0;
-        });
-    bool matched = false;
+    bool numbered = false;
+    Instruction lineScratch;
     for (std::size_t address = 0; address < execution_->code.size(); ++address) {
-        const Instruction& instruction = execution_->code[address];
+        const Instruction& instruction = execution_->code.instructionAt(address, lineScratch);
+        if (instruction.statementStart && instruction.basicLine != 0) {
+            numbered = true;
+            break;
+        }
+    }
+    bool matched = false;
+    Instruction breakpointScratch;
+    for (std::size_t address = 0; address < execution_->code.size(); ++address) {
+        const Instruction& instruction = execution_->code.instructionAt(
+            address, breakpointScratch);
         if (!instruction.statementStart ||
             (numbered ? instruction.basicLine != line : instruction.line != line)) continue;
         matched = true;
