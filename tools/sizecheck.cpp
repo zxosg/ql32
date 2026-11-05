@@ -10,6 +10,7 @@
 #include <string>
 #include <cstdint>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -119,6 +120,15 @@ int main(int argc, char** argv) {
               << estimateInstructionSequenceBytes(code) << " bytes\n"
               << "estimate caveat: counts string capacities even when inline; excludes "
                  "allocator bookkeeping and deque block slack\n";
+
+    InstructionSequence compactInput = code;
+    CompactProgram compact(std::move(compactInput));
+    std::cout << "compact instruction record bytes: "
+              << sizeof(CompactInstruction) << " bytes\n"
+              << "compact records: " << compact.compactRecordCount() << '\n'
+              << "rich sidecar instructions: " << compact.sidecarCount() << '\n'
+              << "encoded program estimate including side tables: "
+              << compact.encodedStorageBytes() << " bytes\n";
 
     printStringPoolTradeoff();
     printBufferIndexTradeoff();

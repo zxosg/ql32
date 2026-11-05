@@ -111,6 +111,7 @@ if(QL32_BUILD_TESTS)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_ui_test.cmake
   )
   add_executable(ql32_runtime_tests tests/runtime_tests.cpp)
+  target_include_directories(ql32_runtime_tests PRIVATE src)
   target_link_libraries(ql32_runtime_tests PRIVATE ql32_host)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
   add_executable(ql32_scheduler_tests tests/scheduler_tests.cpp)

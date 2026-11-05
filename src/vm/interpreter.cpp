@@ -56,7 +56,8 @@ bool mayContainInclude(std::string_view source) {
     return false;
 }
 
-void verifyBytecode(const detail::InstructionSequence& code) {
+template <typename Code>
+void verifyBytecode(const Code& code) {
     const auto invalid = [](const Instruction& instruction, const char* reason) {
         throw std::runtime_error("line " + std::to_string(instruction.line) +
             ", column " + std::to_string(instruction.column) +
@@ -429,15 +430,15 @@ ExecutionStatus Interpreter::executeResumable(const std::string& source, std::os
     return executeSlice(source, output, std::numeric_limits<std::size_t>::max(), stop);
 }
 
-void Interpreter::bindProgramSymbols(detail::VMExecutionState& state) {
-    for (const auto& [functionName, metadata] : state.code.functions) {
+void Interpreter::bindProgramSymbols(detail::CompactProgram& code) {
+    for (const auto& [functionName, metadata] : code.functions) {
         auto& symbols = localSymbolTables_[functionName];
         for (const std::string& name : metadata.localSymbols) {
             if (std::find(symbols.begin(), symbols.end(), name) == symbols.end())
                 symbols.push_back(name);
         }
     }
-    for (Instruction& instruction : state.code) {
+    code.forEachSidecar([&](Instruction& instruction) {
         const bool carriesSymbol = instruction.op == Op::Load || instruction.op == Op::Store ||
             instruction.op == Op::Input || instruction.op == Op::ForNext ||
             instruction.op == Op::DimArray || instruction.op == Op::ArrayGet ||
@@ -445,15 +446,15 @@ void Interpreter::bindProgramSymbols(detail::VMExecutionState& state) {
             instruction.op == Op::ChannelRead;
         const std::string& symbolName = instruction.op == Op::ChannelRead ?
             instruction.targetVariable.get() : instruction.name;
-        if (!carriesSymbol || symbolName.empty()) continue;
+        if (!carriesSymbol || symbolName.empty()) return;
         if (!instruction.ownerDefinition.empty()) {
             const auto table = localSymbolTables_.find(instruction.ownerDefinition.get());
             bool localEligible = instruction.op != Op::DimArray;
             if (instruction.op == Op::ArrayGet || instruction.op == Op::ArraySet ||
                 instruction.op == Op::PushArrayRef) {
                 localEligible = false;
-                const auto function = state.code.functions.find(instruction.ownerDefinition.get());
-                if (function != state.code.functions.end() &&
+                const auto function = code.functions.find(instruction.ownerDefinition.get());
+                if (function != code.functions.end() &&
                     std::find(function->second.parameters.begin(),
                               function->second.parameters.end(), symbolName) !=
                         function->second.parameters.end())
@@ -465,13 +466,13 @@ void Interpreter::bindProgramSymbols(detail::VMExecutionState& state) {
                 if (local != table->second.end()) {
                     instruction.localSlot = static_cast<std::uint32_t>(
                         local - table->second.begin());
-                    continue;
+                    return;
                 }
             }
         }
         const Value initial = symbolName.back() == '$' ? Value(std::string{}) : Value(0.0);
         instruction.symbolSlot = ensureGlobalSymbol(symbolName, initial);
-    }
+    });
 }
 
 ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostream& output,
@@ -485,16 +486,19 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         if (source.size() <= std::numeric_limits<std::size_t>::max() / 4)
             memoryBudget_.preflight(source.size() * 4, "program compilation");
         execution_ = std::make_unique<detail::VMExecutionState>();
+        detail::InstructionSequence compiled;
         if (mayContainInclude(source)) {
             const std::string expanded = detail::expandIncludes(source, storage_.get());
-            execution_->code = detail::compileSource(expanded);
+            compiled = detail::compileSource(expanded);
         } else {
             // Compile ordinary programs directly from their source. Avoid
             // retaining an expanded duplicate while tokens and bytecode grow.
-            execution_->code = detail::compileSource(source);
+            compiled = detail::compileSource(source);
         }
-        bindProgramSymbols(*execution_);
-        verifyBytecode(execution_->code);
+        detail::CompactProgram compact(std::move(compiled));
+        bindProgramSymbols(compact);
+        verifyBytecode(compact);
+        execution_->code = std::move(compact);
         execution_->debuggerAttached = debuggerAttached_;
         execution_->debugPaused = debugPauseRequested_;
         execution_->diagnosticsEnabled = diagnosticsEnabled_;
@@ -618,7 +622,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     if (state.debuggerAttached && state.debugPaused)
         return ExecutionStatus::DebugPaused;
     const bool singlePrecision = code.numericPrecision == detail::NumericPrecision::Single;
-    const Instruction* activeInstruction = pc == 0 ? nullptr : &code[pc - 1];
+    Instruction activeInstructionScratch;
+    const Instruction* activeInstruction = pc == 0 ? nullptr :
+        &code.instructionAt(pc - 1, activeInstructionScratch);
     auto quantizeNumeric = [&](double value, const Instruction* at = nullptr) {
         if (!singlePrecision) return value;
         const float rounded = static_cast<float>(value);
@@ -629,6 +635,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         }
         return static_cast<double>(rounded);
     };
+    Instruction instructionScratch;
     auto popEntry = [&]() -> StackEntry {
         if (stack.empty()) throw std::runtime_error("internal VM stack underflow");
         StackEntry value = std::move(stack.back());
@@ -796,23 +803,24 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
         if (instructionBudget != 0 && instructionsExecuted >= instructionBudget)
             return ExecutionStatus::Yielded;
-        const Instruction& nextInstruction = code[pc];
-        if (state.debuggerAttached && nextInstruction.statementStart) {
-            if (state.skipBreakpointAddress == pc) {
+        const Instruction& instruction = code.instructionAt(pc, instructionScratch);
+        const std::size_t instructionAddress = pc;
+        if (state.debuggerAttached && instruction.statementStart) {
+            if (state.skipBreakpointAddress == instructionAddress) {
                 state.skipBreakpointAddress = static_cast<std::size_t>(-1);
             } else if (state.debugMode != runtime::DebugResumeMode::Continue &&
                        state.stepStarted &&
                        (state.debugMode == runtime::DebugResumeMode::StepInto ||
-                        callFrames.size() <= state.stepCallDepth)) {
+                       callFrames.size() <= state.stepCallDepth)) {
                 state.debugPaused = true;
                 return ExecutionStatus::DebugPaused;
             } else if (state.debugMode == runtime::DebugResumeMode::Continue &&
-                       state.breakpoints.count(pc) != 0) {
+                       state.breakpoints.count(instructionAddress) != 0) {
                 state.debugPaused = true;
                 return ExecutionStatus::DebugPaused;
             }
         }
-        const auto& instruction = code[pc++];
+        ++pc;
         activeInstruction = &instruction;
         ++instructionsExecuted;
         if (state.diagnosticsEnabled) ++state.bytecodes;
@@ -1028,20 +1036,24 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             if (global) dynamicInstruction.symbolSlot = *global;
                         }
                     }
-                    const std::size_t start = code.size();
-                    code.insert(code.end(), expression.begin(), expression.end());
-                    Instruction finish{Op::Return, 0.0, {}, instruction.line, instruction.column};
+                    Instruction callInstruction = instruction;
+                    activeInstructionScratch = callInstruction;
+                    activeInstruction = &activeInstructionScratch;
+                    Instruction finish{Op::Return, 0.0, {}, callInstruction.line,
+                                       callInstruction.column};
                     finish.expectsValue = true;
-                    code.push_back(std::move(finish));
+                    expression.push_back(std::move(finish));
+                    const std::size_t start = code.size();
+                    code.appendRange(expression);
                     RuntimeFrame frame;
                     frame.returnAddress = pc;
                     frame.callInstruction = pc == 0 ? 0 : pc - 1;
-                    frame.callSourceLine = instruction.line;
-                    frame.callSourceColumn = instruction.column;
-                    frame.callBasicLine = instruction.basicLine;
+                    frame.callSourceLine = callInstruction.line;
+                    frame.callSourceColumn = callInstruction.column;
+                    frame.callBasicLine = callInstruction.basicLine;
                     frame.function = true;
                     frame.dynamicEvaluation = true;
-                    frame.stringifyResult = instruction.name == "EVAL$";
+                    frame.stringifyResult = callInstruction.name == "EVAL$";
                     frame.dynamicCodeStart = start;
                     callFrames.push_back(std::move(frame));
                     pc = start;
@@ -1995,9 +2007,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 }
             }
             callFrames.pop_back();
-            if (dynamicEvaluation)
-                code.erase(code.begin() + static_cast<std::ptrdiff_t>(dynamicCodeStart),
-                           code.end());
+            if (dynamicEvaluation) {
+                activeInstructionScratch = instruction;
+                activeInstruction = &activeInstructionScratch;
+                code.eraseFrom(dynamicCodeStart);
+            }
             if (returnsValue) pushValue(std::move(result));
             break;
         }
@@ -2713,7 +2727,7 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
     result.ifFalse = state.ifFalse;
     result.trace = state.trace;
     if (memory_) result.freeMemory = memory_->freeBytes();
-    result.bytecodeStorageBytes = detail::estimateInstructionSequenceBytes(state.code);
+    result.bytecodeStorageBytes = state.code.encodedStorageBytes();
     result.stackHighWater = state.stackHighWater;
     result.frameHighWater = state.frameHighWater;
     const auto valueStorageBytes = [](const Value& value) {

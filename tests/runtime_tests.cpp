@@ -1,6 +1,7 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
 #include "ql32/runtime/buffer.hpp"
+#include "language/bytecode.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -134,6 +135,56 @@ void testBufferManagerAllocationIndex() {
     try { (void)buffers.peek(second); }
     catch (const ql32::runtime::ServiceError&) { clearedAddressRejected = true; }
     require(clearedAddressRejected, "cleared buffer allocation remained accessible");
+}
+
+void testCompactBytecodeRoundTripAndDynamicTail() {
+    using namespace ql32::detail;
+    static_assert(sizeof(CompactInstruction) == 16,
+                  "encoded VM instruction record exceeded 16 bytes");
+    InstructionSequence rich = compileSource(
+        "10 value=3+4\n"
+        "20 PRINT value;\"ok\"\n");
+    std::vector<Instruction> expected(rich.begin(), rich.end());
+    CompactProgram compact(std::move(rich));
+    require(compact.size() == expected.size() && compact.compactRecordCount() != 0 &&
+                compact.sidecarCount() != 0,
+            "bytecode lowering did not split compact records and sidecars");
+
+    Instruction scratch;
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        const Instruction& actual = compact.instructionAt(index, scratch);
+        const Instruction& original = expected[index];
+        require(actual.op == original.op && actual.line == original.line &&
+                    actual.column == original.column && actual.statementStart == original.statementStart &&
+                    actual.basicLine == original.basicLine && actual.name == original.name &&
+                    actual.separator == original.separator && actual.value == original.value,
+                "compact bytecode changed instruction operands or source metadata");
+    }
+
+    InstructionSequence expression = compileExpression("8+9", compact);
+    const std::size_t dynamicStart = compact.size();
+    Instruction finish{Op::Return, 0.0, {}, 40, 5};
+    finish.expectsValue = true;
+    expression.push_back(std::move(finish));
+    compact.appendRange(expression);
+    require(compact.size() == dynamicStart + expression.size(),
+            "dynamic expression append lost bytecode records");
+    compact.eraseFrom(dynamicStart);
+    require(compact.size() == dynamicStart,
+            "dynamic expression cleanup retained compact records");
+
+    std::string longSource(65540, ' ');
+    longSource += "PRINT 1\n";
+    InstructionSequence longLine = compileSource(longSource);
+    const int expectedColumn = longLine.front().line == 1 ? longLine.front().column : 0;
+    CompactProgram longLineCompact(std::move(longLine));
+    bool preservedWideColumn = false;
+    for (std::size_t index = 0; index < longLineCompact.size(); ++index) {
+        const Instruction& instruction = longLineCompact.instructionAt(index, scratch);
+        if (instruction.column > UINT16_MAX) preservedWideColumn = true;
+    }
+    require(expectedColumn > UINT16_MAX && preservedWideColumn,
+            "wide source columns were truncated by compact encoding");
 }
 
 void testGotoLineNumbersAndLabels() {
@@ -909,6 +960,7 @@ void testDialogMenuBasicCallsSuspendAndResume() {
 int main() {
     try {
         testBufferManagerAllocationIndex();
+        testCompactBytecodeRoundTripAndDynamicTail();
         testInterpreterSessions();
         testMemoryBudgetFailures();
         testGotoLineNumbersAndLabels();

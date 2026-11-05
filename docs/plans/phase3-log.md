@@ -236,3 +236,44 @@
   appends and address lookup remains O(log n). Payload buffers remain separate
   vectors. General allocation pools and task-history retention remain
   unchanged because neither has measured evidence for a beneficial redesign.
+
+## 2026-11-05 — B4 compact instruction records
+
+- **Step:** Track B4. The compiler uses rich instructions as a transient builder;
+  before execution, the VM lowers them into 16-byte records and indexed side
+  tables. This keeps the compiler's patching and verification logic intact while
+  runtime dispatch reads the compact representation.
+- **Encoding:** records store the opcode, statement flags, physical source line
+  and column when each fits 16 bits, BASIC line number, and either a numeric
+  literal or side-table index. String literals use a separate string table.
+  Instructions with names, symbol slots, control-flow targets, parameters, or
+  other complex metadata use indexed rich sidecars. Source coordinates wider
+  than the record fields stay in a sidecar and are never truncated.
+- **Runtime paths:** symbol binding runs against sidecars after lowering.
+  Dynamic EVAL compiles to the builder form, stages and appends encoded records
+  and side tables atomically, then removes the temporary tail on return. The
+  debugger and verifier continue to read decoded instructions with full source
+  metadata.
+- **Tests:** added record/sidecar round-trip checks, dynamic append/erase checks,
+  and a wide-source-column fallback check. The curated golden corpus and all
+  Debug and ASan+UBSan tests passed 61/61. All three supported ESP32 profiles
+  built. No board was flashed; Linux was not available on the Darwin build host.
+- **Host size:** the synthetic 2,000-operation `PRINT 1` program estimates
+  514,176 B in the rich representation and 32,208 B encoded, including tracked
+  side tables and capacity slack (−93.7%). A larger mixed Mandelbrot program
+  estimates 20,742 B rich and 17,292 B encoded (−16.6%), showing that sidecar
+  heavy programs gain less. Estimates include source/debug and function tables,
+  but exclude allocator headers/rounding and implementation-specific deque
+  slack in the transient compiler builder.
+- **Benchmarks:** five-run post-B4 medians are recorded in `phase3-metrics.md`.
+-  Against the earlier three-run B1 medians, changes range from −1.9% to +8.2%;
+  the run counts differ, so treat these as indicative rather than a controlled
+  comparison.
+- **Embedded image sizes:** all profiles retain the prior static RAM totals;
+  flash image changes from B1 range from −88 B to +24 B and are recorded in
+  `phase3-metrics.md`.
+- **Open risks:** dynamic code and sidecar-heavy instructions still hold rich
+  `Instruction` objects. Flat compact-record allocation requests one contiguous
+  record buffer; its largest-block impact has not been measured on hardware.
+  Linux host validation remains outstanding because this Darwin host has no
+  Docker, Podman, or Lima runtime.

@@ -70,7 +70,7 @@ struct MenuBuilder {
 };
 
 struct VMExecutionState {
-    InstructionSequence code;
+    CompactProgram code;
     std::vector<StackEntry> stack;
     std::unordered_map<std::size_t, ForState> forStates;
     std::vector<RuntimeFrame> callFrames;

@@ -224,3 +224,45 @@ or runtime largest-block measurements.
 | `lilygo_vga32` | 53,616 B | 1,556,521 B | +336 B |
 | `olimex_esp32_sbc_fabgl` | 54,252 B | 1,631,101 B | +340 B |
 | `esp32_2432s028` | 51,252 B | 1,496,161 B | +332 B |
+
+### B4 compact bytecode measurements
+
+The host `CompactInstruction` is exactly 16 B. The sizecheck uses the same
+2,000-instruction synthetic `PRINT 1` program recorded in A1/B1:
+
+| Representation | Estimated full program bytes | Change |
+|---|---:|---:|
+| Rich `InstructionSequence`, including tracked side data | 514,176 B | baseline |
+| Compact records plus string, sidecar, function, and debug tables | 32,208 B | −93.7% |
+
+For the larger mixed `benchmarks/mandelbrot.bas` workload (80 instructions),
+the rich estimate is 20,742 B and the compact estimate is 17,292 B (−16.6%).
+This difference reflects its higher share of named and control-flow
+instructions, which retain rich indexed sidecars. The estimate includes
+container capacities and source/debug metadata, but it excludes allocator
+headers/rounding and implementation-specific `std::deque` block slack in the
+transient rich compiler builder.
+
+#### Post-B4 VM benchmark medians
+
+Same host workload suite, five process runs per workload. Compare cautiously
+with the earlier three-run B1 medians because run counts differ.
+
+| Workload | Post-B4 median |
+|---|---:|
+| 10,000 loop iterations | 0.021681 s |
+| Recursive function depth 200 | 0.004535 s |
+| Fill 10,000-element numeric array | 0.015784 s |
+| 1,000 string concatenations | 0.006077 s |
+| 40×28 Mandelbrot iteration | 0.205741 s |
+
+#### After B4 firmware sizes
+
+Values are PlatformIO firmware image size and static RAM; they are not free heap
+or runtime largest-block measurements.
+
+| Environment | Static RAM | Flash image | Flash delta from B1 |
+|---|---:|---:|---:|
+| `lilygo_vga32` | 53,616 B | 1,556,129 B | −56 B |
+| `olimex_esp32_sbc_fabgl` | 54,252 B | 1,630,785 B | +24 B |
+| `esp32_2432s028` | 51,252 B | 1,495,741 B | −88 B |

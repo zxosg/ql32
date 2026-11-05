@@ -26,7 +26,12 @@
 
 namespace ql32 {
 
-namespace detail { struct VMExecutionState; struct UISessionState; }
+namespace detail {
+struct VMExecutionState;
+struct UISessionState;
+struct InstructionSequence;
+class CompactProgram;
+}
 
 using Value = std::variant<double, std::string>;
 enum class ExecutionStatus {
@@ -105,7 +110,7 @@ private:
     const Value& globalValue(std::uint32_t slot) const;
     void setGlobalSlotValue(std::uint32_t slot, Value value);
     void setGlobalValue(const std::string& name, Value value);
-    void bindProgramSymbols(detail::VMExecutionState& state);
+    void bindProgramSymbols(detail::CompactProgram& code);
     void writePagerPage(std::ostream& output, std::size_t lineCount);
     void clearPager() noexcept;
     runtime::ChannelId resolveChannel(runtime::ChannelId channel) const;

@@ -17,18 +17,23 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace ql32 {
 namespace {
+
+static_assert(std::is_nothrow_move_constructible<detail::Instruction>::value,
+              "compact program append depends on no-throw sidecar moves");
 std::atomic<runtime::SessionId> nextInterpreterSessionId{1};
 
 using detail::ArrayArgumentCandidate;
 using detail::ForItemSpec;
 using detail::Instruction;
 using detail::InstructionSequence;
+using detail::ProgramMetadata;
 using detail::Op;
 using detail::PrintSeparator;
 using detail::SelectItemSpec;
@@ -521,7 +526,7 @@ struct SourceTarget {
 class Compiler {
 public:
     explicit Compiler(std::vector<Token> tokens,
-                      const InstructionSequence* enclosing = nullptr)
+                      const ProgramMetadata* enclosing = nullptr)
         : tokens_(std::move(tokens)) {
         if (enclosing) {
             enclosingFunctions_ = enclosing->functions;
@@ -2414,13 +2419,223 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
     }
 }
 
+namespace {
+
+bool compactableInstruction(const detail::Instruction& instruction) {
+    if (!instruction.name.empty() || !instruction.ownerDefinition.empty() ||
+        !instruction.targetVariable.empty() || !instruction.forItems.empty() ||
+        !instruction.parameters.empty() || !instruction.localNames.empty() ||
+        !instruction.arrayArgumentCandidates.empty() || !instruction.selectItems.empty() ||
+        !instruction.jumpScopes.empty() || instruction.target != 0 ||
+        instruction.exitTarget != 0 || instruction.loopId != 0 || instruction.argCount != 0 ||
+        instruction.expectsValue || instruction.builtin || instruction.channelArgument ||
+        instruction.clearTarget || instruction.symbolSlot != detail::Instruction::NoSymbolSlot ||
+        instruction.localSlot != detail::Instruction::NoSymbolSlot || instruction.rank != 0 ||
+        instruction.sliceHasStart || instruction.sliceHasEnd || instruction.sliceSingle ||
+        instruction.sourceJump || instruction.targetIsLineNumber ||
+        instruction.basicLine < 0 || instruction.basicLine > 32767 ||
+        instruction.sourceLineTarget != 0 ||
+        instruction.line < 1 || instruction.column < 1 || instruction.line > UINT16_MAX ||
+        instruction.column > UINT16_MAX)
+        return false;
+    if (instruction.op != detail::Op::PrintSeparator &&
+        instruction.separator != detail::PrintSeparator::None)
+        return false;
+    if (static_cast<unsigned>(instruction.separator) > 7) return false;
+    return std::holds_alternative<double>(instruction.value) ||
+        (instruction.op == detail::Op::Push &&
+         std::holds_alternative<std::string>(instruction.value));
+}
+
+std::size_t richInstructionDynamicBytes(const detail::Instruction& instruction) noexcept {
+    std::size_t bytes = instruction.name.capacity() + 1 +
+        instruction.ownerDefinition.capacity() + 1 + instruction.targetVariable.capacity() + 1;
+    if (const auto* text = std::get_if<std::string>(&instruction.value))
+        bytes += text->capacity() + 1;
+    bytes += instruction.forItems.capacity() * sizeof(detail::ForItemSpec);
+    bytes += instruction.parameters.capacity() * sizeof(std::string);
+    for (const auto& value : instruction.parameters) bytes += value.capacity() + 1;
+    bytes += instruction.localNames.capacity() * sizeof(std::string);
+    for (const auto& value : instruction.localNames) bytes += value.capacity() + 1;
+    bytes += instruction.arrayArgumentCandidates.capacity() * sizeof(detail::ArrayArgumentCandidate);
+    for (const auto& value : instruction.arrayArgumentCandidates)
+        bytes += value.name.capacity() + 1;
+    bytes += instruction.selectItems.capacity() * sizeof(detail::SelectItemSpec);
+    bytes += instruction.jumpScopes.capacity() * sizeof(std::size_t);
+    return bytes;
+}
+
+} // namespace
+
+detail::CompactProgram::CompactProgram(detail::InstructionSequence&& rich)
+    : detail::ProgramMetadata(std::move(static_cast<detail::ProgramMetadata&>(rich))) {
+    records_.reserve(rich.size());
+    while (!rich.empty()) {
+        detail::Instruction instruction = std::move(rich.front());
+        rich.pop_front();
+        appendOne(std::move(instruction));
+    }
+}
+
+void detail::CompactProgram::appendOne(detail::Instruction instruction) {
+    detail::CompactInstruction record;
+    record.opcode = static_cast<std::uint8_t>(instruction.op);
+    if (compactableInstruction(instruction)) {
+        const bool stringLiteral = instruction.op == detail::Op::Push &&
+            std::holds_alternative<std::string>(instruction.value);
+        record.flags = (instruction.statementStart ? 0x01 : 0) |
+            (instruction.explicitNext ? 0x02 : 0) |
+            (static_cast<std::uint8_t>(instruction.separator) << 2) |
+            (stringLiteral ? 0x20 : 0);
+        record.line = static_cast<std::uint16_t>(instruction.line);
+        record.column = static_cast<std::uint16_t>(instruction.column);
+        record.basicLine = static_cast<std::uint16_t>(instruction.basicLine);
+        if (stringLiteral) {
+            record.payload.sidecarIndex = stringLiterals_.size();
+            stringLiterals_.push_back(std::move(std::get<std::string>(instruction.value)));
+        } else {
+            record.payload.number = std::get<double>(instruction.value);
+        }
+        records_.push_back(record);
+        ++compactRecordCount_;
+    } else {
+        record.flags = UINT8_MAX;
+        record.payload.sidecarIndex = sidecars_.size();
+        records_.push_back(record);
+        sidecars_.push_back(std::move(instruction));
+    }
+}
+
+void detail::CompactProgram::appendRange(const detail::InstructionSequence& instructions) {
+    detail::CompactProgram addition;
+    addition.records_.reserve(instructions.size());
+    for (const detail::Instruction& instruction : instructions)
+        addition.appendOne(instruction);
+
+    records_.reserve(records_.size() + addition.records_.size());
+    sidecars_.reserve(sidecars_.size() + addition.sidecars_.size());
+    stringLiterals_.reserve(stringLiterals_.size() + addition.stringLiterals_.size());
+    const std::uint64_t sidecarBase = sidecars_.size();
+    const std::uint64_t stringBase = stringLiterals_.size();
+    for (detail::CompactInstruction& record : addition.records_) {
+        if (record.flags == UINT8_MAX) record.payload.sidecarIndex += sidecarBase;
+        else if ((record.flags & 0x20) != 0) record.payload.sidecarIndex += stringBase;
+        records_.push_back(record);
+    }
+    for (detail::Instruction& instruction : addition.sidecars_)
+        sidecars_.push_back(std::move(instruction));
+    for (std::string& literal : addition.stringLiterals_)
+        stringLiterals_.push_back(std::move(literal));
+    compactRecordCount_ += addition.compactRecordCount_;
+}
+
+void detail::CompactProgram::eraseFrom(std::size_t first) {
+    if (first >= records_.size()) return;
+    std::size_t discardedSidecars = 0;
+    std::size_t discardedLiterals = 0;
+    for (std::size_t index = first; index < records_.size(); ++index)
+        if (records_[index].flags == UINT8_MAX) ++discardedSidecars;
+        else if ((records_[index].flags & 0x20) != 0) ++discardedLiterals;
+    records_.resize(first);
+    for (std::size_t count = 0; count < discardedSidecars; ++count)
+        sidecars_.pop_back();
+    for (std::size_t count = 0; count < discardedLiterals; ++count)
+        stringLiterals_.pop_back();
+    compactRecordCount_ = static_cast<std::size_t>(std::count_if(
+        records_.begin(), records_.end(), [](const detail::CompactInstruction& record) {
+            return record.flags != UINT8_MAX;
+        }));
+}
+
+const detail::Instruction& detail::CompactProgram::decode(
+    std::size_t index, detail::Instruction& scratch) const {
+    if (index >= records_.size()) throw std::out_of_range("bytecode address out of range");
+    const auto& record = records_[index];
+    if (record.flags == UINT8_MAX) {
+        if (record.payload.sidecarIndex >= sidecars_.size())
+            throw std::runtime_error("invalid compact bytecode sidecar index");
+        const auto& instruction = sidecars_[record.payload.sidecarIndex];
+        if (record.opcode != static_cast<std::uint8_t>(instruction.op))
+            throw std::runtime_error("compact bytecode opcode and sidecar disagree");
+        return instruction;
+    }
+    if (record.opcode > static_cast<std::uint8_t>(detail::Op::SelectEnd))
+        throw std::runtime_error("invalid compact bytecode opcode");
+    scratch.op = static_cast<detail::Op>(record.opcode);
+    if ((record.flags & 0x20) != 0) {
+        if (record.opcode != static_cast<std::uint8_t>(detail::Op::Push) ||
+            record.payload.sidecarIndex >= stringLiterals_.size())
+            throw std::runtime_error("invalid compact string literal index");
+        scratch.value = stringLiterals_[record.payload.sidecarIndex];
+    } else {
+        scratch.value = record.payload.number;
+    }
+    scratch.line = record.line;
+    scratch.column = record.column;
+    scratch.statementStart = (record.flags & 0x01) != 0;
+    scratch.explicitNext = (record.flags & 0x02) != 0;
+    scratch.separator = static_cast<detail::PrintSeparator>((record.flags >> 2) & 0x07);
+    scratch.basicLine = record.basicLine;
+    return scratch;
+}
+
+detail::Instruction detail::CompactProgram::operator[](std::size_t index) const {
+    detail::Instruction scratch;
+    return decode(index, scratch);
+}
+
+detail::Instruction detail::CompactProgram::at(std::size_t index) const {
+    detail::Instruction scratch;
+    return decode(index, scratch);
+}
+
+const detail::Instruction& detail::CompactProgram::instructionAt(
+    std::size_t index, detail::Instruction& scratch) const {
+    return decode(index, scratch);
+}
+
+detail::Instruction detail::CompactProgram::const_iterator::operator*() const {
+    detail::Instruction scratch;
+    return program_->decode(index_, scratch);
+}
+
+std::size_t detail::CompactProgram::encodedStorageBytes() const noexcept {
+    std::size_t bytes = sizeof(*this) + records_.capacity() * sizeof(detail::CompactInstruction) +
+        sidecars_.capacity() * sizeof(detail::Instruction);
+    bytes += stringLiterals_.capacity() * sizeof(std::string);
+    for (const std::string& literal : stringLiterals_) bytes += literal.capacity() + 1;
+    for (const detail::Instruction& sidecar : sidecars_)
+        bytes += richInstructionDynamicBytes(sidecar);
+    const auto stringBytes = [](const std::string& value) { return value.capacity() + 1; };
+    for (const auto& [name, metadata] : functions) {
+        bytes += sizeof(decltype(functions)::value_type) + stringBytes(name);
+        bytes += metadata.parameters.capacity() * sizeof(std::string);
+        bytes += metadata.locals.capacity() * sizeof(std::string);
+        bytes += metadata.localSymbols.capacity() * sizeof(std::string);
+        for (const auto& value : metadata.parameters) bytes += stringBytes(value);
+        for (const auto& value : metadata.locals) bytes += stringBytes(value);
+        for (const auto& value : metadata.localSymbols) bytes += stringBytes(value);
+    }
+    for (const auto& [name, rank] : arrays) {
+        (void)rank;
+        bytes += sizeof(decltype(arrays)::value_type) + stringBytes(name);
+    }
+    for (const auto& [name, value] : constants) {
+        bytes += sizeof(decltype(constants)::value_type) + stringBytes(name);
+        if (const auto* text = std::get_if<std::string>(&value)) bytes += stringBytes(*text);
+    }
+    bytes += functions.bucket_count() * sizeof(void*) + arrays.bucket_count() * sizeof(void*) +
+        constants.bucket_count() * sizeof(void*);
+    return bytes;
+}
+
 detail::InstructionSequence detail::compileSource(const std::string& source) {
     Compiler compiler(Lexer(source).scan());
     return compiler.compile();
 }
 
 detail::InstructionSequence detail::compileExpression(
-    const std::string& source, const InstructionSequence& enclosing) {
+    const std::string& source, const ProgramMetadata& enclosing) {
     Compiler compiler(Lexer(source).scan(), &enclosing);
     return compiler.compileExpression();
 }

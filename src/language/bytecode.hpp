@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -179,6 +180,25 @@ struct Instruction {
     OptionalVector<std::size_t> jumpScopes;
 };
 
+// Compact common-case record. Instructions with names, control-flow metadata,
+// or other uncommon payloads live in CompactProgram's indexed side table.
+struct CompactInstruction {
+    std::uint8_t opcode = 0;
+    std::uint8_t flags = 0;
+    std::uint16_t line = 1;
+    std::uint16_t column = 1;
+    std::uint16_t basicLine = 0;
+    union Payload {
+        double number;
+        std::uint64_t sidecarIndex;
+        constexpr Payload() : number(0.0) {}
+    } payload;
+};
+static_assert(sizeof(CompactInstruction) == 16,
+              "compact bytecode records must remain 16 bytes");
+static_assert(static_cast<unsigned>(Op::SelectEnd) <= UINT8_MAX,
+              "compact bytecode opcode field is too small");
+
 struct FunctionMetadata {
     std::size_t address = 0;
     bool function = false;
@@ -187,9 +207,7 @@ struct FunctionMetadata {
     std::vector<std::string> localSymbols;
 };
 
-// Chunked instruction storage keeps bytecode growth from requiring one large
-// contiguous allocation on memory-constrained targets.
-struct InstructionSequence : std::deque<Instruction> {
+struct ProgramMetadata {
     NumericPrecision numericPrecision = NumericPrecision::Double;
     std::uint16_t cpuFrequencyMHz = 0;
     std::unordered_map<std::string, FunctionMetadata> functions;
@@ -197,9 +215,69 @@ struct InstructionSequence : std::deque<Instruction> {
     std::unordered_map<std::string, Value> constants;
 };
 
+// Compiler-only rich instruction builder. VM execution lowers this transient
+// form into fixed-size records plus indexed side tables below.
+struct InstructionSequence : std::deque<Instruction>, ProgramMetadata {};
+
+class CompactProgram : public ProgramMetadata {
+public:
+    class const_iterator {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = Instruction;
+        using difference_type = std::ptrdiff_t;
+        using pointer = void;
+        using reference = Instruction;
+
+        Instruction operator*() const;
+        const_iterator& operator++() { ++index_; return *this; }
+        const_iterator operator++(int) { auto copy = *this; ++*this; return copy; }
+        friend bool operator==(const const_iterator& a, const const_iterator& b) {
+            return a.program_ == b.program_ && a.index_ == b.index_;
+        }
+        friend bool operator!=(const const_iterator& a, const const_iterator& b) {
+            return !(a == b);
+        }
+
+    private:
+        friend class CompactProgram;
+        const_iterator(const CompactProgram* program, std::size_t index)
+            : program_(program), index_(index) {}
+        const CompactProgram* program_ = nullptr;
+        std::size_t index_ = 0;
+    };
+
+    CompactProgram() = default;
+    explicit CompactProgram(InstructionSequence&& rich);
+    std::size_t size() const noexcept { return records_.size(); }
+    bool empty() const noexcept { return records_.empty(); }
+    Instruction operator[](std::size_t index) const;
+    Instruction at(std::size_t index) const;
+    const Instruction& instructionAt(std::size_t index, Instruction& scratch) const;
+    const_iterator begin() const { return const_iterator(this, 0); }
+    const_iterator end() const { return const_iterator(this, size()); }
+    void appendRange(const InstructionSequence& instructions);
+    void eraseFrom(std::size_t first);
+    template <typename Function>
+    void forEachSidecar(Function&& function) {
+        for (Instruction& instruction : sidecars_) function(instruction);
+    }
+    std::size_t compactRecordCount() const noexcept { return compactRecordCount_; }
+    std::size_t sidecarCount() const noexcept { return sidecars_.size(); }
+    std::size_t encodedStorageBytes() const noexcept;
+
+private:
+    const Instruction& decode(std::size_t index, Instruction& scratch) const;
+    void appendOne(Instruction instruction);
+    std::vector<CompactInstruction> records_;
+    std::vector<Instruction> sidecars_;
+    std::vector<std::string> stringLiterals_;
+    std::size_t compactRecordCount_ = 0;
+};
+
 InstructionSequence compileSource(const std::string& source);
 InstructionSequence compileExpression(const std::string& source,
-                                      const InstructionSequence& enclosing);
+                                      const ProgramMetadata& enclosing);
 // Counts container objects, element storage and string capacities owned by the
 // sequence. Allocator bookkeeping and deque block slack are implementation-specific.
 std::size_t estimateInstructionSequenceBytes(const InstructionSequence& code) noexcept;
