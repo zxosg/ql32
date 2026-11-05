@@ -383,3 +383,27 @@
 - B4 remains open. Error/allocation sweeps, fuzz coverage, direct compact
   compiler emission, and the device soak still need completion. Hardware
   acceptance requires G2; do not merge B4 to mainline before then.
+
+### Direct compact compiler completion — 2026-11-05
+
+- The compiler now emits compact records and side tables as it parses. EVAL
+  and debugger EVAL use the same compact emitter. The rich compiler builder,
+  rich `InstructionSequence` API, and post-compile lowering path have been
+  removed. Production builds do not include the test-only allocation failure
+  hook.
+- Before removing the comparison path, direct output matched the former
+  rich-then-lower encoding on the 38-source compiler corpus and three EVAL
+  expressions, including records, ordered sidecars, string literals, line
+  fields, and program metadata. All 50 opcodes remain represented in the
+  corpus. The two REPL command-stream fixtures are not compilation units.
+- The 2,000-line compile peak fell from 2,666,800 B to 918,024 B (34.4%).
+  Tiny, Mandelbrot, and attractor peaks also fell; detailed figures and the
+  precise host allocation counter scope are in `phase3-metrics.md`.
+- A 128-position mid-emission `bad_alloc` sweep translated every failure to
+  BASIC Out-of-memory and verified an existing session global survived.
+- Final normal and ASan/UBSan suites pass 65/65. A production build with tests
+  disabled succeeds after removing the rich compiler path. The 2,000-line
+  execution result was remeasured at 122.1% of REF before any further tuning.
+- Direct compact emission and its differential checks are complete. B4 stays
+  open for the remaining error/allocation coverage, fuzz coverage, and device
+  soak gates; G2 is still required before mainline merge.

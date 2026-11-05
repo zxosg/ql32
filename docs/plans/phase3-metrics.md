@@ -406,3 +406,37 @@ metadata, and other global-`new` allocations that overlap in lifetime; it is
 not the bytecode size or process RSS. Stack usage and allocations that bypass
 global `new` are not counted. The current CAND compile peak matches REF exactly,
 which makes this the pre-change comparison point for direct emission.
+
+### Direct compact emission results — 2026-11-05
+
+The compiler now appends each instruction to compact records or side tables as
+parsing emits it. It releases the token vector after parsing and trims output
+vector capacities before returning. The production build has no rich
+instruction sequence or rich-then-lower compiler API. The failure-injection
+hook is compiled only when `QL32_BUILD_TESTS=ON`.
+
+| Sample | REF peak before | CAND rich compile peak before | Direct compile peak | Peak vs CAND before | Encoded output after |
+|---|---:|---:|---:|---:|---:|
+| 10 numbered PRINT lines | 18,208 B | 18,208 B | 7,360 B | 40.4% | 848 B |
+| `benchmarks/mandelbrot.bas` | 30,038 B | 30,038 B | 23,150 B | 77.1% | 11,260 B |
+| 2,000 numbered PRINT lines | 2,666,800 B | 2,666,800 B | 918,024 B | 34.4% | 128,208 B |
+| `examples/attractor.bas` | 51,404 B | 51,404 B | 45,644 B | 88.8% | 19,429 B |
+
+The 2,000-line peak is now 34.4% of the previous CAND peak and is below half.
+The emitted compact programs matched the former rich-then-lower output before
+that path was removed: the curated 38-source compiler corpus matched record
+bytes, ordered sidecars, string literals, source-line fields, constants, arrays,
+and function metadata. Three EVAL expressions matched as well. Two CLI REPL
+command streams are excluded from compiler-unit comparison; the malformed
+syntax fixture compares diagnostics rather than an encoded program.
+
+The direct-emission `bad_alloc` sweep injected failure at each of 128
+instruction-emission positions after the builder had begun collecting records.
+Each failure translated to BASIC Out-of-memory, and a global value established
+before compilation remained unchanged afterward. Both the normal and
+ASan/UBSan CTest suites pass 65/65; a `QL32_BUILD_TESTS=OFF` production build
+also succeeds without the legacy path.
+
+After direct emission, the same 2,000-line PRINT execution benchmark measured
+0.019865 s REF and 0.024252 s CAND (122.1%, nine timed runs after one warm-up).
+This was measured before any further runtime tuning.
