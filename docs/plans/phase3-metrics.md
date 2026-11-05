@@ -381,3 +381,28 @@ lower compile peak has not yet been measured or demonstrated.
 The new `tools/hw_soak.py` host mode passed 32 REF/CAND fixture comparisons,
 then 200 candidate process load/run/free cycles and three concurrent process
 runs. It is a host check only and does not replace the planned device soak.
+
+### Direct-emission pre-change baseline — 2026-11-05
+
+The global-allocation tracking harness was rebuilt against the current B3 REF
+library (`58bf799`) and current CAND library (including exact sidecar
+reservation). Input source strings were read before tracking. Compilation was
+measured around the public `compileSource()` call; CAND lowering was then
+measured separately while the rich result remained live.
+
+| Sample | REF compile peak | REF retained | CAND compile peak | CAND retained | CAND lowering peak total | CAND encoded live |
+|---|---:|---:|---:|---:|---:|---:|
+| 10 numbered PRINT lines | 18,208 B | 11,992 B | 18,208 B | 11,992 B | 12,664 B | 8,688 B |
+| `benchmarks/mandelbrot.bas` | 30,038 B | 20,246 B | 30,038 B | 20,246 B | 30,406 B | 18,478 B |
+| 2,000 numbered PRINT lines | 2,666,800 B | 1,876,824 B | 2,666,800 B | 1,876,824 B | 2,004,856 B | 140,112 B |
+| `examples/attractor.bas` | 51,404 B | 28,364 B | 51,404 B | 28,364 B | 45,796 B | 25,916 B |
+
+Specifically, **2,666,800 B** is the peak live total of allocations observed
+through overridden global `operator new` during `compileSource()` for the
+numbered 2,000-line fixture. Each allocation is counted as its requested size
+plus the harness's header and alignment allowance. The source string is outside
+the tracking interval. The figure includes compiler tokens, rich bytecode,
+metadata, and other global-`new` allocations that overlap in lifetime; it is
+not the bytecode size or process RSS. Stack usage and allocations that bypass
+global `new` are not counted. The current CAND compile peak matches REF exactly,
+which makes this the pre-change comparison point for direct emission.
