@@ -1,7 +1,10 @@
 #include "language/bytecode.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
+#include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -83,6 +86,60 @@ bool sameInstruction(const Instruction& a, const Instruction& b) {
         sameSequence(a.jumpScopes, b.jumpScopes, [](auto x, auto y) { return x == y; });
 }
 
+bool sameCompactEncoding(const CompactProgram& a, const CompactProgram& b) {
+    if (a.encodedRecords().size() != b.encodedRecords().size() ||
+        a.encodedSidecars().size() != b.encodedSidecars().size() ||
+        a.encodedStringLiterals() != b.encodedStringLiterals() ||
+        a.functions.size() != b.functions.size() || a.arrays != b.arrays ||
+        a.constants != b.constants)
+        return false;
+    for (std::size_t i = 0; i < a.encodedRecords().size(); ++i)
+        if (std::memcmp(&a.encodedRecords()[i], &b.encodedRecords()[i],
+                        sizeof(CompactInstruction)) != 0)
+            return false;
+    for (std::size_t i = 0; i < a.encodedSidecars().size(); ++i)
+        if (!sameInstruction(a.encodedSidecars()[i], b.encodedSidecars()[i]))
+            return false;
+    for (const auto& [name, left] : a.functions) {
+        const auto found = b.functions.find(name);
+        if (found == b.functions.end()) return false;
+        const auto& right = found->second;
+        if (left.address != right.address || left.function != right.function ||
+            left.parameters != right.parameters || left.locals != right.locals ||
+            left.localSymbols != right.localSymbols)
+            return false;
+    }
+    return a.numericPrecision == b.numericPrecision &&
+        a.cpuFrequencyMHz == b.cpuFrequencyMHz;
+}
+
+std::vector<std::string> discoverFixtures(const std::string& root) {
+    namespace fs = std::filesystem;
+    std::vector<std::string> fixtures;
+    for (const auto& entry : fs::directory_iterator(root + "/tests/cli")) {
+        const std::string filename = entry.path().filename().string();
+        // These are REPL command streams (LIST/RUN and NEW/CLEAR), not source
+        // units that compileSource can consume as one BASIC program.
+        if (entry.path().extension() == ".bas" && filename != "cli_abbreviations.bas" &&
+            filename != "cli_program_commands.bas")
+            fixtures.push_back(fs::relative(entry.path(), root).generic_string());
+    }
+    for (const auto& entry : fs::directory_iterator(root + "/tests/language")) {
+        const std::string filename = entry.path().filename().string();
+        if (entry.path().extension() == ".bas" && filename.rfind("b4_", 0) == 0)
+            fixtures.push_back(fs::relative(entry.path(), root).generic_string());
+    }
+    fixtures.push_back("examples/attractor.bas");
+    fixtures.push_back("examples/mandelbrot.bas");
+    for (const auto& entry : fs::directory_iterator(root + "/benchmarks")) {
+        if (entry.path().extension() == ".bas")
+            fixtures.push_back(fs::relative(entry.path(), root).generic_string());
+    }
+    std::sort(fixtures.begin(), fixtures.end());
+    fixtures.erase(std::unique(fixtures.begin(), fixtures.end()), fixtures.end());
+    return fixtures;
+}
+
 std::string readFile(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) throw std::runtime_error("cannot open fixture: " + path);
@@ -97,35 +154,38 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string root = argv[1];
-    const std::array<const char*, 17> fixtures{{
-        "tests/cli/cli_numeric_portable.bas",
-        "tests/cli/cli_expression_rules.bas",
-        "tests/cli/cli_functions.bas",
-        "tests/cli/cli_procedure_locals.bas",
-        "tests/cli/cli_arrays.bas",
-        "tests/cli/cli_array_by_reference.bas",
-        "tests/cli/cli_select_edges.bas",
-        "tests/cli/cli_language_slice.bas",
-        "tests/cli/cli_call_depth.bas",
-        "tests/cli/cli_array_bounds.bas",
-        "tests/cli/cli_div_overflow.bas",
-        "tests/cli/cli_print_separators.bas",
-        "tests/cli/cli_repeat_control.bas",
-        "tests/cli/cli_for_exit.bas",
-        "tests/language/b4_extra_opcodes.bas",
-        "tests/language/b4_input_compile.bas",
-        "examples/mandelbrot.bas",
-    }};
+    const std::vector<std::string> fixtures = discoverFixtures(root);
     std::array<bool, allOps.size()> seen{};
-    for (const char* relative : fixtures) {
+    for (const std::string& relative : fixtures) {
         const std::string path = root + "/" + relative;
+        const std::string source = readFile(path);
         InstructionSequence rich;
+        std::string legacyError;
         try {
-            rich = compileSource(readFile(path));
+            rich = compileSource(source);
         } catch (const std::exception& error) {
-            std::cerr << path << ": " << error.what() << '\n';
+            legacyError = error.what();
+        }
+        std::string directError;
+        CompactProgram direct;
+#ifdef QL32_TEST_COMPACT
+        try {
+            direct = compileSourceCompact(source);
+        } catch (const std::exception& error) {
+            directError = error.what();
+        }
+        if (legacyError != directError) {
+            std::cerr << path << ": legacy/direct compile diagnostics differ: ["
+                      << legacyError << "] / [" << directError << "]\n";
             return 1;
         }
+        if (!legacyError.empty()) continue;
+#else
+        if (!legacyError.empty()) {
+            std::cerr << path << ": " << legacyError << '\n';
+            return 1;
+        }
+#endif
         for (const Instruction& instruction : rich) {
             const auto index = static_cast<std::size_t>(instruction.op);
             if (index >= seen.size()) {
@@ -137,6 +197,42 @@ int main(int argc, char** argv) {
 #ifdef QL32_TEST_COMPACT
         const std::vector<Instruction> expected(rich.begin(), rich.end());
         CompactProgram compact(std::move(rich));
+        if (!sameCompactEncoding(compact, direct)) {
+            std::cerr << path << ": direct and legacy compact encodings differ"
+                      << " (records " << compact.encodedRecords().size() << '/'
+                      << direct.encodedRecords().size() << ", sidecars "
+                      << compact.encodedSidecars().size() << '/'
+                      << direct.encodedSidecars().size() << ", literals "
+                      << compact.encodedStringLiterals().size() << '/'
+                      << direct.encodedStringLiterals().size() << ")\n";
+            for (std::size_t i = 0; i < compact.size() && i < direct.size(); ++i) {
+                Instruction left, right;
+                if (!sameInstruction(compact.instructionAt(i, left),
+                                     direct.instructionAt(i, right))) {
+                    std::cerr << "first semantic difference at instruction " << i << '\n';
+                    break;
+                }
+            }
+            for (std::size_t i = 0; i < compact.encodedRecords().size() &&
+                 i < direct.encodedRecords().size(); ++i) {
+                const auto& a = compact.encodedRecords()[i];
+                const auto& b = direct.encodedRecords()[i];
+                if (std::memcmp(&a, &b, sizeof(CompactInstruction)) != 0) {
+                    std::uint64_t leftPayload = 0, rightPayload = 0;
+                    std::memcpy(&leftPayload, &a.payload, sizeof(leftPayload));
+                    std::memcpy(&rightPayload, &b.payload, sizeof(rightPayload));
+                    std::cerr << "first record difference " << i << ": "
+                              << unsigned(a.opcode) << '/' << unsigned(b.opcode) << " flags "
+                              << unsigned(a.flags) << '/' << unsigned(b.flags) << " loc "
+                              << a.line << ':' << a.column << '/' << b.line << ':' << b.column
+                              << " payload " << leftPayload << '/' << rightPayload << '\n';
+                    break;
+                }
+            }
+            if (compact.functions.size() != direct.functions.size())
+                std::cerr << "function metadata sizes differ\n";
+            return 1;
+        }
         Instruction scratch;
         for (std::size_t index = 0; index < expected.size(); ++index) {
             if (!sameInstruction(expected[index], compact.instructionAt(index, scratch))) {
@@ -148,6 +244,36 @@ int main(int argc, char** argv) {
 #endif
     }
 
+#ifdef QL32_TEST_COMPACT
+    InstructionSequence enclosingRich = compileSource(
+        "DIM data(2)\n"
+        "DEFine FuNction AddLocal(localValue)\n"
+        "RETurn localValue + 1\n"
+        "END DEFine AddLocal\n");
+    CompactProgram enclosing(std::move(enclosingRich));
+    for (const std::string expression : {"8+9", "AddLocal(4)", "data(0)+1"}) {
+        InstructionSequence richExpression;
+        try {
+            richExpression = compileExpression(expression, enclosing);
+        } catch (const std::exception& error) {
+            std::cerr << "legacy EVAL expression failed: " << error.what() << '\n';
+            return 1;
+        }
+        CompactProgram oldExpression(std::move(richExpression));
+        CompactProgram directExpression;
+        try {
+            directExpression = compileExpressionCompact(expression, enclosing);
+        } catch (const std::exception& error) {
+            std::cerr << "direct EVAL expression failed: " << error.what() << '\n';
+            return 1;
+        }
+        if (!sameCompactEncoding(oldExpression, directExpression)) {
+            std::cerr << "EVAL expression compact encodings differ: " << expression << '\n';
+            return 1;
+        }
+    }
+#endif
+
     bool complete = true;
     for (const auto& item : allOps) {
         if (!seen[static_cast<std::size_t>(item.first)]) {
@@ -157,9 +283,10 @@ int main(int argc, char** argv) {
     }
     if (!complete) return 1;
     std::cout << "B4 corpus emitted all " << allOps.size() << " opcodes across "
-              << fixtures.size() << " fixtures";
+              << fixtures.size() << " source fixtures";
 #ifdef QL32_TEST_COMPACT
     std::cout << " and round-tripped every instruction field";
+    std::cout << " and matched direct compact emission";
 #endif
     std::cout << '\n';
 }

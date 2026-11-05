@@ -90,6 +90,36 @@ void testMemoryBudgetFailures() {
     require(output.str() == "42\n", "interpreter did not remain usable after allocation failure");
 }
 
+void testDirectEmissionAllocationFailureSweep() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute("kept = 42\n", output);
+
+    std::string source;
+    for (std::size_t line = 1; line <= 64; ++line)
+        source += std::to_string(line * 10) + " PRINT " + std::to_string(line) + "\n";
+
+    // Inject bad_alloc before each of the first 128 compact instruction emits.
+    // Every failure happens after earlier compact records already exist in the
+    // compiler builder, and the prior session global must remain unchanged.
+    for (std::size_t failAfter = 1; failAfter <= 128; ++failAfter) {
+        ql32::detail::failCompactEmissionAfterForTest(failAfter);
+        bool translated = false;
+        try {
+            interpreter.execute("kept = 99\n" + source, output);
+        } catch (const ql32::runtime::Error& error) {
+            translated = error.code() == ql32::runtime::ErrorCode::OutOfMemory;
+        }
+        ql32::detail::failCompactEmissionAfterForTest(0);
+        require(translated, "direct-emission bad_alloc was not translated to Out-of-memory");
+
+        const std::size_t before = output.str().size();
+        interpreter.execute("PRINT kept\n", output);
+        require(output.str().substr(before) == "42\n",
+                "failed direct emission changed the prior session state");
+    }
+}
+
 bool endsWith(const std::string& value, const std::string& suffix) {
     return value.size() >= suffix.size() &&
         value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
@@ -963,6 +993,7 @@ int main() {
         testCompactBytecodeRoundTripAndDynamicTail();
         testInterpreterSessions();
         testMemoryBudgetFailures();
+        testDirectEmissionAllocationFailureSweep();
         testGotoLineNumbersAndLabels();
         testCancellation();
         testAtomicProgramLineAndBlocks();
