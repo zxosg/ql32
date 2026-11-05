@@ -1,7 +1,7 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-05):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`; five worker launch/kill cycles ran. Their heap readings include retained task-result records and graphics-arena high-water capacity, so they do not isolate source-buffer recovery. Olimex ESP32-SBC-FabGL Rev B uses a 512 KiB SPIFFS `FFS` partition alongside external `SDC:/`. Both drives mount; YMODEM, directory listing, worker loading, and remote debugger breakpoint/EVAL/watch/step/diagnostics were exercised over USB serial. VGA capture verified printable ASCII; paged `HELP` resumed after `Q`; the 80x56 Mandelbrot demo completed and was captured. PS/2 input/shortcuts, clock, and Wi-Fi acceptance remain open.
+**Status (2026-11-05):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`. An automated serial-REPL memory suite completed 25 worker runs with per-run cleanup and reboot recovery; it measured a 5,796-byte cumulative free-heap decrease before reboot, and task-result retention was not isolated. The four `CLS` forms ran over serial without syntax or VM errors, though overlapping windows prevented visual isolation of clear colors. Resizing `#0` returned out-of-memory under the tested workload. Olimex ESP32-SBC-FabGL Rev B uses a 512 KiB SPIFFS `FFS` partition alongside external `SDC:/`. Both drives mount; YMODEM, directory listing, worker loading, and remote debugger breakpoint/EVAL/watch/step/diagnostics were exercised over USB serial. VGA capture verified printable ASCII; paged `HELP` resumed after `Q`; the 80x56 Mandelbrot demo completed and was captured. Three concurrent workers plus Mandelbrot can exceed compiler memory. PS/2 input/shortcuts, clock, and Wi-Fi acceptance remain open.
 
 Supported build families are independent firmware targets:
 
@@ -10,7 +10,7 @@ Supported build families are independent firmware targets:
 | `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance on a LILYGO board pending |
 | `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass; physical PS/2 shortcuts, clock, and Wi-Fi remain open |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; memory stress still needs isolated measurements |
-| `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Built and flashed; storage mounted, `startup.bas` loaded at boot, task launch/cancellation exercised |
+| `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Built and flashed; storage mounted, `startup.bas` loaded at boot, task launch/cancellation exercised; 25-run automated memory suite passed per-run cleanup and reboot checks, with cumulative pre-reboot heap drift recorded below |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
 | `linux` | Host adapter | Development and conformance host |
@@ -108,6 +108,29 @@ reclamation. The
 current CYD firmware's opened-endpoint registry was also exercised: serial text and byte output,
 null text/byte/graphics discard, type/count enumeration, and close/reopen all
 worked.
+
+### CYD automated heap run (2026-11-05)
+
+The serial-REPL suite in `tools/ql32-memory-test.py` ran five repetitions each
+of array, file-channel, graphics, debugger, and combined workers on the CYD
+SPIFFS profile. It passed its per-worker recovery and fresh-reboot checks. The
+initial idle median was 158,752 free bytes, with a 51,188-byte largest block
+and 21 free blocks. Active worker samples reduced total free heap by 7,432 to
+32,916 bytes depending on workload; the largest free block remained 51,188
+bytes. After all 25 workers, before reboot, free heap was 152,956 bytes (5,796
+bytes below the initial median), the largest block was still 51,188 bytes, and
+the allocator reported 35 free blocks. After reboot, the median was 158,696
+bytes, 56 bytes below the initial total, with the same largest block and 23
+free blocks.
+
+This is a pass for per-worker cleanup and reboot recovery, not evidence that
+the full worker sequence has zero cumulative cost. The runner currently checks
+recovery against the immediately preceding sample and compares the reset
+baseline after reboot; it does not fail on cumulative free-heap drift across
+separate workload groups. Retained task-result records are a known source of
+small persistent allocations, but this run did not isolate their contribution.
+The machine-readable run report is written to `memory-test-report.json` by the
+runner.
 
 The current implementation includes module-level `OPTION KOptMathSingle` and
 `OPTION KOptMathDouble` (DOUBLE is the default), plus

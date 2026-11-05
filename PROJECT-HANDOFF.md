@@ -17,13 +17,12 @@ session.
 
 ## Repository state reviewed
 
-Reviewed 2026-11-04: the source baseline was
-[`de88fe5`](https://github.com/zxosg/ql32/commit/de88fe5) (“Add QL/32 language
-and runtime features”), matching `origin/main` at that review. This 2026-11-05
-update records subsequent implementation and board testing. The shared working
-tree also contains pre-existing changes from other work; inspect `git status`
-before staging or committing. Math precision and ESP32 CPU frequency options
-were already committed at the earlier baseline.
+Reviewed 2026-11-05: source baseline [`b2e0b3b`](https://github.com/zxosg/ql32/commit/b2e0b3b)
+(“Expand BASIC graphics, input, and window support”), now matching
+`origin/main`. This update incorporates earlier review notes from `de88fe5`
+and `0c78eae`. The shared working tree contains uncommitted changes; inspect
+`git status` before staging or committing. Math precision and ESP32 CPU
+frequency options are committed.
 
 The latest implementation includes:
 
@@ -43,10 +42,14 @@ The latest implementation includes:
   `WINDOW #channel,x,y,w,h` now selects independent per-session channel
   surfaces, including a graphics surface for console channel `#0`; `PRINT #0`
   remains console output. CYD and FabGL console overlays follow `#0` bounds.
-  Linux and all maintained ESP32 profiles build. The classic glyph set now
-  covers printable ASCII `0x20`–`0x7E`, verified by VGA capture. CYD users have
-  confirmed compositor movement, resizing/clipping and rotations; visual
-  confirmation of the latest `PLOT` attractor remains open.
+  `CLS` accepts no arguments, `#channel`, `ink,paper`, or
+  `#channel,ink,paper`; color arguments persist on that graphics surface.
+  Linux and all maintained ESP32 profiles build. The classic glyph set covers
+  printable ASCII `0x20`–`0x7E`, verified by VGA capture. CYD users have
+  confirmed compositor movement, resizing/clipping and rotations; the four
+  `CLS` forms ran without syntax or VM errors, though overlapping windows
+  prevented visual isolation of clear colors. Visual confirmation of the latest
+  `PLOT` attractor remains open.
 - Cooperative weighted session scheduling and an embedded persistent REPL.
   Current supervisor/BASIC task APIs use `TASK`, `KILL`, `TASKRESULT`,
   `TASKCHANNELS`, `LOGON`, `LOGOFF`, `SUSPEND`, `RESUME`, `SLICE`,
@@ -109,7 +112,9 @@ this was not a full CTest run.
   confirmation of the plot is still pending. CYD serial `SCREEN` capture now
   streams a reconstructed compositor and console snapshot as an 8-bit indexed
   BMP over YMODEM without a full-frame allocation; a 320×240 capture was
-  received from hardware.
+  received from hardware. The CYD SPIFFS firmware also completed an automated
+  25-run worker suite with cleanup and reboot recovery; cumulative free-heap
+  drift before reboot was 5,796 bytes, with task-result retention not isolated.
 - Olimex Rev B has 512 KiB internal FFS alongside external SDC. Both mounts,
   BASIC REPL arithmetic/heap queries, dual-drive YMODEM, remote debugger file
   listing, worker launch, breakpoint/EVAL/watch/step/diagnostics, and worker
@@ -117,6 +122,7 @@ this was not a full CTest run.
   output, pager interaction, and Mandelbrot output were also verified. Physical
   PS/2 key input/shortcuts, clock, line UI, and Wi-Fi still need board-level
   verification.
+- A CYD `WINDOW #0` resize returned out-of-memory under the tested workload.
 - Known memory constraint: three concurrent workers plus Mandelbrot can fail
   during compiler preparation. After worker cycles, free heap was 5–10 KiB
   below the reset baseline while the largest block recovered; retained task
@@ -134,10 +140,12 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    drawn outside the compositor.
 2. **CYD task acceptance:** exercise `TASK` command/function with `KTaskWait`,
    child failure/error propagation, and direct `PRIORITY id,0` baseline reset.
-3. **CYD memory characterization:** repeat worker/graphics launch-kill cycles
-   and isolate source buffers, task-result records, and canvas-arena high-water
-   storage using `FREE()`, `FREE(1)`, `FREE(2)`. Record the supported workload
-   boundary where Mandelbrot compilation exhausts memory.
+3. **CYD memory characterization:** isolate source buffers, task-result records,
+   and canvas-arena high-water storage using `FREE()`, `FREE(1)`, `FREE(2)`. The
+   25-run worker suite recovered per run and after reboot, but showed 5,796 bytes
+   cumulative free-heap drift before reboot. Set an acceptance threshold and
+   record the supported workload boundary where Mandelbrot compilation
+   exhausts memory.
 4. **Native Linux:** run `tools/build-target.sh linux` and all CTest cases on
    a Linux machine or CI runner; the two build directories in this Mac checkout
    both ran on Darwin.

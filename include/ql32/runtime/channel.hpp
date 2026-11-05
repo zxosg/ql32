@@ -16,6 +16,10 @@
 
 namespace ql32::runtime {
 
+// XFER stages transmit and receive data in the portable VM before invoking a
+// channel adapter. Keep their combined footprint bounded on small targets.
+inline constexpr std::size_t maximumHardwareTransferBytes = 4096;
+
 using SessionId = std::uint64_t;
 using ChannelId = std::uint64_t;
 

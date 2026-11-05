@@ -753,6 +753,21 @@ bool SessionScheduler::kill(TaskId id) {
     return false;
 }
 
+bool SessionScheduler::reap(TaskId id) {
+    for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
+        const Task& current = **it;
+        if (current.id != id || current.supervisor ||
+            (current.status != TaskStatus::Completed &&
+             current.status != TaskStatus::Failed &&
+             current.status != TaskStatus::Cancelled) ||
+            current.waitingParentId != 0 || current.waitingChildId != 0)
+            continue;
+        tasks_.erase(it);
+        return true;
+    }
+    return false;
+}
+
 std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {
     for (const auto& current : tasks_)
         if (current->id == id)

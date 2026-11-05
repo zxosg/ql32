@@ -46,3 +46,11 @@ run means the REPL stayed responsive, workers were terminated, required
 workloads showed their expected allocation behavior, each cleanup recovered
 within tolerance, and the fresh-boot heap returned within tolerance. No fixed
 heap total is assumed.
+
+The 2026-11-05 CYD run passed those checks across 25 worker runs. Total free
+heap declined by 5,796 bytes over the full sequence before reboot, while the
+largest free block stayed at 51,188 bytes. Reboot returned total free heap to
+158,696 bytes against the initial 158,752-byte median. This cumulative
+pre-reboot drift is reported for review but is not currently a suite failure;
+the run does not isolate retained task-result allocations from other small
+persistent allocations.

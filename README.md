@@ -26,7 +26,10 @@ targets.
 
 The host CLI includes expressions, structured blocks, procedures, functions,
 locals, arrays, `SELect ON`, numbered-line commands (`LIST`, `RUN`, `NEW`,
-`LOAD`, `SAVE`, and `DIR`), and a persistent terminal REPL. The M2 host slice
+`LOAD`, `SAVE`, `DIR`, `CD`, `DELETE`, `RENAME`, and `FORMAT`), and a persistent
+terminal REPL. `CD` maintains a per-session current directory; file commands
+accept relative paths, including `.` and `..`. `FORMAT` recursively clears a
+selected directory, including a drive root. The M2 host slice
 also defines portable storage, session-owned text/binary file channels, line
 input, and asynchronous UI
 request services. BASIC `ALERT`/`CONFIRM` calls suspend and resume individual
@@ -252,7 +255,11 @@ changes the current default window (initially `#1`).
 console-associated `#0` graphics surface.
 Drawing coordinates remain relative to the selected window. `PRINT #0` still
 writes to the console stream; drawing commands such as `LINE #0,...` target its
-graphics surface. `GORIGINX()` and `GORIGINY()` report the default `#1` window's
+graphics surface. `CLS` clears the default graphics channel; `CLS #channel`
+clears a selected channel. `CLS ink,paper` sets both colors and clears the
+default channel, while `CLS #channel,ink,paper` does the same on a selected
+channel. The chosen colors remain active for later drawing. `GORIGINX()` and
+`GORIGINY()` report the default `#1` window's
 absolute screen coordinates. The resulting composed frame is written to
 `ql32-screen.ppm`.
 

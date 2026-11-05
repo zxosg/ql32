@@ -1782,11 +1782,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto txAddress = integerArgument(0, "invalid transmit buffer address", 0,
                         9007199254740991.0);
                     const auto txLength = integerArgument(1, "invalid transmit length", 0,
-                        16 * 1024 * 1024);
+                        runtime::maximumHardwareTransferBytes);
                     const auto rxAddress = integerArgument(2, "invalid receive buffer address", 0,
                         9007199254740991.0);
                     const auto rxLength = integerArgument(3, "invalid receive length", 0,
-                        16 * 1024 * 1024);
+                        runtime::maximumHardwareTransferBytes);
+                    if (txLength > runtime::maximumHardwareTransferBytes - rxLength)
+                        runtimeError(instruction, "XFER combined length exceeds 4096 bytes");
                     std::vector<std::uint8_t> tx(static_cast<std::size_t>(txLength));
                     std::vector<std::uint8_t> rx(static_cast<std::size_t>(rxLength));
                     if (txLength != 0) buffers_.read(txAddress, tx.data(), tx.size());

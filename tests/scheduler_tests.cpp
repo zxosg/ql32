@@ -665,6 +665,19 @@ void testTaskSupportsCommandAndFunctionSyntax() {
             "TASK command did not report its task ID to console channel #0");
 }
 
+void testCompletedTaskCanBeReapedExplicitly() {
+    ql32::vm::SessionScheduler scheduler;
+    std::ostringstream output;
+    const auto task = scheduler.launch("PRINT 1\n", output);
+    require(scheduler.tick(), "scheduler did not run task before reaping");
+    require(scheduler.task(task) &&
+                scheduler.task(task)->status == ql32::vm::TaskStatus::Completed,
+            "completed task result was not retained before reaping");
+    require(scheduler.reap(task), "completed task could not be reaped");
+    require(!scheduler.task(task), "reaped task remained queryable");
+    require(!scheduler.reap(task), "reaping an unknown task succeeded");
+}
+
 void testTaskWaitResumesCallerAndExposesChildStatus() {
     auto storage = std::make_shared<ProgramStorage>();
     storage->files["worker.bas"] = "x=42\n";
@@ -875,6 +888,7 @@ int main() {
     testKillConfirmationUsesConsoleChannel();
     testKillRemovesCompletedAndFailedTaskRecords();
     testTaskSupportsCommandAndFunctionSyntax();
+    testCompletedTaskCanBeReapedExplicitly();
     testTaskWaitResumesCallerAndExposesChildStatus();
     testWaitTaskResumesAfterDialogAndMenu();
     testTaskWaitReturnsChildErrorContext();

@@ -95,6 +95,24 @@ void invalidSyntaxTest() {
     }
 }
 
+void transferLimitTest() {
+    using namespace ql32;
+    auto hardware = std::make_shared<platform::linux_host::VirtualHardware>();
+    auto channels = std::make_shared<runtime::ChannelRegistry>(nullptr,
+        runtime::ChannelRegistry::SerialWriter{}, hardware);
+    Interpreter interpreter({}, channels);
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        interpreter.execute(
+            "spi=OPEN(7,0,11,1000000,0)\n"
+            "XFER #spi,0,4096,0,1\n", output);
+    } catch (const std::exception&) {
+        rejected = true;
+    }
+    require(rejected, "XFER accepted a combined payload larger than 4096 bytes");
+}
+
 void serialTouchAndTimerTest() {
     using namespace ql32;
     auto hardware = std::make_shared<platform::linux_host::VirtualHardware>();
@@ -165,6 +183,7 @@ int main() {
         apiAndSyntaxTest();
         externalInputsAndLifetimeTest();
         invalidSyntaxTest();
+        transferLimitTest();
         serialTouchAndTimerTest();
         schedulerWaitsPerSessionTest();
     } catch (const std::exception& error) {

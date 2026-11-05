@@ -109,6 +109,9 @@ public:
     bool tick();
     bool cancel(TaskId id);
     bool kill(TaskId id);
+    // Removes a terminal task and releases its retained interpreter/result.
+    // Results remain queryable until this is called.
+    bool reap(TaskId id);
     std::optional<TaskInfo> task(TaskId id) const;
     std::vector<TaskInfo> tasks() const;
 

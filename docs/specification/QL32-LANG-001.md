@@ -477,8 +477,9 @@ function calls are bound when `RUN` compiles the complete program. Unnumbered
 statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
 interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
-`DELETE`, and `RENAME`. `LOAD "path.bas"` accepts either numbered BASIC source or unnumbered
-source. Unnumbered non-empty lines receive line numbers 10, 20, and so on in
+`DELETE`, `RENAME`, `FORMAT`, and `CD`. `LOAD "path.bas"` accepts either
+numbered BASIC source or unnumbered source. Unnumbered non-empty lines receive
+line numbers 10, 20, and so on in
 file order; blank lines are skipped. A file cannot mix numbered and unnumbered
 source lines. After loading, use `LIST` to inspect the numbered program and
 `RUN` to execute it.
@@ -501,10 +502,26 @@ For example, `DIR "FFS:/"`, `LOAD "SDC:/mandelbrot.bas"`, and
 colon marks the drive root; paths remain inside that drive, and `..` cannot
 escape its root. A drive prefix can be used by any operation that accepts a
 storage path, including `LOAD`, `SAVE`, `DIR`, `INCLUDE`, `TASK`, and file
-channels, as well as `DELETE path$` and `RENAME path$,newpath$`. The file
-commands accept quoted paths or string variables. Rename fails if the
-destination already exists; delete applies to files, not directories. Relative
-include paths stay on the drive of the including file.
+channels, as well as the file commands below.
+
+`DIR [path]` lists the immediate entries of a directory in sorted name order;
+directory names end in `/`. With no path it lists the session's current
+directory. `CD path$` changes that directory for the current interpreter
+session. `CD` accepts a quoted path, a string variable, or a bare path such as
+`CD ..`; relative paths start at the current directory. `.` and `..` components
+walk the directory tree, and a drive-qualified path selects its root or a
+directory on that drive.
+
+`DELETE path$` removes a file and `RENAME path$,newpath$` moves a file. Their
+paths are resolved relative to the current directory unless drive-qualified.
+Rename fails if the destination already exists; delete applies to files, not
+directories. `FORMAT path$` recursively deletes all files and subdirectories
+inside the selected directory while leaving that directory in place. To erase
+a volume, pass its root, for example `FORMAT "SDC:/"`. Formatting is
+destructive. File commands accept quoted paths or string variables; `CD`,
+`DIR`, and `FORMAT` also accept bare path text. Relative include paths stay on
+the drive of the including file.
+
 Unprefixed paths continue to use the platform's default storage drive.
 Attempting to use a drive that is not mounted reports a storage-unavailable
 error. These names describe logical storage roles; a platform may implement
