@@ -161,6 +161,27 @@ Same three-run median method and host configuration as A3.
 | `olimex_esp32_sbc_fabgl` | 54,252 B | 1,630,761 B | +6,476 B |
 | `esp32_2432s028` | 51,252 B | 1,495,829 B | +6,516 B |
 
+### Track B2 string representation probe — 2026-11-05
+
+Host probe run: macOS AppleClang 21 Debug via `ql32_sizecheck`. Current
+`sizeof(std::string)` is 24 B; `sizeof(ql32::Value)` is 32 B. An illustrative
+tagged value with a `double` or 32-bit `StrId` is 16 B, and an illustrative
+pool entry containing a string, reference count, and free-list link is 32 B.
+The probe compares 1,000-element string arrays:
+
+| Representation / workload | Estimated structural bytes |
+|---|---:|
+| Current string objects, all empty | 24,000 B |
+| Handles + one shared empty pool entry and index node | 4,096 B |
+| Current string objects, 1,000 unique short strings | 24,000 B |
+| Handles + 1,000 unique pool entries and index nodes | 100,000 B |
+
+These are optimistic structural estimates, not allocator measurements. They
+exclude string payload allocations, hash bucket arrays beyond the simple node
+pointer estimate, allocator metadata, and temporary hashing storage. The pool
+has a large upside for highly shared values and a large downside for unique
+short values, so B2 retains the existing RAII `std::string` representation.
+
 Static RAM did not change at PlatformIO's reported granularity.
 
 ### Post-A1 benchmark comparison

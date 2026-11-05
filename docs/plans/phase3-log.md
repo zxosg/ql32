@@ -179,3 +179,34 @@
 - **Open risks:** the host sample has few globals and cannot establish the
   scaling break-even point for symbol table metadata. String ownership,
   allocator changes, and compact bytecode remain ordered in B2-B4.
+
+## 2026-11-05 — B2 complete (retain `std::string`)
+
+- **Step:** Track B2, string ownership and value representation.
+- **Commit:** pending commit of the ownership review and representation probe.
+- **Ownership review:** wrote `phase3-string-ownership.md` before making any
+  representation changes. It records owners/lifetimes for globals, locals,
+  stack entries, arrays, literals/constants, calls, debugger values, and
+  service boundaries, plus the retain/release obligations a handle pool would
+  introduce. Current RAII copy/move/destruction paths match that contract.
+- **Measurement:** extended `ql32_sizecheck` with structural host models for
+  tagged 16-byte values and a refcounted, deduplicating string pool. For 1,000
+  shared empty strings, an optimistic handle model is 4,096 B versus 24,000 B
+  of current `std::string` array objects. For 1,000 unique short strings, the
+  same pool model is 100,000 B versus 24,000 B, before heap metadata. The
+  result is highly dependent on sharing and excludes payload allocations and
+  allocator details; it is not a measured heap census.
+- **Decision:** keep `std::string` for globals, locals, stack, and string
+  arrays. The current curated corpus and benchmarks do not establish that
+  duplicate immutable strings dominate, while a plausible unique-string array
+  workload regresses materially in the pool model. Ownership assertions and
+  explicit retain/release paths would add risk without a demonstrated
+  whole-workload benefit. Revisit if a representative device corpus shows
+  sustained string sharing.
+- **Tests:** no runtime representation changed. Existing A3 string array
+  initialization/assignment and B1 function argument/result, session,
+  dynamic-EVAL, debugger-EVAL, error-unwind, and service regression coverage
+  remains green. Debug and ASan+UBSan CTest each passed 61/61 during B1.
+- **Open risks:** no target-board heap census of string-heavy workloads exists;
+  the probe is a structural estimate and cannot establish embedded allocator
+  behavior.

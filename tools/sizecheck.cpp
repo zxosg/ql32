@@ -8,9 +8,26 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <cstdint>
 #include <unordered_map>
 
 namespace {
+
+struct CompactValueProbe {
+    enum class Tag : std::uint8_t { Number, String } tag = Tag::Number;
+    union Payload { double number; std::uint32_t stringId; } payload{};
+};
+
+struct StringPoolEntryProbe {
+    std::string text;
+    std::uint32_t references = 0;
+    std::uint32_t nextFree = 0;
+};
+
+struct StringInternNodeProbe {
+    std::string text;
+    std::uint32_t stringId = 0;
+};
 
 std::string readSource(int argc, char** argv) {
     if (argc > 2) {
@@ -29,6 +46,31 @@ std::string readSource(int argc, char** argv) {
     std::string source;
     for (std::size_t i = 0; i < 500; ++i) source += "PRINT 1\n";
     return source;
+}
+
+void printStringPoolTradeoff() {
+    constexpr std::size_t count = 1000;
+    const std::size_t currentEmptyArray = count * sizeof(std::string);
+    const std::size_t sharedEmptyPool = count * sizeof(std::uint32_t) +
+        sizeof(StringPoolEntryProbe) + sizeof(StringInternNodeProbe) + 4 * sizeof(void*);
+    const std::size_t currentUniqueArray = count * sizeof(std::string);
+    const std::size_t uniquePool = count * (sizeof(std::uint32_t) +
+        sizeof(StringPoolEntryProbe) + sizeof(StringInternNodeProbe) + 4 * sizeof(void*));
+    std::cout << "string representation probe (structural host estimate, 1000 array entries):\n"
+              << "  sizeof(compact tagged value): " << sizeof(CompactValueProbe) << " bytes\n"
+              << "  sizeof(pool entry with refcount/free link): "
+              << sizeof(StringPoolEntryProbe) << " bytes\n"
+              << "  sizeof(intern index node): " << sizeof(StringInternNodeProbe) << " bytes\n"
+              << "  current std::string array objects, repeated empty: "
+              << currentEmptyArray << " bytes\n"
+              << "  pooled handles + one shared empty + one index node: "
+              << sharedEmptyPool << " bytes\n"
+              << "  current std::string array objects, 1000 unique SSO strings: "
+              << currentUniqueArray << " bytes\n"
+              << "  pooled handles + 1000 unique entries and index nodes: "
+              << uniquePool << " bytes\n"
+              << "  caveat: excludes string payload allocations, map buckets, allocator metadata, "
+                 "and hashing scratch; this is a representation comparison, not a measured heap census\n";
 }
 
 } // namespace
@@ -51,6 +93,8 @@ int main(int argc, char** argv) {
               << estimateInstructionSequenceBytes(code) << " bytes\n"
               << "estimate caveat: counts string capacities even when inline; excludes "
                  "allocator bookkeeping and deque block slack\n";
+
+    printStringPoolTradeoff();
 
     ql32::vm::SessionScheduler scheduler({}, 1024);
     std::ostringstream output;
