@@ -20,6 +20,15 @@
       "displayName": "QL/32 macOS host",
       "inherits": "linux",
       "binaryDir": "${sourceDir}/build/macos"
+    },
+    {
+      "name": "sanitized",
+      "displayName": "QL/32 host with ASan and UBSan",
+      "inherits": "linux",
+      "binaryDir": "${sourceDir}/build/sanitized",
+      "cacheVariables": {
+        "QL32_ENABLE_SANITIZERS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -30,6 +39,10 @@
     {
       "name": "macos",
       "configurePreset": "macos"
+    },
+    {
+      "name": "sanitized",
+      "configurePreset": "sanitized"
     }
   ]
 }

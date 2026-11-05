@@ -3,6 +3,15 @@ cmake_minimum_required(VERSION 3.20)
 project(ql32 VERSION 0.1.0 LANGUAGES CXX)
 
 option(QL32_BUILD_TESTS "Build QL/32 host tests" ON)
+option(QL32_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
+if(QL32_ENABLE_SANITIZERS)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    message(FATAL_ERROR "QL32_ENABLE_SANITIZERS requires GCC or Clang")
+  endif()
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined)
+endif()
 
 add_library(ql32_portable
   src/language/interpreter.cpp
@@ -81,6 +90,13 @@ if(QL32_BUILD_TESTS)
   add_cli_conformance_test(cli_abbreviations 0)
   add_cli_conformance_test(cli_array_by_reference 0)
   add_cli_conformance_test(cli_select_edges 0)
+  add_test(
+    NAME ql32_golden_corpus
+    COMMAND ${CMAKE_COMMAND}
+      -DQL32_EXECUTABLE=$<TARGET_FILE:ql32>
+      -DQL32_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/golden_corpus_test.cmake
+  )
   add_test(
     NAME cli_ui_dialog_menu
     COMMAND ${CMAKE_COMMAND}
