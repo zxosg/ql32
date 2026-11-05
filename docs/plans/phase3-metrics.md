@@ -121,6 +121,46 @@ remain informational and separate from correctness tests.
 | `olimex_esp32_sbc_fabgl` | 54,252 B | 1,624,285 B | +1,548 B |
 | `esp32_2432s028` | 51,252 B | 1,489,313 B | +1,508 B |
 
+### Track B1 host measurements — 2026-11-05
+
+Same macOS AppleClang 21 Debug host and `ql32_sizecheck` workload as A1/A3.
+
+| Type / metric | A3 | After B1 |
+|---|---:|---:|
+| `sizeof(Instruction)` | 224 B | 232 B |
+| `sizeof(RuntimeFrame)` | 152 B | 136 B |
+| 2,000 instruction records | 448,000 B | 464,000 B |
+| Estimated bytecode sequence | 498,176 B | 514,176 B |
+| Runtime sample bytecode estimate | 6,289 B | 6,701 B |
+| Runtime global storage estimate | 135 B | 478 B |
+| Runtime local storage estimate | 214 B | 205 B |
+| Runtime array storage estimate | 967 B | 951 B |
+
+Global storage now includes the symbol-name-to-slot table, slot values, and
+uninitialized symbols referenced in compiled functions. The sample has few
+globals and therefore highlights table overhead rather than scale savings.
+`RuntimeFrame` storage excludes allocator details and includes vector capacity.
+
+### Post-B1 benchmark comparison — 2026-11-05
+
+Same three-run median method and host configuration as A3.
+
+| Workload | A3 | After B1 | Change |
+|---|---:|---:|---:|
+| Loops | 0.024055 s | 0.020029 s | −16.7% |
+| Recursion | 0.004655 s | 0.004625 s | −0.6% |
+| Array fill | 0.020117 s | 0.015561 s | −22.6% |
+| String concat | 0.006018 s | 0.005960 s | −1.0% |
+| Mandelbrot iteration | 0.237271 s | 0.201053 s | −15.3% |
+
+### After B1 firmware sizes
+
+| Environment | Static RAM | Flash image | Flash delta from A3 |
+|---|---:|---:|---:|
+| `lilygo_vga32` | 53,616 B | 1,556,185 B | +6,508 B |
+| `olimex_esp32_sbc_fabgl` | 54,252 B | 1,630,761 B | +6,476 B |
+| `esp32_2432s028` | 51,252 B | 1,495,829 B | +6,516 B |
+
 Static RAM did not change at PlatformIO's reported granularity.
 
 ### Post-A1 benchmark comparison

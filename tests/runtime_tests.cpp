@@ -304,6 +304,22 @@ void testTypedArrayInitializationAndReplacement() {
             "typed array initialization, assignment, precision, or string lifetime failed");
 }
 
+void testSlotBasedSessionAndFunctionSymbols() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute("value = 10\n", output);
+    interpreter.execute(
+        "PRINT Shadow(3)\n"
+        "PRINT value\n"
+        "DEFine FuNction Shadow(value)\n"
+        "LOCal result\n"
+        "result = EVAL(\"value + 1\")\n"
+        "RETurn result\n"
+        "END DEFine Shadow\n", output);
+    require(output.str() == "4\n10\n",
+            "session slots, local shadowing, or dynamic EVAL resolved the wrong symbol");
+}
+
 void testKeywordAbbreviationCoverage() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -870,6 +886,7 @@ int main() {
         testPersistentRepl();
         testStoredProgramDiagnosticsAndArrayTypes();
         testTypedArrayInitializationAndReplacement();
+        testSlotBasedSessionAndFunctionSymbols();
         testKeywordAbbreviationCoverage();
         testForwardCallsAndKnownSemanticErrors();
         testProcedureFunctionCallSyntax();

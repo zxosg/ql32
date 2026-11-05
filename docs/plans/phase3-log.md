@@ -143,3 +143,39 @@
   firmware sizes are recorded in `phase3-metrics.md`; static RAM is unchanged.
 - **Open risks:** typed string arrays still own each element as
   `std::string`; Track B2 decides whether a measured handle pool is worthwhile.
+
+## 2026-11-05 — B1 complete
+
+- **Step:** Track B1, session and function symbol resolution.
+- **Commit:** pending commit of this step.
+- **Changes:** replaced the session's name-to-`Value` map with a stable global
+  name-to-slot table and parallel value storage. Each function has a stable
+  session symbol list for parameters and `LOCAL` names; active frames store
+  values in a contiguous vector. Compiler binding assigns global/local slots
+  to variable instructions. Array tables and array-parameter aliases now use
+  stable symbol slots; array references on the operand stack carry a slot and
+  scope bit. Debugger inspection maps slots back to names.
+- **Dynamic paths:** EVAL bytecode binds names against the active frame and
+  session globals. Debugger EVAL continues to resolve the active local and
+  global symbols without creating missing globals.
+- **Tests:** added session recompilation, local shadowing, dynamic EVAL in a
+  function, and debugger EVAL of an active local. Existing recursion, array
+  aliasing, INPUT, FOR, and golden tests passed. Debug CTest passed 61/61;
+  ASan+UBSan CTest passed 61/61.
+- **Host measurement:** `sizeof(Instruction)` increased from 224 B to 232 B
+  for two 32-bit slot fields; `sizeof(RuntimeFrame)` fell from 152 B to 136 B.
+  The 2,000-instruction sequence estimate increased from 498,176 B to
+  514,176 B (+3.2%) because symbol/local metadata is now explicit. The runtime
+  probe's array estimate is 951 B. The one-sample global metadata estimate
+  increased from 135 B to 478 B because it now includes symbols referenced by
+  the compiled functions, including uninitialized names. This is a small
+  sample overhead to track while the slot/value representation evolves.
+- **Benchmarks:** post-B1 three-run medians and comparisons with A3 are in
+  `phase3-metrics.md`; the array-fill workload improved 22.6% and no workload
+  regressed.
+- **ESP32:** all three supported PlatformIO environments compiled. Updated
+  firmware and flash deltas are recorded in `phase3-metrics.md`; static RAM
+  remained unchanged. No hardware was flashed.
+- **Open risks:** the host sample has few globals and cannot establish the
+  scaling break-even point for symbol table metadata. String ownership,
+  allocator changes, and compact bytecode remain ordered in B2-B4.

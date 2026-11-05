@@ -561,9 +561,12 @@ public:
         resolveSourceJumps(tolerateUnresolvedSourceJumps);
         resolveCalls(tolerateUnresolvedCalls);
         for (const auto& [name, definition] : definitions_) {
+            auto localSymbols = definition.parameters;
+            localSymbols.insert(localSymbols.end(), definition.locals.begin(),
+                                definition.locals.end());
             code_.functions.emplace(name, detail::FunctionMetadata{
                 definition.address, definition.function, definition.parameters,
-                definition.locals});
+                definition.locals, std::move(localSymbols)});
         }
         code_.arrays = arrays_;
         code_.constants = constants_;
@@ -718,8 +721,10 @@ private:
     }
     void emit(Op op, const Token& token, Value value = 0.0, std::string name = {},
               PrintSeparator separator = PrintSeparator::None) {
-        code_.push_back({op, std::move(value), std::move(name), token.line,
-                         token.column, separator});
+        Instruction instruction{op, std::move(value), std::move(name), token.line,
+                                token.column, separator};
+        instruction.ownerDefinition = currentDefinitionName_;
+        code_.push_back(std::move(instruction));
     }
     void resolveCalls(bool tolerateUnresolvedCalls) {
         for (Instruction& instruction : code_) {
@@ -982,6 +987,7 @@ private:
         instruction.target = loop.body;
         instruction.loopId = loop.id;
         instruction.explicitNext = explicitNext;
+        instruction.ownerDefinition = currentDefinitionName_;
         code_.push_back(std::move(instruction));
         loop.nextInstructions.push_back(code_.size() - 1);
     }
@@ -1061,6 +1067,7 @@ private:
         arrays_[name.text] = rank;
         Instruction instruction{Op::DimArray, 0.0, name.text, keyword.line, keyword.column};
         instruction.rank = rank;
+        instruction.ownerDefinition = currentDefinitionName_;
         code_.push_back(std::move(instruction));
     }
     void selectArm() {
@@ -1569,6 +1576,7 @@ private:
                 error(peek(), "commands take arguments without call parentheses");
             if (name.text == "INPUT") {
                 Instruction input{Op::Input, 0.0, {}, name.line, name.column};
+                input.ownerDefinition = currentDefinitionName_;
                 bool hasPromptChannel = false;
                 const auto followedByInputSeparator = [&](std::size_t position,
                                                            bool channelAfterComma) {
@@ -2146,6 +2154,64 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
         session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
 }
 
+std::uint32_t Interpreter::ensureGlobalSymbol(const std::string& name, Value initial) {
+    const auto found = globalSymbolSlots_.find(name);
+    if (found != globalSymbolSlots_.end()) return found->second;
+    if (globalSymbolNames_.size() >= std::numeric_limits<std::uint32_t>::max())
+        throw runtime::Error(runtime::ErrorCode::OutOfMemory, "global symbol table is full");
+    const auto slot = static_cast<std::uint32_t>(globalSymbolNames_.size());
+    globalSymbolNames_.push_back(name);
+    try {
+        globalValues_.push_back(std::move(initial));
+        try {
+            globalInitialized_.push_back(false);
+            try {
+            globalSymbolSlots_.emplace(name, slot);
+            } catch (...) {
+                globalInitialized_.pop_back();
+                throw;
+            }
+        } catch (...) {
+            globalValues_.pop_back();
+            throw;
+        }
+    } catch (...) {
+        globalSymbolNames_.pop_back();
+        throw;
+    }
+    return slot;
+}
+
+std::optional<std::uint32_t> Interpreter::findGlobalSymbol(const std::string& name) const {
+    const auto found = globalSymbolSlots_.find(name);
+    if (found == globalSymbolSlots_.end()) return std::nullopt;
+    return found->second;
+}
+
+const Value* Interpreter::findGlobalValue(const std::string& name) const {
+    const auto slot = findGlobalSymbol(name);
+    return slot && globalInitialized_[*slot] ? &globalValues_[*slot] : nullptr;
+}
+
+const Value& Interpreter::globalValue(std::uint32_t slot) const {
+    if (slot >= globalValues_.size())
+        throw std::runtime_error("invalid global symbol slot");
+    return globalValues_[slot];
+}
+
+void Interpreter::setGlobalSlotValue(std::uint32_t slot, Value value) {
+    if (slot >= globalValues_.size())
+        throw std::runtime_error("invalid global symbol slot");
+    globalValues_[slot] = std::move(value);
+    globalInitialized_[slot] = true;
+}
+
+void Interpreter::setGlobalValue(const std::string& name, Value value) {
+    const auto slot = ensureGlobalSymbol(name);
+    globalValues_[slot] = std::move(value);
+    globalInitialized_[slot] = true;
+}
+
 void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
     errorCode_ = code;
     errorDetail_ = std::move(detail);
@@ -2401,6 +2467,7 @@ std::size_t detail::estimateInstructionSequenceBytes(
         bytes += sizeof(decltype(code.functions)::value_type) + stringBytes(name);
         bytes += stringVectorBytes(metadata.parameters);
         bytes += stringVectorBytes(metadata.locals);
+        bytes += stringVectorBytes(metadata.localSymbols);
     }
     bytes += code.arrays.bucket_count() * sizeof(void*);
     for (const auto& [name, rank] : code.arrays) {
@@ -2485,11 +2552,11 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         std::string name = value;
         std::transform(name.begin(), name.end(), name.begin(),
             [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-        const auto found = variables_.find(name);
-        if (found == variables_.end() || !std::holds_alternative<std::string>(found->second))
+        const auto* found = findGlobalValue(name);
+        if (!found || !std::holds_alternative<std::string>(*found))
             throw std::runtime_error(std::string(commandName) +
                                      " path must be a quoted string or string variable");
-        return std::get<std::string>(found->second);
+        return std::get<std::string>(*found);
     };
     auto commandPathValue = [&](const std::string& text, const char* commandName) {
         const std::string value = trim(text);
@@ -2498,9 +2565,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         std::string name = value;
         std::transform(name.begin(), name.end(), name.begin(),
             [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-        const auto found = variables_.find(name);
-        if (found != variables_.end() && std::holds_alternative<std::string>(found->second))
-            return std::get<std::string>(found->second);
+        const auto* found = findGlobalValue(name);
+        if (found && std::holds_alternative<std::string>(*found))
+            return std::get<std::string>(*found);
         return value;
     };
     auto normalizePath = [&](const std::string& inputPath) {
@@ -2573,11 +2640,11 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             return channel;
         std::transform(selector.begin(), selector.end(), selector.begin(),
             [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-        const auto found = variables_.find(selector);
-        if (found == variables_.end())
+        const auto* found = findGlobalValue(selector);
+        if (!found)
             throw std::runtime_error(std::string(commandName) +
                                      " channel must be an integer or numeric variable");
-        const auto* number = std::get_if<double>(&found->second);
+        const auto* number = std::get_if<double>(found);
         if (!number || !std::isfinite(*number) || std::trunc(*number) != *number || *number < 0 ||
             *number > static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
             throw std::runtime_error(std::string(commandName) +
@@ -3302,7 +3369,11 @@ void Interpreter::clear() {
     pendingInteractiveTail_.clear();
     clearPager();
     *uiSession_ = detail::UISessionState{};
-    variables_.clear();
+    globalSymbolSlots_.clear();
+    globalSymbolNames_.clear();
+    globalValues_.clear();
+    globalInitialized_.clear();
+    localSymbolTables_.clear();
     buffers_.clear();
     output_column_ = 0;
 }

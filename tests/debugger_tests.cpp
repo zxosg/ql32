@@ -160,6 +160,9 @@ void testStepIntoNextAndArrayReads() {
     snapshot = scheduler.debugInspect(task);
     require(snapshot && snapshot->location.basicLine == 130 && snapshot->frames.size() == 1,
             "NEXT did not advance one statement at the current call depth");
+    const auto localValue = scheduler.debugEvaluate(task, "localValue");
+    require(localValue && std::get<double>(*localValue) == 5,
+            "debugger EVAL did not resolve the active frame's local slot");
     require(scheduler.debugResume(task, ql32::runtime::DebugResumeMode::Continue),
             "CONTINUE setup failed");
     for (int i = 0; i < 5 && scheduler.task(task)->status != ql32::vm::TaskStatus::Completed; ++i)

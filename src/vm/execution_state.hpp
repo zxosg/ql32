@@ -27,10 +27,10 @@ struct RuntimeFrame {
     bool dynamicEvaluation = false;
     bool stringifyResult = false;
     std::size_t dynamicCodeStart = 0;
-    std::unordered_map<std::string, Value> locals;
-    std::unordered_map<std::string, std::string> arrayAliases;
+    std::vector<Value> locals;
+    std::unordered_map<std::uint32_t, std::uint32_t> arrayAliases;
 };
-struct ArrayReference { std::string name; };
+struct ArrayReference { std::uint32_t slot = 0; bool local = false; };
 using StackEntry = std::variant<double, std::string, ArrayReference>;
 struct RuntimeArray {
     std::vector<std::size_t> lengths;
@@ -74,7 +74,7 @@ struct VMExecutionState {
     std::vector<StackEntry> stack;
     std::unordered_map<std::size_t, ForState> forStates;
     std::vector<RuntimeFrame> callFrames;
-    std::unordered_map<std::string, RuntimeArray> arrays;
+    std::unordered_map<std::uint32_t, RuntimeArray> arrays;
     std::vector<SelectState> selectStates;
     std::size_t pc = 0;
     std::uint64_t printChannel = 1;

@@ -429,6 +429,51 @@ ExecutionStatus Interpreter::executeResumable(const std::string& source, std::os
     return executeSlice(source, output, std::numeric_limits<std::size_t>::max(), stop);
 }
 
+void Interpreter::bindProgramSymbols(detail::VMExecutionState& state) {
+    for (const auto& [functionName, metadata] : state.code.functions) {
+        auto& symbols = localSymbolTables_[functionName];
+        for (const std::string& name : metadata.localSymbols) {
+            if (std::find(symbols.begin(), symbols.end(), name) == symbols.end())
+                symbols.push_back(name);
+        }
+    }
+    for (Instruction& instruction : state.code) {
+        const bool carriesSymbol = instruction.op == Op::Load || instruction.op == Op::Store ||
+            instruction.op == Op::Input || instruction.op == Op::ForNext ||
+            instruction.op == Op::DimArray || instruction.op == Op::ArrayGet ||
+            instruction.op == Op::ArraySet || instruction.op == Op::PushArrayRef ||
+            instruction.op == Op::ChannelRead;
+        const std::string& symbolName = instruction.op == Op::ChannelRead ?
+            instruction.targetVariable.get() : instruction.name;
+        if (!carriesSymbol || symbolName.empty()) continue;
+        if (!instruction.ownerDefinition.empty()) {
+            const auto table = localSymbolTables_.find(instruction.ownerDefinition.get());
+            bool localEligible = instruction.op != Op::DimArray;
+            if (instruction.op == Op::ArrayGet || instruction.op == Op::ArraySet ||
+                instruction.op == Op::PushArrayRef) {
+                localEligible = false;
+                const auto function = state.code.functions.find(instruction.ownerDefinition.get());
+                if (function != state.code.functions.end() &&
+                    std::find(function->second.parameters.begin(),
+                              function->second.parameters.end(), symbolName) !=
+                        function->second.parameters.end())
+                    localEligible = true;
+            }
+            if (localEligible && table != localSymbolTables_.end()) {
+                const auto local = std::find(table->second.begin(), table->second.end(),
+                                             symbolName);
+                if (local != table->second.end()) {
+                    instruction.localSlot = static_cast<std::uint32_t>(
+                        local - table->second.begin());
+                    continue;
+                }
+            }
+        }
+        const Value initial = symbolName.back() == '$' ? Value(std::string{}) : Value(0.0);
+        instruction.symbolSlot = ensureGlobalSymbol(symbolName, initial);
+    }
+}
+
 ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostream& output,
                                            std::size_t instructionBudget,
                                            runtime::CancellationToken stop) {
@@ -448,6 +493,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
             // retaining an expanded duplicate while tokens and bytecode grow.
             execution_->code = detail::compileSource(source);
         }
+        bindProgramSymbols(*execution_);
         verifyBytecode(execution_->code);
         execution_->debuggerAttached = debuggerAttached_;
         execution_->debugPaused = debugPauseRequested_;
@@ -619,9 +665,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             value = name.empty() || name.back() != '%' ?
                 quantizeNumeric(number, &at) : number;
         }
-        if (!callFrames.empty() && callFrames.back().locals.count(name))
-            callFrames.back().locals[name] = std::move(value);
-        else variables_[name] = std::move(value);
+        if (!callFrames.empty() && !callFrames.back().dynamicEvaluation &&
+            at.localSlot != Instruction::NoSymbolSlot &&
+            at.localSlot < callFrames.back().locals.size())
+            callFrames.back().locals[at.localSlot] = std::move(value);
+        else if (at.symbolSlot != Instruction::NoSymbolSlot)
+            setGlobalSlotValue(at.symbolSlot, std::move(value));
+        else setGlobalValue(name, std::move(value));
     };
     auto writePrintText = [&](const std::string& text, const Instruction& at) {
         if (state.printChannel == 0) {
@@ -642,13 +692,23 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     auto printColumn = [&]() -> std::size_t& {
         return state.printChannel == 0 ? output_column_ : state.printChannelColumn;
     };
-    auto resolveArrayName = [&](const Instruction& instruction) {
-        std::string name = instruction.name;
-        if (!callFrames.empty()) {
-            const auto alias = callFrames.back().arrayAliases.find(name);
-            if (alias != callFrames.back().arrayAliases.end()) name = alias->second;
+    auto resolveArraySlot = [&](const Instruction& instruction) {
+        std::uint32_t slot = instruction.symbolSlot;
+        if (instruction.localSlot != Instruction::NoSymbolSlot) {
+            bool resolved = false;
+            for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
+                const auto alias = frame->arrayAliases.find(instruction.localSlot);
+                if (alias != frame->arrayAliases.end()) {
+                    slot = alias->second;
+                    resolved = true;
+                    break;
+                }
+            }
+            if (!resolved) runtimeError(instruction, "array parameter is not bound");
         }
-        return name;
+        if (slot >= globalSymbolNames_.size())
+            runtimeError(instruction, "array symbol slot is invalid");
+        return slot;
     };
     auto assignLoopValue = [&](const Instruction& instruction, double value) {
         if (!std::isfinite(value)) runtimeError(instruction, "numeric overflow");
@@ -659,14 +719,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
              value < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
              value > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
             runtimeError(instruction, "Int32 value out of range");
-        variables_[instruction.name] = value;
+        if (instruction.localSlot != Instruction::NoSymbolSlot && !callFrames.empty())
+            callFrames.back().locals.at(instruction.localSlot) = value;
+        else if (instruction.symbolSlot != Instruction::NoSymbolSlot)
+            setGlobalSlotValue(instruction.symbolSlot, value);
+        else setGlobalValue(instruction.name, value);
     };
     auto rangeContains = [](const ForRange& range, double value) {
         if (range.single) return true;
         return range.step > 0 ? value <= range.end : value >= range.end;
     };
     auto arrayOffset = [&](const Instruction& instruction) {
-        const auto found = arrays.find(resolveArrayName(instruction));
+        const auto found = arrays.find(resolveArraySlot(instruction));
         if (found == arrays.end()) runtimeError(instruction, "array is not dimensioned");
         RuntimeArray& array = found->second;
         if (array.lengths.size() != instruction.rank)
@@ -940,6 +1004,29 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         expression = detail::compileExpression(*expressionText, code);
                     } catch (const runtime::Error& error) {
                         runtimeError(instruction, error.what());
+                    }
+                    for (Instruction& dynamicInstruction : expression) {
+                        if (dynamicInstruction.op != Op::Load &&
+                            dynamicInstruction.op != Op::ArrayGet &&
+                            dynamicInstruction.op != Op::ArraySet &&
+                            dynamicInstruction.op != Op::PushArrayRef) continue;
+                        for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
+                            if (frame->dynamicEvaluation) continue;
+                            const auto symbols = localSymbolTables_.find(frame->name);
+                            if (symbols == localSymbolTables_.end()) break;
+                            const auto local = std::find(symbols->second.begin(),
+                                symbols->second.end(), dynamicInstruction.name);
+                            if (local != symbols->second.end()) {
+                                dynamicInstruction.localSlot = static_cast<std::uint32_t>(
+                                    local - symbols->second.begin());
+                                break;
+                            }
+                            break;
+                        }
+                        if (dynamicInstruction.localSlot == Instruction::NoSymbolSlot) {
+                            const auto global = findGlobalSymbol(dynamicInstruction.name);
+                            if (global) dynamicInstruction.symbolSlot = *global;
+                        }
                     }
                     const std::size_t start = code.size();
                     code.insert(code.end(), expression.begin(), expression.end());
@@ -1829,30 +1916,55 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             frame.callBasicLine = instruction.basicLine;
             frame.function = instruction.expectsValue;
             frame.name = instruction.name;
+            const auto localTable = localSymbolTables_.find(instruction.name);
+            if (localTable != localSymbolTables_.end()) {
+                frame.locals.reserve(localTable->second.size());
+                for (const std::string& localName : localTable->second)
+                    frame.locals.emplace_back(!localName.empty() && localName.back() == '$' ?
+                                              Value(std::string{}) : Value(0.0));
+            }
             for (std::size_t i = 0; i < instruction.parameters.size(); ++i) {
                 const std::string& parameter = instruction.parameters[i];
+                const auto slot = localTable == localSymbolTables_.end() ?
+                    std::vector<std::string>::const_iterator{} :
+                    std::find(localTable->second.begin(), localTable->second.end(), parameter);
                 if (const auto* array = std::get_if<ArrayReference>(&arguments[i])) {
-                    std::string actualName = array->name;
-                    if (!callFrames.empty()) {
-                        const auto alias = callFrames.back().arrayAliases.find(actualName);
-                        if (alias != callFrames.back().arrayAliases.end()) actualName = alias->second;
+                    std::uint32_t actualSlot = array->slot;
+                    if (array->local) {
+                        bool resolved = false;
+                        for (auto caller = callFrames.rbegin(); caller != callFrames.rend(); ++caller) {
+                            const auto alias = caller->arrayAliases.find(array->slot);
+                            if (alias != caller->arrayAliases.end()) {
+                                actualSlot = alias->second;
+                                resolved = true;
+                                break;
+                            }
+                        }
+                        if (!resolved)
+                            runtimeError(instruction, "array parameter is not bound");
                     }
-                    if (arrays.find(actualName) == arrays.end())
+                    if (actualSlot >= globalSymbolNames_.size())
+                        runtimeError(instruction, "array symbol slot is invalid");
+                    const std::string& actualName = globalSymbolNames_[actualSlot];
+                    if (arrays.find(actualSlot) == arrays.end())
                         runtimeError(instruction, "array argument is not dimensioned");
                     if ((!parameter.empty() && parameter.back() == '$') !=
                         (!actualName.empty() && actualName.back() == '$'))
                         runtimeError(instruction, "array argument type does not match parameter");
-                    frame.arrayAliases[parameter] = std::move(actualName);
+                    if (localTable != localSymbolTables_.end() &&
+                        slot != localTable->second.end())
+                        frame.arrayAliases[static_cast<std::uint32_t>(
+                            slot - localTable->second.begin())] = actualSlot;
                 } else if (const auto* number = std::get_if<double>(&arguments[i])) {
-                    frame.locals[parameter] = *number;
+                    if (localTable != localSymbolTables_.end() &&
+                        slot != localTable->second.end())
+                        frame.locals[static_cast<std::size_t>(slot - localTable->second.begin())] =
+                            *number;
                 } else {
-                    frame.locals[parameter] = std::get<std::string>(arguments[i]);
-                }
-            }
-            for (const std::string& local : instruction.localNames) {
-                if (frame.locals.find(local) == frame.locals.end()) {
-                    if (!local.empty() && local.back() == '$') frame.locals[local] = std::string{};
-                    else frame.locals[local] = 0.0;
+                    if (localTable != localSymbolTables_.end() &&
+                        slot != localTable->second.end())
+                        frame.locals[static_cast<std::size_t>(slot - localTable->second.begin())] =
+                            std::get<std::string>(arguments[i]);
                 }
             }
             callFrames.push_back(std::move(frame));
@@ -1923,7 +2035,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 auto& values = std::get<std::vector<double>>(array.values);
                 values.resize(elements, 0.0);
             }
-            arrays[instruction.name] = std::move(array);
+            arrays[instruction.symbolSlot] = std::move(array);
             break;
         }
         case Op::ArrayGet: {
@@ -1990,7 +2102,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         case Op::ArraySet: {
             Value value = pop();
             auto [array, offset] = arrayOffset(instruction);
-            const std::string actualName = resolveArrayName(instruction);
+            const std::uint32_t arraySlot = resolveArraySlot(instruction);
+            const std::string& actualName = globalSymbolNames_[arraySlot];
             if (!actualName.empty() && actualName.back() == '$') {
                 if (!std::holds_alternative<std::string>(value))
                     runtimeError(instruction, "string value required for array element");
@@ -2069,9 +2182,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             auto found = forStates.find(instruction.loopId);
             if (found == forStates.end()) runtimeError(instruction, "inactive FOR loop");
             ForState& state = found->second;
-            const auto variable = variables_.find(instruction.name);
-            if (variable == variables_.end()) runtimeError(instruction, "missing FOR variable");
-            const double current = numeric(variable->second, instruction);
+            const Value* variable = nullptr;
+            if (instruction.localSlot != Instruction::NoSymbolSlot && !callFrames.empty() &&
+                instruction.localSlot < callFrames.back().locals.size())
+                variable = &callFrames.back().locals[instruction.localSlot];
+            else if (instruction.symbolSlot != Instruction::NoSymbolSlot)
+                variable = &globalValue(instruction.symbolSlot);
+            if (!variable) runtimeError(instruction, "missing FOR variable");
+            const double current = numeric(*variable, instruction);
             const ForRange& range = state.ranges[state.item];
             const double next = range.single ? current :
                 singlePrecision &&
@@ -2135,29 +2253,29 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             pc = instruction.target;
             break;
         case Op::Push: pushValue(instruction.value); break;
-        case Op::PushArrayRef: stack.emplace_back(ArrayReference{instruction.name}); break;
+        case Op::PushArrayRef:
+            if (instruction.localSlot != Instruction::NoSymbolSlot)
+                stack.emplace_back(ArrayReference{instruction.localSlot, true});
+            else stack.emplace_back(ArrayReference{instruction.symbolSlot, false});
+            break;
         case Op::Load: {
-            bool foundLocal = false;
-            for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
-                if (frame->dynamicEvaluation) continue;
-                const auto local = frame->locals.find(instruction.name);
-                if (local != frame->locals.end()) {
-                    pushValue(local->second,
-                              !instruction.name.empty() && instruction.name.back() == '%');
-                    foundLocal = true;
+            RuntimeFrame* localFrame = nullptr;
+            if (instruction.localSlot != Instruction::NoSymbolSlot) {
+                for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
+                    if (!frame->dynamicEvaluation) { localFrame = &*frame; break; }
                 }
-                break;
             }
-            if (foundLocal) break;
-            const auto found = variables_.find(instruction.name);
-            if (found != variables_.end()) {
-                pushValue(found->second,
+            if (localFrame && instruction.localSlot < localFrame->locals.size())
+                pushValue(localFrame->locals[instruction.localSlot],
                           !instruction.name.empty() && instruction.name.back() == '%');
-            } else if (!instruction.name.empty() && instruction.name.back() == '$') {
+            else if (instruction.symbolSlot != Instruction::NoSymbolSlot)
+                pushValue(globalValue(instruction.symbolSlot),
+                          !instruction.name.empty() && instruction.name.back() == '%');
+            else if (const Value* found = findGlobalValue(instruction.name))
+                pushValue(*found, !instruction.name.empty() && instruction.name.back() == '%');
+            else if (!instruction.name.empty() && instruction.name.back() == '$')
                 stack.emplace_back(std::string{});
-            } else {
-                stack.emplace_back(0.0);
-            }
+            else stack.emplace_back(0.0);
             break;
         }
         case Op::Store: {
@@ -2178,11 +2296,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                                                  ": Int32 value out of range");
                 }
             }
-            if (!callFrames.empty() &&
-                callFrames.back().locals.find(instruction.name) != callFrames.back().locals.end())
-                callFrames.back().locals[instruction.name] = std::move(value);
-            else
-                variables_[instruction.name] = std::move(value);
+            if (instruction.localSlot != Instruction::NoSymbolSlot && !callFrames.empty() &&
+                !callFrames.back().dynamicEvaluation &&
+                instruction.localSlot < callFrames.back().locals.size())
+                callFrames.back().locals[instruction.localSlot] = std::move(value);
+            else if (instruction.symbolSlot != Instruction::NoSymbolSlot)
+                setGlobalSlotValue(instruction.symbolSlot, std::move(value));
+            else setGlobalValue(instruction.name, std::move(value));
             break;
         }
         case Op::Negate: {
@@ -2403,9 +2523,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 static_cast<std::size_t>(count)));
             if (instruction.targetVariable.empty() || instruction.targetVariable.back() != '$')
                 runtimeError(instruction, "binary IN target must be a string variable");
-            if (!callFrames.empty() && callFrames.back().locals.count(instruction.targetVariable.get()))
-                callFrames.back().locals[instruction.targetVariable.get()] = std::move(value);
-            else variables_[instruction.targetVariable.get()] = std::move(value);
+            if (!callFrames.empty() && !callFrames.back().dynamicEvaluation &&
+                instruction.localSlot != Instruction::NoSymbolSlot &&
+                instruction.localSlot < callFrames.back().locals.size())
+                callFrames.back().locals[instruction.localSlot] = std::move(value);
+            else if (instruction.symbolSlot != Instruction::NoSymbolSlot)
+                setGlobalSlotValue(instruction.symbolSlot, std::move(value));
+            else setGlobalValue(instruction.targetVariable.get(), std::move(value));
             break;
         }
         case Op::ChannelWrite: {
@@ -2577,7 +2701,10 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
     runtime::DebugSnapshot result;
     result.attached = true;
     result.paused = execution_ && execution_->debugPaused;
-    for (const auto& [name, value] : variables_) result.globals.emplace(name, value);
+    for (std::size_t slot = 0; slot < globalSymbolNames_.size(); ++slot) {
+        if (globalInitialized_[slot])
+            result.globals.emplace(globalSymbolNames_[slot], globalValues_[slot]);
+    }
     if (!execution_) return result;
     const detail::VMExecutionState& state = *execution_;
     result.bytecodes = state.bytecodes;
@@ -2593,21 +2720,34 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
         const auto* text = std::get_if<std::string>(&value);
         return text ? text->capacity() + 1 : std::size_t{0};
     };
-    result.globalStorageBytes = sizeof(variables_) +
-        variables_.bucket_count() * sizeof(void*);
-    for (const auto& entry : variables_)
-        result.globalStorageBytes += sizeof(decltype(variables_)::value_type) +
-            entry.first.capacity() + 1 + valueStorageBytes(entry.second);
+    result.globalStorageBytes = sizeof(globalSymbolSlots_) +
+        globalSymbolSlots_.bucket_count() * sizeof(void*) +
+        globalSymbolNames_.capacity() * sizeof(std::string) +
+        globalValues_.capacity() * sizeof(Value) +
+        globalInitialized_.capacity() / 8 + 1;
+    for (const std::string& name : globalSymbolNames_)
+        result.globalStorageBytes += sizeof(decltype(globalSymbolSlots_)::value_type) +
+            name.capacity() + 1;
+    for (std::size_t slot = 0; slot < globalValues_.size(); ++slot)
+        if (globalInitialized_[slot])
+            result.globalStorageBytes += valueStorageBytes(globalValues_[slot]);
+    for (const auto& [function, symbols] : localSymbolTables_) {
+        result.localStorageBytes += function.capacity() + 1 +
+            symbols.capacity() * sizeof(std::string);
+        for (const std::string& name : symbols)
+            result.localStorageBytes += name.capacity() + 1;
+    }
     for (const auto& frame : state.callFrames) {
         result.localStorageBytes += sizeof(frame.locals) +
-            frame.locals.bucket_count() * sizeof(void*);
-        for (const auto& entry : frame.locals)
-            result.localStorageBytes += sizeof(decltype(frame.locals)::value_type) +
-                entry.first.capacity() + 1 + valueStorageBytes(entry.second);
+            frame.locals.capacity() * sizeof(Value);
+        for (const auto& value : frame.locals)
+            result.localStorageBytes += valueStorageBytes(value);
     }
     result.arrayStorageBytes = sizeof(state.arrays) +
         state.arrays.bucket_count() * sizeof(void*);
-    for (const auto& [name, array] : state.arrays) {
+    for (const auto& [slot, array] : state.arrays) {
+        if (slot >= globalSymbolNames_.size()) continue;
+        const std::string& name = globalSymbolNames_[slot];
         result.arrayStorageBytes += sizeof(decltype(state.arrays)::value_type) +
             name.capacity() + 1 + array.lengths.capacity() * sizeof(std::size_t) +
             (array.isString() ? array.capacity() * sizeof(std::string) :
@@ -2636,11 +2776,20 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
         runtime::DebugFrameInfo view;
         view.name = frame.name;
         view.function = frame.function;
-        for (const auto& [name, value] : frame.locals) view.locals.emplace(name, value);
-        for (const auto& [localName, arrayName] : frame.arrayAliases) {
-            const auto array = state.arrays.find(arrayName);
-            if (array != state.arrays.end())
-                view.arrays.emplace_back(localName, array->second.lengths);
+        const auto symbols = localSymbolTables_.find(frame.name);
+        if (symbols != localSymbolTables_.end()) {
+            const std::size_t count = std::min(symbols->second.size(), frame.locals.size());
+            for (std::size_t slot = 0; slot < count; ++slot)
+                view.locals.emplace(symbols->second[slot], frame.locals[slot]);
+        }
+        if (symbols != localSymbolTables_.end()) {
+            for (const auto& [localSlot, globalSlot] : frame.arrayAliases) {
+                if (localSlot >= symbols->second.size() ||
+                    globalSlot >= globalSymbolNames_.size()) continue;
+                const auto array = state.arrays.find(globalSlot);
+                if (array != state.arrays.end())
+                    view.arrays.emplace_back(symbols->second[localSlot], array->second.lengths);
+            }
         }
         if (frame.returnAddress > 0 && frame.returnAddress <= state.code.size()) {
             view.returnLocation.instruction = frame.callInstruction;
@@ -2651,8 +2800,10 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
         }
         result.frames.push_back(std::move(view));
     }
-    for (const auto& [name, array] : state.arrays)
-        result.arrays.emplace_back(name, array.lengths);
+    for (const auto& [slot, array] : state.arrays) {
+        if (slot < globalSymbolNames_.size())
+            result.arrays.emplace_back(globalSymbolNames_[slot], array.lengths);
+    }
     for (const std::string& expression : debugWatches_) {
         runtime::DebugWatchInfo watch;
         watch.expression = expression;
@@ -2729,16 +2880,23 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
             for (auto frame = execution_->callFrames.rbegin();
                  frame != execution_->callFrames.rend(); ++frame) {
                 if (frame->dynamicEvaluation) continue;
-                const auto local = frame->locals.find(instruction.name);
-                if (local != frame->locals.end()) {
-                    values.push_back(local->second);
-                    found = true;
-                    break;
+                const auto symbols = localSymbolTables_.find(frame->name);
+                if (symbols != localSymbolTables_.end()) {
+                    const auto local = std::find(symbols->second.begin(), symbols->second.end(),
+                                                 instruction.name);
+                    if (local != symbols->second.end()) {
+                        const auto slot = static_cast<std::size_t>(local - symbols->second.begin());
+                        if (slot < frame->locals.size()) {
+                            values.push_back(frame->locals[slot]);
+                            found = true;
+                            break;
+                        }
+                    }
                 }
             }
             if (!found) {
-                const auto global = variables_.find(instruction.name);
-                if (global != variables_.end()) values.push_back(global->second);
+                const Value* global = findGlobalValue(instruction.name);
+                if (global) values.push_back(*global);
                 else {
                     const auto constant = execution_->code.constants.find(instruction.name);
                     if (constant == execution_->code.constants.end())
@@ -2749,13 +2907,38 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
             break;
         }
         case Op::ArrayGet: {
-            std::string name = instruction.name;
-            for (auto frame = execution_->callFrames.rbegin();
-                 frame != execution_->callFrames.rend(); ++frame) {
-                const auto alias = frame->arrayAliases.find(name);
-                if (alias != frame->arrayAliases.end()) { name = alias->second; break; }
+            std::uint32_t globalSlot = instruction.symbolSlot;
+            if (instruction.localSlot != Instruction::NoSymbolSlot) {
+                for (auto frame = execution_->callFrames.rbegin();
+                     frame != execution_->callFrames.rend(); ++frame) {
+                    const auto alias = frame->arrayAliases.find(instruction.localSlot);
+                    if (alias != frame->arrayAliases.end()) {
+                        globalSlot = alias->second;
+                        break;
+                    }
+                }
+            } else if (globalSlot == Instruction::NoSymbolSlot) {
+                for (auto frame = execution_->callFrames.rbegin();
+                     frame != execution_->callFrames.rend(); ++frame) {
+                    if (frame->dynamicEvaluation) continue;
+                    const auto symbols = localSymbolTables_.find(frame->name);
+                    if (symbols == localSymbolTables_.end()) continue;
+                    const auto local = std::find(symbols->second.begin(),
+                        symbols->second.end(), instruction.name);
+                    if (local == symbols->second.end()) continue;
+                    const auto slot = static_cast<std::uint32_t>(local - symbols->second.begin());
+                    const auto alias = frame->arrayAliases.find(slot);
+                    if (alias != frame->arrayAliases.end()) globalSlot = alias->second;
+                    break;
+                }
+                if (globalSlot == Instruction::NoSymbolSlot) {
+                    const auto global = findGlobalSymbol(instruction.name);
+                    if (global) globalSlot = *global;
+                }
             }
-            const auto array = execution_->arrays.find(name);
+            if (globalSlot >= globalSymbolNames_.size())
+                throw std::runtime_error("debug EVAL array symbol slot is invalid");
+            const auto array = execution_->arrays.find(globalSlot);
             if (array == execution_->arrays.end())
                 throw std::runtime_error("array is not available in debug EVAL");
             std::size_t offset = 0, stride = 1;

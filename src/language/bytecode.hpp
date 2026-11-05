@@ -163,6 +163,9 @@ struct Instruction {
     OptionalVector<ArrayArgumentCandidate> arrayArgumentCandidates;
     OptionalString ownerDefinition;
     OptionalString targetVariable;
+    static constexpr std::uint32_t NoSymbolSlot = UINT32_MAX;
+    std::uint32_t symbolSlot = NoSymbolSlot;
+    std::uint32_t localSlot = NoSymbolSlot;
     std::size_t rank = 0;
     bool sliceHasStart = false;
     bool sliceHasEnd = false;
@@ -181,6 +184,7 @@ struct FunctionMetadata {
     bool function = false;
     std::vector<std::string> parameters;
     std::vector<std::string> locals;
+    std::vector<std::string> localSymbols;
 };
 
 // Chunked instruction storage keeps bytecode growth from requiring one large

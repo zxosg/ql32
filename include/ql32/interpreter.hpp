@@ -99,6 +99,13 @@ public:
 private:
     ExecutionStatus runExecution(std::ostream& output, runtime::CancellationToken stop,
                                  std::size_t instructionBudget = 0);
+    std::uint32_t ensureGlobalSymbol(const std::string& name, Value initial = 0.0);
+    std::optional<std::uint32_t> findGlobalSymbol(const std::string& name) const;
+    const Value* findGlobalValue(const std::string& name) const;
+    const Value& globalValue(std::uint32_t slot) const;
+    void setGlobalSlotValue(std::uint32_t slot, Value value);
+    void setGlobalValue(const std::string& name, Value value);
+    void bindProgramSymbols(detail::VMExecutionState& state);
     void writePagerPage(std::ostream& output, std::size_t lineCount);
     void clearPager() noexcept;
     runtime::ChannelId resolveChannel(runtime::ChannelId channel) const;
@@ -106,7 +113,11 @@ private:
     void bindChannel(runtime::ChannelId source, runtime::ChannelId destination);
     void closeChannel(runtime::ChannelId channel);
     bool channelIsOpen(runtime::ChannelId channel) const;
-    std::unordered_map<std::string, Value> variables_;
+    std::unordered_map<std::string, std::uint32_t> globalSymbolSlots_;
+    std::vector<std::string> globalSymbolNames_;
+    std::vector<Value> globalValues_;
+    std::vector<bool> globalInitialized_;
+    std::unordered_map<std::string, std::vector<std::string>> localSymbolTables_;
     std::size_t output_column_ = 0;
     runtime::ChannelId default_output_channel_ = 1;
     std::string current_directory_;
