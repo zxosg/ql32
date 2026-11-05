@@ -354,3 +354,32 @@
   the 2,000-line execution case; AC9 is blocked by the attractor growth. AC3,
   AC4, AC5, AC6, and AC7 are incomplete; AC11 is pending. B4 is not ready for
   mainline merge under the stated criteria.
+
+### Follow-up after REF-first coverage — 2026-11-05
+
+- Added an explicit 50-opcode coverage test across 17 deterministic fixtures,
+  compact instruction field round trips, an INPUT compile fixture, and a
+  call-depth boundary fixture. The boundary accepts depth 255 and reports the
+  same `call stack limit exceeded` error at depth 256 on REF and CAND. These
+  new tests were first run against REF `58bf799` unchanged.
+- Added `tools/hw_soak.py` in host-only mode. Its 32-fixture REF/CAND
+  comparison and 200 candidate process load/run/free cycles passed. Host
+  processes do not validate embedded heap behavior or satisfy T11.
+- Reserved exact sidecar and literal counts before compact lowering. The
+  attractor estimate is now 19,429 B versus 29,652 B REF (65.5%); the mixed
+  Mandelbrot estimate is 11,260 B versus 20,742 B REF (54.3%). AC9's earlier
+  growth blocker is cleared by this host estimate.
+- Changed bytecode verification and program setup scans to decode into
+  reusable scratch instructions rather than materializing rich instructions
+  through the by-value iterator. The repeated 2,000-line PRINT run is now
+  123.3% of REF (9 runs, first warm-up discarded), below the >150% T8 stop
+  threshold but above the 110% target. The previous 155.0% result remains the
+  pre-fix measurement.
+- Full CAND CTest passes 65/65 after these changes. The compile peak remains
+  unresolved: the read-only host allocation probe measured 2,666,800 B on
+  both REF and CAND before lowering. Compact records are still built after the
+  rich compiler sequence, so direct compact emission remains required to
+  improve peak compile heap.
+- B4 remains open. Error/allocation sweeps, fuzz coverage, direct compact
+  compiler emission, and the device soak still need completion. Hardware
+  acceptance requires G2; do not merge B4 to mainline before then.

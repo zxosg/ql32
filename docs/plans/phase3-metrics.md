@@ -353,3 +353,31 @@ Fresh `pio run` results compared with the recorded B3 values:
 
 All three builds succeeded; static RAM did not increase and no new compiler
 warnings appeared in VM/compiler sources.
+
+### B4 corrective follow-up — 2026-11-05
+
+The initial 155.0% 2,000-line execution result triggered the read-only profile.
+The samples showed rich `Instruction` materialization in bytecode verification
+and pre-execution scans through the by-value compact iterator. Those scans now
+use indexed decoding into reusable scratch records. On a repeated 2,000-line
+PRINT run (nine measurements, first discarded), REF median was 0.019589 s and
+CAND median was 0.024146 s, or 123.3%. This clears the plan's >150% stop
+threshold, though it remains above the 110% runtime target.
+
+Exact pre-reservation of the compact sidecar and string-literal vectors removed
+the attractor's excess capacity:
+
+| Sample | REF rich estimate | CAND encoded estimate | CAND / REF |
+|---|---:|---:|---:|
+| `examples/attractor.bas` (114 instructions) | 29,652 B | 19,429 B | 65.5% |
+| `benchmarks/mandelbrot.bas` (80 instructions) | 20,742 B | 11,260 B | 54.3% |
+
+The earlier AC9 attractor growth is resolved by this structural estimate. The
+compile peak is still 2,666,800 B on both REF and CAND for the 2,000-line
+program because the compiler still builds a rich instruction sequence before
+lowering. Direct compact emission during compilation is still needed; the
+lower compile peak has not yet been measured or demonstrated.
+
+The new `tools/hw_soak.py` host mode passed 32 REF/CAND fixture comparisons,
+then 200 candidate process load/run/free cycles and three concurrent process
+runs. It is a host check only and does not replace the planned device soak.
