@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
@@ -40,6 +41,51 @@ public:
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+class InjectedMemoryService final : public ql32::runtime::MemoryService {
+public:
+    std::uint64_t freeBytes() const override { return available; }
+    void allocationCheckpoint(std::size_t, std::string_view) const override {
+        ++checkpoints;
+        if (failAt != 0 && checkpoints == failAt) throw std::bad_alloc();
+    }
+
+    std::uint64_t available = 1024 * 1024;
+    mutable std::size_t checkpoints = 0;
+    mutable std::size_t failAt = 0;
+};
+
+void testMemoryBudgetFailures() {
+    auto memory = std::make_shared<InjectedMemoryService>();
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, memory);
+    std::ostringstream output;
+    interpreter.execute("kept = 42\n", output);
+
+    memory->available = 0;
+    bool lowMemoryReported = false;
+    try {
+        interpreter.execute("DIM items(3)\n", output);
+    } catch (const ql32::runtime::Error& error) {
+        lowMemoryReported = error.code() == ql32::runtime::ErrorCode::OutOfMemory;
+    }
+    require(lowMemoryReported, "low reported memory did not produce BASIC Out-of-memory");
+    memory->available = 1024 * 1024;
+
+    // Compilation is checkpoint 1, DIM's dimensions are checkpoint 2, and
+    // its payload is checkpoint 3. Fail the latter to exercise a partial
+    // multi-allocation operation before it replaces the array table entry.
+    memory->failAt = memory->checkpoints + 3;
+    bool injectedFailureReported = false;
+    try {
+        interpreter.execute("DIM items(3)\n", output);
+    } catch (const ql32::runtime::Error& error) {
+        injectedFailureReported = error.code() == ql32::runtime::ErrorCode::OutOfMemory;
+    }
+    require(injectedFailureReported, "mid-DIM allocation failure was not translated");
+    memory->failAt = 0;
+    interpreter.execute("PRINT kept\n", output);
+    require(output.str() == "42\n", "interpreter did not remain usable after allocation failure");
 }
 
 bool endsWith(const std::string& value, const std::string& suffix) {
@@ -239,6 +285,23 @@ void testStoredProgramDiagnosticsAndArrayTypes() {
                             std::string::npos;
     }
     require(arrayRankRejected, "array rank mismatch was not diagnosed");
+}
+
+void testTypedArrayInitializationAndReplacement() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "DIM numeric%(1)\n"
+        "numeric%(0) = 1\n"
+        "numeric%(1) = 2147483647\n"
+        "DIM text$(1)\n"
+        "text$(0) = \"alpha\"\n"
+        "text$(1) = text$(0) + \" beta\"\n"
+        "PRINT numeric%(0)\n"
+        "PRINT numeric%(1)\n"
+        "PRINT text$(1)\n", output);
+    require(output.str() == "1\n2147483647\nalpha beta\n",
+            "typed array initialization, assignment, precision, or string lifetime failed");
 }
 
 void testKeywordAbbreviationCoverage() {
@@ -799,12 +862,14 @@ void testDialogMenuBasicCallsSuspendAndResume() {
 int main() {
     try {
         testInterpreterSessions();
+        testMemoryBudgetFailures();
         testGotoLineNumbersAndLabels();
         testCancellation();
         testAtomicProgramLineAndBlocks();
         testHelpCommandCatalog();
         testPersistentRepl();
         testStoredProgramDiagnosticsAndArrayTypes();
+        testTypedArrayInitializationAndReplacement();
         testKeywordAbbreviationCoverage();
         testForwardCallsAndKnownSemanticErrors();
         testProcedureFunctionCallSyntax();

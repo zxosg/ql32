@@ -72,6 +72,55 @@ not an exact allocator measurement.
 | `olimex_esp32_sbc_fabgl` | 54,252 B | 1,619,613 B | +3,260 B |
 | `esp32_2432s028` | 51,252 B | 1,484,709 B | +3,220 B |
 
+### After A2 firmware sizes
+
+| Environment | Static RAM | Flash image | Flash delta from A1 |
+|---|---:|---:|---:|
+| `lilygo_vga32` | 53,616 B | 1,548,149 B | +3,084 B |
+| `olimex_esp32_sbc_fabgl` | 54,252 B | 1,622,737 B | +3,124 B |
+| `esp32_2432s028` | 51,252 B | 1,487,805 B | +3,096 B |
+
+The A2 `PlatformLimits` defaults retain the existing 1,000,000-element array
+and 16 MiB buffer/transfer ceilings; strings remain uncapped at the language
+level. No board-specific reserve or tighter ceiling is enabled because live
+board heap measurements have not been obtained. Free-memory checks are
+estimates and do not reserve memory.
+
+### Track A3 host typed-array measurements — 2026-11-05
+
+Same macOS AppleClang 21 Debug host and `ql32_sizecheck` workload as A1.
+
+| Type / metric | A1 | After A3 |
+|---|---:|---:|
+| `sizeof(RuntimeArray)` | 48 B | 56 B |
+| Runtime sample array storage estimate | 3,359 B | 967 B |
+| Numeric array payload | 32 B per `Value` element | 8 B per `double` element |
+
+For the 100-element numeric sample, the total estimate fell 71.2%. The estimate
+still includes inline string capacity when measuring string arrays and omits
+allocator metadata, as described above.
+
+### Post-A3 benchmark comparison — 2026-11-05
+
+Same three-run median method and host configuration as A0. All measurements
+remain informational and separate from correctness tests.
+
+| Workload | A0 | After A3 | Change |
+|---|---:|---:|---:|
+| Loops | 0.024317 s | 0.024055 s | −1.1% |
+| Recursion | 0.004821 s | 0.004655 s | −3.4% |
+| Array fill | 0.021055 s | 0.020117 s | −4.5% |
+| String concat | 0.006180 s | 0.006018 s | −2.6% |
+| Mandelbrot iteration | 0.238021 s | 0.237271 s | −0.3% |
+
+### After A3 firmware sizes
+
+| Environment | Static RAM | Flash image | Flash delta from A2 |
+|---|---:|---:|---:|
+| `lilygo_vga32` | 53,616 B | 1,549,677 B | +1,528 B |
+| `olimex_esp32_sbc_fabgl` | 54,252 B | 1,624,285 B | +1,548 B |
+| `esp32_2432s028` | 51,252 B | 1,489,313 B | +1,508 B |
+
 Static RAM did not change at PlatformIO's reported granularity.
 
 ### Post-A1 benchmark comparison

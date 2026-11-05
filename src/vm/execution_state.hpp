@@ -32,7 +32,27 @@ struct RuntimeFrame {
 };
 struct ArrayReference { std::string name; };
 using StackEntry = std::variant<double, std::string, ArrayReference>;
-struct RuntimeArray { std::vector<std::size_t> lengths; std::vector<Value> values; };
+struct RuntimeArray {
+    std::vector<std::size_t> lengths;
+    std::variant<std::vector<double>, std::vector<std::string>> values =
+        std::vector<double>{};
+
+    bool isString() const noexcept {
+        return std::holds_alternative<std::vector<std::string>>(values);
+    }
+    std::size_t size() const noexcept {
+        return isString() ? std::get<std::vector<std::string>>(values).size() :
+                            std::get<std::vector<double>>(values).size();
+    }
+    std::size_t capacity() const noexcept {
+        return isString() ? std::get<std::vector<std::string>>(values).capacity() :
+                            std::get<std::vector<double>>(values).capacity();
+    }
+    Value valueAt(std::size_t offset) const {
+        if (isString()) return std::get<std::vector<std::string>>(values).at(offset);
+        return std::get<std::vector<double>>(values).at(offset);
+    }
+};
 struct SelectState { double value = 0; bool matched = false; };
 struct DialogBuilder {
     std::string title;

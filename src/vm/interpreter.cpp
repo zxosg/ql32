@@ -40,6 +40,8 @@ using detail::SelectState;
 using detail::DialogBuilder;
 using detail::MenuBuilder;
 
+constexpr std::size_t kLargeStringPreflightBytes = 4096;
+
 bool mayContainInclude(std::string_view source) {
     constexpr std::string_view directive = "INCLUDE";
     for (std::size_t start = 0; start + directive.size() <= source.size(); ++start) {
@@ -435,6 +437,8 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         throw std::invalid_argument("instruction budget must be positive");
     bool preparingProgram = true;
     try {
+        if (source.size() <= std::numeric_limits<std::size_t>::max() / 4)
+            memoryBudget_.preflight(source.size() * 4, "program compilation");
         execution_ = std::make_unique<detail::VMExecutionState>();
         if (mayContainInclude(source)) {
             const std::string expanded = detail::expandIncludes(source, storage_.get());
@@ -482,7 +486,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         }
         execution_.reset();
         setErrorContext(runtime::ErrorCode::OutOfMemory, detail);
-        throw std::runtime_error(detail);
+        throw runtime::Error(runtime::ErrorCode::OutOfMemory, detail);
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
@@ -534,8 +538,9 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
     } catch (const std::bad_alloc&) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        setErrorContext(runtime::ErrorCode::OutOfMemory, "out of memory resuming BASIC program");
-        throw;
+        const std::string detail = "out of memory resuming BASIC program";
+        setErrorContext(runtime::ErrorCode::OutOfMemory, detail);
+        throw runtime::Error(runtime::ErrorCode::OutOfMemory, detail);
     } catch (const std::exception& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
@@ -755,6 +760,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         }
         if (state.debugMode != runtime::DebugResumeMode::Continue &&
             !state.stepStarted) state.stepStarted = true;
+        try {
         switch (instruction.op) {
         case Op::Call: {
             if (state.diagnosticsEnabled && !instruction.builtin) ++state.procedureCalls;
@@ -1548,6 +1554,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto height = integerArgument(3, "window size must be positive");
                         if (width <= 0 || height <= 0)
                             runtimeError(instruction, "window size must be positive");
+                        const std::uint64_t pixels = static_cast<std::uint64_t>(width) *
+                                                     static_cast<std::uint64_t>(height);
+                        if (pixels > std::numeric_limits<std::size_t>::max() / 4)
+                            throw runtime::Error(runtime::ErrorCode::OutOfMemory,
+                                                 "window allocation size overflow");
+                        memoryBudget_.preflight(static_cast<std::size_t>(pixels * 4),
+                                                "WINDOW canvas resize");
                         graphics_->setWindowBounds(session_id_, channel,
                             {x, y, static_cast<std::uint32_t>(width),
                              static_cast<std::uint32_t>(height)});
@@ -1666,7 +1679,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     pushValue(channels_->readValue(session_id_, channel, reg));
                 } else if (instruction.name == "ALLOC") {
                     const auto size = integerArgument(0, "ALLOC size must be a positive integer",
-                                                      1, 16 * 1024 * 1024);
+                        1, static_cast<double>(memoryBudget_.limits().maxBufferBytes));
+                    memoryBudget_.enforce(static_cast<std::size_t>(size),
+                        memoryBudget_.limits().maxBufferBytes, "buffer");
+                    memoryBudget_.preflight(static_cast<std::size_t>(size), "ALLOC");
                     pushValue(static_cast<double>(buffers_.allocate(static_cast<std::size_t>(size))));
                 } else if (instruction.name == "PEEK" || instruction.name == "PEEK_W" ||
                            instruction.name == "PEEK_L") {
@@ -1689,6 +1705,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto address = integerArgument(addressIndex,
                             "invalid buffer address", 0, 9007199254740991.0);
                         const auto size = buffers_.allocationSize(address);
+                        memoryBudget_.preflight(size, "IOREAD buffer");
                         std::vector<std::uint8_t> bytes(size);
                         if (instruction.name == "IOWRITE") {
                             buffers_.read(address, bytes.data(), bytes.size());
@@ -1786,12 +1803,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto txAddress = integerArgument(0, "invalid transmit buffer address", 0,
                         9007199254740991.0);
                     const auto txLength = integerArgument(1, "invalid transmit length", 0,
-                        16 * 1024 * 1024);
+                        static_cast<double>(memoryBudget_.limits().maxTransferBytes));
                     const auto rxAddress = integerArgument(2, "invalid receive buffer address", 0,
                         9007199254740991.0);
                     const auto rxLength = integerArgument(3, "invalid receive length", 0,
-                        16 * 1024 * 1024);
+                        static_cast<double>(memoryBudget_.limits().maxTransferBytes));
+                    memoryBudget_.preflight(static_cast<std::size_t>(txLength), "XFER transmit");
                     std::vector<std::uint8_t> tx(static_cast<std::size_t>(txLength));
+                    memoryBudget_.preflight(static_cast<std::size_t>(rxLength), "XFER receive");
                     std::vector<std::uint8_t> rx(static_cast<std::size_t>(rxLength));
                     if (txLength != 0) buffers_.read(txAddress, tx.data(), tx.size());
                     if (rxLength != 0) buffers_.write(rxAddress, rx.data(), rx.size());
@@ -1873,6 +1892,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         case Op::FunctionEnd:
             runtimeError(instruction, "function did not return a value");
         case Op::DimArray: {
+            memoryBudget_.preflight(instruction.rank * sizeof(std::size_t), "DIM dimensions");
             std::vector<std::size_t> lengths(instruction.rank);
             std::size_t elements = 1;
             for (std::size_t i = instruction.rank; i-- > 0;) {
@@ -1880,23 +1900,35 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 if (std::trunc(upper) != upper || upper < 0 || upper > 2147483647.0)
                     runtimeError(instruction, "array upper bound must be a nonnegative integer");
                 const std::size_t length = static_cast<std::size_t>(upper) + 1;
-                if (elements > 1000000 / length)
+                if (length != 0 && elements > memoryBudget_.limits().maxArrayElements / length)
                     runtimeError(instruction, "array allocation limit exceeded");
                 elements *= length;
                 lengths[i] = length;
             }
             RuntimeArray array;
             array.lengths = std::move(lengths);
-            if (!instruction.name.empty() && instruction.name.back() == '$')
-                array.values.resize(elements, std::string{});
-            else
-                array.values.resize(elements, 0.0);
+            if (!instruction.name.empty() && instruction.name.back() == '$') {
+                array.values = std::vector<std::string>{};
+                if (elements > std::numeric_limits<std::size_t>::max() / sizeof(std::string))
+                    throw runtime::Error(runtime::ErrorCode::OutOfMemory,
+                                         "array allocation size overflow");
+                memoryBudget_.preflight(elements * sizeof(std::string), "DIM string elements");
+                auto& values = std::get<std::vector<std::string>>(array.values);
+                values.resize(elements);
+            } else {
+                if (elements > std::numeric_limits<std::size_t>::max() / sizeof(double))
+                    throw runtime::Error(runtime::ErrorCode::OutOfMemory,
+                                         "array allocation size overflow");
+                memoryBudget_.preflight(elements * sizeof(double), "DIM numeric elements");
+                auto& values = std::get<std::vector<double>>(array.values);
+                values.resize(elements, 0.0);
+            }
             arrays[instruction.name] = std::move(array);
             break;
         }
         case Op::ArrayGet: {
             auto [array, offset] = arrayOffset(instruction);
-            pushValue(array->values[offset],
+            pushValue(array->valueAt(offset),
                       !instruction.name.empty() && instruction.name.back() == '%');
             break;
         }
@@ -1908,6 +1940,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             Value source = pop();
             const auto* text = std::get_if<std::string>(&source);
             if (!text) runtimeError(instruction, "string value required for slice");
+
+            memoryBudget_.enforce(text->size(), memoryBudget_.limits().maxStringBytes,
+                                  "string");
+            if (text->size() >= kLargeStringPreflightBytes &&
+                text->size() < std::numeric_limits<std::size_t>::max() /
+                                   sizeof(std::size_t))
+                memoryBudget_.preflight((text->size() + 1) * sizeof(std::size_t),
+                                        "string slice index");
 
             std::vector<std::size_t> offsets;
             offsets.reserve(text->size() + 1);
@@ -1939,6 +1979,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 runtimeError(instruction, "string slice index out of bounds");
             const std::size_t first = static_cast<std::size_t>(startValue) - 1;
             const std::size_t last = static_cast<std::size_t>(endValue);
+            const std::size_t resultBytes = offsets[last] - offsets[first];
+            memoryBudget_.enforce(resultBytes, memoryBudget_.limits().maxStringBytes,
+                                  "string");
+            if (resultBytes >= kLargeStringPreflightBytes)
+                memoryBudget_.preflight(resultBytes, "string slice");
             stack.emplace_back(text->substr(offsets[first], offsets[last] - offsets[first]));
             break;
         }
@@ -1949,6 +1994,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (!actualName.empty() && actualName.back() == '$') {
                 if (!std::holds_alternative<std::string>(value))
                     runtimeError(instruction, "string value required for array element");
+                std::get<std::vector<std::string>>(array->values)[offset] =
+                    std::move(std::get<std::string>(value));
             } else {
                 const double number = numeric(value, instruction);
                 if (!actualName.empty() && actualName.back() == '%' &&
@@ -1956,8 +2003,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                      number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
                      number > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
                     runtimeError(instruction, "Int32 array element out of range");
+                std::get<std::vector<double>>(array->values)[offset] = number;
             }
-            array->values[offset] = std::move(value);
             break;
         }
         case Op::SelectBegin: {
@@ -2158,7 +2205,23 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (instruction.op == Op::Add &&
                 std::holds_alternative<std::string>(left) &&
                 std::holds_alternative<std::string>(right)) {
-                stack.push_back(std::get<std::string>(left) + std::get<std::string>(right));
+                const auto& lhs = std::get<std::string>(left);
+                const auto& rhs = std::get<std::string>(right);
+                if (rhs.size() > std::numeric_limits<std::size_t>::max() - lhs.size())
+                    throw runtime::Error(runtime::ErrorCode::OutOfMemory,
+                                         "string allocation size overflow");
+                const auto size = lhs.size() + rhs.size();
+                memoryBudget_.enforce(size, memoryBudget_.limits().maxStringBytes, "string");
+                if (size < kLargeStringPreflightBytes) {
+                    stack.emplace_back(lhs + rhs);
+                    break;
+                }
+                memoryBudget_.preflight(size, "string concatenation");
+                std::string joined;
+                joined.reserve(size);
+                joined.append(lhs);
+                joined.append(rhs);
+                stack.emplace_back(std::move(joined));
                 break;
             }
             const double a = numeric(left, instruction);
@@ -2411,6 +2474,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             break;
         }
         }
+        } catch (const std::bad_alloc&) {
+            const std::string detail = "out of memory at line " +
+                                       std::to_string(instruction.line);
+            throw runtime::Error(runtime::ErrorCode::OutOfMemory, detail);
+        }
         if (state.diagnosticsEnabled) {
             state.stackHighWater = std::max(state.stackHighWater, stack.size());
             state.frameHighWater = std::max(state.frameHighWater, callFrames.size());
@@ -2542,9 +2610,12 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
     for (const auto& [name, array] : state.arrays) {
         result.arrayStorageBytes += sizeof(decltype(state.arrays)::value_type) +
             name.capacity() + 1 + array.lengths.capacity() * sizeof(std::size_t) +
-            array.values.capacity() * sizeof(Value);
-        for (const auto& value : array.values)
-            result.arrayStorageBytes += valueStorageBytes(value);
+            (array.isString() ? array.capacity() * sizeof(std::string) :
+                                array.capacity() * sizeof(double));
+        if (array.isString()) {
+            for (const auto& value : std::get<std::vector<std::string>>(array.values))
+                result.arrayStorageBytes += value.capacity() + 1;
+        }
     }
     const std::size_t address = std::min(state.pc, state.code.size());
     result.location.instruction = address;
@@ -2628,6 +2699,7 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
     const std::string& expression) const {
     if (!execution_ || !execution_->debuggerAttached || !execution_->debugPaused)
         return std::nullopt;
+    try {
     const auto code = detail::compileExpression(expression, execution_->code);
     std::vector<runtime::DebugValue> values;
     const auto popValue = [&]() -> runtime::DebugValue {
@@ -2699,7 +2771,7 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
                 offset += indexes[i] * stride;
                 stride *= array->second.lengths[i];
             }
-            values.push_back(array->second.values.at(offset));
+            values.push_back(array->second.valueAt(offset));
             break;
         }
         case Op::Negate: values.emplace_back(-number(popValue())); break;
@@ -2787,6 +2859,10 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
     }
     if (values.size() != 1) throw std::runtime_error("debug EVAL did not produce one value");
     return values.back();
+    } catch (const std::bad_alloc&) {
+        throw runtime::Error(runtime::ErrorCode::OutOfMemory,
+                             "out of memory compiling or evaluating debugger expression");
+    }
 }
 
 bool Interpreter::debugAddWatch(std::string expression) {

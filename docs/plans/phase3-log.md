@@ -31,7 +31,7 @@
 ## 2026-11-05 — A0 complete
 
 - **Step:** Track A0, deterministic safety net.
-- **Commits:** pending commit of this step.
+- **Commit:** `7891823 test: establish compact VM safety net`.
 - **Changes:** added the `ql32_golden_corpus` CTest target over 11 stable CLI
   fixtures; added a CMake sanitizer option and `sanitized` preset; added a
   separate benchmark runner and BASIC workloads for loops, recursion, array
@@ -54,7 +54,7 @@
 ## 2026-11-05 — A1 complete
 
 - **Step:** Track A1, measurement.
-- **Commit:** pending commit of this step.
+- **Commit:** `826c7ea perf: add compact VM host memory measurements`.
 - **Changes:** added `ql32_sizecheck`; added estimates for compiled bytecode,
   scalar globals/locals, arrays, and diagnostic-only operand-stack/call-frame
   high-water marks. Exposed these values through debugger `STATS` and the
@@ -78,3 +78,68 @@
   not an exact allocator measurement or board heap claim.
 - **Open risks:** runtime free heap and largest-block measurements on physical
   boards remain pending.
+
+## 2026-11-05 — A2 complete
+
+- **Step:** Track A2, memory budget, allocation failure handling, and platform
+  limits.
+- **Commit:** pending commit of this step.
+- **Changes:** added platform-neutral `MemoryBudget` and `PlatformLimits`.
+  Defaults preserve measured/current language behavior: arrays remain capped
+  at 1,000,000 elements; buffers and transfers remain capped at 16 MiB; strings
+  have no new size cap. The ESP32 adapter reports no unmeasured reserve, so the
+  default reserve is zero. MemoryService reports are advisory and do not
+  guarantee a later allocation.
+- **Safety:** preflights compilation source estimates, DIM dimensions and
+  payload, ALLOC, both XFER scratch buffers, I/O scratch buffers, WINDOW resize
+  estimates, string concatenation and slicing. Array replacement is staged
+  through complete dimension and payload construction before table update.
+  `std::bad_alloc` at the VM instruction boundary and during source/debugger
+  compilation is converted to `runtime::Error(OutOfMemory)`.
+- **Tests:** added low-reported-memory and deterministic mid-DIM allocation
+  failure coverage. Both failures return BASIC Out-of-memory and the same
+  interpreter remains able to run another command with its prior scalar state.
+  Arrays currently belong to one execution, so the test cannot inspect a prior
+  array after the failed execution is discarded; table replacement is staged
+  before mutation and will receive direct transition coverage in A3.
+  Debug CTest passed 61/61; ASan+UBSan CTest passed 61/61.
+- **ESP32:** all supported PlatformIO profiles compiled successfully. Updated
+  firmware sizes are recorded in `phase3-metrics.md`; static RAM stayed at its
+  prior reported values. No hardware flash or runtime heap measurement was
+  performed because the attached serial device remains unidentified.
+- **Decision:** do not set a nonzero embedded reserve or stricter embedded
+  allocation limits until board/workload runtime measurements justify them.
+- **Open risks:** estimates may undercount allocator metadata and concurrent
+  platform activity. Preflight does not prevent `bad_alloc`; the instruction
+  boundary translation remains necessary. Canvas sizing uses a conservative
+  four-byte-per-pixel estimate, which is not a claim about each backend's
+  physical representation.
+
+## 2026-11-05 — A3 complete
+
+- **Step:** Track A3, typed arrays.
+- **Commit:** pending commit of Track A2/A3 work.
+- **Changes:** `RuntimeArray` now stores numeric elements in
+  `std::vector<double>` and string elements in `std::vector<std::string>`,
+  selected by the BASIC `$` suffix at DIM time. Name-based array lookup,
+  array aliases, bounds checks, debugger inspection, and public `Value`
+  boundaries remain in place. Array estimates now account for actual typed
+  payload capacity and string capacities.
+- **Tests:** curated corpus and Debug CTest passed 61/61; ASan+UBSan CTest
+  passed 61/61. Added typed array initialization, assignment, Int32 edge
+  precision, string concatenation/lifetime coverage; existing tests cover
+  bounds, rank errors, and array parameters. The language rejects re-DIM of an
+  existing array, so replacement semantics were not added or tested as a
+  user-visible feature.
+- **Host measurement:** `sizeof(RuntimeArray)` is now 56 B. The A1 size probe's
+  runtime numeric array estimate fell from 3,359 B to 967 B (−71.2%), with the
+  same 100-element workload. Numeric payload bytes are 8 per element.
+- **Benchmarks:** final three-run medians are in `phase3-metrics.md`. All five
+  workloads are within 5% of the A0 baseline; string concatenation is −2.6%.
+  An initial per-operation free-memory query caused a measured concat slowdown;
+  checks are now limited to strings at least 4 KiB, which matches the plan's
+  requirement to preflight large operations and restored baseline timing.
+- **ESP32:** all three supported PlatformIO environments compiled. Updated
+  firmware sizes are recorded in `phase3-metrics.md`; static RAM is unchanged.
+- **Open risks:** typed string arrays still own each element as
+  `std::string`; Track B2 decides whether a measured handle pool is worthwhile.

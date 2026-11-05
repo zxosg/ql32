@@ -193,8 +193,8 @@ void testStepIntoNextAndArrayReads() {
                 arraySnapshot->arrays.front().first == "DATA" &&
                 arraySnapshot->arrays.front().second == std::vector<std::size_t>{3},
             "global array dimensions were not included in inspection");
-    require(arraySnapshot->arrayStorageBytes >= 3 * sizeof(ql32::Value),
-            "array payload storage estimate omitted its elements");
+    require(arraySnapshot->arrayStorageBytes >= 3 * sizeof(double),
+            "numeric array payload estimate omitted its typed elements");
     const auto arrayValue = arrayScheduler.debugEvaluate(arrayTask, "data(0)+1");
     require(arrayValue && std::get<double>(*arrayValue) == 8,
             "read-only EVAL did not support array reads");
