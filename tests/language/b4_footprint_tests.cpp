@@ -22,26 +22,17 @@ std::string numberedPrints(std::size_t count) {
 }
 
 bool checkFootprint(const char* label, const std::string& source,
-                    double maximumRatio, bool enforceCompact) {
-    auto rich = ql32::detail::compileSource(source);
-    const std::size_t richBytes = ql32::detail::estimateInstructionSequenceBytes(rich);
-#ifdef QL32_TEST_COMPACT
-    ql32::detail::CompactProgram compact(std::move(rich));
+                    std::size_t referenceBytes, double maximumRatio) {
+    ql32::detail::CompactProgram compact = ql32::detail::compileSource(source);
     const std::size_t compactBytes = compact.encodedStorageBytes();
-    const double ratio = richBytes == 0 ? 0.0 :
-        static_cast<double>(compactBytes) / static_cast<double>(richBytes);
-    std::cout << label << ": rich=" << richBytes << " encoded=" << compactBytes
+    const double ratio = referenceBytes == 0 ? 0.0 :
+        static_cast<double>(compactBytes) / static_cast<double>(referenceBytes);
+    std::cout << label << ": REF rich=" << referenceBytes << " encoded=" << compactBytes
               << " ratio=" << ratio << '\n';
-    if (enforceCompact && ratio > maximumRatio) {
+    if (ratio > maximumRatio) {
         std::cerr << label << " exceeds the encoded footprint limit\n";
         return false;
     }
-#else
-    (void)label;
-    (void)maximumRatio;
-    (void)enforceCompact;
-    if (richBytes == 0) return false;
-#endif
     return true;
 }
 
@@ -53,10 +44,10 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string root = argv[1];
-    if (!checkFootprint("tiny-10-line", numberedPrints(10), 0.50, true) ||
-        !checkFootprint("synthetic-2000-line", numberedPrints(2000), 0.30, true) ||
-        !checkFootprint("attractor", readFile(root + "/examples/attractor.bas"), 1.00, true) ||
+    if (!checkFootprint("tiny-10-line", numberedPrints(10), 10456, 0.50) ||
+        !checkFootprint("synthetic-2000-line", numberedPrints(2000), 2056176, 0.30) ||
+        !checkFootprint("attractor", readFile(root + "/examples/attractor.bas"), 29652, 1.00) ||
         !checkFootprint("mixed-mandelbrot",
-                        readFile(root + "/benchmarks/mandelbrot.bas"), 1.00, true))
+                        readFile(root + "/benchmarks/mandelbrot.bas"), 20742, 1.00))
         return 1;
 }

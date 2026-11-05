@@ -29,7 +29,6 @@ namespace ql32 {
 namespace detail {
 struct VMExecutionState;
 struct UISessionState;
-struct InstructionSequence;
 class CompactProgram;
 }
 

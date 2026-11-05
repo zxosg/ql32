@@ -494,11 +494,11 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         detail::CompactProgram compact;
         if (mayContainInclude(source)) {
             const std::string expanded = detail::expandIncludes(source, storage_.get());
-            compact = detail::compileSourceCompact(expanded);
+            compact = detail::compileSource(expanded);
         } else {
             // Emit compact records directly so the rich instruction sequence
             // never coexists with the compiler token vector.
-            compact = detail::compileSourceCompact(source);
+            compact = detail::compileSource(source);
         }
         bindProgramSymbols(compact);
         verifyBytecode(compact);
@@ -1020,7 +1020,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
                     detail::CompactProgram expression;
                     try {
-                        expression = detail::compileExpressionCompact(*expressionText, code);
+                        expression = detail::compileExpression(*expressionText, code);
                     } catch (const runtime::Error& error) {
                         runtimeError(instruction, error.what());
                     }
@@ -2892,7 +2892,7 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
     if (!execution_ || !execution_->debuggerAttached || !execution_->debugPaused)
         return std::nullopt;
     try {
-    const auto code = detail::compileExpressionCompact(expression, execution_->code);
+    const auto code = detail::compileExpression(expression, execution_->code);
     std::vector<runtime::DebugValue> values;
     const auto popValue = [&]() -> runtime::DebugValue {
         if (values.empty()) throw std::runtime_error("debug EVAL stack underflow");

@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -217,10 +216,6 @@ struct ProgramMetadata {
     std::unordered_map<std::string, Value> constants;
 };
 
-// Compiler-only rich instruction builder. VM execution lowers this transient
-// form into fixed-size records plus indexed side tables below.
-struct InstructionSequence : std::deque<Instruction>, ProgramMetadata {};
-
 class CompactProgram : public ProgramMetadata {
 public:
     class const_iterator {
@@ -250,12 +245,17 @@ public:
     };
 
     CompactProgram() = default;
-    explicit CompactProgram(InstructionSequence&& rich);
     std::size_t size() const noexcept { return records_.size(); }
     bool empty() const noexcept { return records_.empty(); }
     bool isSidecar(std::size_t index) const {
         if (index >= records_.size()) throw std::out_of_range("bytecode address out of range");
         return records_[index].flags == UINT8_MAX;
+    }
+    void reserveStorage(std::size_t records, std::size_t sidecars,
+                        std::size_t stringLiterals) {
+        records_.reserve(records);
+        sidecars_.reserve(sidecars);
+        stringLiterals_.reserve(stringLiterals);
     }
     Instruction operator[](std::size_t index) const;
     Instruction at(std::size_t index) const;
@@ -267,9 +267,13 @@ public:
     const std::vector<std::string>& encodedStringLiterals() const noexcept {
         return stringLiterals_;
     }
-    void appendRange(const InstructionSequence& instructions);
     void appendRange(const CompactProgram& instructions);
     void push_back(Instruction instruction) { appendOne(std::move(instruction)); }
+    void finalizeStorage() {
+        records_.shrink_to_fit();
+        sidecars_.shrink_to_fit();
+        stringLiterals_.shrink_to_fit();
+    }
     template <typename Function>
     void updateAt(std::size_t index, Function&& function) {
         updateAtImpl(index, std::function<void(Instruction&)>(
@@ -295,41 +299,29 @@ private:
     std::size_t compactRecordCount_ = 0;
 };
 
-// Compiler storage that can keep either the legacy rich sequence or emit into
-// compact records as instructions are produced. Metadata is shared by both
-// modes; mutable compact instructions are promoted to sidecars on demand.
-#ifdef QL32_TEST_LEGACY_COMPILER
+// Compiler storage emits compact records as instructions are produced.
+#ifdef QL32_TEST_COMPILER_FAILURE_INJECTION
 void compilerEmissionCheckpointForTest();
 #endif
 class CompilerCode : public ProgramMetadata {
 public:
-    explicit CompilerCode(bool compactEmission = false)
-        : compactEmission_(compactEmission) {}
-
-    std::size_t size() const noexcept {
-        return compactEmission_ ? compact_.size() : rich_.size();
+    std::size_t size() const noexcept { return compact_.size(); }
+    void reserve(std::size_t records, std::size_t sidecars, std::size_t stringLiterals) {
+        compact_.reserveStorage(records, sidecars, stringLiterals);
     }
     void push_back(Instruction instruction) {
-#ifdef QL32_TEST_LEGACY_COMPILER
-        if (compactEmission_) compilerEmissionCheckpointForTest();
+#ifdef QL32_TEST_COMPILER_FAILURE_INJECTION
+        compilerEmissionCheckpointForTest();
 #endif
-        if (compactEmission_) compact_.push_back(std::move(instruction));
-        else rich_.push_back(std::move(instruction));
+        compact_.push_back(std::move(instruction));
     }
-    Instruction readAt(std::size_t index) const {
-        return compactEmission_ ? compact_.at(index) : rich_.at(index);
-    }
+    Instruction readAt(std::size_t index) const { return compact_.at(index); }
     template <typename Function>
     void updateAt(std::size_t index, Function&& function) {
-        if (compactEmission_) compact_.updateAt(index, std::forward<Function>(function));
-        else function(rich_.at(index));
+        compact_.updateAt(index, std::forward<Function>(function));
     }
     template <typename Function>
     void forEachMutable(Function&& function) {
-        if (!compactEmission_) {
-            for (Instruction& instruction : rich_) function(instruction);
-            return;
-        }
         Instruction scratch;
         for (std::size_t index = 0; index < compact_.size(); ++index) {
             if (!compact_.isSidecar(index)) continue;
@@ -340,46 +332,23 @@ public:
             });
         }
     }
-    InstructionSequence takeRich() {
-        InstructionSequence result;
-        static_cast<std::deque<Instruction>&>(result) = std::move(rich_);
-        static_cast<ProgramMetadata&>(result) = std::move(
-            static_cast<ProgramMetadata&>(*this));
-        return result;
-    }
     CompactProgram takeCompact() {
-        if (!compactEmission_) {
-            CompactProgram result;
-            for (Instruction& instruction : rich_)
-                result.push_back(std::move(instruction));
-            rich_.clear();
-            static_cast<ProgramMetadata&>(result) = std::move(
-                static_cast<ProgramMetadata&>(*this));
-            return result;
-        }
+        compact_.finalizeStorage();
         static_cast<ProgramMetadata&>(compact_) = std::move(
             static_cast<ProgramMetadata&>(*this));
         return std::move(compact_);
     }
 
 private:
-    bool compactEmission_ = false;
-    std::deque<Instruction> rich_;
     CompactProgram compact_;
 };
 
-CompactProgram compileSourceCompact(const std::string& source);
-#ifdef QL32_TEST_LEGACY_COMPILER
-InstructionSequence compileSource(const std::string& source);
-InstructionSequence compileExpression(const std::string& source,
-                                      const ProgramMetadata& enclosing);
+CompactProgram compileSource(const std::string& source);
+CompactProgram compileExpression(const std::string& source,
+                                 const ProgramMetadata& enclosing);
+#ifdef QL32_TEST_COMPILER_FAILURE_INJECTION
 void failCompactEmissionAfterForTest(std::size_t instructionCount);
 #endif
-CompactProgram compileExpressionCompact(const std::string& source,
-                                        const ProgramMetadata& enclosing);
-// Counts container objects, element storage and string capacities owned by the
-// sequence. Allocator bookkeeping and deque block slack are implementation-specific.
-std::size_t estimateInstructionSequenceBytes(const InstructionSequence& code) noexcept;
 std::string expandIncludes(const std::string& source, runtime::StorageService* storage);
 
 } // namespace ql32::detail

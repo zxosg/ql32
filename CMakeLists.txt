@@ -28,7 +28,7 @@ add_library(ql32_portable
 target_include_directories(ql32_portable PUBLIC include)
 target_compile_features(ql32_portable PUBLIC cxx_std_17)
 if(QL32_BUILD_TESTS)
-  target_compile_definitions(ql32_portable PUBLIC QL32_TEST_LEGACY_COMPILER)
+  target_compile_definitions(ql32_portable PUBLIC QL32_TEST_COMPILER_FAILURE_INJECTION)
 endif()
 
 add_library(ql32_host_adapters
@@ -119,13 +119,11 @@ if(QL32_BUILD_TESTS)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
   add_executable(ql32_b4_opcode_coverage tests/language/b4_opcode_coverage.cpp)
   target_include_directories(ql32_b4_opcode_coverage PRIVATE src)
-  target_compile_definitions(ql32_b4_opcode_coverage PRIVATE QL32_TEST_COMPACT)
   target_link_libraries(ql32_b4_opcode_coverage PRIVATE ql32_portable)
   add_test(NAME ql32_b4_opcode_coverage
     COMMAND ql32_b4_opcode_coverage ${CMAKE_CURRENT_SOURCE_DIR})
   add_executable(ql32_b4_footprint_tests tests/language/b4_footprint_tests.cpp)
   target_include_directories(ql32_b4_footprint_tests PRIVATE src)
-  target_compile_definitions(ql32_b4_footprint_tests PRIVATE QL32_TEST_COMPACT)
   target_link_libraries(ql32_b4_footprint_tests PRIVATE ql32_portable)
   add_test(NAME ql32_b4_footprint_tests
     COMMAND ql32_b4_footprint_tests ${CMAKE_CURRENT_SOURCE_DIR})

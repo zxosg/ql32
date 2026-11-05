@@ -106,18 +106,7 @@ int main(int argc, char** argv) {
     using namespace ql32;
     using namespace ql32::detail;
     const std::string source = readSource(argc, argv);
-    CompactProgram compact;
-    std::size_t instructionCount = 0;
-    std::size_t richSequenceEstimate = 0;
-#ifdef QL32_TEST_LEGACY_COMPILER
-    const InstructionSequence code = compileSource(source);
-    instructionCount = code.size();
-    richSequenceEstimate = estimateInstructionSequenceBytes(code);
-    compact = CompactProgram(InstructionSequence(code));
-#else
-    compact = compileSourceCompact(source);
-    instructionCount = compact.size();
-#endif
+    const CompactProgram compact = compileSource(source);
 
     std::cout << "sizeof(Value): " << sizeof(Value) << " bytes\n"
               << "sizeof(StackEntry): " << sizeof(StackEntry) << " bytes\n"
@@ -126,15 +115,9 @@ int main(int argc, char** argv) {
               << "sizeof(RuntimeArray): " << sizeof(RuntimeArray) << " bytes\n"
               << "sizeof(unordered_map<string, Value>): "
               << sizeof(std::unordered_map<std::string, Value>) << " bytes\n"
-              << "instruction count: " << instructionCount << '\n'
-              << "instruction record bytes: " << instructionCount * sizeof(Instruction) << '\n';
-#ifdef QL32_TEST_LEGACY_COMPILER
-    std::cout << "estimated bytecode sequence storage: " << richSequenceEstimate << " bytes\n"
-              << "estimate caveat: counts string capacities even when inline; excludes "
-                 "allocator bookkeeping and deque block slack\n";
-#else
-    std::cout << "legacy rich sequence estimate unavailable in this build\n";
-#endif
+              << "instruction count: " << compact.size() << '\n'
+              << "instruction record bytes: " << compact.size() * sizeof(Instruction) << '\n'
+              << "legacy rich sequence is no longer built\n";
     std::cout << "compact instruction record bytes: "
               << sizeof(CompactInstruction) << " bytes\n"
               << "compact records: " << compact.compactRecordCount() << '\n'
