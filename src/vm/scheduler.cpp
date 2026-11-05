@@ -121,6 +121,7 @@ struct SessionScheduler::Task {
     std::string error;
     runtime::ErrorCode errorCode = runtime::ErrorCode::None;
     std::string errorDetail;
+    std::string pendingInteractiveTail;
     TaskId waitingChildId = 0;
     TaskId waitingParentId = 0;
     bool started = false;
@@ -328,6 +329,7 @@ bool SessionScheduler::breakTaskExecution(TaskId id) {
         current->interpreter->setErrorContext(runtime::ErrorCode::None);
         policy_.remove(current->id);
         current->releaseSource();
+        current->pendingInteractiveTail.clear();
         current->hasPendingSource = false;
         current->interactiveSubmission = false;
         current->started = false;
@@ -358,6 +360,7 @@ void SessionScheduler::stopWorkersAndReturnToSupervisor() {
             if (current->interpreter)
                 current->interpreter->setErrorContext(runtime::ErrorCode::None);
             current->releaseSource();
+            current->pendingInteractiveTail.clear();
             current->hasPendingSource = false;
             current->interactiveSubmission = false;
             current->started = false;
@@ -571,6 +574,7 @@ bool SessionScheduler::tick() {
             current.interpreter->setErrorContext(current.errorCode, current.errorDetail);
         current.hasPendingSource = false;
         current.interactiveSubmission = false;
+        current.pendingInteractiveTail.clear();
         current.releaseSource();
         current.started = false;
         if (current.interactive) {
@@ -600,18 +604,55 @@ bool SessionScheduler::tick() {
         }
         current.hasPendingSource = false;
         current.interactiveSubmission = false;
+        if (result == ExecutionStatus::InteractivePending) {
+            if (!current.interactive)
+                throw std::logic_error(
+                    "interactive continuation requested outside the REPL session");
+            current.releaseSource();
+            current.source = current.interpreter->takePendingInteractiveTail();
+            current.hasPendingSource = !current.source.empty();
+            current.interactiveSubmission = current.hasPendingSource;
+            current.started = false;
+            current.status = current.hasPendingSource ? TaskStatus::Runnable :
+                                                        TaskStatus::WaitingInput;
+            if (!current.hasPendingSource) current.releaseSource();
+            policy_.remove(current.id);
+            return true;
+        }
+        if (result == ExecutionStatus::RunPending) {
+            if (!current.interactive || !submittedInteractiveCommand)
+                throw std::logic_error("deferred RUN requested outside an interactive command");
+            current.releaseSource();
+            current.source = current.interpreter->takePendingRunSource();
+            current.pendingInteractiveTail =
+                current.interpreter->takePendingInteractiveTail();
+            current.hasPendingSource = !current.source.empty();
+            current.started = false;
+            current.status = current.hasPendingSource ? TaskStatus::Runnable :
+                                                        TaskStatus::WaitingInput;
+            return true;
+        }
         if (result == ExecutionStatus::Completed) {
             current.started = false;
             policy_.remove(current.id);
             if (current.interactive) {
-                if (!submittedInteractiveCommand)
-                    current.interpreter->releaseGraphicsResources();
-                current.status = TaskStatus::WaitingInput;
+                if (!current.pendingInteractiveTail.empty()) {
+                    current.releaseSource();
+                    current.source = std::move(current.pendingInteractiveTail);
+                    current.hasPendingSource = true;
+                    current.interactiveSubmission = true;
+                    current.status = TaskStatus::Runnable;
+                } else {
+                    if (!submittedInteractiveCommand)
+                        current.interpreter->releaseGraphicsResources();
+                    current.status = TaskStatus::WaitingInput;
+                    current.releaseSource();
+                }
             } else {
                 current.status = TaskStatus::Completed;
+                current.releaseSource();
                 current.interpreter.reset();
             }
-            current.releaseSource();
             wakeParent(current);
         } else if (result == ExecutionStatus::WaitingTask) {
             current.started = true;
@@ -659,6 +700,7 @@ bool SessionScheduler::cancel(TaskId id) {
         task->interpreter.reset();
         policy_.remove(task->id);
         task->releaseSource();
+        task->pendingInteractiveTail.clear();
         task->hasPendingSource = false;
         task->interactiveSubmission = false;
         task->paused = false;
@@ -696,9 +738,19 @@ bool SessionScheduler::cancel(TaskId id) {
 }
 
 bool SessionScheduler::kill(TaskId id) {
-    for (auto& task : tasks_)
-        if (task->id == id && task->supervisor) return false;
-    return cancel(id);
+    for (auto task = tasks_.begin(); task != tasks_.end(); ++task) {
+        if ((*task)->id != id) continue;
+        if ((*task)->supervisor) return false;
+        if ((*task)->status == TaskStatus::Completed ||
+            (*task)->status == TaskStatus::Failed ||
+            (*task)->status == TaskStatus::Cancelled) {
+            if (focusedTaskId_ == id) logoff();
+            tasks_.erase(task);
+            return true;
+        }
+        return cancel(id);
+    }
+    return false;
 }
 
 std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {

@@ -28,6 +28,7 @@
 #include "ql32/vm/scheduler.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/idf_sd.hpp"
+#include "ql32/platform/esp32/drive_router.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
 #include "ql32/platform/esp32/cpu_frequency.hpp"
@@ -285,6 +286,10 @@ ql32::platform::esp32::SdChannels flashChannels(SPIFFS, "FFS");
 ql32::platform::esp32::IdfSdCard idfSdCard;
 ql32::platform::esp32::IdfSdStorage idfSdStorage(idfSdCard);
 ql32::platform::esp32::IdfSdChannels idfSdChannels(idfSdCard);
+#if defined(QL32_OLIMEX_USE_SPIFFS)
+ql32::platform::esp32::DriveRouterStorage driveStorage(flashStorage, idfSdStorage);
+ql32::platform::esp32::DriveRouterChannels driveChannels(flashChannels, idfSdChannels);
+#endif
 #endif
 SerialOutputBuffer serialBuffer;
 std::ostream serialOutput(&serialBuffer);
@@ -381,7 +386,9 @@ void submitInputLine() {
     Serial.println();
     if (!protocolInputLine) screenConsole.write("\n", 1);
     if (remoteDebugger && remoteDebugger->handles(inputLine)) {
-#if defined(QL32_OLIMEX_USE_SPIFFS)
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+        auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(driveStorage);
+#elif defined(QL32_OLIMEX_USE_SPIFFS)
         auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(flashStorage);
 #elif defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
         auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(idfSdStorage);
@@ -396,7 +403,10 @@ void submitInputLine() {
     } else if (uiPresenter && uiPresenter->active()) {
         (void)uiPresenter->consumeLine(inputLine);
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
-#if defined(QL32_OLIMEX_USE_SPIFFS)
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+                   inputLine, driveStorage, driveChannels, Serial,
+                   [] { return screenCaptureSource(); })) {
+#elif defined(QL32_OLIMEX_USE_SPIFFS)
                    inputLine, flashStorage, flashChannels, Serial
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
                    , [] { return screenCaptureSource(); }
@@ -599,7 +609,14 @@ void setup() {
         Serial.println("FabGL keyboard interface unavailable on port 0");
     }
 
-#if defined(QL32_OLIMEX_USE_SPIFFS)
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    const bool ffsStorageReady = SPIFFS.begin(false);
+    const bool sdcStorageReady = idfSdCard.mount({
+        ql32_board::sdMosi, ql32_board::sdMiso, ql32_board::sdClock,
+        ql32_board::sdChipSelect
+    });
+    const bool storageReady = ffsStorageReady || sdcStorageReady;
+#elif defined(QL32_OLIMEX_USE_SPIFFS)
 #if !defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
     sdBus.begin(ql32_board::sdClock, ql32_board::sdMiso,
                 ql32_board::sdMosi, ql32_board::sdChipSelect);
@@ -627,6 +644,12 @@ void setup() {
         Serial.printf("Unix time: %lld\n", static_cast<long long>(*wallTime));
     else
         Serial.println("Wall clock unsynchronized");
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    if (ffsStorageReady) Serial.println("FFS storage ready");
+    else Serial.println("FFS mount failed");
+    if (sdcStorageReady) Serial.println("SDC storage ready");
+    else Serial.printf("SDC mount failed: %s\n", idfSdCard.error().c_str());
+#else
     if (storageReady) {
 #if defined(QL32_OLIMEX_USE_SPIFFS)
         Serial.println("FFS storage ready");
@@ -643,6 +666,7 @@ void setup() {
 #endif
 #endif
     }
+#endif
 
     auto graphicsService = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     std::string startupProgram =
@@ -652,7 +676,35 @@ void setup() {
         "RECT 8,48,96,48\nLINE 8,48,103,95\nCIRCLE 150,72,24\n"
         "TEXT 8,112,\"BASIC VM ready\"\n"
         "PRINT \"QL/32 BASIC VM running\"\n";
-#if defined(QL32_OLIMEX_USE_SPIFFS)
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    bool startupLoaded = false;
+    if (sdcStorageReady) {
+        try {
+            startupProgram = idfSdStorage.readText("SDC:/startup.bas");
+            startupLoaded = true;
+            Serial.println("Running SDC:/startup.bas");
+        } catch (const ql32::runtime::ServiceError& error) {
+            if (error.code() != ql32::runtime::ServiceErrorCode::NotFound) {
+                Serial.printf("SDC startup read error: %s\n", error.what());
+                return;
+            }
+            Serial.println("SDC:/startup.bas not found");
+        }
+    }
+    if (!startupLoaded && ffsStorageReady) {
+        try {
+            startupProgram = flashStorage.readText("FFS:/startup.bas");
+            startupLoaded = true;
+            Serial.println("Running FFS:/startup.bas");
+        } catch (const ql32::runtime::ServiceError& error) {
+            if (error.code() != ql32::runtime::ServiceErrorCode::NotFound) {
+                Serial.printf("FFS startup read error: %s\n", error.what());
+                return;
+            }
+            Serial.println("FFS:/startup.bas not found; running built-in demo");
+        }
+    }
+#elif defined(QL32_OLIMEX_USE_SPIFFS)
     if (storageReady) {
         try {
             startupProgram = flashStorage.readText("FFS:/startup.bas");
@@ -685,7 +737,12 @@ void setup() {
 #endif
 
     ql32::vm::Services services;
-#if defined(QL32_OLIMEX_USE_SPIFFS)
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    services.storage = std::shared_ptr<ql32::runtime::StorageService>(
+        &driveStorage, [](ql32::runtime::StorageService*) {});
+    auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
+        &driveChannels, [](ql32::runtime::ChannelService*) {});
+#elif defined(QL32_OLIMEX_USE_SPIFFS)
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &flashStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
@@ -727,7 +784,9 @@ void setup() {
     scheduler = std::make_unique<ql32::vm::SessionScheduler>(std::move(services), 128);
     ql32::platform::esp32::RemoteDebugCapabilities remoteCapabilities;
     remoteCapabilities.board = kBoardName;
-#if defined(QL32_OLIMEX_USE_SPIFFS)
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    remoteCapabilities.storageRoots = {"FFS:/", "SDC:/"};
+#elif defined(QL32_OLIMEX_USE_SPIFFS)
     remoteCapabilities.storageRoots = {"FFS:/"};
 #elif defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
     remoteCapabilities.storageRoots = {"SDC:/"};

@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <limits>
 #include <istream>
+#include <iterator>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -91,6 +92,95 @@ constexpr std::string_view builtinCommands[] = {
     "DEALLOC", "XFER"
 };
 
+constexpr std::string_view builtinFunctions[] = {
+    "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
+    "MID$", "VAL", "EVAL", "EVAL$", "BAND", "BOR", "BXOR", "BNOT", "ROL",
+    "ROR", "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
+    "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
+    "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
+    "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GWIDTH", "GHEIGHT", "GDEPTH",
+    "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$"
+};
+
+constexpr std::string_view shellHelpCommands[] = {
+    "HELP", "RUN", "LIST", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
+    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKRESULT", "LOGON",
+    "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
+    "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "WHERE", "LOCALS", "GLOBALS",
+    "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
+    "DIAGNOSTICS", "TRACE"
+};
+
+template <typename Range>
+void appendHelpNames(std::ostringstream& listing, const Range& names) {
+    bool first = true;
+    for (const auto& name : names) {
+        if (!first) listing << ", ";
+        listing << name;
+        first = false;
+    }
+    listing << '\n';
+}
+
+std::string commandHelpListing() {
+    std::ostringstream listing;
+    listing << "Shell commands:\n";
+    appendHelpNames(listing, shellHelpCommands);
+    listing << "BASIC statements and commands:\n";
+    bool first = true;
+    for (const Keyword& keyword : keywords) {
+        if (!first) listing << ", ";
+        listing << keyword.canonical;
+        first = false;
+    }
+    for (const std::string_view name : builtinCommands) {
+        if (!first) listing << ", ";
+        listing << name;
+        first = false;
+    }
+    listing << '\n' << "Built-in functions:\n";
+    appendHelpNames(listing, builtinFunctions);
+    listing << "Some commands require optional runtime services (storage, task control, "
+            << "debugger, graphics, network, or system control).\n";
+    return listing.str();
+}
+
+std::string wrapListingText(const std::string& text, std::size_t columns) {
+    columns = std::max<std::size_t>(1, columns);
+    std::string wrapped;
+    wrapped.reserve(text.size() + text.size() / columns + 1);
+    std::size_t lineStart = 0;
+    while (lineStart < text.size()) {
+        std::size_t lineEnd = text.find('\n', lineStart);
+        if (lineEnd == std::string::npos) lineEnd = text.size();
+        if (lineStart == lineEnd) {
+            wrapped.push_back('\n');
+        } else {
+            std::size_t segmentStart = lineStart;
+            while (segmentStart < lineEnd) {
+                std::size_t segmentEnd = std::min(lineEnd, segmentStart + columns);
+                if (segmentEnd < lineEnd) {
+                    const std::size_t space = text.rfind(' ', segmentEnd - 1);
+                    if (space != std::string::npos && space >= segmentStart)
+                        segmentEnd = space;
+                }
+                if (segmentEnd == segmentStart)
+                    segmentEnd = std::min(lineEnd, segmentStart + columns);
+                wrapped.append(text, segmentStart, segmentEnd - segmentStart);
+                wrapped.push_back('\n');
+                segmentStart = segmentEnd;
+                while (segmentStart < lineEnd && text[segmentStart] == ' ')
+                    ++segmentStart;
+            }
+        }
+        lineStart = lineEnd + (lineEnd < text.size() ? 1 : 0);
+    }
+    if (text.empty()) return {};
+    if (text.back() != '\n' && (wrapped.empty() || wrapped.back() != '\n'))
+        wrapped.push_back('\n');
+    return wrapped;
+}
+
 bool isBuiltinCommandName(std::string_view name) {
     return std::find(std::begin(builtinCommands), std::end(builtinCommands), name) !=
            std::end(builtinCommands);
@@ -104,25 +194,8 @@ std::string uppercaseAscii(std::string value) {
 }
 
 bool isBuiltinFunctionName(std::string_view name) {
-    return name == "TASK" || name == "TASKRESULT" || name == "ERR" ||
-           name == "ERR$" || name == "ERRX$" || name == "LEN" ||
-           name == "LEFT$" || name == "RIGHT$" || name == "MID$" ||
-           name == "VAL" || name == "EVAL" || name == "EVAL$" ||
-           name == "BAND" || name == "BOR" || name == "BXOR" || name == "BNOT" ||
-           name == "ROL" || name == "ROR" || name == "HEX$" || name == "BIN$" || name == "FREE" ||
-           name == "SIN" || name == "COS" ||
-           name == "INT" ||
-           name == "OPEN" || name == "READ$" || name == "EOF" ||
-           name == "IN" || name == "ALLOC" || name == "PEEK" ||
-           name == "PEEK_W" || name == "PEEK_L" || name == "IOREAD" ||
-           name == "IOWRITE" ||
-           name == "CONFIRM" || name == "DIALOG" || name == "DINIT" ||
-           name == "DGET" || name == "DGET$" || name == "MINIT" || name == "MENU" ||
-           name == "NETSTAT$" || name == "NETADDR$" || name == "NETSIGNAL" ||
-           name == "GETCHANNEL" ||
-           name == "GWIDTH" || name == "GHEIGHT" || name == "GDEPTH" ||
-           name == "GORIGINX" || name == "GORIGINY" ||
-           name == "GROTATION" || name == "GPALETTESIZE" || name == "GPALETTE$";
+    return std::find(std::begin(builtinFunctions), std::end(builtinFunctions), name) !=
+           std::end(builtinFunctions);
 }
 
 bool isBuiltinName(const std::string& name) {
@@ -2080,6 +2153,94 @@ void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
 void Interpreter::abortExecution() noexcept {
     if (ui_) ui_->cancelSession(session_id_);
     execution_.reset();
+    pendingRunSource_.clear();
+    pendingInteractiveTail_.clear();
+    clearPager();
+}
+
+std::string Interpreter::takePendingRunSource() noexcept {
+    return std::exchange(pendingRunSource_, std::string{});
+}
+
+std::string Interpreter::takePendingInteractiveTail() noexcept {
+    return std::exchange(pendingInteractiveTail_, std::string{});
+}
+
+bool Interpreter::hasPendingInteractivePager() const noexcept {
+    return pendingPagerRequest_.has_value();
+}
+
+void Interpreter::clearPager() noexcept {
+    pendingPagerRequest_.reset();
+    pendingPagerOffset_ = 0;
+    pendingPagerPageRows_ = 1;
+    pendingPagerChannel_ = 0;
+    std::string{}.swap(pendingPagerText_);
+}
+
+void Interpreter::writePagerPage(std::ostream& output, std::size_t lineCount) {
+    std::size_t end = pendingPagerOffset_;
+    for (std::size_t line = 0; line < lineCount && end < pendingPagerText_.size(); ++line) {
+        const std::size_t newline = pendingPagerText_.find('\n', end);
+        end = newline == std::string::npos ? pendingPagerText_.size() : newline + 1;
+    }
+    if (end == pendingPagerOffset_) return;
+
+    const std::string page = pendingPagerText_.substr(
+        pendingPagerOffset_, end - pendingPagerOffset_);
+    const runtime::ChannelId channel = resolveChannel(pendingPagerChannel_);
+    if (channel == 0) {
+        output << page;
+        if (page.find('\n') != std::string::npos) output_column_ = 0;
+    } else if (channel == 1) {
+        if (graphics_) graphics_->writeText(session_id_, page);
+        else output << page;
+    } else {
+        if (!channels_)
+            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                        "channel output unavailable");
+        channels_->write(session_id_, channel, page);
+    }
+    output.flush();
+    pendingPagerOffset_ = end;
+}
+
+ExecutionStatus Interpreter::resumeInteractivePager(std::ostream& output) {
+    if (!pendingPagerRequest_) return ExecutionStatus::Completed;
+    if (!ui_) {
+        clearPager();
+        return ExecutionStatus::Completed;
+    }
+
+    const auto result = ui_->poll(*pendingPagerRequest_);
+    if (!result) return ExecutionStatus::Suspended;
+    pendingPagerRequest_.reset();
+
+    std::string action;
+    if (result->kind == ui::ResultKind::Submitted && !result->fields.empty()) {
+        if (const auto* submitted = std::get_if<std::string>(&result->fields.front()))
+            action = *submitted;
+    }
+    std::transform(action.begin(), action.end(), action.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    const auto first = action.find_first_not_of(" \t\r\n");
+    const auto last = action.find_last_not_of(" \t\r\n");
+    action = first == std::string::npos ? std::string{} :
+        action.substr(first, last - first + 1);
+
+    if (result->kind == ui::ResultKind::Submitted && action != "Q" && action != "QUIT") {
+        writePagerPage(output, action == "L" || action == "LINE" ? 1 : pendingPagerPageRows_);
+        if (pendingPagerOffset_ < pendingPagerText_.size()) {
+            pendingPagerRequest_ = ui_->beginInput(session_id_,
+                "--More-- Enter=page, L=line, Q=quit: ");
+            return ExecutionStatus::Suspended;
+        }
+    }
+
+    clearPager();
+    return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
+                                             ExecutionStatus::InteractivePending;
 }
 
 void Interpreter::releaseGraphicsResources() noexcept {
@@ -2206,7 +2367,8 @@ std::string detail::expandIncludes(const std::string& source,
 
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
     const auto status = executeInteractiveResumable(source, output);
-    if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel)
+    if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel ||
+        status == ExecutionStatus::InteractivePending)
         throw std::runtime_error("execution suspended; use executeResumable() and resume()");
 }
 
@@ -2387,12 +2549,47 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             channels_->write(session_id_, channel, text);
         }
     };
+    auto writeGeneratedListing = [&](std::uint64_t channel,
+                                     const std::string& listing) {
+        const runtime::ChannelId endpoint = resolveChannel(channel);
+        if (!pagerEnabled_ || !ui_ || endpoint > 1) {
+            writeChannelText(channel, listing);
+            return false;
+        }
+
+        std::size_t columns = 80;
+        std::size_t rows = 24;
+        if (graphics_) {
+            const auto info = graphics_->windowInfo(session_id_, endpoint);
+            if (info.width != 0) columns = std::max<std::size_t>(1, info.width / 6);
+            if (info.height != 0) rows = std::max<std::size_t>(1, info.height / 8);
+        }
+        const std::string wrapped = wrapListingText(listing, columns);
+        const std::size_t totalRows = static_cast<std::size_t>(
+            std::count(wrapped.begin(), wrapped.end(), '\n')) +
+            (!wrapped.empty() && wrapped.back() != '\n' ? 1 : 0);
+        const std::size_t pageRows = std::max<std::size_t>(1, rows > 1 ? rows - 1 : 1);
+        if (totalRows <= pageRows) {
+            writeChannelText(channel, wrapped);
+            return false;
+        }
+
+        pendingPagerText_ = wrapped;
+        pendingPagerOffset_ = 0;
+        pendingPagerPageRows_ = pageRows;
+        pendingPagerChannel_ = channel;
+        writePagerPage(output, pageRows);
+        pendingPagerRequest_ = ui_->beginInput(session_id_,
+            "--More-- Enter=page, L=line, Q=quit: ");
+        return true;
+    };
     bool commandMode = false;
     std::istringstream probe(source);
     for (std::string line; std::getline(probe, line);) {
         const std::size_t numberEnd = lineNumberEnd(line);
         const std::string word = command(line);
-        if (numberEnd != 0 || word == "RUN" || word == "LIST" ||
+        if (numberEnd != 0 || word == "HELP" || word == "PAGER" ||
+            word.rfind("PAGER ", 0) == 0 || word == "RUN" || word == "LIST" ||
             word.rfind("LIST ", 0) == 0 || word.rfind("LIST#", 0) == 0 ||
             word == "NEW" || word == "REBOOT" ||
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
@@ -2433,6 +2630,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
     }
 
     std::istringstream input(source);
+    auto preserveInteractiveTail = [&]() {
+        pendingInteractiveTail_.assign(std::istreambuf_iterator<char>(input),
+                                       std::istreambuf_iterator<char>());
+    };
     for (std::string line; std::getline(input, line);) {
         const std::size_t numberEnd = lineNumberEnd(line);
         if (numberEnd != 0) {
@@ -2452,7 +2653,26 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         const std::string word = command(line);
         if (word.empty()) continue;
         const std::string normalizedLine = trim(line);
-        if (word == "LIST" || word.rfind("LIST ", 0) == 0 ||
+        if (word == "HELP") {
+            if (writeGeneratedListing(default_output_channel_, commandHelpListing())) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
+        } else if (word == "PAGER" || word.rfind("PAGER ", 0) == 0) {
+            const std::string argument = trim(normalizedLine.substr(5));
+            if (argument.empty()) {
+                writeChannelText(default_output_channel_, std::string("Pager is ") +
+                    (pagerEnabled_ ? "ON\n" : "OFF\n"));
+            } else if (command(argument) == "ON") {
+                pagerEnabled_ = true;
+                writeChannelText(default_output_channel_, "Pager enabled\n");
+            } else if (command(argument) == "OFF") {
+                pagerEnabled_ = false;
+                writeChannelText(default_output_channel_, "Pager disabled\n");
+            } else {
+                throw std::runtime_error("PAGER syntax is PAGER ON or PAGER OFF");
+            }
+        } else if (word == "LIST" || word.rfind("LIST ", 0) == 0 ||
             word.rfind("LIST#", 0) == 0) {
             std::uint64_t channel = default_output_channel_;
             std::string selector = trim(normalizedLine.substr(4));
@@ -2462,7 +2682,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             std::string listing;
             for (const auto& [number, body] : program_)
                 listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
-            writeChannelText(channel, listing);
+            if (writeGeneratedListing(channel, listing)) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
         } else if (word == "REBOOT") {
             if (!systemControl_)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2475,8 +2698,14 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             clear();
         } else if (word == "RUN") {
             clear();
-            const auto status = executeSlice(joinProgramLines(program_), output,
-                                             instructionBudget, stop);
+            const std::string programSource = joinProgramLines(program_);
+            if (taskControl_ && !programSource.empty()) {
+                pendingRunSource_ = programSource;
+                pendingInteractiveTail_.assign(std::istreambuf_iterator<char>(input),
+                                               std::istreambuf_iterator<char>());
+                return ExecutionStatus::RunPending;
+            }
+            const auto status = executeSlice(programSource, output, instructionBudget, stop);
             if (status != ExecutionStatus::Completed) return status;
         } else if (word == "LOAD" || word.rfind("LOAD ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2571,7 +2800,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             std::string listing;
             for (const auto& entry : storage_->list(path))
                 listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
-            writeChannelText(channel, listing);
+            if (writeGeneratedListing(channel, listing)) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(5));
             const std::uint64_t outputChannel = argument.empty() ?
@@ -2603,7 +2835,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 listing += "\n";
             }
             if (listing.empty()) listing = "No sessions\n";
-            writeChannelText(outputChannel, listing);
+            if (writeGeneratedListing(outputChannel, listing)) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
         } else if (word == "TASKCHANNELS" || word.rfind("TASKCHANNELS ", 0) == 0) {
             if (!taskControl_)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2622,7 +2857,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             for (const auto& channel : channels)
                 listing += "#" + std::to_string(channel.handle) + " " +
                     runtime::channelTypeName(channel.type) + "\n";
-            writeChannelText(0, listing);
+            if (writeGeneratedListing(0, listing)) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
         } else if (word == "DEBUG" || word.rfind("DEBUG ", 0) == 0) {
             if (!taskControl_) throw std::runtime_error("debugger service unavailable");
             const std::string argument = trim(normalizedLine.substr(5));
@@ -2763,7 +3001,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 else listing << "unavailable\n";
                 for (const auto& entry : snapshot->trace) listing << entry << '\n';
             }
-            writeChannelText(0, listing.str());
+            if (writeGeneratedListing(0, listing.str())) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
         } else if (word == "WATCH" || word.rfind("WATCH ", 0) == 0 ||
                    word == "UNWATCH" || word.rfind("UNWATCH ", 0) == 0) {
             if (!taskControl_ || debugTaskId_ == 0)
@@ -2966,23 +3207,34 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
         }
         if (!std::getline(input, line)) break;
         try {
-            executeInteractive(line + "\n", output);
-        } catch (const std::exception& error) {
-            if (!execution_ || !dispatchUiRequest) {
-                diagnostics << "ql32: " << error.what() << '\n';
-                continue;
-            }
-            try {
-                while (execution_) {
-                    if (!dispatchUiRequest())
-                        throw std::runtime_error("no host presenter for pending UI request");
-                    if (resume(output) == ExecutionStatus::Completed) break;
+            ExecutionStatus status = executeInteractiveResumable(line + "\n", output);
+            while (status != ExecutionStatus::Completed) {
+                if (status == ExecutionStatus::InteractivePending) {
+                    const std::string tail = takePendingInteractiveTail();
+                    if (tail.empty()) {
+                        status = ExecutionStatus::Completed;
+                        continue;
+                    }
+                    status = executeInteractiveResumable(tail, output);
+                    continue;
                 }
-            } catch (const std::exception& dispatchError) {
-                if (ui_) ui_->cancelSession(session_id_);
-                execution_.reset();
-                diagnostics << "ql32: " << dispatchError.what() << '\n';
+                if (status == ExecutionStatus::Suspended) {
+                    if (!dispatchUiRequest || !dispatchUiRequest())
+                        throw std::runtime_error("no host presenter for pending UI request");
+                    status = resume(output);
+                    continue;
+                }
+                if (status == ExecutionStatus::WaitingChannel)
+                    throw std::runtime_error("interactive command is waiting for channel input");
+                if (status == ExecutionStatus::RunPending)
+                    throw std::runtime_error("deferred RUN requires the session scheduler");
+                throw std::runtime_error("interactive command did not complete");
             }
+        } catch (const std::exception& error) {
+            if (ui_) ui_->cancelSession(session_id_);
+            execution_.reset();
+            clearPager();
+            diagnostics << "ql32: " << error.what() << '\n';
         }
     }
 }
@@ -2990,6 +3242,9 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
 void Interpreter::clear() {
     if (ui_) ui_->cancelSession(session_id_);
     execution_.reset();
+    pendingRunSource_.clear();
+    pendingInteractiveTail_.clear();
+    clearPager();
     *uiSession_ = detail::UISessionState{};
     variables_.clear();
     buffers_.clear();

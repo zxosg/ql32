@@ -103,7 +103,7 @@ public:
     void clear(ql32::graphics::SessionId) override {}
     void closeSession(ql32::graphics::SessionId) override {}
     ql32::graphics::WindowInfo windowInfo(ql32::graphics::SessionId) override {
-        return {};
+        return info;
     }
     ql32::graphics::RgbColor paletteColor(ql32::graphics::SessionId,
                                           std::uint16_t) override {
@@ -111,6 +111,7 @@ public:
     }
 
     std::string writtenText;
+    ql32::graphics::WindowInfo info{120, 32, 4, 16, 0, 0, 0};
 };
 
 class CountingSystemControl final : public ql32::runtime::SystemControlService {
@@ -167,6 +168,67 @@ void testUiWaitDoesNotBlockOtherSessions() {
     require(scheduler.task(waiting)->status == ql32::vm::TaskStatus::Completed &&
                 waitingOutput.str() == "resumed\n",
             "suspended session did not resume after UI acknowledgement");
+}
+
+void testOptionalPagerSuspendsOnlyReplAndContinuesTail() {
+    auto ui = std::make_shared<ql32::ui::QueuedService>();
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.ui = ui;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 64);
+    std::ostringstream replOutput;
+    std::ostringstream workerOutput;
+    const auto repl = scheduler.launchInteractive(replOutput);
+    const auto worker = scheduler.launch("PRINT \"other session ran\"\n", workerOutput);
+
+    require(scheduler.submit(repl,
+                "PAGER ON\nHELP\nPRINT #0,\"after pager\"\n"),
+            "REPL did not accept the pager command sequence");
+    for (int tick = 0; tick < 8 && scheduler.task(repl)->status !=
+         ql32::vm::TaskStatus::WaitingUi; ++tick)
+        (void)scheduler.tick();
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingUi,
+            "PAGER ON did not suspend after filling the output window");
+    const auto firstPage = ui->takeNextRequest();
+    require(firstPage && firstPage->kind == ql32::ui::RequestKind::Input &&
+                firstPage->title.find("Enter=page") != std::string::npos,
+            "pager did not request its next-page input asynchronously");
+
+    for (int tick = 0; tick < 8 && scheduler.task(worker)->status !=
+         ql32::vm::TaskStatus::Completed; ++tick)
+        (void)scheduler.tick();
+    require(scheduler.task(worker)->status == ql32::vm::TaskStatus::Completed &&
+                graphics->writtenText.find("other session ran\n") != std::string::npos,
+            "a waiting pager blocked another session");
+
+    auto request = firstPage;
+    bool useLineStep = true;
+    std::size_t pages = 0;
+    while (request) {
+        require(ui->submitInput(request->id, useLineStep ? "L" : ""),
+                "pager input was not accepted");
+        useLineStep = false;
+        ++pages;
+        request.reset();
+        for (int tick = 0; tick < 64; ++tick) {
+            (void)scheduler.tick();
+            request = ui->takeNextRequest();
+            if (request || scheduler.task(repl)->status ==
+                               ql32::vm::TaskStatus::WaitingInput)
+                break;
+        }
+    }
+    for (int tick = 0; tick < 4 && scheduler.task(repl)->status !=
+         ql32::vm::TaskStatus::WaitingInput; ++tick)
+        (void)scheduler.tick();
+    require(pages > 1 && scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput,
+            "pager did not finish and return the REPL to input");
+    require(graphics->writtenText.find("Shell commands:") != std::string::npos &&
+                graphics->writtenText.find("Built-in functions:") != std::string::npos,
+            "pager did not emit the complete HELP listing");
+    require(replOutput.str() == "after pager\n",
+            "commands after the paged listing were not resumed in order");
 }
 
 void testInteractiveSessionUsesSlicesAndKeepsReplState() {
@@ -260,6 +322,74 @@ void testInteractiveUiWaitResumesThroughScheduler() {
             "interactive session did not return to input after UI completion");
     require(output.str() == "resumed\n",
             "interactive session did not continue after UI completion");
+}
+
+void testInteractiveRunUnwindsReplAndContinuesTrailingCommands() {
+    auto ui = std::make_shared<ql32::ui::QueuedService>();
+    ql32::vm::Services services;
+    services.ui = ui;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 8);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    require(scheduler.submit(repl,
+                "10 IF 1 THEN\n"
+                "20 IF 1 THEN\n"
+                "30 ALERT \"nested\",\"acknowledge\"\n"
+                "40 PRINT \"program finished\"\n"
+                "50 END IF\n"
+                "60 END IF\n"),
+            "interactive session rejected nested program lines");
+    require(scheduler.tick() &&
+                scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput,
+            "nested program entry did not return to the REPL");
+
+    require(scheduler.submit(repl, "RUN\nPRINT \"tail command\"\n"),
+            "interactive session rejected RUN with a following command");
+    require(scheduler.tick() &&
+                scheduler.task(repl)->status == ql32::vm::TaskStatus::Runnable,
+            "RUN was not deferred to the scheduler after the REPL slice");
+    for (int tick = 0; tick < 40 && scheduler.task(repl)->status !=
+            ql32::vm::TaskStatus::WaitingUi; ++tick)
+        (void)scheduler.tick();
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingUi,
+            "deferred nested program did not reach its alert");
+    const auto request = ui->takeNextRequest();
+    require(request && ui->resolve(request->id, ql32::ui::ResultKind::Acknowledged),
+            "test could not acknowledge deferred RUN alert");
+    for (int tick = 0; tick < 40 && scheduler.task(repl)->status !=
+            ql32::vm::TaskStatus::WaitingInput; ++tick)
+        (void)scheduler.tick();
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput,
+            "deferred RUN or its trailing command did not return to the prompt");
+    require(output.str() == "program finished\ntail command\n",
+            "deferred RUN lost program output or its trailing command");
+}
+
+void testBreakDuringDeferredRunDiscardsTrailingCommands() {
+    auto ui = std::make_shared<ql32::ui::QueuedService>();
+    ql32::vm::Services services;
+    services.ui = ui;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 8);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    require(scheduler.submit(repl, "10 ALERT \"wait\",\"acknowledge\"\n"),
+            "interactive session rejected the alert program");
+    require(scheduler.tick(), "scheduler did not store the alert program");
+    require(scheduler.submit(repl, "RUN\nPRINT \"discarded tail\"\n"),
+            "interactive session rejected RUN before break");
+    require(scheduler.tick(), "scheduler did not defer RUN before break");
+    require(scheduler.tick() && scheduler.task(repl)->status ==
+                ql32::vm::TaskStatus::WaitingUi,
+            "deferred program did not suspend for UI");
+    require(scheduler.breakTaskExecution(repl),
+            "break did not abort the deferred interactive run");
+    require(scheduler.submit(repl, "PRINT \"after break\"\n"),
+            "interactive session did not accept input after breaking RUN");
+    require(scheduler.tick() && scheduler.task(repl)->status ==
+                ql32::vm::TaskStatus::WaitingInput,
+            "interactive session did not return to input after break");
+    require(output.str() == "after break\n",
+            "breaking deferred RUN executed its trailing command");
 }
 
 void testSmoothWeightedRoundRobinMatchesReferenceSequence() {
@@ -474,6 +604,37 @@ void testKillConfirmationUsesConsoleChannel() {
             "KILL confirmation allocated or wrote to graphics channel #1");
 }
 
+void testKillRemovesCompletedAndFailedTaskRecords() {
+    ql32::vm::SessionScheduler scheduler({}, 32);
+    std::ostringstream completedOutput;
+    std::ostringstream failedOutput;
+    std::ostringstream supervisorOutput;
+    const auto completed = scheduler.launch("PRINT \"done\"\n", completedOutput);
+    const auto failed = scheduler.launch("PRINT (\n", failedOutput);
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+
+    for (int tick = 0; tick < 8; ++tick) scheduler.tick();
+    require(scheduler.task(completed)->status == ql32::vm::TaskStatus::Completed &&
+                scheduler.task(failed)->status == ql32::vm::TaskStatus::Failed,
+            "test tasks did not reach completed and failed states");
+
+    require(scheduler.submit(supervisor, "KILL " + std::to_string(completed) + "\n"),
+            "supervisor did not accept KILL for a completed task");
+    require(scheduler.tick(), "scheduler did not remove the completed task record");
+    require(!scheduler.task(completed),
+            "KILL left a completed task in the task registry");
+
+    require(scheduler.submit(supervisor, "KILL " + std::to_string(failed) + "\n"),
+            "supervisor did not accept KILL for a failed task");
+    require(scheduler.tick(), "scheduler did not remove the failed task record");
+    require(!scheduler.task(failed),
+            "KILL left a failed task in the task registry");
+    require(supervisorOutput.str() ==
+                "Killed task " + std::to_string(completed) + "\n" +
+                "Killed task " + std::to_string(failed) + "\n",
+            "KILL did not confirm removal of terminal task records");
+}
+
 void testTaskSupportsCommandAndFunctionSyntax() {
     auto storage = std::make_shared<ProgramStorage>();
     storage->files["worker.bas"] = "PRINT \"worker ready\"\n";
@@ -533,6 +694,63 @@ void testTaskWaitResumesCallerAndExposesChildStatus() {
             "wait form did not finish child and return caller to its prompt");
     require(graphics->writtenText == "COMPLETED\n",
             "TASKRESULT did not expose the completed standard task status");
+}
+
+void testWaitTaskResumesAfterDialogAndMenu() {
+    auto storage = std::make_shared<ProgramStorage>();
+    storage->files["ui.bas"] =
+        "dialogHandle = DINIT(\"Profile\")\n"
+        "DTEXT dialogHandle, \"Edit the profile\"\n"
+        "DEDIT dialogHandle, \"Name\", \"Ada\"\n"
+        "DINT dialogHandle, \"Age\", 36, 0, 150\n"
+        "DFLOAT dialogHandle, \"Score\", 1.5, 0, 10\n"
+        "DCHOICE dialogHandle, \"Color\", 2, \"Red|Green|Blue\"\n"
+        "DCHECK dialogHandle, \"Active\", 1\n"
+        "DBUTTONS dialogHandle, \"Apply\", \"Cancel\"\n"
+        "IF DIALOG(dialogHandle) THEN\n"
+        "  PRINT DGET$(dialogHandle, 2)\n"
+        "END IF\n"
+        "menuHandle = MINIT(\"Main menu\")\n"
+        "MCARD menuHandle, 10, \"Open\", \"O\"\n"
+        "MCARD menuHandle, 90, \"Exit\", \"X\"\n"
+        "command = MENU(menuHandle)\n"
+        "PRINT command\n";
+    auto ui = std::make_shared<ql32::ui::QueuedService>();
+    ql32::vm::Services services;
+    services.storage = storage;
+    services.ui = ui;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 128);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+    require(scheduler.submit(supervisor,
+                "id=TASK(\"ui.bas\",1)\nPRINT TASKRESULT(id,1)\n"),
+            "supervisor did not accept wait-mode UI task");
+    require(scheduler.tick() &&
+                scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingTask,
+            "supervisor did not wait for its UI task");
+    require(scheduler.tick() &&
+                scheduler.task(2)->status == ql32::vm::TaskStatus::WaitingUi,
+            "UI task did not suspend at its dialog");
+    auto request = ui->takeNextRequest();
+    require(request && request->kind == ql32::ui::RequestKind::Dialog &&
+                ui->submitDialog(request->id, {
+                    std::monostate{}, std::string("Grace"), 42.0, 2.75, 1.0, false}),
+            "test could not submit the UI task's dialog");
+    require(scheduler.tick() &&
+                scheduler.task(2)->status == ql32::vm::TaskStatus::WaitingUi,
+            "UI task did not resume from dialog and suspend at its menu");
+    request = ui->takeNextRequest();
+    require(request && request->kind == ql32::ui::RequestKind::Menu &&
+                ui->selectMenu(request->id, 90),
+            "test could not select the UI task's menu item");
+    require(scheduler.tick() &&
+                scheduler.task(2)->status == ql32::vm::TaskStatus::Completed,
+            "UI task did not complete after its menu selection");
+    require(scheduler.tick() &&
+                scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
+            "wait-mode caller did not resume after UI task completion");
+    require(output.str() == "Grace\n90\nCOMPLETED\n",
+            "wait-mode caller did not observe the UI task's output and completion");
 }
 
 void testTaskWaitReturnsChildErrorContext() {
@@ -641,10 +859,13 @@ void testRebootInteractiveCommandCallsSystemService() {
 int main() {
     testRoundRobinSlicesKeepSessionsIndependent();
     testUiWaitDoesNotBlockOtherSessions();
+    testOptionalPagerSuspendsOnlyReplAndContinuesTail();
     testInteractiveSessionUsesSlicesAndKeepsReplState();
     testInteractiveStartupProgramSharesReplSession();
     testInteractiveSessionRecoversFromCommandErrors();
     testInteractiveUiWaitResumesThroughScheduler();
+    testInteractiveRunUnwindsReplAndContinuesTrailingCommands();
+    testBreakDuringDeferredRunDiscardsTrailingCommands();
     testSmoothWeightedRoundRobinMatchesReferenceSequence();
     testZeroPriorityTaskIsNeverSelected();
     testWeightedPolicyResetsForRemovalAndPriorityChanges();
@@ -652,8 +873,10 @@ int main() {
     testSupervisorCanSetSliceAndWorkerPriority();
     testTasksUsesDefaultAndExplicitPrintChannels();
     testKillConfirmationUsesConsoleChannel();
+    testKillRemovesCompletedAndFailedTaskRecords();
     testTaskSupportsCommandAndFunctionSyntax();
     testTaskWaitResumesCallerAndExposesChildStatus();
+    testWaitTaskResumesAfterDialogAndMenu();
     testTaskWaitReturnsChildErrorContext();
     testTaskAndVmPausePreserveRunnableSessions();
     testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor();

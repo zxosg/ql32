@@ -1,14 +1,14 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-03):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`; five worker launch/kill cycles ran. Their heap readings include retained task-result records and graphics-arena high-water capacity, so they do not isolate source-buffer recovery. Olimex ESP32-SBC-FabGL Rev B now uses a 1 MiB SPIFFS `FFS` partition. YMODEM send/receive and overwrite were tested over USB serial with byte-for-byte verification. Multiple workers, FIFO cancellation, heap recovery, and Mandelbrot after cancellation were verified on Olimex. Three concurrent workers plus Mandelbrot still exceed compiler memory. Full VGA, keyboard shortcuts, clock, and Wi-Fi acceptance on Olimex remain partly open.
+**Status (2026-11-05):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`; five worker launch/kill cycles ran. Their heap readings include retained task-result records and graphics-arena high-water capacity, so they do not isolate source-buffer recovery. Olimex ESP32-SBC-FabGL Rev B uses a 512 KiB SPIFFS `FFS` partition alongside external `SDC:/`. Both drives mount; YMODEM, directory listing, worker loading, and remote debugger breakpoint/EVAL/watch/step/diagnostics were exercised over USB serial. VGA capture verified printable ASCII; paged `HELP` resumed after `Q`; the 80x56 Mandelbrot demo completed and was captured. PS/2 input/shortcuts, clock, and Wi-Fi acceptance remain open.
 
 Supported build families are independent firmware targets:
 
 | Profile | Display / input | Status |
 | --- | --- | --- |
 | `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance on a LILYGO board pending |
-| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 1 MiB SPIFFS (`FFS`) | Built and flashed on Rev B; serial REPL, FFS, YMODEM send/receive/overwrite, PS/2 detection, and multi-task memory stress checked; full VGA and shortcut acceptance open |
+| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass; physical PS/2 shortcuts, clock, and Wi-Fi remain open |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; memory stress still needs isolated measurements |
 | `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Built and flashed; storage mounted, `startup.bas` loaded at boot, task launch/cancellation exercised |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
@@ -47,15 +47,17 @@ builds cover the adapters using fakes; USB serial REPL was verified on the
 physical Olimex board using the LILYGO image. That image configured SD MISO as
 GPIO 2, while the Olimex Rev B schematic specifies GPIO 35. A separate Olimex
 profile now selects MISO 35; the LILYGO profile retains MISO 2. Both use PS/2
-port 0 at CLK GPIO 33 and DATA GPIO 32. Rebuild and flash the Olimex image
-before repeating SD and keyboard checks. The Olimex adapter uses ESP-IDF's
-SPI2/VFS SD-SPI mount path, while the LILYGO adapter retains Arduino SD. VGA
-output, clock status, and SD
-behavior still require verification. The async line
-presenter for alert, confirmation, dialog, and menu requests is integrated. It
-accepts replies via serial or PS/2 and is covered by Linux state-machine tests;
-physical interaction still requires board verification. ESP32-S3 TFT
-integration remains platform work.
+port 0 at CLK GPIO 33 and DATA GPIO 32. The Olimex image mounts its 512 KiB
+SPIFFS partition as `FFS:/` and the external card as `SDC:/` through ESP-IDF's
+SPI2/VFS SD-SPI adapter; the LILYGO adapter retains Arduino SD. On 2026-11-05,
+the Olimex firmware was flashed and VGA capture verified the printable ASCII
+font. Paged HELP suspended and resumed through its on-screen input panel. The
+80x56 Mandelbrot demo rendered on the default graphics surface; its attempted
+`WINDOW` resize raised `bad_alloc`, so the example avoids resizing that surface.
+Physical PS/2 interaction/shortcuts, clock, and Wi-Fi still need verification.
+The async presenter handles alert, confirmation, dialog, menu, and input
+requests and is covered by host state-machine tests. ESP32-S3 TFT integration
+remains platform work.
 
 The `esp32_2432s028` target applies the same BASIC graphics contract to the
 common ESP32-2432S028R yellow-board variant using an ILI9341 TFT. Its USB serial

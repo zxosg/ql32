@@ -513,6 +513,7 @@ ExecutionStatus Interpreter::resume(std::ostream& output, runtime::CancellationT
 ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
                                           std::size_t instructionBudget,
                                           runtime::CancellationToken stop) {
+    if (hasPendingInteractivePager()) return resumeInteractivePager(output);
     if (!execution_) throw std::runtime_error("interpreter has no suspended execution");
     if (instructionBudget == 0)
         throw std::invalid_argument("instruction budget must be positive");
@@ -692,7 +693,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             DialogBuilder& dialog = found->second;
             dialog.hasResults = result->kind == ui::ResultKind::Submitted;
             if (dialog.hasResults) {
-                dialog.results = result->fields;
+                dialog.results = std::move(result->fields);
                 for (std::size_t i = 0; i < dialog.fields.size(); ++i)
                     dialog.fields[i].initialValue = dialog.results[i];
             }

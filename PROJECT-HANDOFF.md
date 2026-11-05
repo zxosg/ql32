@@ -19,9 +19,11 @@ session.
 
 Reviewed 2026-11-04: the source baseline was
 [`de88fe5`](https://github.com/zxosg/ql32/commit/de88fe5) (“Add QL/32 language
-and runtime features”), matching `origin/main`. This review updates project
-status documents in the working tree. Math precision and ESP32 CPU frequency
-options are committed, not local-only changes.
+and runtime features”), matching `origin/main` at that review. This 2026-11-05
+update records subsequent implementation and board testing. The shared working
+tree also contains pre-existing changes from other work; inspect `git status`
+before staging or committing. Math precision and ESP32 CPU frequency options
+were already committed at the earlier baseline.
 
 The latest implementation includes:
 
@@ -32,15 +34,19 @@ The latest implementation includes:
 - Host storage and session-owned channels, `LOAD`/`SAVE`/`DIR`, `OPEN`,
   line and exact-byte file I/O, and asynchronous UI requests. `ALERT`,
   `CONFIRM`, dialogs and menus suspend/resume only their calling session.
+  Optional `PAGER ON` pagination covers generated listings; graphics adapters
+  show the input prompt on screen. Submit an empty line, `L`, or `Q` to advance,
+  step, or stop the listing.
 - Retained indexed graphics windows, `PLOT`, filled/outline primitives,
   window movement/resizing, CYD rotation
   and palette queries, Linux PPM output, and CYD/VGA32 graphics adapters.
   `WINDOW #channel,x,y,w,h` now selects independent per-session channel
   surfaces, including a graphics surface for console channel `#0`; `PRINT #0`
   remains console output. CYD and FabGL console overlays follow `#0` bounds.
-  Linux and all maintained ESP32 profiles build. CYD users have confirmed
-  compositor movement, resizing/clipping and rotations; visual confirmation of
-  the latest `PLOT` attractor remains open.
+  Linux and all maintained ESP32 profiles build. The classic glyph set now
+  covers printable ASCII `0x20`–`0x7E`, verified by VGA capture. CYD users have
+  confirmed compositor movement, resizing/clipping and rotations; visual
+  confirmation of the latest `PLOT` attractor remains open.
 - Cooperative weighted session scheduling and an embedded persistent REPL.
   Current supervisor/BASIC task APIs use `TASK`, `KILL`, `TASKRESULT`,
   `TASKCHANNELS`, `LOGON`, `LOGOFF`, `SUSPEND`, `RESUME`, `SLICE`,
@@ -60,6 +66,15 @@ cases. It also built the four maintained PlatformIO environments:
 `esp32_2432s028_spiffs`. The machine is macOS, so the `build/linux` preset
 compiled and tested here is not native Linux evidence. Native Linux validation
 remains open.
+
+On 2026-11-05, the Olimex firmware was rebuilt and flashed. Board checks
+verified the full printable ASCII glyph set in a 320x200 VGA capture, paged
+HELP resumption after `Q`, and rendered Mandelbrot output. The Mandelbrot demo
+now uses an 80x56 streaming renderer on the default graphics surface. Its
+`WINDOW` resize statement raised `bad_alloc` on this board, even at 80x64, so
+the demo avoids resizing. The runtime, scheduler, graphics, and graphics UI
+host suites passed when compiled directly with `g++`; CMake was unavailable, so
+this was not a full CTest run.
 
 ## Decisions to preserve
 
@@ -95,12 +110,13 @@ remains open.
   streams a reconstructed compositor and console snapshot as an 8-bit indexed
   BMP over YMODEM without a full-frame allocation; a 320×240 capture was
   received from hardware.
-- Olimex Rev B has earlier partial acceptance for USB serial REPL, internal
-  FFS/YMODEM, PS/2 detection, worker launch/cancellation, heap recovery, and
-  Mandelbrot after worker cancellation. Do not claim full VGA acceptance: the
-  display, PS/2 interaction/shortcuts, clock, line UI, task interaction, SD and
-  Wi-Fi still require board-level verification. VGA hardware is currently
-  unavailable, so defer those checks.
+- Olimex Rev B has 512 KiB internal FFS alongside external SDC. Both mounts,
+  BASIC REPL arithmetic/heap queries, dual-drive YMODEM, remote debugger file
+  listing, worker launch, breakpoint/EVAL/watch/step/diagnostics, and worker
+  cancellation were verified on 2026-11-05. VGA screen capture, ASCII font
+  output, pager interaction, and Mandelbrot output were also verified. Physical
+  PS/2 key input/shortcuts, clock, line UI, and Wi-Fi still need board-level
+  verification.
 - Known memory constraint: three concurrent workers plus Mandelbrot can fail
   during compiler preparation. After worker cycles, free heap was 5–10 KiB
   below the reset baseline while the largest block recovered; retained task
@@ -122,17 +138,17 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    and isolate source buffers, task-result records, and canvas-arena high-water
    storage using `FREE()`, `FREE(1)`, `FREE(2)`. Record the supported workload
    boundary where Mandelbrot compilation exhausts memory.
-4. **Native Linux:** run `tools/build-target.sh linux` and all 57 CTest cases on
+4. **Native Linux:** run `tools/build-target.sh linux` and all CTest cases on
    a Linux machine or CI runner; the two build directories in this Mac checkout
    both ran on Darwin.
-5. **Deferred VGA acceptance:** when the physical board returns, use the current
-   `olimex_esp32_sbc_fabgl` profile and verify VGA/console layout, PS/2 key
-   input/shortcuts, `REBOOT`, startup/storage, line UI, task controls, clock,
-   and Wi-Fi. Keep LILYGO-specific physical acceptance separate.
-6. **Performance check:** time attractor frames and measure the selected CPU
+5. **Olimex board acceptance:** use the connected `olimex_esp32_sbc_fabgl` board
+   to verify physical PS/2 key input/shortcuts, `REBOOT`, line UI, task controls,
+   clock, and Wi-Fi. VGA capture, font, pager, and Mandelbrot output were
+   verified on 2026-11-05. Keep LILYGO-specific physical acceptance separate.
+6. **Performance check:** time the 80x56 attractor and measure the selected CPU
    clock for SINGLE/DOUBLE and 80/160/240 MHz.
-7. **Backlog:** specify bounded font assets and `FONT`/`LOAD FONT`; implement
-   REPL `EDIT linenumber`; later scope palette changes, task window tiling,
+7. **Backlog:** specify custom bounded bitmap-font assets and `FONT`/`LOAD FONT`;
+   implement REPL `EDIT linenumber`; later scope palette changes, task window tiling,
    string splitting/slicing, indirect procedure calls, network channels, BLE,
    and new hardware families.
 

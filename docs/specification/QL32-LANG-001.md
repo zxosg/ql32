@@ -483,6 +483,17 @@ file order; blank lines are skipped. A file cannot mix numbered and unnumbered
 source lines. After loading, use `LIST` to inspect the numbered program and
 `RUN` to execute it.
 
+`HELP` lists the implemented REPL commands, BASIC statements and commands, and
+built-in functions. It includes commands that require optional runtime services;
+those commands may report that a required service is unavailable when used.
+`PAGER ON` enables per-session pagination for generated listings such as `HELP`,
+`LIST`, `DIR`, and `TASKS`; it is off by default. Page size follows the output
+window's text rows and columns. Submit an empty line for the next page, `L` to
+advance one line, or `Q` to stop the listing. While waiting, only the requesting
+session is suspended. Graphics UI adapters display the prompt as an on-screen
+input panel; keyboard and serial text can answer it. `PAGER OFF` disables
+pagination and `PAGER` reports the current mode.
+
 Storage paths may select a named drive with a prefix before the colon:
 `FFS:` is the internal flash filesystem and `SDC:` is the removable SD card.
 For example, `DIR "FFS:/"`, `LOAD "SDC:/mandelbrot.bas"`, and
@@ -521,8 +532,9 @@ include `ql32.inc` to use these named constants.
 `TASKCHANNELS id` lists a session's reserved and opened handles with endpoint
 types. `LOGON id` routes embedded console input to an idle worker so immediate
 BASIC commands operate in that session; `LOGOFF` returns to the supervisor.
-The prompt includes the attached task ID. `KILL id` stops an active task;
-log off before killing the currently attached session. `SLICE` reports or
+The prompt includes the attached task ID. `KILL id` stops an active task, or
+removes a completed, failed, or cancelled task record and its saved result.
+Log off before killing the currently attached session. `SLICE` reports or
 changes the number of bytecode instructions allowed per scheduler turn (default
 128, valid range 1..65536). `PRIORITY id,weight` sets a task's scheduling
 weight to a non-negative 32-bit integer; the default is 4. Higher weights
@@ -574,7 +586,7 @@ are statement commands. See
 [QL32-API-001](QL32-API-001.md). `EDIT linenumber` is planned as a REPL
 editing command: it will load the numbered line into the input editor so Enter
 replaces it; submitting an empty numbered line deletes it. The target shell's
-`STOP` and `HELP`, and later `CONT`, remain future work.
+`STOP` and, later, `CONT`, remain future work.
 
 Channels are universal session-owned I/O handles. `#0` is reserved for the
 command/error console and keyboard input; `#1` is reserved for user/program

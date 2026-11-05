@@ -156,6 +156,33 @@ void testAtomicProgramLineAndBlocks() {
             "multi-line block could not be stored and run");
 }
 
+void testHelpCommandCatalog() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.executeInteractive("10 PRINT \"kept\"\n", output);
+
+    interpreter.executeInteractive("help\nPRINT \"after help\"\n", output);
+    const std::string help = output.str();
+    require(help.find("Shell commands:\n") != std::string::npos &&
+                help.find("HELP, RUN, LIST") != std::string::npos,
+            "HELP did not list the shell commands");
+    require(help.find("BASIC statements and commands:\n") != std::string::npos &&
+                help.find("SELect") != std::string::npos && help.find("WRITE") != std::string::npos,
+            "HELP did not list BASIC keywords and commands");
+    require(help.find("Built-in functions:\n") != std::string::npos &&
+                help.find("LEN") != std::string::npos && help.find("GPALETTE$") != std::string::npos,
+            "HELP did not list built-in functions");
+    require(help.find("optional runtime services") != std::string::npos,
+            "HELP did not explain optional service requirements");
+    require(endsWith(help, "after help\n"),
+            "HELP did not continue with the following interactive statement");
+
+    std::ostringstream listing;
+    interpreter.executeInteractive("LIST\n", listing);
+    require(listing.str() == "10 PRINT \"kept\"\n",
+            "HELP modified the stored program");
+}
+
 void testPersistentRepl() {
     ql32::Interpreter interpreter;
     std::istringstream input(
@@ -775,6 +802,7 @@ int main() {
         testGotoLineNumbersAndLabels();
         testCancellation();
         testAtomicProgramLineAndBlocks();
+        testHelpCommandCatalog();
         testPersistentRepl();
         testStoredProgramDiagnosticsAndArrayTypes();
         testKeywordAbbreviationCoverage();

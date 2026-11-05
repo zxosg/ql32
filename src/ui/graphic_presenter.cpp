@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace ql32::ui {
 namespace {
@@ -94,7 +95,7 @@ GraphicPresenter::~GraphicPresenter() {
 }
 
 bool GraphicPresenter::graphicActive() const noexcept {
-    return request_ && request_->kind != RequestKind::Input;
+    return request_.has_value();
 }
 bool GraphicPresenter::inputActive() const noexcept {
     return request_ && request_->kind == RequestKind::Input;
@@ -106,6 +107,7 @@ bool GraphicPresenter::beginNext() {
     request_ = service_->takeNextRequest();
     if (!request_) return false;
     edits_.clear(); values_.clear(); error_.clear();
+    inputEdit_.clear();
     focus_ = scroll_ = 0;
     confirmYes_ = false;
     for (const auto& field : request_->fields) {
@@ -186,6 +188,8 @@ void GraphicPresenter::rebuildRows() {
             if (value.size() > columns) value = value.substr(value.size() - columns);
             rows_.push_back({value, static_cast<int>(i)});
         }
+    } else if (request_->kind == RequestKind::Input) {
+        rows_.push_back({inputEdit_});
     }
 }
 
@@ -276,6 +280,7 @@ void GraphicPresenter::paint() {
         request_->kind == RequestKind::Confirm ?
             (confirmYes_ ? "N  No   [Y  Yes]" : "[N  No]   Y  Yes") :
         request_->kind == RequestKind::Menu ? "Enter:Select Esc:Back" :
+        request_->kind == RequestKind::Input ? "Enter:Submit  Esc:Cancel" :
         request_->cancelLabel + "   " + request_->acceptLabel;
     if (!error_.empty()) actions = error_;
     drawText(canvas, 7, h - footerHeight + 5, actions, w - 14, 0);
@@ -379,7 +384,7 @@ bool GraphicPresenter::submit() {
         }
         values_[i] = number;
     }
-    if (service_->submitDialog(id, values_)) { finish(); return true; }
+    if (service_->submitDialog(id, std::move(values_))) { finish(); return true; }
     error_ = "Check values"; paint(); graphics_->invalidateSystemRegion(bounds_);
     return false;
 }
@@ -387,6 +392,23 @@ bool GraphicPresenter::submit() {
 bool GraphicPresenter::handleKey(const input::KeyEvent& event) {
     refresh();
     if (!graphicActive() || !event.pressed) return false;
+    if (request_->kind == RequestKind::Input) {
+        if (event.key == input::Key::Escape) {
+            service_->resolve(request_->id, ResultKind::Cancelled); finish(); return true;
+        }
+        if (event.key == input::Key::Backspace) {
+            if (!inputEdit_.empty()) inputEdit_.pop_back();
+        } else if (event.key == input::Key::Enter) {
+            service_->submitInput(request_->id, inputEdit_); finish(); return true;
+        } else if (event.key == input::Key::Character && event.character >= 32 &&
+                   event.character <= 126 && inputEdit_.size() < 256) {
+            inputEdit_.push_back(static_cast<char>(event.character));
+        } else {
+            return false;
+        }
+        rebuildRows(); paint(); graphics_->invalidateSystemRegion(bounds_);
+        return true;
+    }
     if (event.key == input::Key::Escape) {
         service_->resolve(request_->id, ResultKind::Cancelled); finish(); return true;
     }

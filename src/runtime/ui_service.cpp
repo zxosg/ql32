@@ -3,6 +3,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
+#include <utility>
 
 namespace ql32::ui {
 
@@ -93,7 +94,7 @@ std::optional<Result> QueuedService::poll(RequestId request) {
     std::lock_guard lock(mutex_);
     const auto found = requests_.find(request);
     if (found == requests_.end() || !found->second.result) return std::nullopt;
-    const Result result = *found->second.result;
+    Result result = std::move(*found->second.result);
     requests_.erase(found);
     return result;
 }
@@ -141,7 +142,14 @@ bool QueuedService::resolve(RequestId request, ResultKind result) {
     return false;
 }
 
-bool QueuedService::submitDialog(RequestId request, std::vector<FieldValue> fields) {
+bool QueuedService::submitDialog(RequestId request,
+                                 const std::vector<FieldValue>& fields) {
+    std::vector<FieldValue> copy = fields;
+    return submitDialog(request, std::move(copy));
+}
+
+bool QueuedService::submitDialog(RequestId request,
+                                 std::vector<FieldValue>&& fields) {
     std::lock_guard lock(mutex_);
     const auto found = requests_.find(request);
     if (found == requests_.end() || !found->second.dispatched || found->second.result ||

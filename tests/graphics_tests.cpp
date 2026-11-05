@@ -702,6 +702,15 @@ void testCanvasArenaCompactsAndReusesStorage() {
             "canvas depth change lost pixels in the arena");
 }
 
+void testEveryPrintableAsciiCharacterHasAGlyph() {
+    const auto fallback = classicGlyphColumns('\x01');
+    for (int character = 32; character <= 126; ++character) {
+        const auto pattern = classicGlyphColumns(static_cast<char>(character));
+        require(pattern != fallback,
+                "printable ASCII character fell through to the unknown-glyph box");
+    }
+}
+
 void testCloseWindowCommandDispatch() {
     auto graphics = std::make_shared<RecordingGraphics>();
     ql32::Interpreter interpreter({}, {}, {}, graphics);
@@ -732,5 +741,6 @@ int main() {
     testCloseWindowReleasesCanvasAndAllowsReuse();
     testCompletedSessionRemainsAvailableForCapture();
     testCanvasArenaCompactsAndReusesStorage();
+    testEveryPrintableAsciiCharacterHasAGlyph();
     testCloseWindowCommandDispatch();
 }

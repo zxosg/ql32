@@ -173,6 +173,13 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_esp32_channels_tests PRIVATE tests/fakes include)
   target_compile_features(ql32_esp32_channels_tests PRIVATE cxx_std_20)
   add_test(NAME ql32_esp32_channels_tests COMMAND ql32_esp32_channels_tests)
+  add_executable(ql32_drive_router_tests
+    tests/drive_router_tests.cpp
+    src/platform/esp32/drive_router.cpp
+  )
+  target_include_directories(ql32_drive_router_tests PRIVATE include)
+  target_compile_features(ql32_drive_router_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_drive_router_tests COMMAND ql32_drive_router_tests)
   add_executable(ql32_lilygo_vga32_profile_tests tests/lilygo_vga32_profile_tests.cpp)
   target_include_directories(ql32_lilygo_vga32_profile_tests PRIVATE boards/lilygo_vga32 include)
   target_compile_features(ql32_lilygo_vga32_profile_tests PRIVATE cxx_std_17)

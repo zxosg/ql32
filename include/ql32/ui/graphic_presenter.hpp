@@ -47,6 +47,7 @@ private:
     std::vector<Row> rows_;
     std::vector<std::string> edits_;
     std::vector<FieldValue> values_;
+    std::string inputEdit_;
     std::size_t focus_ = 0;
     std::size_t scroll_ = 0;
     bool confirmYes_ = false;

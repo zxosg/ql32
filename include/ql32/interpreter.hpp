@@ -28,7 +28,10 @@ namespace ql32 {
 namespace detail { struct VMExecutionState; struct UISessionState; }
 
 using Value = std::variant<double, std::string>;
-enum class ExecutionStatus { Completed, Suspended, WaitingChannel, WaitingTask, Yielded, DebugPaused };
+enum class ExecutionStatus {
+    Completed, Suspended, WaitingChannel, WaitingTask, Yielded, DebugPaused,
+    RunPending, InteractivePending
+};
 
 class Interpreter {
 public:
@@ -84,6 +87,10 @@ public:
     std::optional<runtime::DebugValue> debugEvaluate(const std::string& expression) const;
     bool debugAddWatch(std::string expression);
     bool debugRemoveWatch(const std::string& expression);
+    std::string takePendingRunSource() noexcept;
+    std::string takePendingInteractiveTail() noexcept;
+    bool hasPendingInteractivePager() const noexcept;
+    ExecutionStatus resumeInteractivePager(std::ostream& output);
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
     const std::string& errorDetail() const noexcept { return errorDetail_; }
     void clear();
@@ -91,6 +98,8 @@ public:
 private:
     ExecutionStatus runExecution(std::ostream& output, runtime::CancellationToken stop,
                                  std::size_t instructionBudget = 0);
+    void writePagerPage(std::ostream& output, std::size_t lineCount);
+    void clearPager() noexcept;
     runtime::ChannelId resolveChannel(runtime::ChannelId channel) const;
     void setDefaultOutputChannel(runtime::ChannelId channel);
     void bindChannel(runtime::ChannelId source, runtime::ChannelId destination);
@@ -100,6 +109,14 @@ private:
     std::size_t output_column_ = 0;
     runtime::ChannelId default_output_channel_ = 1;
     std::string current_directory_;
+    std::string pendingRunSource_;
+    std::string pendingInteractiveTail_;
+    bool pagerEnabled_ = false;
+    std::string pendingPagerText_;
+    std::size_t pendingPagerOffset_ = 0;
+    std::size_t pendingPagerPageRows_ = 1;
+    runtime::ChannelId pendingPagerChannel_ = 0;
+    std::optional<ui::RequestId> pendingPagerRequest_;
     // Logical channels point directly at the endpoint handle they currently
     // represent. No channel-to-channel route chains are retained.
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;

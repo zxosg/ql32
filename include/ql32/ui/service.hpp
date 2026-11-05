@@ -95,7 +95,8 @@ public:
 
     std::optional<Request> takeNextRequest();
     bool resolve(RequestId request, ResultKind result);
-    bool submitDialog(RequestId request, std::vector<FieldValue> fields);
+    bool submitDialog(RequestId request, const std::vector<FieldValue>& fields);
+    bool submitDialog(RequestId request, std::vector<FieldValue>&& fields);
     bool submitInput(RequestId request, std::string line);
     bool selectMenu(RequestId request, std::uint32_t commandId);
     bool isOutstanding(RequestId request);

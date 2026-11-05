@@ -1,14 +1,15 @@
-REM Small 120x84 Mandelbrot, drawn as horizontal color runs for CYD.
-DIM row%(119)
-WINDOW 0,0,240,176
+REM Small 80x56 Mandelbrot, drawn on the default graphics window.
 PAPER 0
 INK 7
+GUPDATE 1
 CLS
-PRINT "MANDELBROT 120x84"
-FOR py = 0 TO 83
-  cy = (42 - py) / 32
-  FOR px = 0 TO 119
-    cx = (px - 60) / 33 - 0.5
+PRINT "MANDELBROT 80x56"
+FOR py = 0 TO 55
+  cy = (28 - py) / 21
+  shade = -1
+  runStart = 0
+  FOR px = 0 TO 79
+    cx = (px - 40) / 22 - 0.5
     zx = 0
     zy = 0
     iter = 0
@@ -20,31 +21,24 @@ FOR py = 0 TO 83
         iter = iter + 1
       END IF
     END FOR it
-    shade = 0
+    pixelShade = 0
     IF iter < 24 THEN
-      shade = iter MOD 7 + 1
+      pixelShade = iter MOD 7 + 1
     END IF
-    row%(px) = shade
+    IF px = 0 THEN
+      shade = pixelShade
+      runStart = 0
+    ELSE
+      IF pixelShade <> shade THEN
+        INK shade
+        LINE runStart, py + 8, px - 1, py + 8
+        shade = pixelShade
+        runStart = px
+      END IF
+    END IF
   END FOR px
-  x = 0
-  REPEAT runs
-    IF x >= 120 THEN
-      EXIT runs
-    END IF
-    shade = row%(x)
-    runStart = x
-    REPEAT extend
-      x = x + 1
-      IF x >= 120 THEN
-        EXIT extend
-      END IF
-      IF row%(x) <> shade THEN
-        EXIT extend
-      END IF
-    END REPEAT extend
-    INK shade
-    LINE runStart * 2, py * 2 + 8, x * 2 - 1, py * 2 + 8
-    LINE runStart * 2, py * 2 + 9, x * 2 - 1, py * 2 + 9
-  END REPEAT runs
+  INK shade
+  LINE runStart, py + 8, 79, py + 8
 END FOR py
+GUPDATE
 PRINT #0, "Mandelbrot complete"

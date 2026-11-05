@@ -181,6 +181,26 @@ void testFrameVisibleOnLightAndDarkBackgrounds() {
                 "dialog frame disappears into the background");
     }
 }
+
+void testLineInputPromptIsVisibleAndKeyboardAccessible() {
+    auto service = std::make_shared<ql32::ui::QueuedService>();
+    auto capture = std::make_shared<Capture>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, capture);
+    ql32::ui::GraphicPresenter ui(service, graphics);
+    const auto request = service->beginInput(1,
+        "--More-- Enter=page, L=line, Q=quit:");
+    require(ui.beginNext() && ui.graphicActive() && ui.inputActive(),
+            "line input prompt was not presented as an active graphics UI");
+    const auto bounds = ui.bounds();
+    require(bounds.width > 0 && bounds.height > 0 && capture->count > 0,
+            "line input prompt was not drawn on screen");
+    ui.handleKey(key(ql32::input::Key::Character, 'L'));
+    ui.handleKey(key(ql32::input::Key::Enter));
+    const auto result = service->poll(request);
+    require(result && result->kind == ql32::ui::ResultKind::Submitted &&
+            std::get<std::string>(result->fields.at(0)) == "L" && !ui.active(),
+            "line input did not accept and submit keyboard text");
+}
 } // namespace
 
 int main() {
@@ -189,4 +209,5 @@ int main() {
     testCancellationAndLayers();
     testConfirmSerialAndLongMessage();
     testFrameVisibleOnLightAndDarkBackgrounds();
+    testLineInputPromptIsVisibleAndKeyboardAccessible();
 }
