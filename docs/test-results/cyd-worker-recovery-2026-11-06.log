@@ -46,4 +46,4 @@ BASIC REPL ready (USB serial)
 > serial_probe = OPEN(2)
 > PRINT #serial_probe,"IDLE_AFTER_WORKER_REBOOT|";FREE(0);",";FREE(1);",";FREE(2)
 IDLE_AFTER_WORKER_REBOOT|181472,110580,23
-> 
+>

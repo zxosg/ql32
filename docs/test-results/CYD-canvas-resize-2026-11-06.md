@@ -1,11 +1,11 @@
 # CYD full-screen canvas resize test
 
-**Date:** 2026-11-06 (Europe/Prague)  
-**Board:** ESP32-2432S028 CYD  
-**Port:** `/dev/cu.usbserial-11440`  
-**PlatformIO profile:** `esp32_2432s028_spiffs`  
-**Git branch/HEAD:** `codex/newvm` / `f8e95b8` with uncommitted graphics changes  
-**Firmware image SHA-256:** `c6009c2aaeca657755e700217821acb400174655b6d199140228fb573f60898b`
+- **Date:** 2026-11-06 (Europe/Prague)
+- **Board:** ESP32-2432S028 CYD
+- **Port:** `/dev/cu.usbserial-11440`
+- **PlatformIO profile:** `esp32_2432s028_spiffs`
+- **Git branch/HEAD at first run:** `codex/newvm` / `f8e95b8`, with the resize changes in the worktree
+- **First firmware image SHA-256:** `c6009c2aaeca657755e700217821acb400174655b6d199140228fb573f60898b`
 
 The firmware was built with `pio run -e esp32_2432s028_spiffs` and flashed with
 `pio run -e esp32_2432s028_spiffs -t upload --upload-port /dev/cu.usbserial-11440`.
@@ -112,4 +112,3 @@ state differ from the post-reboot baseline.
 [`cyd-fullscreen-resize-2026-11-06.log`](cyd-fullscreen-resize-2026-11-06.log)
 [`cyd-resize-soak-2026-11-06.log`](cyd-resize-soak-2026-11-06.log)
 [`cyd-worker-recovery-2026-11-06.log`](cyd-worker-recovery-2026-11-06.log)
-
