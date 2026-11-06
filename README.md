@@ -197,8 +197,8 @@ screen buffer.
 
 ### PC remote debugger
 
-The Python desktop client supports the ESP32-2432S028 CYD and Olimex
-ESP32-SBC-FabGL. Install its dependencies and launch it from the repository root:
+The Python desktop client supports the ESP32-2432S028 CYD, Tenstar ESP32-S3,
+and Olimex ESP32-SBC-FabGL. Install its dependencies and launch it from the repository root:
 
 ```bash
 python3 -m pip install -r tools/ql32_remote_debugger/requirements.txt
@@ -216,9 +216,29 @@ The panels show source position, locals, globals, arrays, watches, stack, and
 opt-in execution counters. EVAL and watches accept only side-effect-free
 expressions. Screen captures are on demand and can be saved as BMP files.
 
+The Debugger tab also exposes each task's screen-space canvas origin and clip
+size. Select a task, edit X/Y/W/H, and choose **Set selected canvas** to move or
+resize its viewport while preserving the BASIC program's window coordinates.
+**Tile tasks in grid** lays out all non-supervisor tasks using the configured
+display width and height (defaults to the Tenstar's 240×135). Start the same
+worker source several times to see each task's independent windows in a tile;
+change one task's canvas origin to move its windows together. The task list
+refreshes without overwriting canvas values while they are being edited.
+
 The client deliberately reports other boards, including LILYGO VGA32, as
 unsupported. Firmware protocol requests use the versioned `@QL32DBG/1` serial
-frame; the existing monitor REPL and YMODEM commands remain available.
+frame; the existing monitor REPL and YMODEM commands remain available. The
+protocol's `tasks.list` response includes each task's viewport geometry, and
+`task.viewport` changes it without modifying the BASIC program. Its arguments
+are task ID, screen-space origin X/Y, and canvas width/height. For example, a
+client request has the fields:
+
+```text
+@QL32DBG/1<TAB>42<TAB>task.viewport<TAB>3<TAB>80<TAB>0<TAB>80<TAB>135
+```
+
+`<TAB>` represents one literal tab byte. Negative origins are accepted and
+clipped at the task canvas and display edges.
 
 On embedded targets, enter `REBOOT` at the interactive supervisor prompt to
 perform a software restart. The Olimex FabGL target also supports PS/2 execution

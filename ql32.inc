@@ -48,7 +48,7 @@ CONST KFlowXonXoff = 2
 CONST KFreeTotal = 0
 CONST KFreeContiguous = 1
 CONST KFreeFragments = 2
-' TASK start flags and TASKRESULT selectors
+' TASK and GETTASK selectors, plus TASKRESULT selectors
 CONST KTaskWait = 1
 CONST KTaskResultStatus = 1
 CONST KTaskResultChannels = 2
@@ -57,3 +57,9 @@ CONST KTaskResultErrorDetail = 4
 CONST KTaskResultKind = 5
 CONST KTaskResultPriority = 6
 CONST KTaskResultResumePriority = 7
+CONST KTaskResultCanvasOriginX = 8
+CONST KTaskResultCanvasOriginY = 9
+CONST KTaskResultCanvasWidth = 10
+CONST KTaskResultCanvasHeight = 11
+CONST KTaskCount = 0
+CONST KTaskHandle = 1

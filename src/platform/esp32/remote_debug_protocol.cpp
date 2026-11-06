@@ -234,7 +234,8 @@ void RemoteDebugProtocol::handle(std::string_view line, vm::SessionScheduler& sc
         if (operation == "hello") {
             requireArgs(0);
             const bool supportedBoard = capabilities_.board == "ESP32-2432S028" ||
-                capabilities_.board == "Olimex ESP32-SBC-FabGL";
+                capabilities_.board == "Olimex ESP32-SBC-FabGL" ||
+                capabilities_.board == "TENSTAR-ESP32-S3";
             payload = "{\"version\":1,\"board\":" + json(capabilities_.board) +
                 ",\"supported\":" +
                 std::string(supportedBoard ? "true" : "false") +
@@ -257,6 +258,10 @@ void RemoteDebugProtocol::handle(std::string_view line, vm::SessionScheduler& sc
                     ",\"supervisor\":" + (task.supervisor ? "true" : "false") +
                     ",\"interactive\":" + (task.interactive ? "true" : "false") +
                     ",\"priority\":" + std::to_string(task.priority) +
+                    ",\"canvas_origin_x\":" + std::to_string(task.viewport.originX) +
+                    ",\"canvas_origin_y\":" + std::to_string(task.viewport.originY) +
+                    ",\"canvas_width\":" + std::to_string(task.viewport.canvasWidth) +
+                    ",\"canvas_height\":" + std::to_string(task.viewport.canvasHeight) +
                     ",\"error\":" + json(task.error) + "}";
             }
             payload.push_back(']');
@@ -280,6 +285,21 @@ void RemoteDebugProtocol::handle(std::string_view line, vm::SessionScheduler& sc
                 throw std::runtime_error("could not attach debugger to new task");
             }
             payload = "{\"task_id\":" + std::to_string(task) + ",\"paused\":true}";
+        } else if (operation == "task.viewport") {
+            requireArgs(5);
+            const auto task = number<vm::TaskId>(args[0], "task id");
+            const auto originX = number<std::int32_t>(args[1], "canvas origin x");
+            const auto originY = number<std::int32_t>(args[2], "canvas origin y");
+            const auto width = number<std::uint32_t>(args[3], "canvas width");
+            const auto height = number<std::uint32_t>(args[4], "canvas height");
+            if (!scheduler.setTaskViewport(task,
+                    {originX, originY, width, height}))
+                throw std::runtime_error("task viewport could not be updated");
+            payload = "{\"task_id\":" + std::to_string(task) +
+                ",\"canvas_origin_x\":" + std::to_string(originX) +
+                ",\"canvas_origin_y\":" + std::to_string(originY) +
+                ",\"canvas_width\":" + std::to_string(width) +
+                ",\"canvas_height\":" + std::to_string(height) + "}";
         } else if (operation == "debug.attach") {
             requireArgs(1);
             const auto task = number<vm::TaskId>(args[0], "task id");

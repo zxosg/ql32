@@ -58,6 +58,10 @@ public:
     bool setTaskPriority(runtime::TaskId id, std::uint32_t priority) override {
         return scheduler_.setTaskPriority(id, priority);
     }
+    bool setTaskViewport(runtime::TaskId id, std::int32_t x, std::int32_t y,
+                         std::uint32_t width, std::uint32_t height) override {
+        return scheduler_.setTaskViewport(id, {x, y, width, height});
+    }
 
     std::vector<runtime::ChannelInfo> listChannels(runtime::TaskId id) const override {
         return scheduler_.taskChannels(id);
@@ -101,7 +105,9 @@ public:
                               info.priority, info.resumePriority,
                               info.paused,
                               info.error, info.errorCode, info.errorDetail,
-                              info.openChannels});
+                              info.openChannels, info.viewport.originX,
+                              info.viewport.originY, info.viewport.canvasWidth,
+                              info.viewport.canvasHeight});
         }
         return result;
     }
@@ -508,6 +514,21 @@ std::vector<runtime::ChannelInfo> SessionScheduler::taskChannels(TaskId id) cons
     return {};
 }
 
+bool SessionScheduler::setTaskViewport(TaskId id, graphics::TaskViewport viewport) {
+    if (!services_.graphics) return false;
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interpreter) continue;
+        try {
+            services_.graphics->setTaskViewport(
+                current->interpreter->graphicsSessionId(), viewport);
+            return true;
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+    return false;
+}
+
 std::string SessionScheduler::takeError(TaskId id) {
     for (auto& current : tasks_)
         if (current->id == id) return std::exchange(current->error, {});
@@ -775,26 +796,36 @@ bool SessionScheduler::reap(TaskId id) {
 
 std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {
     for (const auto& current : tasks_)
-        if (current->id == id)
-            return TaskInfo{current->id, current->status, current->error,
+        if (current->id == id) {
+            TaskInfo info{current->id, current->status, current->error,
                             current->errorCode, current->errorDetail,
                             current->interactive, current->supervisor,
                             current->priority, current->resumePriority,
                             current->paused,
                             current->interpreter ? current->interpreter->openChannelCount() : 0};
+            if (services_.graphics && current->interpreter)
+                info.viewport = services_.graphics->taskViewport(
+                    current->interpreter->graphicsSessionId());
+            return info;
+        }
     return std::nullopt;
 }
 
 std::vector<TaskInfo> SessionScheduler::tasks() const {
     std::vector<TaskInfo> result;
     result.reserve(tasks_.size());
-    for (const auto& current : tasks_)
-        result.push_back({current->id, current->status, current->error,
+    for (const auto& current : tasks_) {
+        TaskInfo info{current->id, current->status, current->error,
                           current->errorCode, current->errorDetail,
                           current->interactive, current->supervisor,
                           current->priority, current->resumePriority,
                           current->paused,
-                          current->interpreter ? current->interpreter->openChannelCount() : 0});
+                          current->interpreter ? current->interpreter->openChannelCount() : 0};
+        if (services_.graphics && current->interpreter)
+            info.viewport = services_.graphics->taskViewport(
+                current->interpreter->graphicsSessionId());
+        result.push_back(std::move(info));
+    }
     return result;
 }
 

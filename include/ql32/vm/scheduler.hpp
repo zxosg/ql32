@@ -40,6 +40,7 @@ struct TaskInfo {
     std::uint32_t resumePriority = 4;
     bool paused = false;
     std::size_t openChannels = 0;
+    graphics::TaskViewport viewport{};
 };
 
 struct Services {
@@ -105,6 +106,7 @@ public:
     bool debugAddWatch(TaskId id, std::string expression);
     bool debugRemoveWatch(TaskId id, const std::string& expression);
     std::vector<runtime::ChannelInfo> taskChannels(TaskId id) const;
+    bool setTaskViewport(TaskId id, graphics::TaskViewport viewport);
     std::string takeError(TaskId id);
     bool tick();
     bool cancel(TaskId id);

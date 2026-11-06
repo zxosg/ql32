@@ -529,7 +529,8 @@ error. These names describe logical storage roles; a platform may implement
 
 The scheduler-backed embedded REPL also provides `TASKS`,
 `TASKRESULT id`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `KILL id`,
-`SLICE [instructions]`, `PRIORITY task-id,weight`, `SUSPEND id`, and
+`TASKVIEW id,origin-x,origin-y,width,height`, `SLICE [instructions]`,
+`PRIORITY task-id,weight`, `SUSPEND id`, and
 `RESUME id`. `TASK` reads source through the configured storage service and
 starts a task. Its statement form `TASK "path.bas"` reports the new task ID to
 console channel `#0`; `task_id = TASK("path.bas")` returns the ID without
@@ -544,8 +545,20 @@ slice; suspended tasks also show their saved resume priority.
 `TASKRESULT id` prints all available properties. In expressions,
 `TASKRESULT(id, selector)` returns one property selected by `KTaskResultStatus`,
 `KTaskResultChannels`, `KTaskResultErrorCode`, `KTaskResultErrorDetail`,
-`KTaskResultKind`, `KTaskResultPriority`, or `KTaskResultResumePriority`;
-include `ql32.inc` to use these named constants.
+`KTaskResultKind`, `KTaskResultPriority`, `KTaskResultResumePriority`,
+`KTaskResultCanvasOriginX`, `KTaskResultCanvasOriginY`,
+`KTaskResultCanvasWidth`, or `KTaskResultCanvasHeight`; include `ql32.inc` to
+use these named constants. The canvas origin is signed screen-space; width and
+height must be positive integers.
+`GETTASK(KTaskCount)` returns the number of retained task records, including
+the supervisor and completed records. `GETTASK(KTaskHandle, position)` returns
+the task ID at a zero-based position in ascending task-ID order. These
+supervisor-only selectors allow a program to enumerate tasks and inspect their
+state with `TASKRESULT`.
+`TASKVIEW id,origin-x,origin-y,width,height` changes the selected task's
+screen-space canvas origin and clipping dimensions. It is supervisor-only.
+Each task's `WINDOW x,y,width,height` positions remain relative to that task's
+origin, and the compositor clips windows to both the task canvas and display.
 `TASKCHANNELS id` lists a session's reserved and opened handles with endpoint
 types. `LOGON id` routes embedded console input to an idle worker so immediate
 BASIC commands operate in that session; `LOGOFF` returns to the supervisor.

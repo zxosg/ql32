@@ -818,7 +818,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         runtimeError(instruction, "TASKRESULT requires a positive task ID");
                     if (!numericField || !std::isfinite(*numericField) ||
                         std::trunc(*numericField) != *numericField ||
-                        *numericField < 1 || *numericField > 7)
+                        *numericField < 1 || *numericField > 11)
                         runtimeError(instruction, "invalid TASKRESULT selector");
                     const auto tasks = taskControl_->listTasks();
                     const auto found = std::find_if(tasks.begin(), tasks.end(),
@@ -852,6 +852,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         break;
                     case runtime::TaskResultField::ResumePriority:
                         pushValue(static_cast<double>(found->resumePriority));
+                        break;
+                    case runtime::TaskResultField::CanvasOriginX:
+                        pushValue(static_cast<double>(found->canvasOriginX));
+                        break;
+                    case runtime::TaskResultField::CanvasOriginY:
+                        pushValue(static_cast<double>(found->canvasOriginY));
+                        break;
+                    case runtime::TaskResultField::CanvasWidth:
+                        pushValue(static_cast<double>(found->canvasWidth));
+                        break;
+                    case runtime::TaskResultField::CanvasHeight:
+                        pushValue(static_cast<double>(found->canvasHeight));
                         break;
                     }
                     break;
@@ -1047,6 +1059,68 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     state.printChannel = previousChannel;
                     break;
                 }
+                if (instruction.name == "TASKVIEW") {
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "task supervisor service unavailable");
+                    const auto tasks = taskControl_->listTasks();
+                    const auto self = std::find_if(tasks.begin(), tasks.end(),
+                        [this](const runtime::ManagedTaskInfo& task) {
+                            return task.id == task_id_;
+                        });
+                    if (self == tasks.end() || !self->supervisor)
+                        throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
+                                             "TASKVIEW is supervisor-only");
+
+                    const auto* numericId = std::get_if<double>(&arguments[0]);
+                    if (!numericId || !std::isfinite(*numericId) ||
+                        std::trunc(*numericId) != *numericId || *numericId < 1 ||
+                        *numericId >= std::ldexp(1.0, 64))
+                        runtimeError(instruction, "TASKVIEW requires a positive task ID");
+                    const auto target = static_cast<runtime::TaskId>(*numericId);
+                    const auto requireInteger = [&](std::size_t index, double minimum,
+                                                    double maximum, const char* message) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number || !std::isfinite(*number) ||
+                            std::trunc(*number) != *number || *number < minimum ||
+                            *number > maximum)
+                            runtimeError(instruction, message);
+                        return *number;
+                    };
+                    const auto x = static_cast<std::int32_t>(requireInteger(1,
+                        static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+                        static_cast<double>(std::numeric_limits<std::int32_t>::max()),
+                        "TASKVIEW origin X must be a signed 32-bit integer"));
+                    const auto y = static_cast<std::int32_t>(requireInteger(2,
+                        static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+                        static_cast<double>(std::numeric_limits<std::int32_t>::max()),
+                        "TASKVIEW origin Y must be a signed 32-bit integer"));
+                    const auto width = static_cast<std::uint32_t>(requireInteger(3, 1,
+                        static_cast<double>(std::numeric_limits<std::uint32_t>::max()),
+                        "TASKVIEW canvas width must be a positive 32-bit integer"));
+                    const auto height = static_cast<std::uint32_t>(requireInteger(4, 1,
+                        static_cast<double>(std::numeric_limits<std::uint32_t>::max()),
+                        "TASKVIEW canvas height must be a positive 32-bit integer"));
+                    const auto targetInfo = std::find_if(tasks.begin(), tasks.end(),
+                        [target](const runtime::ManagedTaskInfo& task) {
+                            return task.id == target;
+                        });
+                    if (targetInfo == tasks.end())
+                        throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
+                                             "no task exists with that ID");
+                    if (!taskControl_->setTaskViewport(target, x, y, width, height))
+                        throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
+                                             "task viewport could not be updated");
+                    setErrorContext(runtime::ErrorCode::None);
+                    const auto previousChannel = state.printChannel;
+                    state.printChannel = resolveChannel(default_output_channel_);
+                    writePrintText("Task " + std::to_string(target) +
+                        " viewport set to (" + std::to_string(x) + "," +
+                        std::to_string(y) + ") " + std::to_string(width) + "x" +
+                        std::to_string(height) + "\n", instruction);
+                    state.printChannel = previousChannel;
+                    break;
+                }
                 if (instruction.name == "LEFT$" || instruction.name == "RIGHT$" ||
                     instruction.name == "MID$") {
                     const auto* text = std::get_if<std::string>(&arguments[0]);
@@ -1193,6 +1267,51 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         if (found == openChannels.end())
                             runtimeError(instruction, "channel handle is not open");
                         pushValue(std::string(runtime::channelTypeName(found->type)));
+                    }
+                    break;
+                }
+                if (instruction.name == "GETTASK") {
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "task supervisor unavailable");
+                    const auto tasks = taskControl_->listTasks();
+                    const auto self = std::find_if(tasks.begin(), tasks.end(),
+                        [this](const runtime::ManagedTaskInfo& task) {
+                            return task.id == task_id_;
+                        });
+                    if (self == tasks.end() || !self->supervisor)
+                        throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
+                                             "GETTASK is supervisor-only");
+                    const auto integerArgument = [&](std::size_t index,
+                                                     std::uint64_t maximum,
+                                                     const char* message) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number || !std::isfinite(*number) ||
+                            std::trunc(*number) != *number || *number < 0 ||
+                            *number > static_cast<double>(maximum))
+                            runtimeError(instruction, message);
+                        return static_cast<std::uint64_t>(*number);
+                    };
+                    const auto selector = integerArgument(0, 1,
+                                                          "invalid GETTASK selector");
+                    std::vector<runtime::ManagedTaskInfo> ordered = tasks;
+                    std::sort(ordered.begin(), ordered.end(),
+                        [](const auto& left, const auto& right) {
+                            return left.id < right.id;
+                        });
+                    if (selector == static_cast<std::uint64_t>(
+                                        runtime::TaskListField::Count)) {
+                        if (arguments.size() != 1)
+                            runtimeError(instruction, "GETTASK count takes one argument");
+                        pushValue(static_cast<double>(ordered.size()));
+                    } else {
+                        if (arguments.size() != 2)
+                            runtimeError(instruction, "GETTASK handle requires a position");
+                        const auto position = integerArgument(1, ordered.size(),
+                                                              "task position out of range");
+                        if (position >= ordered.size())
+                            runtimeError(instruction, "task position out of range");
+                        pushValue(static_cast<double>(ordered[position].id));
                     }
                     break;
                 }

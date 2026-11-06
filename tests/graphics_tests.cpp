@@ -783,6 +783,83 @@ void testCanvasStorageReleasesAndReusesAllocations() {
             "canvas depth change lost pixels in the arena");
 }
 
+void testTaskViewportTranslatesAndClipsOwnedWindows() {
+    using namespace ql32::graphics;
+    WindowManager manager(8, 6, 5, 0);
+    const auto background = manager.create(9, {0, 0, 8, 6});
+    manager.canvas(background).setPaper(3);
+    manager.canvas(background).clear();
+
+    const auto first = manager.create(41, {1, 1, 6, 4});
+    auto& firstCanvas = manager.canvas(first);
+    firstCanvas.setPaper(2);
+    firstCanvas.clear();
+    firstCanvas.setPixel(1, 0, 8);
+    firstCanvas.setPixel(5, 3, 12);
+
+    const auto second = manager.create(41, {6, 0, 3, 3});
+    manager.canvas(second).setPaper(5);
+    manager.canvas(second).clear();
+    manager.canvas(second).setPixel(0, 0, 14);
+
+    require(manager.taskViewport(41).canvasWidth == 8 &&
+                manager.taskViewport(41).canvasHeight == 6,
+            "new task viewport did not default to the physical display");
+    manager.setTaskViewport(41, {2, 1, 3, 2});
+    const auto firstState = manager.windowState(first);
+    require(firstState.bounds.x == 3 && firstState.bounds.y == 2 &&
+                firstState.screenClip.x == 3 && firstState.screenClip.y == 2 &&
+                firstState.screenClip.width == 2 && firstState.screenClip.height == 1,
+            "task origin did not translate and clip its window bounds");
+    require(manager.windowState(second).screenClip.width == 0,
+            "window extending outside the task viewport was not clipped");
+
+    auto frame = manager.compose();
+    require(frame[2 * 8 + 3] == 2 && frame[2 * 8 + 4] == 8 &&
+                frame[1 * 8 + 2] == 3,
+            "task clipping changed window-local pixels or covered unrelated pixels");
+
+    manager.setTaskViewport(41, {-1, 0, 8, 6});
+    frame = manager.compose();
+    require(frame[1 * 8 + 1] == 8 && frame[4 * 8 + 5] == 12 &&
+                frame[5] == 14 && frame[5 * 8 + 7] == 3,
+            "expanding/moving the task viewport did not reveal retained pixels or preserve other tasks");
+}
+
+void testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin() {
+    using namespace ql32::graphics;
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(8, 6, presenter, 4, 0);
+    const auto background = graphics.windowManager().create(99, {0, 0, 8, 6});
+    graphics.windowManager().canvas(background).setPaper(3);
+    graphics.windowManager().canvas(background).clear();
+
+    graphics.setWindowBounds(77, 1, {1, 1, 6, 4});
+    const auto window = graphics.windowForSession(77);
+    auto& canvas = graphics.windowManager().canvas(window);
+    canvas.setPaper(2);
+    canvas.clear();
+    canvas.setPixel(1, 0, 8);
+    graphics.present();
+
+    graphics.setTaskViewport(77, {2, 1, 3, 2});
+    const auto info = graphics.windowInfo(77);
+    require(info.originX == 3 && info.originY == 2,
+            "GORIGINX/Y did not return the translated absolute window position");
+    require(presenter->lastFrame.pixels[1 * 8 + 1] == 3 &&
+                presenter->lastFrame.pixels[2 * 8 + 4] == 8 &&
+                presenter->lastFrame.pixels[2 * 8 + 5] == 3,
+            "moving the task viewport did not redraw old and clipped new regions");
+
+    graphics.closeSession(77);
+    require(graphics.taskViewport(77).canvasWidth == 3,
+            "completed task lost its viewport while its frozen canvas remained visible");
+    graphics.clear(88);
+    require(graphics.taskViewport(77).canvasWidth == 8 &&
+                graphics.taskViewport(77).canvasHeight == 6,
+            "reclaiming a frozen canvas did not release its task viewport");
+}
+
 void testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink() {
     using namespace ql32::graphics;
     WindowManager manager(16, 10, 4, 256);
@@ -922,6 +999,8 @@ int main() {
     testNewWindowCommandReclaimsFrozenCanvasBudget();
     testDebugOverlayComposesAboveGraphics();
     testCanvasStorageReleasesAndReusesAllocations();
+    testTaskViewportTranslatesAndClipsOwnedWindows();
+    testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin();
     testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
     testFailedCanvasResizePreservesAllWindows();
     testEveryPrintableAsciiCharacterHasAGlyph();

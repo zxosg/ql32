@@ -668,6 +668,14 @@ void WindowManager::validate(Rect bounds) {
 WindowId WindowManager::create(SessionId owner, Rect bounds, PixelDepth depth) {
     if (owner == 0) throw std::invalid_argument("window owner must be a valid session");
     validate(bounds);
+    const auto viewport = taskViewport(owner);
+    const auto screenX = static_cast<std::int64_t>(viewport.originX) + bounds.x;
+    const auto screenY = static_cast<std::int64_t>(viewport.originY) + bounds.y;
+    if (screenX < std::numeric_limits<std::int32_t>::min() ||
+        screenY < std::numeric_limits<std::int32_t>::min() ||
+        screenX + bounds.width > std::numeric_limits<std::int32_t>::max() ||
+        screenY + bounds.height > std::numeric_limits<std::int32_t>::max())
+        throw std::out_of_range("window bounds exceed supported screen coordinates");
     if (windows_.size() >= maximumWindows_)
         throw std::runtime_error("window manager window limit reached");
     const auto newBytes = checkedCanvasBytes(bounds.width, bounds.height, depth);
@@ -714,17 +722,57 @@ void WindowManager::closeSession(SessionId owner) {
     windows_.erase(std::remove_if(windows_.begin(), windows_.end(),
                                   [owner](const Entry& item) { return item.owner == owner; }),
                    windows_.end());
+    taskViewports_.erase(owner);
 }
 
 WindowState WindowManager::windowState(WindowId id) const {
     const auto& entry = find(id);
-    return {entry.id, entry.owner, entry.bounds, clip(entry.bounds),
+    const auto bounds = screenBounds(entry);
+    return {entry.id, entry.owner, bounds, clipToTask(entry, bounds),
             entry.canvas.depth(), entry.visible};
+}
+
+void WindowManager::setTaskViewport(SessionId owner, TaskViewport viewport) {
+    if (owner == 0) throw std::invalid_argument("task viewport owner must be valid");
+    validate(viewport);
+    for (const auto& entry : windows_) {
+        if (entry.owner != owner) continue;
+        const auto x = static_cast<std::int64_t>(viewport.originX) + entry.bounds.x;
+        const auto y = static_cast<std::int64_t>(viewport.originY) + entry.bounds.y;
+        const auto right = x + entry.bounds.width;
+        const auto bottom = y + entry.bounds.height;
+        if (x < std::numeric_limits<std::int32_t>::min() ||
+            y < std::numeric_limits<std::int32_t>::min() ||
+            right > std::numeric_limits<std::int32_t>::max() ||
+            bottom > std::numeric_limits<std::int32_t>::max())
+            throw std::out_of_range("task viewport places a window outside supported coordinates");
+    }
+    taskViewports_[owner] = viewport;
+}
+
+TaskViewport WindowManager::taskViewport(SessionId owner) const {
+    const auto found = taskViewports_.find(owner);
+    if (found != taskViewports_.end()) return found->second;
+    return {0, 0, screenWidth_, screenHeight_};
+}
+
+void WindowManager::releaseTaskViewportIfUnused(SessionId owner) {
+    const auto remains = std::find_if(windows_.begin(), windows_.end(),
+        [owner](const Entry& entry) { return entry.owner == owner; });
+    if (remains == windows_.end()) taskViewports_.erase(owner);
 }
 
 void WindowManager::setBounds(WindowId id, Rect bounds) {
     validate(bounds);
     auto& entry = find(id);
+    const auto viewport = taskViewport(entry.owner);
+    const auto x = static_cast<std::int64_t>(viewport.originX) + bounds.x;
+    const auto y = static_cast<std::int64_t>(viewport.originY) + bounds.y;
+    if (x < std::numeric_limits<std::int32_t>::min() ||
+        y < std::numeric_limits<std::int32_t>::min() ||
+        x + bounds.width > std::numeric_limits<std::int32_t>::max() ||
+        y + bounds.height > std::numeric_limits<std::int32_t>::max())
+        throw std::out_of_range("window bounds exceed supported screen coordinates");
     const auto newBytes = checkedCanvasBytes(bounds.width, bounds.height, entry.canvas.depth());
     if (maximumCanvasBytes_ != 0) {
         std::size_t allocated = newBytes;
@@ -783,13 +831,39 @@ void WindowManager::raise(WindowId id) {
     windows_.push_back(std::move(raised));
 }
 
-Rect WindowManager::clip(Rect bounds) const {
-    const std::int64_t left = std::max<std::int64_t>(0, bounds.x);
-    const std::int64_t top = std::max<std::int64_t>(0, bounds.y);
-    const std::int64_t right = std::min<std::int64_t>(screenWidth_,
-        static_cast<std::int64_t>(bounds.x) + bounds.width);
-    const std::int64_t bottom = std::min<std::int64_t>(screenHeight_,
-        static_cast<std::int64_t>(bounds.y) + bounds.height);
+void WindowManager::validate(TaskViewport viewport) {
+    if (viewport.canvasWidth == 0 || viewport.canvasHeight == 0)
+        throw std::invalid_argument("task canvas dimensions must be positive");
+    const auto right = static_cast<std::int64_t>(viewport.originX) + viewport.canvasWidth;
+    const auto bottom = static_cast<std::int64_t>(viewport.originY) + viewport.canvasHeight;
+    if (right > std::numeric_limits<std::int32_t>::max() ||
+        bottom > std::numeric_limits<std::int32_t>::max())
+        throw std::out_of_range("task viewport exceeds supported coordinates");
+}
+
+Rect WindowManager::screenBounds(const Entry& entry) const {
+    const auto viewport = taskViewport(entry.owner);
+    const auto x = static_cast<std::int64_t>(viewport.originX) + entry.bounds.x;
+    const auto y = static_cast<std::int64_t>(viewport.originY) + entry.bounds.y;
+    if (x < std::numeric_limits<std::int32_t>::min() ||
+        y < std::numeric_limits<std::int32_t>::min() ||
+        x + entry.bounds.width > std::numeric_limits<std::int32_t>::max() ||
+        y + entry.bounds.height > std::numeric_limits<std::int32_t>::max())
+        throw std::out_of_range("window bounds exceed supported screen coordinates");
+    return {static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+            entry.bounds.width, entry.bounds.height};
+}
+
+Rect WindowManager::clipToTask(const Entry& entry, Rect bounds) const {
+    const auto viewport = taskViewport(entry.owner);
+    const auto left = std::max<std::int64_t>({0, bounds.x, viewport.originX});
+    const auto top = std::max<std::int64_t>({0, bounds.y, viewport.originY});
+    const auto right = std::min<std::int64_t>({
+        screenWidth_, static_cast<std::int64_t>(bounds.x) + bounds.width,
+        static_cast<std::int64_t>(viewport.originX) + viewport.canvasWidth});
+    const auto bottom = std::min<std::int64_t>({
+        screenHeight_, static_cast<std::int64_t>(bounds.y) + bounds.height,
+        static_cast<std::int64_t>(viewport.originY) + viewport.canvasHeight});
     if (left >= right || top >= bottom) return {};
     return {static_cast<std::int32_t>(left), static_cast<std::int32_t>(top),
             static_cast<std::uint32_t>(right - left),
@@ -849,7 +923,8 @@ void WindowManager::composeRegionRowInto(std::uint32_t y, std::uint32_t x,
     const auto right = x + width;
     for (const auto& entry : windows_) {
         if (!entry.visible) continue;
-        const Rect visible = clip(entry.bounds);
+        const auto bounds = screenBounds(entry);
+        const Rect visible = clipToTask(entry, bounds);
         if (visible.width == 0 || visible.height == 0 ||
             y < static_cast<std::uint32_t>(visible.y) ||
             y >= static_cast<std::uint32_t>(visible.y) + visible.height)
@@ -859,9 +934,9 @@ void WindowManager::composeRegionRowInto(std::uint32_t y, std::uint32_t x,
             static_cast<std::uint32_t>(visible.x) + visible.width);
         if (left >= clippedRight) continue;
         const auto sourceX = static_cast<std::uint32_t>(
-            static_cast<std::int64_t>(left) - entry.bounds.x);
+            static_cast<std::int64_t>(left) - bounds.x);
         const auto sourceY = static_cast<std::uint32_t>(
-            static_cast<std::int64_t>(y) - entry.bounds.y);
+            static_cast<std::int64_t>(y) - bounds.y);
         for (std::uint32_t destinationX = left;
              destinationX < clippedRight; ++destinationX) {
             row[destinationX - x] = entry.canvas.pixel(
@@ -875,9 +950,10 @@ std::vector<WindowState> WindowManager::compositionOrder() const {
     result.reserve(windows_.size());
     for (const auto& entry : windows_) {
         if (!entry.visible) continue;
-        const Rect visible = clip(entry.bounds);
+        const auto bounds = screenBounds(entry);
+        const Rect visible = clipToTask(entry, bounds);
         if (visible.width == 0 || visible.height == 0) continue;
-        result.push_back({entry.id, entry.owner, entry.bounds, visible,
+        result.push_back({entry.id, entry.owner, bounds, visible,
                           entry.canvas.depth(), entry.visible});
     }
     return result;
@@ -936,9 +1012,27 @@ void WindowManager::tile() {
     }
     if (maximumCanvasBytes_ != 0 && requiredBytes > maximumCanvasBytes_)
         throw std::runtime_error("window manager canvas memory limit reached");
+    std::vector<Rect> localBounds;
+    localBounds.reserve(visible.size());
+    for (std::size_t index = 0; index < visible.size(); ++index) {
+        const auto viewport = taskViewport(visible[index]->owner);
+        const auto localX = static_cast<std::int64_t>(tiledBounds[index].x) -
+                            viewport.originX;
+        const auto localY = static_cast<std::int64_t>(tiledBounds[index].y) -
+                            viewport.originY;
+        if (localX < std::numeric_limits<std::int32_t>::min() ||
+            localX > std::numeric_limits<std::int32_t>::max() ||
+            localY < std::numeric_limits<std::int32_t>::min() ||
+            localY > std::numeric_limits<std::int32_t>::max())
+            throw std::out_of_range("tiled window position exceeds supported coordinates");
+        localBounds.push_back({static_cast<std::int32_t>(localX),
+                               static_cast<std::int32_t>(localY),
+                               tiledBounds[index].width,
+                               tiledBounds[index].height});
+    }
     for (std::size_t index = 0; index < visible.size(); ++index) {
         visible[index]->canvas.resize(tiledBounds[index].width, tiledBounds[index].height);
-        visible[index]->bounds = tiledBounds[index];
+        visible[index]->bounds = localBounds[index];
     }
 }
 

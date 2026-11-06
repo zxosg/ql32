@@ -30,9 +30,17 @@ pio device monitor -p /dev/ttyACM0 -b 115200
 
 The firmware profile reserves 512 KiB of the 4 MiB flash for SPIFFS at `FFS:/`.
 The Tenstar-only filesystem folder contains a compact `startup.bas`,
-`graphics-test.bas`, `memory-test.bas`, three persistent worker programs, and a
-concurrent Mandelbrot workload; `PLATFORMIO_DATA_DIR` selects it for the
-`uploadfs` operation without changing the other boards' filesystem images.
+`graphics-test.bas`, `sincos64-grid.bas`, `fsconsole.bas`,
+`memory-test.bas`, three persistent worker programs, and a concurrent
+Mandelbrot workload; `PLATFORMIO_DATA_DIR` selects it for the `uploadfs`
+operation without changing the other boards' filesystem images.
+`sincos64-grid.bas` draws a 64×64 eight-color field using four sine/cosine
+modulations and task-origin phase. On the 240×135 panel, use six 80×67 task
+viewports at X=0/80/160 and Y=0/68. Enter `WINDOW #0,239,0,1,135` once in the
+supervisor REPL before launching them to narrow the text-console overlay to the
+right edge, leaving the full display height available for both rows. The
+Tenstar window manager allows 16 live windows with its 32,400-byte canvas
+budget, enough for this six-task grid at four-bit depth.
 The memory test reports `FREE(0)` (free heap bytes), `FREE(1)` (largest free
 block), and `FREE(2)` (free blocks) to the USB serial channel before opening,
 while holding, and after closing a small graphics window. The BASIC display

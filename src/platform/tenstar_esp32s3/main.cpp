@@ -330,7 +330,7 @@ void setup() {
         },
         [] { if (tftConsole) tftConsole->reconfigure(); });
     graphics = std::make_shared<ql32::graphics::WindowedService>(
-        display.width(), display.height(), framePresenter, 4, 32400);
+        display.width(), display.height(), framePresenter, 16, 32400);
     graphics->setCanvasResizeObserver(
         [](ql32::graphics::CanvasResizePhase phase, std::size_t oldBytes,
            std::size_t newBytes) {

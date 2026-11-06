@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, QSignalBlocker, Signal
 from PySide6.QtGui import QColor, QPainter, QTextFormat
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel,
     QInputDialog,
     QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QSplitter, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QPushButton, QSpinBox, QSplitter, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -149,6 +150,7 @@ class DebuggerWindow(QMainWindow):
         self.pending: dict[int, tuple] = {}
         self.transfer_jobs: dict[str, tuple] = {}
         self.current_task: int | None = None
+        self.task_info: dict[int, dict] = {}
         self.current_source_path: str | None = None
         self.storage_roots: list[str] = []
         self.remote_dir = ""
@@ -207,6 +209,29 @@ class DebuggerWindow(QMainWindow):
         bar.addWidget(self.attach_button)
         bar.addWidget(self.start_button)
         layout.addLayout(bar)
+
+        viewport = QHBoxLayout()
+        self.viewport_x = self._spinbox(-4096, 4096, 0, "Canvas screen X")
+        self.viewport_y = self._spinbox(-4096, 4096, 0, "Canvas screen Y")
+        self.viewport_width = self._spinbox(1, 4096, 240, "Canvas width")
+        self.viewport_height = self._spinbox(1, 4096, 135, "Canvas height")
+        for label, widget in (("X", self.viewport_x), ("Y", self.viewport_y),
+                              ("W", self.viewport_width), ("H", self.viewport_height)):
+            viewport.addWidget(QLabel(label))
+            viewport.addWidget(widget)
+        self.screen_width = self._spinbox(1, 4096, 240, "Physical display width for grid")
+        self.screen_height = self._spinbox(1, 4096, 135, "Physical display height for grid")
+        viewport.addWidget(QLabel("Display W×H"))
+        viewport.addWidget(self.screen_width)
+        viewport.addWidget(self.screen_height)
+        self.viewport_apply = QPushButton("Set selected canvas")
+        self.viewport_apply.clicked.connect(self._set_selected_viewport)
+        self.grid_button = QPushButton("Tile tasks in grid")
+        self.grid_button.clicked.connect(self._tile_tasks)
+        viewport.addWidget(self.viewport_apply)
+        viewport.addWidget(self.grid_button)
+        layout.addLayout(viewport)
+        self.task_box.currentIndexChanged.connect(self._load_selected_viewport)
 
         split = QSplitter()
         self.editor = SourceEditor()
@@ -428,6 +453,11 @@ class DebuggerWindow(QMainWindow):
             self._populate_files(payload)
         elif callback == "start":
             self.current_task = int(payload["task_id"])
+            self._request("tasks.list", callback="tasks")
+        elif callback == "viewport":
+            self._log(f"Task {payload['task_id']} canvas set to "
+                      f"({payload['canvas_origin_x']}, {payload['canvas_origin_y']}) "
+                      f"{payload['canvas_width']}×{payload['canvas_height']}")
             self._log(f"Started and attached task {self.current_task}")
             self._inspect()
         elif callback == "attach":
@@ -444,6 +474,8 @@ class DebuggerWindow(QMainWindow):
 
     def _populate_tasks(self, tasks):
         old = self.task_box.currentData()
+        self.task_info = {int(task["id"]): task for task in tasks}
+        blocker = QSignalBlocker(self.task_box)
         self.task_box.clear()
         for task in tasks:
             label = f"{task['id']} — {task['status']}"
@@ -451,6 +483,56 @@ class DebuggerWindow(QMainWindow):
         index = self.task_box.findData(old)
         if index >= 0:
             self.task_box.setCurrentIndex(index)
+        del blocker
+        if old != self.task_box.currentData():
+            self._load_selected_viewport()
+
+    @staticmethod
+    def _spinbox(minimum, maximum, value, tooltip):
+        box = QSpinBox()
+        box.setRange(minimum, maximum)
+        box.setValue(value)
+        box.setToolTip(tooltip)
+        box.setMaximumWidth(90)
+        return box
+
+    def _load_selected_viewport(self, *_):
+        task_id = self.task_box.currentData()
+        task = self.task_info.get(int(task_id)) if task_id is not None else None
+        if not task:
+            return
+        self.viewport_x.setValue(int(task.get("canvas_origin_x", 0)))
+        self.viewport_y.setValue(int(task.get("canvas_origin_y", 0)))
+        self.viewport_width.setValue(int(task.get("canvas_width", 240)))
+        self.viewport_height.setValue(int(task.get("canvas_height", 135)))
+
+    def _set_selected_viewport(self):
+        task_id = self.task_box.currentData()
+        if task_id is None:
+            self._show_error("Select a task first.")
+            return
+        self._request("task.viewport", task_id, self.viewport_x.value(),
+                      self.viewport_y.value(), self.viewport_width.value(),
+                      self.viewport_height.value(), callback="viewport")
+
+    def _tile_tasks(self):
+        tasks = [task for task in self.task_info.values() if not task.get("supervisor")]
+        if not tasks:
+            self._show_error("Start at least one worker task first.")
+            return
+        columns = math.ceil(math.sqrt(len(tasks)))
+        rows = math.ceil(len(tasks) / columns)
+        screen_width = self.screen_width.value()
+        screen_height = self.screen_height.value()
+        tile_width = max(1, screen_width // columns)
+        tile_height = max(1, screen_height // rows)
+        for index, task in enumerate(tasks):
+            x = (index % columns) * tile_width
+            y = (index // columns) * tile_height
+            self._request("task.viewport", task["id"], x, y, tile_width, tile_height,
+                          callback="viewport")
+        self._log(f"Tiling {len(tasks)} tasks in a {columns}×{rows} grid "
+                  f"using {tile_width}×{tile_height} canvases")
 
     def _populate_files(self, entries):
         self.file_tree.clear()

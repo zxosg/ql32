@@ -88,7 +88,7 @@ constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
     "INK", "PAPER", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
-    "CLOSEWINDOW", "GUPDATE", "KILL", "OUT", "POKE", "POKE_W", "POKE_L",
+    "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
     "DEALLOC", "XFER"
 };
 
@@ -98,13 +98,13 @@ constexpr std::string_view builtinFunctions[] = {
     "ROR", "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
     "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
-    "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GWIDTH", "GHEIGHT", "GDEPTH",
+    "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
     "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$"
 };
 
 constexpr std::string_view shellHelpCommands[] = {
     "HELP", "RUN", "LIST", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
-    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKRESULT", "LOGON",
+    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "WHERE", "LOCALS", "GLOBALS",
     "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
@@ -204,6 +204,7 @@ bool isBuiltinName(const std::string& name) {
 
 std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "KILL") return {1, false};
+    if (instruction.name == "TASKVIEW") return {5, false};
     if (instruction.name == "TASK") return {1, instruction.expectsValue};
     if (instruction.name == "TASKRESULT") return {2, true};
     if (instruction.name == "ERR") return {0, true};
@@ -223,6 +224,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
         instruction.name == "INT") return {1, true};
     if (instruction.name == "FREE") return {0, true};
     if (instruction.name == "GETCHANNEL") return {1, true};
+    if (instruction.name == "GETTASK") return {1, true};
     if (instruction.name == "GETNET") return {2, false};
     if (instruction.name == "DISNET") return {0, false};
     if (instruction.name == "NETSTAT$" || instruction.name == "NETADDR$") return {0, true};
@@ -736,6 +738,9 @@ private:
                 } else if (instruction.name == "GETCHANNEL") {
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "GETCHANNEL expects one or two arguments");
+                } else if (instruction.name == "GETTASK") {
+                    if (passedArguments < 1 || passedArguments > 2)
+                        error(instruction, "GETTASK expects one or two arguments");
                 } else if (instruction.name == "OPEN") {
                     if (passedArguments < 1 || passedArguments > 20)
                         error(instruction, "OPEN expects a device and up to nineteen parameters");
@@ -757,6 +762,9 @@ private:
                 } else if (instruction.name == "TASK") {
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "TASK expects a filename and optional flags");
+                } else if (instruction.name == "TASKVIEW") {
+                    if (passedArguments != 5)
+                        error(instruction, "TASKVIEW expects task ID, origin X/Y, and canvas width/height");
                 } else if (instruction.name == "MID$") {
                     if (passedArguments < 2 || passedArguments > 3)
                         error(instruction, "MID$ expects a string, start, and optional length");

@@ -24,6 +24,15 @@ struct Rect {
     std::uint32_t height = 0;
 };
 
+// Screen-space viewport shared by all retained windows owned by one task.
+// Window bounds are task-relative; composition translates and clips them here.
+struct TaskViewport {
+    std::int32_t originX = 0;
+    std::int32_t originY = 0;
+    std::uint32_t canvasWidth = 0;
+    std::uint32_t canvasHeight = 0;
+};
+
 struct WindowInfo {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
@@ -43,8 +52,8 @@ struct RgbColor {
 enum class UpdateMode : std::uint8_t { Auto, On, Off };
 
 // Platform-neutral drawing contract. An implementation owns pixel windows and
-// drawing state per session/channel. It creates windows on first use, clips
-// drawing to their bounds, and releases them from closeSession().
+// drawing state per session/channel. A task viewport translates and clips its
+// windows during composition. Resources are released from closeSession().
 class Service {
 public:
     virtual ~Service() = default;
@@ -187,6 +196,10 @@ public:
         (void)channel;
         setWindowBounds(session, bounds);
     }
+    virtual void setTaskViewport(SessionId, TaskViewport) {
+        throw std::runtime_error("task viewport positioning unsupported");
+    }
+    virtual TaskViewport taskViewport(SessionId) const { return {}; }
     virtual void setRotation(SessionId, std::uint16_t degrees) {
         throw std::runtime_error("display rotation unsupported");
     }

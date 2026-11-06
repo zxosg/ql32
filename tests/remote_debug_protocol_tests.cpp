@@ -1,4 +1,5 @@
 #include "ql32/platform/esp32/remote_debug_protocol.hpp"
+#include "ql32/graphics/windowed_service.hpp"
 
 #include <map>
 #include <sstream>
@@ -32,7 +33,8 @@ public:
     void remove(const std::string& path) override { files.erase(path); }
 
     std::map<std::string, std::string> files{
-        {"FFS:/demo.bas", "10 x=2\n20 PRINT x\n"}
+        {"FFS:/demo.bas", "10 x=2\n20 PRINT x\n"},
+        {"FFS:/window.bas", "WINDOW 1,1,8,6\nPAPER 2\nCLS\n"}
     };
 };
 
@@ -139,6 +141,64 @@ void testDebuggerOperationsAndErrors() {
             "unknown protocol operation did not return a structured error");
 }
 
+void testRemoteTaskViewportControl() {
+    ql32::platform::esp32::RemoteDebugCapabilities capabilities;
+    capabilities.board = "ESP32-2432S028";
+    capabilities.storageRoots = {"FFS:/"};
+    ql32::platform::esp32::RemoteDebugProtocol protocol(std::move(capabilities));
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        32, 16, nullptr, 5, 0);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    MemoryStorage storage;
+    std::ostringstream output;
+
+    const auto started = invoke(protocol, scheduler, storage, output,
+        request(1, "task.start", {"FFS:/window.bas"}));
+    require(started.find("\"task_id\":1") != std::string::npos,
+            "viewport scenario task failed to start");
+    require(scheduler.tick(), "viewport scenario did not enter its initial pause");
+    require(invoke(protocol, scheduler, storage, output,
+                    request(2, "debug.resume", {"1", "continue"})).find("\tOK\t") !=
+                std::string::npos,
+            "viewport scenario task did not resume");
+    for (int i = 0; i < 20; ++i) {
+        const auto info = scheduler.task(1);
+        if (info && info->status == ql32::vm::TaskStatus::WaitingInput) break;
+        require(scheduler.tick(), "viewport scenario task stopped before its prompt");
+    }
+    require(scheduler.task(1)->status == ql32::vm::TaskStatus::WaitingInput,
+            "viewport scenario did not reach its interactive prompt");
+    const auto before = graphics->windowManager().compositionOrder();
+    require(before.size() == 1 && before.front().bounds.x == 1 &&
+                before.front().bounds.y == 1,
+            "viewport scenario did not create its initial window");
+
+    const auto moved = invoke(protocol, scheduler, storage, output,
+        request(3, "task.viewport", {"1", "10", "-2", "8", "6"}));
+    require(moved.find("\"canvas_origin_x\":10") != std::string::npos &&
+                moved.find("\"canvas_origin_y\":-2") != std::string::npos,
+            "remote viewport update response omitted its geometry");
+    const auto after = graphics->windowManager().compositionOrder();
+    require(after.size() == 1 && after.front().bounds.x == 11 &&
+                after.front().bounds.y == -1 && after.front().screenClip.y == 0,
+            "remote viewport update did not reposition and clip the retained window");
+    const auto taskList = invoke(protocol, scheduler, storage, output,
+                                 request(4, "tasks.list"));
+    require(taskList.find("\"canvas_origin_x\":10") != std::string::npos &&
+                taskList.find("\"canvas_origin_y\":-2") != std::string::npos &&
+                taskList.find("\"canvas_width\":8") != std::string::npos &&
+                taskList.find("\"canvas_height\":6") != std::string::npos,
+            "remote task listing did not report current viewport properties");
+
+    const auto rejected = invoke(protocol, scheduler, storage, output,
+        request(5, "task.viewport", {"1", "0", "0", "0", "6"}));
+    require(rejected.find("\tERR\t") != std::string::npos &&
+                scheduler.task(1)->viewport.originX == 10,
+            "invalid viewport update was not rejected atomically");
+}
+
 void testLilygoCapabilityIsRejectedByClientHandshake() {
     ql32::platform::esp32::RemoteDebugCapabilities capabilities;
     capabilities.board = "LILYGO VGA32 V1.4";
@@ -151,10 +211,24 @@ void testLilygoCapabilityIsRejectedByClientHandshake() {
             "LILYGO was not advertised as unsupported by the PC app");
 }
 
+void testTenstarCapabilityIsSupportedByClientHandshake() {
+    ql32::platform::esp32::RemoteDebugCapabilities capabilities;
+    capabilities.board = "TENSTAR-ESP32-S3";
+    ql32::platform::esp32::RemoteDebugProtocol protocol(std::move(capabilities));
+    ql32::vm::SessionScheduler scheduler;
+    MemoryStorage storage;
+    std::ostringstream output;
+    const auto hello = invoke(protocol, scheduler, storage, output, request(1, "hello"));
+    require(hello.find("\"supported\":true") != std::string::npos,
+            "Tenstar was not advertised as supported by the PC app");
+}
+
 } // namespace
 
 int main() {
     testCapabilitiesStorageAndTaskStart();
     testDebuggerOperationsAndErrors();
+    testRemoteTaskViewportControl();
     testLilygoCapabilityIsRejectedByClientHandshake();
+    testTenstarCapabilityIsSupportedByClientHandshake();
 }

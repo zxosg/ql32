@@ -2,6 +2,7 @@
 #include "ql32/ui/service.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -589,6 +590,127 @@ void testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts() {
             "LOGOFF did not return focus to the supervisor");
 }
 
+void testSupervisorTaskViewportUsesTaskToSessionMapping() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        32, 16, nullptr, 5, 0);
+    // Consume a graphics session ID before task IDs are allocated so the test
+    // detects accidental use of TaskId as the window owner SessionId.
+    ql32::Interpreter unrelatedSession;
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream supervisorOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    std::ostringstream firstOutput;
+    std::ostringstream secondOutput;
+    const auto first = scheduler.launchWorker(
+        "WINDOW 1,1,6,4\nCLS\n", firstOutput);
+    const auto second = scheduler.launchWorker(
+        "WINDOW 2,0,4,4\nCLS\n", secondOutput);
+    for (int tick = 0; tick < 30; ++tick) {
+        const auto firstInfo = scheduler.task(first);
+        const auto secondInfo = scheduler.task(second);
+        if (firstInfo && secondInfo &&
+            firstInfo->status == ql32::vm::TaskStatus::WaitingInput &&
+            secondInfo->status == ql32::vm::TaskStatus::WaitingInput)
+            break;
+        require(scheduler.tick(), "scheduler did not run viewport worker startup");
+    }
+
+    const auto before = graphics->windowManager().compositionOrder();
+    require(before.size() == 2,
+            "viewport workers did not create two graphics windows");
+    const auto firstBefore = std::find_if(before.begin(), before.end(),
+        [](const auto& item) { return item.bounds.x == 1 && item.bounds.y == 1; });
+    const auto secondBefore = std::find_if(before.begin(), before.end(),
+        [](const auto& item) { return item.bounds.x == 2 && item.bounds.y == 0; });
+    require(firstBefore != before.end() && secondBefore != before.end() &&
+                firstBefore->owner != first && secondBefore->owner != second,
+            "test did not create distinct task IDs and graphics session IDs");
+    require(scheduler.setTaskViewport(first, {5, 2, 12, 8}),
+            "supervisor viewport operation rejected a valid task");
+
+    const auto after = graphics->windowManager().compositionOrder();
+    const auto firstOwner = firstBefore->owner;
+    const auto secondOwner = secondBefore->owner;
+    const auto moved = std::find_if(after.begin(), after.end(),
+        [firstOwner](const auto& item) { return item.owner == firstOwner; });
+    const auto unchanged = std::find_if(after.begin(), after.end(),
+        [secondOwner](const auto& item) { return item.owner == secondOwner; });
+    require(moved != after.end() && moved->bounds.x == 6 && moved->bounds.y == 3,
+            "TaskId-to-SessionId mapping did not move the selected task's window");
+    require(unchanged != after.end() && unchanged->bounds.x == 2 &&
+                unchanged->bounds.y == 0,
+            "setting one task viewport moved another task's window");
+    const auto reported = scheduler.task(first);
+    const auto untouched = scheduler.task(second);
+    require(reported && reported->viewport.originX == 5 &&
+                reported->viewport.originY == 2 &&
+                reported->viewport.canvasWidth == 12 &&
+                reported->viewport.canvasHeight == 8 && untouched &&
+                untouched->viewport.originX == 0 &&
+                untouched->viewport.canvasWidth == 32 &&
+                untouched->viewport.canvasHeight == 16,
+            "task information did not report viewport properties");
+    (void)supervisor;
+}
+
+void testBasicTaskViewCommandIsSupervisorOnly() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        32, 16, nullptr, 5, 0);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream supervisorOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    std::ostringstream workerOutput;
+    const auto worker = scheduler.launchWorker("WINDOW 0,0,8,8\nCLS\n", workerOutput);
+    for (int tick = 0; tick < 20; ++tick) {
+        const auto info = scheduler.task(worker);
+        if (info && info->status == ql32::vm::TaskStatus::WaitingInput) break;
+        require(scheduler.tick(), "scheduler did not start viewport command worker");
+    }
+
+    require(scheduler.submit(supervisor,
+                "TASKVIEW " + std::to_string(worker) + ",5,2,12,8\n"),
+            "supervisor did not accept TASKVIEW");
+    require(scheduler.tick(), "scheduler did not execute TASKVIEW");
+    const auto changed = scheduler.task(worker);
+    require(changed && changed->viewport.originX == 5 &&
+                changed->viewport.originY == 2 &&
+                changed->viewport.canvasWidth == 12 &&
+                changed->viewport.canvasHeight == 8,
+            "TASKVIEW did not update the selected task's viewport");
+    require(scheduler.submit(supervisor,
+                "PRINT #0,GETTASK(KTaskCount)\n"),
+            "supervisor did not accept GETTASK count");
+    require(scheduler.tick(), "scheduler did not execute GETTASK count");
+    require(scheduler.submit(supervisor,
+                "PRINT #0,GETTASK(KTaskHandle,1)\n"),
+            "supervisor did not accept GETTASK handle");
+    require(scheduler.tick(), "scheduler did not execute GETTASK handle");
+    require(supervisorOutput.str().find("2") != std::string::npos &&
+                supervisorOutput.str().find(std::to_string(worker)) != std::string::npos,
+            "GETTASK did not return task count and ID enumeration");
+
+    std::ostringstream unauthorizedOutput;
+    const auto unauthorized = scheduler.launchWorker(
+        "TASKVIEW 1,0,0,8,8\n", unauthorizedOutput);
+    for (int tick = 0; tick < 20; ++tick) {
+        const auto info = scheduler.task(unauthorized);
+        if (info && info->status == ql32::vm::TaskStatus::Failed) break;
+        if (!scheduler.tick()) break;
+    }
+    const auto rejected = scheduler.task(unauthorized);
+    if (!(rejected &&
+          rejected->errorDetail.find("supervisor-only") != std::string::npos)) {
+        throw std::runtime_error("TASKVIEW was not restricted to the supervisor (state=" +
+            (rejected ? std::to_string(static_cast<int>(rejected->status)) :
+                        std::string("missing")) + ", error=" +
+            (rejected ? rejected->errorDetail : std::string("missing")) + ")");
+    }
+}
+
 void testSupervisorCanToggleDebugBar() {
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
         320, 240, nullptr);
@@ -935,6 +1057,8 @@ int main() {
     testPriorityWeightsChangeFrequency();
     testSupervisorCanSetSliceAndWorkerPriority();
     testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts();
+    testSupervisorTaskViewportUsesTaskToSessionMapping();
+    testBasicTaskViewCommandIsSupervisorOnly();
     testSupervisorCanToggleDebugBar();
     testTasksUsesDefaultAndExplicitPrintChannels();
     testKillConfirmationUsesConsoleChannel();

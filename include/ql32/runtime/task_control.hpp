@@ -42,7 +42,16 @@ enum class TaskResultField : std::uint32_t {
     ErrorDetail = 4,
     Kind = 5,
     Priority = 6,
-    ResumePriority = 7
+    ResumePriority = 7,
+    CanvasOriginX = 8,
+    CanvasOriginY = 9,
+    CanvasWidth = 10,
+    CanvasHeight = 11
+};
+
+enum class TaskListField : std::uint32_t {
+    Count = 0,
+    Handle = 1
 };
 
 enum class DebugResumeMode { Continue, StepInto, StepOver };
@@ -105,6 +114,10 @@ struct ManagedTaskInfo {
     ErrorCode errorCode = ErrorCode::None;
     std::string errorDetail;
     std::size_t openChannels = 0;
+    std::int32_t canvasOriginX = 0;
+    std::int32_t canvasOriginY = 0;
+    std::uint32_t canvasWidth = 0;
+    std::uint32_t canvasHeight = 0;
 };
 
 // Control surface available to the interactive BASIC supervisor.
@@ -124,6 +137,8 @@ public:
     virtual bool setTaskPriority(TaskId id, std::uint32_t priority) = 0;
     virtual std::vector<ManagedTaskInfo> listTasks() const = 0;
     virtual std::vector<ChannelInfo> listChannels(TaskId id) const = 0;
+    virtual bool setTaskViewport(TaskId, std::int32_t, std::int32_t,
+                                 std::uint32_t, std::uint32_t) { return false; }
     virtual bool debugAttach(TaskId) { return false; }
     virtual bool debugSetBreakpoint(TaskId, int, bool) { return false; }
     virtual bool debugResume(TaskId, DebugResumeMode) { return false; }

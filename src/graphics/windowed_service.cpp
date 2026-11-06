@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <stdexcept>
+#include <vector>
 
 namespace ql32::graphics {
 namespace {
@@ -67,11 +68,17 @@ WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screen
 void WindowedService::discardFrozenWindows() {
     if (frozenWindows_.empty()) return;
     Rect dirty{};
+    std::vector<SessionId> owners;
     for (const auto id : frozenWindows_) {
-        dirty = unite(dirty, manager_.windowState(id).screenClip);
+        const auto state = manager_.windowState(id);
+        dirty = unite(dirty, state.screenClip);
+        owners.push_back(state.owner);
         manager_.close(id);
     }
     frozenWindows_.clear();
+    std::sort(owners.begin(), owners.end());
+    owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
+    for (const auto owner : owners) manager_.releaseTaskViewportIfUnused(owner);
     presentRegion(dirty);
 }
 
@@ -125,8 +132,7 @@ Rect WindowedService::screenRegion(SessionId session, ChannelId channel,
         static_cast<std::int32_t>(static_cast<std::int64_t>(state.bounds.y) + localTop),
         static_cast<std::uint32_t>(localRight - localLeft),
         static_cast<std::uint32_t>(localBottom - localTop)};
-    return intersect(translated,
-                     {0, 0, manager_.screenWidth(), manager_.screenHeight()});
+    return intersect(translated, state.screenClip);
 }
 
 void WindowedService::setInk(SessionId session, ColorIndex color) {
@@ -277,8 +283,7 @@ void WindowedService::writeText(SessionId session, const std::string& value) {
             static_cast<std::int32_t>(static_cast<std::int64_t>(bounds.x) + dirty.x),
             static_cast<std::int32_t>(static_cast<std::int64_t>(bounds.y) + dirty.y),
             dirty.width, dirty.height};
-        presentRegion(intersect(translated,
-            {0, 0, manager_.screenWidth(), manager_.screenHeight()}));
+        presentRegion(intersect(translated, manager_.windowState(id).screenClip));
     }
 }
 
@@ -309,8 +314,18 @@ void WindowedService::closeWindow(SessionId session, ChannelId channel) {
     textCursors_.erase(key);
     if (channel == 0 && consoleBoundsCallback_) {
         const auto fallback = defaultWindowBounds_.find(channel);
-        if (fallback != defaultWindowBounds_.end())
-            consoleBoundsCallback_(fallback->second);
+        if (fallback != defaultWindowBounds_.end()) {
+            const auto viewport = manager_.taskViewport(session);
+            auto bounds = fallback->second;
+            bounds.x = static_cast<std::int32_t>(
+                static_cast<std::int64_t>(bounds.x) + viewport.originX);
+            bounds.y = static_cast<std::int32_t>(
+                static_cast<std::int64_t>(bounds.y) + viewport.originY);
+            consoleBoundsCallback_(intersect(intersect(bounds,
+                {viewport.originX, viewport.originY,
+                 viewport.canvasWidth, viewport.canvasHeight}),
+                {0, 0, manager_.screenWidth(), manager_.screenHeight()}));
+        }
     }
     presentRegion(oldBounds);
 }
@@ -325,6 +340,7 @@ void WindowedService::closeSession(SessionId session) {
         textCursors_.erase(found->first);
         found = sessionWindows_.erase(found);
     }
+    manager_.releaseTaskViewportIfUnused(session);
 }
 
 void WindowedService::setUpdateMode(SessionId session, UpdateMode mode) {
@@ -385,9 +401,9 @@ void WindowedService::setWindowBounds(SessionId session, ChannelId channel, Rect
         discardPresentationBuffer();
         const auto id = manager_.create(session, bounds, PixelDepth::Four);
         sessionWindows_.emplace(key, id);
-        if (channel == 0 && consoleBoundsCallback_) consoleBoundsCallback_(bounds);
-        presentRegion(intersect(bounds,
-            {0, 0, manager_.screenWidth(), manager_.screenHeight()}));
+        const auto state = manager_.windowState(id);
+        if (channel == 0 && consoleBoundsCallback_) consoleBoundsCallback_(state.screenClip);
+        presentRegion(state.screenClip);
         return;
     }
     const auto id = found->second;
@@ -396,10 +412,31 @@ void WindowedService::setWindowBounds(SessionId session, ChannelId channel, Rect
     if (bounds.width != current.width || bounds.height != current.height)
         discardPresentationBuffer();
     manager_.setBounds(id, bounds);
-    if (channel == 0 && consoleBoundsCallback_) consoleBoundsCallback_(bounds);
-    const auto newBounds = intersect(bounds,
-        {0, 0, manager_.screenWidth(), manager_.screenHeight()});
+    const auto state = manager_.windowState(id);
+    if (channel == 0 && consoleBoundsCallback_) consoleBoundsCallback_(state.screenClip);
+    const auto newBounds = state.screenClip;
     presentRegion(unite(oldBounds, newBounds));
+}
+
+void WindowedService::setTaskViewport(SessionId session, TaskViewport viewport) {
+    const auto oldViewport = manager_.taskViewport(session);
+    const Rect oldScreen{oldViewport.originX, oldViewport.originY,
+                         oldViewport.canvasWidth, oldViewport.canvasHeight};
+    manager_.setTaskViewport(session, viewport);
+    const Rect newScreen{viewport.originX, viewport.originY,
+                         viewport.canvasWidth, viewport.canvasHeight};
+    presentRegion(unite(intersect(oldScreen,
+                                  {0, 0, manager_.screenWidth(), manager_.screenHeight()}),
+                        intersect(newScreen,
+                                  {0, 0, manager_.screenWidth(), manager_.screenHeight()})));
+    for (const auto& [key, id] : sessionWindows_) {
+        if (key.session == session && key.channel == 0 && consoleBoundsCallback_)
+            consoleBoundsCallback_(manager_.windowState(id).screenClip);
+    }
+}
+
+TaskViewport WindowedService::taskViewport(SessionId session) const {
+    return manager_.taskViewport(session);
 }
 
 void WindowedService::setRotation(SessionId session, std::uint16_t degrees) {

@@ -61,6 +61,8 @@ public:
                           std::uint16_t index) override;
     void setWindowBounds(SessionId session, Rect bounds) override;
     void setWindowBounds(SessionId session, ChannelId channel, Rect bounds) override;
+    void setTaskViewport(SessionId session, TaskViewport viewport) override;
+    TaskViewport taskViewport(SessionId session) const override;
     void setRotation(SessionId session, std::uint16_t degrees) override;
     void setDebugOverlayEnabled(bool enabled) override;
     bool debugOverlayEnabled() const noexcept override { return debugOverlayEnabled_; }

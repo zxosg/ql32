@@ -87,6 +87,7 @@ public:
     std::optional<runtime::DebugValue> debugEvaluate(const std::string& expression) const;
     bool debugAddWatch(std::string expression);
     bool debugRemoveWatch(const std::string& expression);
+    runtime::SessionId graphicsSessionId() const noexcept { return session_id_; }
     std::string takePendingRunSource() noexcept;
     std::string takePendingInteractiveTail() noexcept;
     bool hasPendingInteractivePager() const noexcept;

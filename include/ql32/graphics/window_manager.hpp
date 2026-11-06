@@ -8,6 +8,7 @@
 #include <functional>
 #include <limits>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 namespace ql32::graphics {
@@ -21,7 +22,7 @@ enum class PixelDepth : std::uint8_t { One = 1, Four = 4, Eight = 8 };
 struct WindowState {
     WindowId id = 0;
     SessionId owner = 0;
-    Rect bounds{};
+    Rect bounds{}; // effective absolute screen bounds after task-origin translation
     Rect screenClip{};
     PixelDepth pixelDepth = PixelDepth::Four;
     bool visible = true;
@@ -135,7 +136,11 @@ public:
     void close(WindowId id);
     void closeSession(SessionId owner);
     WindowState windowState(WindowId id) const;
+    void setTaskViewport(SessionId owner, TaskViewport viewport);
+    TaskViewport taskViewport(SessionId owner) const;
+    void releaseTaskViewportIfUnused(SessionId owner);
 
+    // Bounds passed to create/setBounds are relative to the owning task origin.
     void setBounds(WindowId id, Rect bounds);
     void setPixelDepth(WindowId id, PixelDepth depth);
     void setScreenSize(std::uint32_t width, std::uint32_t height);
@@ -166,7 +171,7 @@ private:
     struct Entry {
         WindowId id;
         SessionId owner;
-        Rect bounds;
+        Rect bounds; // task-relative; WindowState exposes translated screen bounds
         bool visible;
         IndexedCanvas canvas;
     };
@@ -174,7 +179,9 @@ private:
     Entry& find(WindowId id);
     const Entry& find(WindowId id) const;
     static void validate(Rect bounds);
-    Rect clip(Rect bounds) const;
+    static void validate(TaskViewport viewport);
+    Rect screenBounds(const Entry& entry) const;
+    Rect clipToTask(const Entry& entry, Rect screenBounds) const;
 
     std::uint32_t screenWidth_;
     std::uint32_t screenHeight_;
@@ -183,6 +190,7 @@ private:
     CanvasArena arena_;
     WindowId nextId_ = 1;
     std::vector<Entry> windows_; // bottom-to-top stacking order
+    std::unordered_map<SessionId, TaskViewport> taskViewports_;
 };
 
 } // namespace ql32::graphics
