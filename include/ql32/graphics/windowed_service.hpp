@@ -87,6 +87,9 @@ public:
     void invalidateSystemRegion(Rect region);
     void composeDisplayRow(std::uint32_t y, std::vector<ColorIndex>& row) const;
     WindowManager& windowManager() noexcept { return manager_; }
+    void setCanvasResizeObserver(CanvasResizeObserver observer) {
+        manager_.setCanvasResizeObserver(std::move(observer));
+    }
     static RgbColor defaultPaletteColor(std::uint16_t index);
 
 private:

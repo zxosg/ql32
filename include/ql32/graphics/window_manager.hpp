@@ -5,7 +5,9 @@
 #include <cstddef>
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace ql32::graphics {
@@ -25,8 +27,16 @@ struct WindowState {
     bool visible = true;
 };
 
-// Lazily growing compact store for retained canvas pixels. Handles remain
-// stable while blocks move during compaction.
+enum class CanvasResizePhase : std::uint8_t {
+    BeforeAllocation,
+    BothBuffersLive,
+    AfterSwap
+};
+using CanvasResizeObserver =
+    std::function<void(CanvasResizePhase, std::size_t, std::size_t)>;
+
+// Independently allocated retained canvas pixels. Handles remain stable when
+// one canvas is resized or released.
 class CanvasArena {
 public:
     explicit CanvasArena(std::size_t maximumBytes = 0) noexcept
@@ -37,20 +47,25 @@ public:
 
     std::uint64_t allocate(std::size_t bytes);
     void release(std::uint64_t handle) noexcept;
-    void resize(std::uint64_t handle, std::size_t bytes);
+    void replace(std::uint64_t handle, std::vector<std::uint8_t>&& bytes);
+    void setResizeObserver(CanvasResizeObserver observer) {
+        resizeObserver_ = std::move(observer);
+    }
+    void reportResize(CanvasResizePhase phase, std::size_t oldBytes,
+                      std::size_t newBytes) const noexcept;
     std::uint8_t* data(std::uint64_t handle) noexcept;
     const std::uint8_t* data(std::uint64_t handle) const noexcept;
     std::size_t size(std::uint64_t handle) const noexcept;
 
 private:
-    struct Block { std::uint64_t handle; std::size_t offset; std::size_t size; };
-    void compact(std::uint64_t lastHandle = 0) noexcept;
+    friend class IndexedCanvas;
+    struct Block { std::uint64_t handle; std::vector<std::uint8_t> bytes; };
     Block& find(std::uint64_t handle);
     const Block& find(std::uint64_t handle) const;
     std::size_t maximumBytes_;
     std::uint64_t nextHandle_ = 1;
     std::vector<Block> blocks_;
-    std::vector<std::uint8_t> bytes_;
+    CanvasResizeObserver resizeObserver_;
 };
 
 // Retained indexed canvas with packed 1-, 4-, or 8-bit pixels.
@@ -114,6 +129,9 @@ public:
 
     WindowId create(SessionId owner, Rect bounds,
                     PixelDepth depth = PixelDepth::Four);
+    void setCanvasResizeObserver(CanvasResizeObserver observer) {
+        arena_.setResizeObserver(std::move(observer));
+    }
     void close(WindowId id);
     void closeSession(SessionId owner);
     WindowState windowState(WindowId id) const;

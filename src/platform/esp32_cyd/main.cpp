@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Adafruit_ILI9341.h>
 #include <SD.h>
+#include <esp_heap_caps.h>
 #if defined(QL32_CYD_USE_SPIFFS)
 #include <SPIFFS.h>
 #endif
@@ -297,6 +298,33 @@ void setup() {
         [] { if (tftConsole) tftConsole->reconfigure(); });
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         display.width(), display.height(), framePresenter, 4, 76800);
+    graphics->setCanvasResizeObserver(
+        [](ql32::graphics::CanvasResizePhase phase, std::size_t oldBytes,
+           std::size_t newBytes) {
+            const char* phaseName = "unknown";
+            switch (phase) {
+            case ql32::graphics::CanvasResizePhase::BeforeAllocation:
+                phaseName = "before-allocation";
+                break;
+            case ql32::graphics::CanvasResizePhase::BothBuffersLive:
+                phaseName = "both-buffers-live";
+                break;
+            case ql32::graphics::CanvasResizePhase::AfterSwap:
+                phaseName = "after-swap";
+                break;
+            }
+            // Capture heap values before serial output so logging cannot skew
+            // the reported checkpoint.
+            const auto freeBytes = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+            const auto largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+            const auto liveWindows = graphics ? graphics->windowManager().size() : 0;
+            Serial.printf("CANVAS_HEAP|%s|%u|%u|%u|%u|%u\n", phaseName,
+                          static_cast<unsigned>(oldBytes),
+                          static_cast<unsigned>(newBytes),
+                          static_cast<unsigned>(freeBytes),
+                          static_cast<unsigned>(largestBlock),
+                          static_cast<unsigned>(liveWindows));
+        });
     graphics->setDefaultWindowBounds(0, {
         0, std::max<std::int32_t>(0, static_cast<std::int32_t>(display.height()) - 64),
         static_cast<std::uint32_t>(display.width()),

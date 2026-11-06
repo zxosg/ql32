@@ -2,10 +2,48 @@
 #include "ql32/graphics/windowed_service.hpp"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdlib>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+namespace {
+std::atomic<long> failAllocationAfter{-1};
+
+bool shouldFailAllocation() noexcept {
+    auto remaining = failAllocationAfter.load(std::memory_order_relaxed);
+    while (remaining >= 0) {
+        if (remaining == 0) {
+            if (failAllocationAfter.compare_exchange_weak(
+                    remaining, -1, std::memory_order_relaxed))
+                return true;
+        } else if (failAllocationAfter.compare_exchange_weak(
+                       remaining, remaining - 1, std::memory_order_relaxed)) {
+            return false;
+        }
+    }
+    return false;
+}
+} // namespace
+
+void* operator new(std::size_t size) {
+    if (shouldFailAllocation()) throw std::bad_alloc();
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc();
+}
+
+void* operator new[](std::size_t size) {
+    return ::operator new(size);
+}
+
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
 
@@ -668,7 +706,7 @@ void testCompletedSessionRemainsAvailableForCapture() {
             "new graphics session did not draw after frozen image cleanup");
 }
 
-void testCanvasArenaCompactsAndReusesStorage() {
+void testCanvasStorageReleasesAndReusesAllocations() {
     using namespace ql32::graphics;
     WindowManager manager(16, 8, 5, 32);
     const auto first = manager.create(1, {0, 0, 4, 4}, PixelDepth::Four);
@@ -700,6 +738,104 @@ void testCanvasArenaCompactsAndReusesStorage() {
     manager.setPixelDepth(last, PixelDepth::Eight);
     require(manager.canvas(last).pixel(2, 2) == 9,
             "canvas depth change lost pixels in the arena");
+}
+
+void testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink() {
+    using namespace ql32::graphics;
+    WindowManager manager(16, 10, 4, 256);
+    const auto first = manager.create(1, {0, 0, 3, 3}, PixelDepth::Four);
+    const auto target = manager.create(2, {3, 0, 3, 3}, PixelDepth::Four);
+    const auto third = manager.create(3, {6, 0, 3, 3}, PixelDepth::Four);
+
+    manager.canvas(first).setPixel(1, 1, 2);
+    manager.canvas(third).setPixel(2, 2, 12);
+    auto& canvas = manager.canvas(target);
+    canvas.setPaper(6);
+    canvas.clear();
+    canvas.setPixel(0, 0, 1);
+    canvas.setPixel(2, 1, 11);
+
+    std::array<CanvasResizePhase, 3> phases{};
+    std::size_t observed = 0;
+    bool byteCountsMatch = true;
+    manager.setCanvasResizeObserver(
+        [&](CanvasResizePhase phase, std::size_t oldBytes, std::size_t newBytes) {
+            if (observed < phases.size()) phases[observed] = phase;
+            ++observed;
+            byteCountsMatch = byteCountsMatch && oldBytes == 5 && newBytes == 13;
+        });
+    manager.setBounds(target, {3, 0, 5, 5});
+    manager.setCanvasResizeObserver({});
+    require(observed == 3 && byteCountsMatch &&
+                phases[0] == CanvasResizePhase::BeforeAllocation &&
+                phases[1] == CanvasResizePhase::BothBuffersLive &&
+                phases[2] == CanvasResizePhase::AfterSwap,
+            "resize telemetry did not report the three allocation phases");
+    require(canvas.width() == 5 && canvas.height() == 5,
+            "odd-width grow did not update canvas dimensions");
+    for (std::uint32_t y = 0; y < 5; ++y) {
+        for (std::uint32_t x = 0; x < 5; ++x) {
+            ColorIndex expected = 6;
+            if (x == 0 && y == 0) expected = 1;
+            if (x == 2 && y == 1) expected = 11;
+            require(canvas.pixel(x, y) == expected,
+                    "odd-width grow lost pixels or paper-filled new area");
+        }
+    }
+
+    manager.setBounds(target, {3, 0, 3, 3});
+    require(canvas.width() == 3 && canvas.height() == 3,
+            "odd-width shrink did not update canvas dimensions");
+    require(canvas.pixel(0, 0) == 1 && canvas.pixel(2, 1) == 11 &&
+                canvas.pixel(2, 2) == 6,
+            "odd-width shrink did not preserve overlapping pixels");
+    require(manager.canvas(first).pixel(1, 1) == 2 &&
+                manager.canvas(third).pixel(2, 2) == 12,
+            "resizing one window changed another window's pixels");
+}
+
+void testFailedCanvasResizePreservesAllWindows() {
+    using namespace ql32::graphics;
+    WindowManager manager(16, 8, 4, 64);
+    const auto first = manager.create(1, {0, 0, 4, 4}, PixelDepth::Four);
+    const auto target = manager.create(2, {4, 0, 4, 4}, PixelDepth::Four);
+    const auto last = manager.create(3, {8, 0, 4, 4}, PixelDepth::Four);
+    manager.canvas(first).setPixel(0, 0, 2);
+    manager.canvas(target).setPixel(1, 1, 5);
+    manager.canvas(last).setPixel(2, 2, 9);
+
+    // Fail the replacement canvas allocation while the target is in the
+    // middle of the window list. No live block or window metadata may change.
+    failAllocationAfter.store(0, std::memory_order_relaxed);
+    bool failed = false;
+    try {
+        manager.setBounds(target, {4, 0, 8, 8});
+    } catch (const std::bad_alloc&) {
+        failed = true;
+    }
+    failAllocationAfter.store(-1, std::memory_order_relaxed);
+
+    require(failed, "injected replacement canvas allocation did not fail");
+    require(manager.size() == 3, "failed resize changed the window count");
+    const auto firstState = manager.windowState(first);
+    const auto targetState = manager.windowState(target);
+    const auto lastState = manager.windowState(last);
+    require(firstState.id == first && firstState.bounds.x == 0 &&
+                firstState.bounds.y == 0 && firstState.bounds.width == 4 &&
+                firstState.bounds.height == 4 && targetState.id == target &&
+                targetState.bounds.x == 4 && targetState.bounds.y == 0 &&
+                targetState.bounds.width == 4 && targetState.bounds.height == 4 &&
+                lastState.id == last && lastState.bounds.x == 8 &&
+                lastState.bounds.y == 0 && lastState.bounds.width == 4 &&
+                lastState.bounds.height == 4,
+            "failed resize changed a window's bounds or handle");
+    require(manager.canvas(first).width() == 4 && manager.canvas(target).width() == 4 &&
+                manager.canvas(last).width() == 4,
+            "failed resize changed a canvas dimension");
+    require(manager.canvas(first).pixel(0, 0) == 2 &&
+                manager.canvas(target).pixel(1, 1) == 5 &&
+                manager.canvas(last).pixel(2, 2) == 9,
+            "failed resize changed pixels or invalidated a window handle");
 }
 
 void testEveryPrintableAsciiCharacterHasAGlyph() {
@@ -740,7 +876,9 @@ int main() {
     testCanvasReshapeReusesFullScreenStorage();
     testCloseWindowReleasesCanvasAndAllowsReuse();
     testCompletedSessionRemainsAvailableForCapture();
-    testCanvasArenaCompactsAndReusesStorage();
+    testCanvasStorageReleasesAndReusesAllocations();
+    testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
+    testFailedCanvasResizePreservesAllWindows();
     testEveryPrintableAsciiCharacterHasAGlyph();
     testCloseWindowCommandDispatch();
 }
