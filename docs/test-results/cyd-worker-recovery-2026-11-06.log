@@ -1,0 +1,49 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1184
+load:0x40078000,len:13232
+load:0x40080400,len:3028
+entry 0x400805e4
+QL/32 ESP32-2432S028 ready
+Uptime ms: 750
+Wall clock unsynchronized
+Storage ready
+Running Storage:/startup.bas
+CANVAS_HEAP|before-allocation|38400|15360|167528|110580|1
+CANVAS_HEAP|both-buffers-live|38400|15360|152152|110580|1
+CANVAS_HEAP|after-swap|38400|15360|190568|110580|1
+CANVAS_HEAP|before-allocation|10240|7680|163400|110580|3
+CANVAS_HEAP|both-buffers-live|10240|7680|155704|110580|3
+CANVAS_HEAP|after-swap|10240|7680|165960|110580|3
+BASIC REPL ready (USB serial)
+> REBOOT
+ets Jul 29 2019 12:21:46
+
+rst:0xc (SW_CPU_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1184
+load:0x40078000,len:13232
+load:0x40080400,len:3028
+entry 0x400805e4
+QL/32 ESP32-2432S028 ready
+Uptime ms: 750
+Wall clock unsynchronized
+Storage ready
+Running Storage:/startup.bas
+CANVAS_HEAP|before-allocation|38400|15360|167528|110580|1
+CANVAS_HEAP|both-buffers-live|38400|15360|152152|110580|1
+CANVAS_HEAP|after-swap|38400|15360|190568|110580|1
+CANVAS_HEAP|before-allocation|10240|7680|163400|110580|3
+CANVAS_HEAP|both-buffers-live|10240|7680|155704|110580|3
+CANVAS_HEAP|after-swap|10240|7680|165960|110580|3
+BASIC REPL ready (USB serial)
+> serial_probe = OPEN(2)
+> PRINT #serial_probe,"IDLE_AFTER_WORKER_REBOOT|";FREE(0);",";FREE(1);",";FREE(2)
+IDLE_AFTER_WORKER_REBOOT|181472,110580,23
+> 

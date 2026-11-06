@@ -1,0 +1,76 @@
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1184
+load:0x40078000,len:13232
+load:0x40080400,len:3028
+entry 0x400805e4
+QL/32 ESP32-2432S028 ready
+Uptime ms: 749
+Wall clock unsynchronized
+Storage ready
+Running Storage:/startup.bas
+CANVAS_HEAP|before-allocation|38400|15360|167528|110580|1
+CANVAS_HEAP|both-buffers-live|38400|15360|152152|110580|1
+CANVAS_HEAP|after-swap|38400|15360|190568|110580|1
+CANVAS_HEAP|before-allocation|10240|7680|163400|110580|3
+CANVAS_HEAP|both-buffers-live|10240|7680|155704|110580|3
+CANVAS_HEAP|after-swap|10240|7680|165960|110580|3
+BASIC REPL ready (USB serial)
+> Transfer received successfully
+> Transfer received successfully
+> Transfer received successfully
+> LOAD "FFS:/wfull.bas"
+> RUN
+WORKERS|started|2,3|128788,110580
+MBFULL|start|1|128544,110580
+CANVAS_HEAP|before-allocation|9600|38400|118560|102388|4
+CANVAS_HEAP|both-buffers-live|9600|38400|80144|63476|4
+CANVAS_HEAP|after-swap|9600|38400|89760|63476|4
+MEM|channel|active|49876,42996,39
+MEM|channel|released|54372,47092,39
+MEM|array|active|54272,47092,41
+MBFULL|rendered|1
+MBFULL|shrink|1|54708,47092
+CANVAS_HEAP|before-allocation|38400|15360|54580|47092|4
+CANVAS_HEAP|both-buffers-live|38400|15360|39204|32756|4
+CANVAS_HEAP|after-swap|38400|15360|77620|38900|4
+MBFULL|released|1|77748,38900
+MBFULL|start|2|77748,38900
+CANVAS_HEAP|before-allocation|15360|9600|77620|38900|4
+CANVAS_HEAP|both-buffers-live|15360|9600|68004|38900|4
+CANVAS_HEAP|after-swap|15360|9600|83380|38900|4
+CANVAS_HEAP|before-allocation|9600|38400|83380|38900|4
+CANVAS_HEAP|both-buffers-live|9600|38400|44964|22516|4
+CANVAS_HEAP|after-swap|9600|38400|54580|47092|4
+MBFULL|rendered|2
+MBFULL|shrink|2|54708,47092
+CANVAS_HEAP|before-allocation|38400|15360|54580|47092|4
+CANVAS_HEAP|both-buffers-live|38400|15360|39204|32756|4
+CANVAS_HEAP|after-swap|38400|15360|77620|38900|4
+MBFULL|released|2|77748,38900
+MBFULL|start|3|77748,38900
+CANVAS_HEAP|before-allocation|15360|9600|77620|38900|4
+CANVAS_HEAP|both-buffers-live|15360|9600|68004|38900|4
+CANVAS_HEAP|after-swap|15360|9600|83380|38900|4
+CANVAS_HEAP|before-allocation|9600|38400|83380|38900|4
+CANVAS_HEAP|both-buffers-live|9600|38400|44964|22516|4
+CANVAS_HEAP|after-swap|9600|38400|54580|47092|4
+MBFULL|rendered|3
+MBFULL|shrink|3|54708,47092
+CANVAS_HEAP|before-allocation|38400|15360|54580|47092|4
+CANVAS_HEAP|both-buffers-live|38400|15360|39204|32756|4
+CANVAS_HEAP|after-swap|38400|15360|77620|38900|4
+MBFULL|released|3|77748,38900
+MBFULL|done|77840,38900
+WORKERS|finished|2,3
+> KILL 2
+BASIC session 2 VM error: Task cancelled
+> KILL 3
+BASIC session 3 VM error: Task cancelled
+> PRINT #serial_probe,"POSTKILL|";FREE(0);",";FREE(1);",";FREE(2)
+POSTKILL|159144,55284,47
+> 
