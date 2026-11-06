@@ -46,7 +46,7 @@ bool readPath(std::string_view input, std::string& path) {
 bool handleMonitorTransferCommand(std::string_view input,
                                   runtime::StorageService& storage,
                                   runtime::ChannelService& channels,
-                                  HardwareSerial& serial,
+                                  Stream& serial,
                                   const std::function<runtime::YModemSource()>&
                                       screenCapture) {
     const std::string line = trim(std::string(input));
@@ -89,7 +89,9 @@ bool handleMonitorTransferCommand(std::string_view input,
         serial.flush();
     };
     io.ready = [&serial, &command] {
-        serial.printf("YMODEM READY %s\r\n", command.c_str());
+        serial.print("YMODEM READY ");
+        serial.print(command.c_str());
+        serial.print("\r\n");
         serial.flush();
     };
 
@@ -107,8 +109,8 @@ bool handleMonitorTransferCommand(std::string_view input,
         else serial.println("Transfer sent successfully");
     } catch (const std::exception& error) {
         const auto* message = error.what();
-        serial.printf("Transfer failed: %s\n",
-                      message && *message ? message : "unknown transfer error");
+        serial.print("Transfer failed: ");
+        serial.println(message && *message ? message : "unknown transfer error");
     }
     return true;
 }

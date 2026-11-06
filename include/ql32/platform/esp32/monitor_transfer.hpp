@@ -14,7 +14,7 @@ namespace ql32::platform::esp32 {
 bool handleMonitorTransferCommand(std::string_view line,
                                   runtime::StorageService& storage,
                                   runtime::ChannelService& channels,
-                                  HardwareSerial& serial,
+                                  Stream& serial,
                                   const std::function<runtime::YModemSource()>&
                                       screenCapture = {});
 

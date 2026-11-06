@@ -1,7 +1,7 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-05):** CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`. An automated serial-REPL memory suite completed 25 worker runs with per-run cleanup and reboot recovery; it measured a 5,796-byte cumulative free-heap decrease before reboot, and task-result retention was not isolated. The four `CLS` forms ran over serial without syntax or VM errors, though overlapping windows prevented visual isolation of clear colors. Resizing `#0` returned out-of-memory under the tested workload. Olimex ESP32-SBC-FabGL Rev B uses a 512 KiB SPIFFS `FFS` partition alongside external `SDC:/`. Both drives mount; YMODEM, directory listing, worker loading, and remote debugger breakpoint/EVAL/watch/step/diagnostics were exercised over USB serial. VGA capture verified printable ASCII; paged `HELP` resumed after `Q`; the 80x56 Mandelbrot demo completed and was captured. Three concurrent workers plus Mandelbrot can exceed compiler memory. PS/2 input/shortcuts, clock, and Wi-Fi acceptance remain open.
+**Status (2026-11-06):** Native Linux CMake build and 64/64 CTest cases passed. CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`. An automated serial-REPL memory suite completed 25 worker runs with per-run cleanup and reboot recovery; it measured a 5,796-byte cumulative free-heap decrease before reboot, and task-result retention was not isolated. The four `CLS` forms ran over serial without syntax or VM errors, though overlapping windows prevented visual isolation of clear colors. Resizing `#0` returned out-of-memory under the tested workload. Olimex ESP32-SBC-FabGL Rev B uses a 512 KiB SPIFFS `FFS` partition alongside external `SDC:/`. Both drives mount; YMODEM, directory listing, worker loading, and remote debugger breakpoint/EVAL/watch/step/diagnostics were exercised over USB serial. VGA capture verified printable ASCII; paged `HELP` resumed after `Q`; the 80x56 Mandelbrot demo completed and was captured. Three concurrent workers plus Mandelbrot can exceed compiler memory on CYD. PS/2 input/shortcuts, clock, and Wi-Fi acceptance remain open.
 
 Supported build families are independent firmware targets:
 
@@ -11,6 +11,7 @@ Supported build families are independent firmware targets:
 | `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass; physical PS/2 shortcuts, clock, and Wi-Fi remain open |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; memory stress still needs isolated measurements |
 | `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Built and flashed; storage mounted, `startup.bas` loaded at boot, task launch/cancellation exercised; 25-run automated memory suite passed per-run cleanup and reboot checks, with cumulative pre-reboot heap drift recorded below |
+| `ql32_tenstar_esp32s3` | TENSTAR TS-ESP32-S3, ST7789 240×135, USB serial, QSPI PSRAM, 512 KiB SPIFFS (`FFS`) | Built and flashed; startup and test programs load from SPIFFS; USB REPL reports 240×135×4-bit; 2 MiB PSRAM detected; worker/Mandelbrot stress run cleaned up; Mandelbrot performance and color/rotation checks remain open; sensors deferred |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
 | `linux` | Host adapter | Development and conformance host |
@@ -56,8 +57,17 @@ font. Paged HELP suspended and resumed through its on-screen input panel. The
 `WINDOW` resize raised `bad_alloc`, so the example avoids resizing that surface.
 Physical PS/2 interaction/shortcuts, clock, and Wi-Fi still need verification.
 The async presenter handles alert, confirmation, dialog, menu, and input
-requests and is covered by host state-machine tests. ESP32-S3 TFT integration
-remains platform work.
+requests and is covered by host state-machine tests. The Tenstar ESP32-S3
+profile builds and flashes the shared interpreter with an ST7789 display
+adapter, scrolling console, 512 KiB SPIFFS, and USB serial REPL. The board
+reports 240×135×4-bit, initializes the display path, and detects its 2 MiB
+PSRAM. A repeated 80×60 window test reported a 2,896-byte free-heap decrease
+while open, with 2,512 bytes recovered on close; largest free block remained
+2,064,372 bytes. Three continuous workers and Mandelbrot stayed runnable
+together; closing the tasks recovered about 65 KiB, and the user confirmed
+concurrent-draw blinking stopped after the workers closed. Mandelbrot remained
+runnable after 28 seconds alone and was cancelled. Visual color-order, rotation,
+and Wi-Fi acceptance remain open.
 
 The `esp32_2432s028` target applies the same BASIC graphics contract to the
 common ESP32-2432S028R yellow-board variant using an ILI9341 TFT. Its USB serial

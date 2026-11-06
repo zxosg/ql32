@@ -209,6 +209,36 @@ if(QL32_BUILD_TESTS)
   target_compile_features(ql32_esp32_2432s028_profile_tests PRIVATE cxx_std_17)
   add_test(NAME ql32_esp32_2432s028_profile_tests COMMAND ql32_esp32_2432s028_profile_tests)
 
+  add_executable(ql32_tenstar_esp32s3_profile_tests
+    tests/tenstar_esp32s3_profile_tests.cpp
+  )
+  target_include_directories(ql32_tenstar_esp32s3_profile_tests PRIVATE
+    boards/ql32_tenstar_esp32s3 include)
+  target_compile_features(ql32_tenstar_esp32s3_profile_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_tenstar_esp32s3_profile_tests COMMAND ql32_tenstar_esp32s3_profile_tests)
+
+  add_executable(ql32_tenstar_esp32s3_graphics_tests
+    tests/tenstar_esp32s3_graphics_tests.cpp
+    src/platform/tenstar_esp32s3/graphics.cpp
+    src/platform/tenstar_esp32s3/frame_presenter.cpp
+  )
+  target_include_directories(ql32_tenstar_esp32s3_graphics_tests PRIVATE
+    tests/fakes include)
+  target_compile_features(ql32_tenstar_esp32s3_graphics_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_tenstar_esp32s3_graphics_tests
+    COMMAND ql32_tenstar_esp32s3_graphics_tests)
+
+  add_executable(ql32_tenstar_esp32s3_console_tests
+    tests/tenstar_esp32s3_console_tests.cpp
+    src/platform/tenstar_esp32s3/text_console.cpp
+  )
+  target_include_directories(ql32_tenstar_esp32s3_console_tests PRIVATE
+    tests/fakes include)
+  target_compile_features(ql32_tenstar_esp32s3_console_tests PRIVATE cxx_std_17)
+  target_link_libraries(ql32_tenstar_esp32s3_console_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_tenstar_esp32s3_console_tests
+    COMMAND ql32_tenstar_esp32s3_console_tests)
+
   add_executable(ql32_esp32_cyd_graphics_tests
     tests/esp32_cyd_graphics_tests.cpp
     src/platform/esp32_cyd/graphics.cpp

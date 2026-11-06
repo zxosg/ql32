@@ -235,7 +235,11 @@ status, address, signal, and disconnect are also verified; VGA32 Wi-Fi still
 needs a physical check. [`examples/cyd-rotation-memory.bas`](examples/cyd-rotation-memory.bas)
 prints free heap after each rotation. The pinned
 VGA32 build uses PlatformIO Core 6.2.0, Arduino-ESP32 2.0.17, and FabGL v1.0.9.
-The ESP32-S3 TFT profile remains backlog work.
+The `ql32_tenstar_esp32s3` profile targets the TENSTAR TS-ESP32-S3 with an
+ST7789 TFT, USB serial REPL, QSPI PSRAM, and 512 KiB SPIFFS. Firmware and
+filesystem were built and flashed; the board reports 240×135×4-bit and the
+REPL starts from SPIFFS. Sensor services are deferred; Wi-Fi and visual
+color/rotation checks remain open. See [the board profile](boards/ql32_tenstar_esp32s3/README.md).
 
 For host graphics testing, run `./build/linux/ql32 examples/graphics.bas` or
 `./build/macos/ql32 examples/graphics.bas`. The CLI

@@ -9,20 +9,20 @@ implementation or hardware-acceptance changes.
 
 QL/32 is a portable, native BASIC computer inspired by SMSQ/E SuperBASIC and
 Psion-style application interfaces. Linux and macOS are host targets. ESP32
-targets include LILYGO FabGL VGA32, Olimex ESP32-SBC-FabGL, and
-ESP32-2432S028 (CYD). Keep the language,
+targets include LILYGO FabGL VGA32, Olimex ESP32-SBC-FabGL, ESP32-2432S028
+(CYD), and the TENSTAR TS-ESP32-S3. Keep the language,
 VM, runtime, system, and UI layers independent of board libraries. Session
 resources belong to their BASIC session, and UI waits suspend only that
 session.
 
 ## Repository state reviewed
 
-Reviewed 2026-11-05: source baseline [`b2e0b3b`](https://github.com/zxosg/ql32/commit/b2e0b3b)
-(“Expand BASIC graphics, input, and window support”), now matching
-`origin/main`. This update incorporates earlier review notes from `de88fe5`
-and `0c78eae`. The shared working tree contains uncommitted changes; inspect
-`git status` before staging or committing. Math precision and ESP32 CPU
-frequency options are committed.
+Reviewed 2026-11-06: `main` is at [`f1fadad`](https://github.com/zxosg/ql32/commit/f1fadad)
+and matches `origin/main`. The working tree contains uncommitted TENSTAR target,
+graphics/console adapter, test, SPIFFS, monitor-transfer, README, and
+specification changes. Inspect `git status` before staging or committing; do
+not discard these changes. Math precision and ESP32 CPU frequency options are
+committed.
 
 The latest implementation includes:
 
@@ -50,6 +50,11 @@ The latest implementation includes:
   `CLS` forms ran without syntax or VM errors, though overlapping windows
   prevented visual isolation of clear colors. Visual confirmation of the latest
   `PLOT` attractor remains open.
+- TENSTAR TS-ESP32-S3 target with ST7789 240×135 landscape graphics, USB CDC
+  REPL, 4 MiB flash layout, QSPI PSRAM, and 512 KiB SPIFFS. `startup.bas`,
+  graphics/memory tests, three continuous worker programs, and a Mandelbrot
+  workload are uploaded from `data/boards/ql32_tenstar_esp32s3/`. Sensors are
+  intentionally deferred.
 - Cooperative weighted session scheduling and an embedded persistent REPL.
   Current supervisor/BASIC task APIs use `TASK`, `KILL`, `TASKRESULT`,
   `TASKCHANNELS`, `LOGON`, `LOGOFF`, `SUSPEND`, `RESUME`, `SLICE`,
@@ -63,12 +68,12 @@ The latest implementation includes:
   `COS`, `INT`; unsigned 32-bit `BAND`, `BOR`, `BXOR`, `BNOT`,
   `ROL`, `ROR`; `&H`/`&B` literals and `HEX$`/`BIN$`. Graphics
   refresh batching uses `GUPDATE`.
-The 2026-11-04 macOS review rebuilt the host target and passed all 57 CTest
-cases. It also built the four maintained PlatformIO environments:
-`lilygo_vga32`, `olimex_esp32_sbc_fabgl`, `esp32_2432s028`, and
-`esp32_2432s028_spiffs`. The machine is macOS, so the `build/linux` preset
-compiled and tested here is not native Linux evidence. Native Linux validation
-remains open.
+On 2026-11-06 the native Linux CMake build and all 64 CTest cases passed. The
+Tenstar PlatformIO environment also built successfully. The ESP32-S3 board was
+flashed with the firmware and a 512 KiB SPIFFS image; esptool detected 4 MiB
+embedded flash and 2 MiB PSRAM. The USB REPL returned `GWIDTH()=240`,
+`GHEIGHT()=135`, and `GDEPTH()=4`; `/startup.bas`, the graphics smoke test, and
+the memory test ran without VM errors.
 
 On 2026-11-05, the Olimex firmware was rebuilt and flashed. Board checks
 verified the full printable ASCII glyph set in a 320x200 VGA capture, paged
@@ -77,7 +82,8 @@ now uses an 80x56 streaming renderer on the default graphics surface. Its
 `WINDOW` resize statement raised `bad_alloc` on this board, even at 80x64, so
 the demo avoids resizing. The runtime, scheduler, graphics, and graphics UI
 host suites passed when compiled directly with `g++`; CMake was unavailable, so
-this was not a full CTest run.
+this was not a full CTest run at that time; the full native Linux suite later
+passed 64/64 on 2026-11-06.
 
 ## Decisions to preserve
 
@@ -122,9 +128,17 @@ this was not a full CTest run.
   output, pager interaction, and Mandelbrot output were also verified. Physical
   PS/2 key input/shortcuts, clock, line UI, and Wi-Fi still need board-level
   verification.
+- Tenstar stress run: with `DEBUGBAR ON` and `SLICE 64`, three continuous
+  workers and Mandelbrot all remained `RUNNABLE` together. After closing them,
+  the task list contained only the supervisor and free heap recovered by about
+  65 KiB; the largest free block stayed at 2,064,372 bytes. The user observed
+  a few blinking pixels under concurrent drawing and confirmed they stopped
+  after workers closed. Mandelbrot itself remained runnable after a further
+  28 seconds alone and was cancelled; its runtime is the current Tenstar
+  performance gap. Debug bar was left enabled.
 - A CYD `WINDOW #0` resize returned out-of-memory under the tested workload.
-- Known memory constraint: three concurrent workers plus Mandelbrot can fail
-  during compiler preparation. After worker cycles, free heap was 5–10 KiB
+- CYD memory constraint: three concurrent workers plus Mandelbrot can fail
+  during compiler preparation. After CYD worker cycles, free heap was 5–10 KiB
   below the reset baseline while the largest block recovered; retained task
   results and canvas-arena high-water storage were not isolated from a leak.
 
@@ -134,35 +148,36 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. **CYD regression:** visually confirm the `PLOT` attractor in `#1` resized to
+1. **Tenstar performance:** characterize why the 80×56 Mandelbrot program was
+   still runnable after 28 seconds alone at `SLICE 64`. Compare other slices,
+   then decide whether to optimize the BASIC workload, interpreter execution,
+   or ST7789 update path. Keep the debug bar enabled for heap/task observation.
+2. **Tenstar display/network acceptance:** visually verify ST7789 color order
+   and rotation, then test Wi-Fi. The concurrent-draw blinking disappeared
+   when the workers stopped; it was not persistent corruption. QMI8658C,
+   BMP280, and RGB LED support are deferred by user decision.
+3. **CYD regression:** visually confirm the `PLOT` attractor in `#1` resized to
    `0,0,320,192`; note animation/clipping and console readability. `SCREEN`
-   currently snapshots retained QL/32 output and the console model, not pixels
-   drawn outside the compositor.
-2. **CYD task acceptance:** exercise `TASK` command/function with `KTaskWait`,
-   child failure/error propagation, and direct `PRIORITY id,0` baseline reset.
-3. **CYD memory characterization:** isolate source buffers, task-result records,
-   and canvas-arena high-water storage using `FREE()`, `FREE(1)`, `FREE(2)`. The
-   25-run worker suite recovered per run and after reboot, but showed 5,796 bytes
-   cumulative free-heap drift before reboot. Set an acceptance threshold and
-   record the supported workload boundary where Mandelbrot compilation
-   exhausts memory.
-4. **Native Linux:** run `tools/build-target.sh linux` and all CTest cases on
-   a Linux machine or CI runner; the two build directories in this Mac checkout
-   both ran on Darwin.
-5. **Olimex board acceptance:** use the connected `olimex_esp32_sbc_fabgl` board
-   to verify physical PS/2 key input/shortcuts, `REBOOT`, line UI, task controls,
-   clock, and Wi-Fi. VGA capture, font, pager, and Mandelbrot output were
-   verified on 2026-11-05. Keep LILYGO-specific physical acceptance separate.
-6. **Performance check:** time the 80x56 attractor and measure the selected CPU
+   snapshots retained QL/32 output and the console model, not pixels drawn
+   outside the compositor.
+4. **CYD task and memory acceptance:** exercise `TASK` command/function with
+   `KTaskWait`, child failure/error propagation, and direct `PRIORITY id,0`
+   baseline reset. Isolate source buffers, task-result records, and canvas-arena
+   high-water storage. The 25-run worker suite recovered per run and after
+   reboot, but showed 5,796 bytes cumulative free-heap drift before reboot.
+   Set an acceptance threshold and record the CYD concurrency boundary where
+   Mandelbrot compilation exhausts memory.
+5. **Olimex/LILYGO acceptance:** verify physical PS/2 input/shortcuts, `REBOOT`,
+   line UI, task/window controls, clock, and Wi-Fi on Olimex; keep LILYGO
+   physical acceptance separate. Add an Olimex GPIO/FFS host profile test.
+6. **Performance check:** time the 80×56 attractor and measure the selected CPU
    clock for SINGLE/DOUBLE and 80/160/240 MHz.
-7. **Backlog:** specify custom bounded bitmap-font assets and `FONT`/`LOAD FONT`;
-   implement REPL `EDIT linenumber`; later scope palette changes, task window tiling,
-   a supervisor-controlled shared display-buffer option for multitasking,
-   string splitting/slicing, indirect procedure calls, network channels, BLE,
-   and new hardware families. The shared-buffer investigation should account for
-   per-session retained canvases surviving while hidden (38,400 bytes per full
-   320x240 4-bit canvas; 76,800 bytes for two), define drawing/visibility
-   semantics, and identify the QL/32 option flag and supervisor command.
+7. **Backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
+   implement REPL `EDIT linenumber`; later scope palette changes, task-window
+   tiling and shared display buffers, string splitting, indirect procedure
+   calls, and network channels. BLE and new hardware families remain deferred.
+   Shared-buffer work must define drawing/visibility semantics and memory
+   ownership; a full 320×240 4-bit retained canvas uses 38,400 bytes.
 
 ## Starting a new chat
 

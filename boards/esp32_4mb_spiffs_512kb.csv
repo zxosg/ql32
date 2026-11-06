@@ -1,0 +1,7 @@
+# 4 MiB ESP32 layout with a 512 KiB SPIFFS partition and 64 KiB coredump.
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x5000,
+phy_init,   data, phy,     0xf000,   0x1000,
+factory,    app,  factory, 0x10000,  0x360000,
+spiffs,     data, spiffs,  0x370000, 0x80000,
+coredump,   data, coredump,0x3F0000, 0x10000,
