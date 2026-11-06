@@ -157,8 +157,12 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    clock for SINGLE/DOUBLE and 80/160/240 MHz.
 7. **Backlog:** specify custom bounded bitmap-font assets and `FONT`/`LOAD FONT`;
    implement REPL `EDIT linenumber`; later scope palette changes, task window tiling,
+   a supervisor-controlled shared display-buffer option for multitasking,
    string splitting/slicing, indirect procedure calls, network channels, BLE,
-   and new hardware families.
+   and new hardware families. The shared-buffer investigation should account for
+   per-session retained canvases surviving while hidden (38,400 bytes per full
+   320x240 4-bit canvas; 76,800 bytes for two), define drawing/visibility
+   semantics, and identify the QL/32 option flag and supervisor command.
 
 ## Starting a new chat
 
