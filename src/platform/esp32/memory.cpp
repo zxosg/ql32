@@ -13,7 +13,8 @@ std::optional<runtime::HeapFragmentationInfo> MemoryService::fragmentationInfo()
     heap_caps_get_info(&info, MALLOC_CAP_8BIT);
     return runtime::HeapFragmentationInfo{
         static_cast<std::uint64_t>(info.largest_free_block),
-        static_cast<std::uint64_t>(info.free_blocks)
+        static_cast<std::uint64_t>(info.free_blocks),
+        static_cast<std::uint64_t>(info.allocated_blocks)
     };
 }
 

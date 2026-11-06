@@ -62,6 +62,9 @@ public:
     void setWindowBounds(SessionId session, Rect bounds) override;
     void setWindowBounds(SessionId session, ChannelId channel, Rect bounds) override;
     void setRotation(SessionId session, std::uint16_t degrees) override;
+    void setDebugOverlayEnabled(bool enabled) override;
+    bool debugOverlayEnabled() const noexcept override { return debugOverlayEnabled_; }
+    void setDebugOverlayText(const std::string& text) override;
 
     WindowId windowForSession(SessionId session);
     void setDefaultWindowBounds(ChannelId channel, Rect bounds);
@@ -131,6 +134,8 @@ private:
     UpdateMode updateMode_ = UpdateMode::Auto;
     RowLayer consoleLayer_;
     RowLayer uiLayer_;
+    bool debugOverlayEnabled_ = false;
+    std::string debugOverlayText_;
 };
 
 } // namespace ql32::graphics

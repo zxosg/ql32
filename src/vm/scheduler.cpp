@@ -643,7 +643,12 @@ bool SessionScheduler::tick() {
                     current.interactiveSubmission = true;
                     current.status = TaskStatus::Runnable;
                 } else {
-                    if (!submittedInteractiveCommand)
+                    // A worker remains a live interactive session after its
+                    // startup source completes. Keep its windows and channels
+                    // available while it waits for LOGON. The supervisor's
+                    // one-shot startup program can release graphics resources;
+                    // submitted REPL commands already keep the session alive.
+                    if (current.supervisor && !submittedInteractiveCommand)
                         current.interpreter->releaseGraphicsResources();
                     current.status = TaskStatus::WaitingInput;
                     current.releaseSource();

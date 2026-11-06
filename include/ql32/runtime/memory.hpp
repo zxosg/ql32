@@ -8,6 +8,7 @@ namespace ql32::runtime {
 struct HeapFragmentationInfo {
     std::uint64_t largestFreeBlockBytes = 0;
     std::uint64_t freeBlockCount = 0;
+    std::uint64_t allocatedBlockCount = 0;
 };
 
 // Reports memory currently available to the platform runtime. The exact pool

@@ -108,7 +108,7 @@ constexpr std::string_view shellHelpCommands[] = {
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "WHERE", "LOCALS", "GLOBALS",
     "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
-    "DIAGNOSTICS", "TRACE"
+    "DIAGNOSTICS", "TRACE", "DEBUGBAR"
 };
 
 template <typename Range>
@@ -2600,6 +2600,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "FORMAT" || word.rfind("FORMAT ", 0) == 0 ||
             word == "CD" || word.rfind("CD ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
+            word == "DEBUGBAR" || word.rfind("DEBUGBAR ", 0) == 0 ||
             word == "DEBUG" || word.rfind("DEBUG ", 0) == 0 ||
             word == "BREAK" || word.rfind("BREAK ", 0) == 0 ||
             word == "CLEARBREAK" || word.rfind("CLEARBREAK ", 0) == 0 ||
@@ -2804,6 +2805,22 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;
             }
+        } else if (word == "DEBUGBAR" || word.rfind("DEBUGBAR ", 0) == 0) {
+            if (!taskControl_ || !graphics_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "debug overlay service unavailable");
+            const auto tasks = taskControl_->listTasks();
+            const auto self = std::find_if(tasks.begin(), tasks.end(), [this](const auto& task) {
+                return task.id == task_id_;
+            });
+            if (self == tasks.end() || !self->supervisor)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "DEBUGBAR is supervisor-only");
+            const std::string argument = command(trim(normalizedLine.substr(8)));
+            if (argument != "ON" && argument != "OFF")
+                throw std::runtime_error("usage: DEBUGBAR ON|OFF");
+            graphics_->setDebugOverlayEnabled(argument == "ON");
+            output << "Debug bar " << (argument == "ON" ? "ON" : "OFF") << '\n';
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(5));
             const std::uint64_t outputChannel = argument.empty() ?

@@ -190,6 +190,12 @@ public:
     virtual void setRotation(SessionId, std::uint16_t degrees) {
         throw std::runtime_error("display rotation unsupported");
     }
+    // Platform status text is composed above application graphics and UI.
+    virtual void setDebugOverlayEnabled(bool) {
+        throw std::runtime_error("debug overlay unsupported");
+    }
+    virtual bool debugOverlayEnabled() const noexcept { return false; }
+    virtual void setDebugOverlayText(const std::string&) {}
 };
 
 } // namespace ql32::graphics

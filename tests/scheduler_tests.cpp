@@ -1,5 +1,6 @@
 #include "ql32/vm/scheduler.hpp"
 #include "ql32/ui/service.hpp"
+#include "ql32/graphics/windowed_service.hpp"
 
 #include <sstream>
 #include <stdexcept>
@@ -557,6 +558,55 @@ void testSupervisorCanSetSliceAndWorkerPriority() {
             "supervisor did not receive scheduler command confirmations");
 }
 
+void testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        32, 8, nullptr, 4, 0);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream supervisorOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+
+    const auto startWorker = [&](const char* source) {
+        std::ostringstream output;
+        const auto worker = scheduler.launchWorker(source, output);
+        for (int tick = 0; tick < 20 && scheduler.task(worker)->status !=
+                ql32::vm::TaskStatus::WaitingInput; ++tick)
+            require(scheduler.tick(), "worker did not finish its startup source");
+        require(scheduler.task(worker)->status == ql32::vm::TaskStatus::WaitingInput,
+                "worker did not remain available at its interactive prompt");
+        return worker;
+    };
+    const auto first = startWorker("WINDOW 0,0,16,8\nPAPER 2\nCLS\n");
+    require(graphics->windowManager().size() == 1,
+            "first worker's window disappeared at its prompt");
+    const auto second = startWorker("WINDOW 16,0,16,8\nPAPER 4\nCLS\n");
+    require(second != first && graphics->windowManager().size() == 2,
+            "starting another worker discarded the idle worker's window");
+    require(scheduler.logon(first) && scheduler.focusedTask() == first,
+            "LOGON could not focus the first worker after its startup program");
+    require(scheduler.logoff() == supervisor,
+            "LOGOFF did not return focus to the supervisor");
+}
+
+void testSupervisorCanToggleDebugBar() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        320, 240, nullptr);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+    require(scheduler.submit(supervisor, "DEBUGBAR ON\n"),
+            "supervisor did not accept DEBUGBAR ON");
+    require(scheduler.tick() && graphics->debugOverlayEnabled(),
+            "DEBUGBAR ON did not enable the overlay");
+    require(scheduler.submit(supervisor, "DEBUGBAR OFF\n"),
+            "supervisor did not accept DEBUGBAR OFF");
+    require(scheduler.tick() && !graphics->debugOverlayEnabled(),
+            "DEBUGBAR OFF did not disable the overlay");
+}
+
 void testTasksUsesDefaultAndExplicitPrintChannels() {
     auto channels = std::make_shared<CapturingChannelService>();
     auto graphics = std::make_shared<CapturingGraphicsService>();
@@ -884,6 +934,8 @@ int main() {
     testWeightedPolicyResetsForRemovalAndPriorityChanges();
     testPriorityWeightsChangeFrequency();
     testSupervisorCanSetSliceAndWorkerPriority();
+    testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts();
+    testSupervisorCanToggleDebugBar();
     testTasksUsesDefaultAndExplicitPrintChannels();
     testKillConfirmationUsesConsoleChannel();
     testKillRemovesCompletedAndFailedTaskRecords();

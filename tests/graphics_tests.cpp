@@ -706,6 +706,49 @@ void testCompletedSessionRemainsAvailableForCapture() {
             "new graphics session did not draw after frozen image cleanup");
 }
 
+void testNewWindowCommandReclaimsFrozenCanvasBudget() {
+    using namespace ql32::graphics;
+    constexpr std::size_t fullCanvasBytes = 16 * 8 / 2;
+    WindowedService graphics(16, 8, nullptr, 4, fullCanvasBytes);
+
+    graphics.setInk(41, 3);
+    graphics.pixel(41, {2, 2});
+    graphics.closeSession(41);
+    require(graphics.windowManager().size() == 1,
+            "completed session canvas was not retained for capture");
+
+    // BASIC WINDOW creates a new session's first canvas directly, rather than
+    // going through ensureWindow(). It must release the frozen canvas first.
+    graphics.setWindowBounds(42, {0, 0, 16, 8});
+    require(graphics.windowManager().size() == 1,
+            "WINDOW did not reclaim the previous session's frozen canvas");
+    const auto info = graphics.windowInfo(42);
+    require(info.width == 16 && info.height == 8,
+            "new WINDOW command did not receive the reclaimed canvas budget");
+}
+
+void testDebugOverlayComposesAboveGraphics() {
+    using namespace ql32::graphics;
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(24, 16, presenter, 2);
+    graphics.setInk(51, 7);
+    graphics.fillRectangle(51, {0, 0}, 24, 16);
+    graphics.setDebugOverlayText("A");
+    graphics.setDebugOverlayEnabled(true);
+
+    require(presenter->lastFrame.pixels.size() == 24 * 16,
+            "debug overlay did not present the composed screen");
+    require(presenter->lastFrame.pixels[8] == 0,
+            "debug overlay did not cover application graphics across the status row");
+    require(presenter->lastFrame.pixels[8 * 24] == 7,
+            "debug overlay covered application graphics below its single text row");
+    bool glyphVisible = false;
+    for (std::size_t y = 0; y < 7; ++y)
+        for (std::size_t x = 0; x < 5; ++x)
+            glyphVisible = glyphVisible || presenter->lastFrame.pixels[y * 24 + x] == 15;
+    require(glyphVisible, "debug overlay text glyph was not composed");
+}
+
 void testCanvasStorageReleasesAndReusesAllocations() {
     using namespace ql32::graphics;
     WindowManager manager(16, 8, 5, 32);
@@ -876,6 +919,8 @@ int main() {
     testCanvasReshapeReusesFullScreenStorage();
     testCloseWindowReleasesCanvasAndAllowsReuse();
     testCompletedSessionRemainsAvailableForCapture();
+    testNewWindowCommandReclaimsFrozenCanvasBudget();
+    testDebugOverlayComposesAboveGraphics();
     testCanvasStorageReleasesAndReusesAllocations();
     testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
     testFailedCanvasResizePreservesAllWindows();

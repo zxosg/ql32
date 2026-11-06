@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <ctime>
 #include <cstring>
 #include <memory>
 #include <ostream>
@@ -73,6 +75,43 @@ bool protocolInputLine = false;
 bool serialSawCarriageReturn = false;
 bool replReadyMessageShown = false;
 bool replPromptShown = false;
+std::uint32_t lastDebugOverlayRefresh = 0;
+
+void refreshDebugOverlay() {
+    if (!graphics || !graphics->debugOverlayEnabled()) return;
+    const std::uint32_t now = millis();
+    if (static_cast<std::uint32_t>(now - lastDebugOverlayRefresh) < 1000) return;
+    lastDebugOverlayRefresh = now;
+
+    const auto freeBytes = boardMemory.freeBytes();
+    const auto heap = boardMemory.fragmentationInfo();
+    std::size_t activeTasks = 0;
+    if (scheduler) {
+        for (const auto& task : scheduler->tasks()) {
+            if (task.status != ql32::vm::TaskStatus::Completed &&
+                task.status != ql32::vm::TaskStatus::Failed &&
+                task.status != ql32::vm::TaskStatus::Cancelled)
+                ++activeTasks;
+        }
+    }
+    char clockText[9] = "--:--:--";
+    if (const auto timestamp = boardClock.unixTimeSeconds()) {
+        const std::time_t value = static_cast<std::time_t>(*timestamp);
+        std::tm parts{};
+        if (gmtime_r(&value, &parts))
+            std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
+                          parts.tm_hour, parts.tm_min, parts.tm_sec);
+    }
+    const auto freeK = freeBytes / 1024;
+    const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
+    char line[64]{};
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u %s",
+        static_cast<unsigned long long>(freeK),
+        static_cast<unsigned long long>(maxK),
+        static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
+        static_cast<unsigned>(activeTasks), clockText);
+    graphics->setDebugOverlayText(line);
+}
 
 ql32::runtime::YModemSource screenCaptureSource() {
     const auto width = graphics->windowManager().screenWidth();
@@ -229,6 +268,7 @@ bool acceptsInput() {
 void advanceScheduler() {
     if (!scheduler) return;
     (void)scheduler->tick();
+    refreshDebugOverlay();
     if (uiPresenter) uiPresenter->refresh();
 
     const auto tasks = scheduler->tasks();

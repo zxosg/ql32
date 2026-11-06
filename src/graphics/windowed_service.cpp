@@ -378,6 +378,10 @@ void WindowedService::setWindowBounds(SessionId session, ChannelId channel, Rect
     const auto found = sessionWindows_.find(key);
     if (found == sessionWindows_.end()) {
         if (session == 0) throw std::invalid_argument("graphics session must be valid");
+        // A completed session's last image is retained until the next session
+        // draws. WINDOW creates the first canvas through this path, so reclaim
+        // frozen canvases here just as ensureWindow() does for drawing commands.
+        discardFrozenWindows();
         discardPresentationBuffer();
         const auto id = manager_.create(session, bounds, PixelDepth::Four);
         sessionWindows_.emplace(key, id);
@@ -419,6 +423,19 @@ void WindowedService::setRotation(SessionId session, std::uint16_t degrees) {
     }
     rotationDegrees_ = degrees;
     presentIfConfigured();
+}
+
+void WindowedService::setDebugOverlayEnabled(bool enabled) {
+    if (debugOverlayEnabled_ == enabled) return;
+    debugOverlayEnabled_ = enabled;
+    invalidateSystemRegion({0, 0, manager_.screenWidth(), 8});
+}
+
+void WindowedService::setDebugOverlayText(const std::string& text) {
+    if (debugOverlayText_ == text) return;
+    debugOverlayText_ = text;
+    if (debugOverlayEnabled_)
+        invalidateSystemRegion({0, 0, manager_.screenWidth(), 8});
 }
 
 void WindowedService::setWindowPixelDepth(SessionId session, PixelDepth depth) {
@@ -496,6 +513,22 @@ void WindowedService::composeDisplayRegionRow(std::uint32_t y, std::uint32_t x,
     manager_.composeRegionRowInto(y, x, width, row);
     if (consoleLayer_) consoleLayer_(y, x, row);
     if (uiLayer_) uiLayer_(y, x, row);
+    if (!debugOverlayEnabled_ || y >= 8) return;
+    std::fill(row.begin(), row.end(), static_cast<ColorIndex>(0));
+    const auto glyphRow = y;
+    const auto firstColumn = x / 6;
+    const auto lastColumn = (x + width + 5) / 6;
+    for (std::uint32_t column = firstColumn;
+         column < lastColumn && column < debugOverlayText_.size(); ++column) {
+        const auto glyph = classicGlyphColumns(debugOverlayText_[column]);
+        const auto columnStart = column * 6;
+        for (std::uint32_t glyphColumn = 0; glyphColumn < 5; ++glyphColumn) {
+            if ((glyph[glyphColumn] & (1u << glyphRow)) == 0) continue;
+            const auto screenX = columnStart + glyphColumn;
+            if (screenX >= x && screenX < x + width)
+                row[screenX - x] = 15;
+        }
+    }
 }
 
 void WindowedService::composeDisplayRow(std::uint32_t y,
