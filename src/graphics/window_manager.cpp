@@ -645,8 +645,10 @@ WindowId WindowManager::create(SessionId owner, Rect bounds, PixelDepth depth) {
     if (owner == 0) throw std::invalid_argument("window owner must be a valid session");
     validate(bounds);
     const auto viewport = taskViewport(owner);
-    const auto screenX = static_cast<std::int64_t>(viewport.originX) + bounds.x;
-    const auto screenY = static_cast<std::int64_t>(viewport.originY) + bounds.y;
+    const auto screenX = static_cast<std::int64_t>(viewport.originX) +
+                         viewport.offsetX + bounds.x;
+    const auto screenY = static_cast<std::int64_t>(viewport.originY) +
+                         viewport.offsetY + bounds.y;
     if (screenX < std::numeric_limits<std::int32_t>::min() ||
         screenY < std::numeric_limits<std::int32_t>::min() ||
         screenX + bounds.width > std::numeric_limits<std::int32_t>::max() ||
@@ -698,8 +700,10 @@ void WindowManager::setTaskViewport(SessionId owner, TaskViewport viewport) {
     validate(viewport);
     for (const auto& entry : windows_) {
         if (entry.owner != owner) continue;
-        const auto x = static_cast<std::int64_t>(viewport.originX) + entry.bounds.x;
-        const auto y = static_cast<std::int64_t>(viewport.originY) + entry.bounds.y;
+        const auto x = static_cast<std::int64_t>(viewport.originX) +
+                       viewport.offsetX + entry.bounds.x;
+        const auto y = static_cast<std::int64_t>(viewport.originY) +
+                       viewport.offsetY + entry.bounds.y;
         const auto right = x + entry.bounds.width;
         const auto bottom = y + entry.bounds.height;
         if (x < std::numeric_limits<std::int32_t>::min() ||
@@ -727,8 +731,10 @@ void WindowManager::setBounds(WindowId id, Rect bounds) {
     validate(bounds);
     auto& entry = find(id);
     const auto viewport = taskViewport(entry.owner);
-    const auto x = static_cast<std::int64_t>(viewport.originX) + bounds.x;
-    const auto y = static_cast<std::int64_t>(viewport.originY) + bounds.y;
+    const auto x = static_cast<std::int64_t>(viewport.originX) +
+                   viewport.offsetX + bounds.x;
+    const auto y = static_cast<std::int64_t>(viewport.originY) +
+                   viewport.offsetY + bounds.y;
     if (x < std::numeric_limits<std::int32_t>::min() ||
         y < std::numeric_limits<std::int32_t>::min() ||
         x + bounds.width > std::numeric_limits<std::int32_t>::max() ||
@@ -778,8 +784,10 @@ void WindowManager::validate(TaskViewport viewport) {
 
 Rect WindowManager::screenBounds(const Entry& entry) const {
     const auto viewport = taskViewport(entry.owner);
-    const auto x = static_cast<std::int64_t>(viewport.originX) + entry.bounds.x;
-    const auto y = static_cast<std::int64_t>(viewport.originY) + entry.bounds.y;
+    const auto x = static_cast<std::int64_t>(viewport.originX) +
+                   viewport.offsetX + entry.bounds.x;
+    const auto y = static_cast<std::int64_t>(viewport.originY) +
+                   viewport.offsetY + entry.bounds.y;
     if (x < std::numeric_limits<std::int32_t>::min() ||
         y < std::numeric_limits<std::int32_t>::min() ||
         x + entry.bounds.width > std::numeric_limits<std::int32_t>::max() ||
@@ -950,9 +958,9 @@ void WindowManager::tile() {
     for (std::size_t index = 0; index < visible.size(); ++index) {
         const auto viewport = taskViewport(visible[index]->owner);
         const auto localX = static_cast<std::int64_t>(tiledBounds[index].x) -
-                            viewport.originX;
+                            viewport.originX - viewport.offsetX;
         const auto localY = static_cast<std::int64_t>(tiledBounds[index].y) -
-                            viewport.originY;
+                            viewport.originY - viewport.offsetY;
         if (localX < std::numeric_limits<std::int32_t>::min() ||
             localX > std::numeric_limits<std::int32_t>::max() ||
             localY < std::numeric_limits<std::int32_t>::min() ||

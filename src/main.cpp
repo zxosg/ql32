@@ -8,12 +8,14 @@
 #include "ql32/platform/linux/ppm_presenter.hpp"
 
 #include <filesystem>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
 #endif
@@ -95,9 +97,14 @@ int main(int argc, char** argv) {
 #endif
             );
             auto status = interpreter.executeResumable(source, std::cout);
-            while (status == ql32::ExecutionStatus::Suspended) {
-                if (!console.dispatchNext())
+            while (status == ql32::ExecutionStatus::Suspended ||
+                   status == ql32::ExecutionStatus::WaitingTime) {
+                if (status == ql32::ExecutionStatus::WaitingTime) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(
+                        interpreter.requestedPauseDurationMs()));
+                } else if (!console.dispatchNext()) {
                     throw std::runtime_error("suspended UI request was not queued");
+                }
                 status = interpreter.resume(std::cout);
             }
         } else {

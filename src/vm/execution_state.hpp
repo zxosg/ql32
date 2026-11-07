@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <chrono>
 #include <optional>
 #include <set>
 #include <string>
@@ -57,6 +58,7 @@ struct VMExecutionState {
     std::unordered_map<std::string, RuntimeArray> arrays;
     std::vector<SelectState> selectStates;
     std::size_t pc = 0;
+    std::optional<std::chrono::steady_clock::time_point> pauseUntil;
     std::uint64_t printChannel = 1;
     std::size_t printChannelColumn = 0;
     std::optional<ui::RequestId> pendingUiRequest;

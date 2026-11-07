@@ -29,7 +29,7 @@ namespace detail { struct VMExecutionState; struct UISessionState; }
 
 using Value = std::variant<double, std::string>;
 enum class ExecutionStatus {
-    Completed, Suspended, WaitingChannel, WaitingTask, Yielded, DebugPaused,
+    Completed, Suspended, WaitingChannel, WaitingTask, WaitingTime, Yielded, DebugPaused,
     RunPending, InteractivePending
 };
 
@@ -98,6 +98,9 @@ public:
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
     const std::string& errorDetail() const noexcept { return errorDetail_; }
     void clear();
+    std::uint32_t requestedPauseDurationMs() const noexcept {
+        return requestedPauseDurationMs_;
+    }
 
 private:
     ExecutionStatus runExecution(std::ostream& output, runtime::CancellationToken stop,
@@ -138,6 +141,7 @@ private:
     std::shared_ptr<runtime::SystemControlService> systemControl_;
     runtime::SessionId session_id_ = 0;
     runtime::TaskId task_id_ = 0;
+    std::uint32_t requestedPauseDurationMs_ = 0;
     runtime::ErrorCode errorCode_ = runtime::ErrorCode::None;
     std::string errorDetail_;
     std::unique_ptr<detail::VMExecutionState> execution_;

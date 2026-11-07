@@ -457,7 +457,9 @@ class DebuggerWindow(QMainWindow):
         elif callback == "viewport":
             self._log(f"Task {payload['task_id']} canvas set to "
                       f"({payload['canvas_origin_x']}, {payload['canvas_origin_y']}) "
-                      f"{payload['canvas_width']}×{payload['canvas_height']}")
+                      f"{payload['canvas_width']}×{payload['canvas_height']} "
+                      f"offset ({payload.get('canvas_offset_x', 0)}, "
+                      f"{payload.get('canvas_offset_y', 0)})")
             self._log(f"Started and attached task {self.current_task}")
             self._inspect()
         elif callback == "attach":
@@ -511,9 +513,12 @@ class DebuggerWindow(QMainWindow):
         if task_id is None:
             self._show_error("Select a task first.")
             return
+        task = self.task_info.get(int(task_id), {})
         self._request("task.viewport", task_id, self.viewport_x.value(),
                       self.viewport_y.value(), self.viewport_width.value(),
-                      self.viewport_height.value(), callback="viewport")
+                      self.viewport_height.value(),
+                      int(task.get("canvas_offset_x", 0)),
+                      int(task.get("canvas_offset_y", 0)), callback="viewport")
 
     def _tile_tasks(self):
         tasks = [task for task in self.task_info.values() if not task.get("supervisor")]
@@ -530,7 +535,8 @@ class DebuggerWindow(QMainWindow):
             x = (index % columns) * tile_width
             y = (index // columns) * tile_height
             self._request("task.viewport", task["id"], x, y, tile_width, tile_height,
-                          callback="viewport")
+                          int(task.get("canvas_offset_x", 0)),
+                          int(task.get("canvas_offset_y", 0)), callback="viewport")
         self._log(f"Tiling {len(tasks)} tasks in a {columns}×{rows} grid "
                   f"using {tile_width}×{tile_height} canvases")
 

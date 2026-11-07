@@ -55,6 +55,10 @@ higher weights more turns. `SUSPEND id` saves the current weight, while
 `RESUME id` restores it. `PRIORITY id,0` directly sets a zero baseline and
 clears the saved resume weight. Each session owns
 its BASIC state and channel handles while sharing the board's physical services.
+`TASKVIEW id,origin-x,origin-y,width,height[,offset-x,offset-y]` positions and
+clips each task's canvas. Optional offsets translate the task's rendered
+content from its local `(0,0)` inside the fixed viewport; positive values move
+it right/down. Omitting the offsets sets them to zero.
 The [embedded supervisor demo](examples/supervisor/README.md) shows three
 workers in side-by-side display windows. See
 [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md).

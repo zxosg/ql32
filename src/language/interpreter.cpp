@@ -6,6 +6,7 @@
 #include <atomic>
 #include <charconv>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cctype>
 #include <cstdint>
@@ -17,6 +18,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -89,7 +91,7 @@ constexpr std::string_view builtinCommands[] = {
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
     "INK", "PAPER", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
-    "DEALLOC", "XFER"
+    "DEALLOC", "XFER", "PAUSE"
 };
 
 constexpr std::string_view builtinFunctions[] = {
@@ -763,8 +765,8 @@ private:
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "TASK expects a filename and optional flags");
                 } else if (instruction.name == "TASKVIEW") {
-                    if (passedArguments != 5)
-                        error(instruction, "TASKVIEW expects task ID, origin X/Y, and canvas width/height");
+                    if (passedArguments != 5 && passedArguments != 7)
+                        error(instruction, "TASKVIEW expects task ID, origin X/Y, canvas width/height, and optional offset X/Y");
                 } else if (instruction.name == "MID$") {
                     if (passedArguments < 2 || passedArguments > 3)
                         error(instruction, "MID$ expects a string, start, and optional length");
@@ -783,6 +785,7 @@ private:
                 } else if (instruction.name != "IN" && instruction.name != "IOREAD" &&
                            instruction.name != "IOWRITE" && instruction.name != "POKE" &&
                            instruction.name != "OUT" && instruction.name != "XFER" &&
+                           instruction.name != "TASKVIEW" &&
                            passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
@@ -1575,6 +1578,15 @@ private:
             const Token name = advance();
             if (check(Kind::LeftParen))
                 error(peek(), "commands take arguments without call parentheses");
+            if (name.text == "PAUSE") {
+                if (commandArgumentTerminator())
+                    error(name, "PAUSE requires a delay in milliseconds");
+                expression();
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of statement after PAUSE delay");
+                code_.push_back({Op::Pause, 0.0, {}, name.line, name.column});
+                return;
+            }
             if (name.text == "INPUT") {
                 Instruction input{Op::Input, 0.0, {}, name.line, name.column};
                 bool hasPromptChannel = false;
@@ -2164,6 +2176,7 @@ void Interpreter::abortExecution() noexcept {
     pendingRunSource_.clear();
     pendingInteractiveTail_.clear();
     clearPager();
+    requestedPauseDurationMs_ = 0;
 }
 
 std::string Interpreter::takePendingRunSource() noexcept {
@@ -2383,9 +2396,14 @@ std::string detail::expandIncludes(const std::string& source,
 }
 
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
-    const auto status = executeInteractiveResumable(source, output);
+    auto status = executeInteractiveResumable(source, output);
+    while (status == ExecutionStatus::WaitingTime) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(requestedPauseDurationMs_));
+        status = resume(output);
+    }
     if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel ||
-        status == ExecutionStatus::InteractivePending)
+        status == ExecutionStatus::WaitingTime || status == ExecutionStatus::InteractivePending)
         throw std::runtime_error("execution suspended; use executeResumable() and resume()");
 }
 
@@ -3283,6 +3301,12 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
                     status = resume(output);
                     continue;
                 }
+                if (status == ExecutionStatus::WaitingTime) {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(requestedPauseDurationMs_));
+                    status = resume(output);
+                    continue;
+                }
                 if (status == ExecutionStatus::WaitingChannel)
                     throw std::runtime_error("interactive command is waiting for channel input");
                 if (status == ExecutionStatus::RunPending)
@@ -3308,6 +3332,7 @@ void Interpreter::clear() {
     variables_.clear();
     buffers_.clear();
     output_column_ = 0;
+    requestedPauseDurationMs_ = 0;
 }
 
 } // namespace ql32

@@ -533,7 +533,7 @@ error. These names describe logical storage roles; a platform may implement
 
 The scheduler-backed embedded REPL also provides `TASKS`,
 `TASKRESULT id`, `TASKCHANNELS id`, `LOGON id`, `LOGOFF`, `KILL id`,
-`TASKVIEW id,origin-x,origin-y,width,height`, `SLICE [instructions]`,
+`TASKVIEW id,origin-x,origin-y,width,height[,offset-x,offset-y]`, `SLICE [instructions]`,
 `PRIORITY task-id,weight`, `SUSPEND id`, and
 `RESUME id`. `TASK` reads source through the configured storage service and
 starts a task. Its statement form `TASK "path.bas"` reports the new task ID to
@@ -546,6 +546,12 @@ mode, source completion leaves the task at its own interactive prompt with its
 variables, program, graphics window, and channels retained. `TASKS` lists task
 IDs, kind, priority, state, and errors, along with the global instruction
 slice; suspended tasks also show their saved resume priority.
+`PAUSE delay` suspends only the calling task for `delay` milliseconds while
+the scheduler continues running other tasks. The delay must be numeric and in
+`0..4294967295`; fractional values round up to the next millisecond. `PAUSE 0`
+yields until the next scheduler turn. A timed wait appears as `WAITING_TIME`.
+The millisecond unit follows Annex32's `PAUSE` reference; task-local scheduling
+and the accepted range are QL/32-specific ([Annex32 PAUSE](https://www.cicciocb.com/annex32help/V1.518/start.htm)).
 `TASKRESULT id` prints all available properties. In expressions,
 `TASKRESULT(id, selector)` returns one property selected by `KTaskResultStatus`,
 `KTaskResultChannels`, `KTaskResultErrorCode`, `KTaskResultErrorDetail`,
@@ -559,10 +565,18 @@ the supervisor and completed records. `GETTASK(KTaskHandle, position)` returns
 the task ID at a zero-based position in ascending task-ID order. These
 supervisor-only selectors allow a program to enumerate tasks and inspect their
 state with `TASKRESULT`.
-`TASKVIEW id,origin-x,origin-y,width,height` changes the selected task's
-screen-space canvas origin and clipping dimensions. It is supervisor-only.
-Each task's `WINDOW x,y,width,height` positions remain relative to that task's
-origin, and the compositor clips windows to both the task canvas and display.
+`TASKVIEW id,origin-x,origin-y,width,height[,offset-x,offset-y]` changes the
+selected task's screen-space canvas origin and clipping dimensions. It is
+supervisor-only. `origin-x` and `origin-y` may be signed integers; `width` and
+`height` must be positive integers. Each task's `WINDOW x,y,width,height`
+positions remain relative to that task's local origin `(0,0)`. The compositor
+adds the optional signed offsets to those local positions, then clips the
+rendered content to the fixed viewport rectangle and display. Positive offsets
+move content right and down; negative offsets move it left and up. Omitting the
+offset pair resets both offsets to zero. For example, `TASKVIEW id,80,60,160,120`
+shows a 160×120 crop at screen position `(80,60)`, while
+`TASKVIEW id,80,60,160,120,-40,-20` shifts the task canvas 40 pixels left and
+20 pixels up inside that same crop.
 `TASKCHANNELS id` lists a session's reserved and opened handles with endpoint
 types. `LOGON id` routes embedded console input to an idle worker so immediate
 BASIC commands operate in that session; `LOGOFF` returns to the supervisor.

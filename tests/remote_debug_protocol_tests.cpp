@@ -176,20 +176,24 @@ void testRemoteTaskViewportControl() {
             "viewport scenario did not create its initial window");
 
     const auto moved = invoke(protocol, scheduler, storage, output,
-        request(3, "task.viewport", {"1", "10", "-2", "8", "6"}));
+        request(3, "task.viewport", {"1", "10", "-2", "8", "6", "4", "-3"}));
     require(moved.find("\"canvas_origin_x\":10") != std::string::npos &&
-                moved.find("\"canvas_origin_y\":-2") != std::string::npos,
+                moved.find("\"canvas_origin_y\":-2") != std::string::npos &&
+                moved.find("\"canvas_offset_x\":4") != std::string::npos &&
+                moved.find("\"canvas_offset_y\":-3") != std::string::npos,
             "remote viewport update response omitted its geometry");
     const auto after = graphics->windowManager().compositionOrder();
-    require(after.size() == 1 && after.front().bounds.x == 11 &&
-                after.front().bounds.y == -1 && after.front().screenClip.y == 0,
+    require(after.size() == 1 && after.front().bounds.x == 15 &&
+                after.front().bounds.y == -4 && after.front().screenClip.y == 0,
             "remote viewport update did not reposition and clip the retained window");
     const auto taskList = invoke(protocol, scheduler, storage, output,
                                  request(4, "tasks.list"));
     require(taskList.find("\"canvas_origin_x\":10") != std::string::npos &&
                 taskList.find("\"canvas_origin_y\":-2") != std::string::npos &&
                 taskList.find("\"canvas_width\":8") != std::string::npos &&
-                taskList.find("\"canvas_height\":6") != std::string::npos,
+                taskList.find("\"canvas_height\":6") != std::string::npos &&
+                taskList.find("\"canvas_offset_x\":4") != std::string::npos &&
+                taskList.find("\"canvas_offset_y\":-3") != std::string::npos,
             "remote task listing did not report current viewport properties");
 
     const auto rejected = invoke(protocol, scheduler, storage, output,

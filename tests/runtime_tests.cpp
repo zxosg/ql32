@@ -1,12 +1,14 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -568,6 +570,31 @@ void testTrigonometricFunctionsUseRadians() {
     require(!(values >> extra), "SIN or COS produced extra values");
 }
 
+void testPauseDurationRoundsUpAndResumes() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    require(interpreter.executeResumable(
+                "PAUSE 1.1\nPRINT \"resumed\"\n", output) ==
+                ql32::ExecutionStatus::WaitingTime,
+            "PAUSE did not yield a timed wait");
+    require(interpreter.requestedPauseDurationMs() == 2,
+            "fractional PAUSE delay did not round up to milliseconds");
+    require(interpreter.resume(output) == ql32::ExecutionStatus::WaitingTime,
+            "early resume bypassed the remaining PAUSE delay");
+    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    require(interpreter.resume(output) == ql32::ExecutionStatus::Completed &&
+                output.str() == "resumed\n",
+            "timed execution did not resume at the instruction after PAUSE");
+
+    bool rejectedNegative = false;
+    try {
+        interpreter.executeResumable("PAUSE -1\n", output);
+    } catch (const ql32::runtime::Error&) {
+        rejectedNegative = true;
+    }
+    require(rejectedNegative, "negative PAUSE delay was accepted");
+}
+
 void testFreeReturnsAllMetricsWithoutSelector() {
     auto memory = std::make_shared<RecordingMemoryService>();
     ql32::Interpreter interpreter({}, {}, {}, {}, {}, memory);
@@ -869,6 +896,7 @@ int main() {
         testStringExtractionFunctions();
         testUnsignedBitFunctionsAndRadixLiterals();
         testTrigonometricFunctionsUseRadians();
+        testPauseDurationRoundsUpAndResumes();
         testFreeReturnsAllMetricsWithoutSelector();
         testFreeLeavesUnavailableMetricsAsEmptyCsvFields();
         testEmergencyReserveCanBeReleasedAndRestored();

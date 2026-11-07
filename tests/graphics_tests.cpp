@@ -871,8 +871,16 @@ void testTaskViewportTranslatesAndClipsOwnedWindows() {
     require(manager.windowState(second).screenClip.width == 0,
             "window extending outside the task viewport was not clipped");
 
+    manager.setTaskViewport(41, {2, 1, 3, 2, 1, 0});
+    const auto offsetState = manager.windowState(first);
+    require(offsetState.bounds.x == 4 && offsetState.bounds.y == 2 &&
+                offsetState.screenClip.x == 4 && offsetState.screenClip.y == 2 &&
+                offsetState.screenClip.width == 1 &&
+                offsetState.screenClip.height == 1,
+            "task display offsets did not move content inside the fixed viewport");
+
     auto frame = manager.compose();
-    require(frame[2 * 8 + 3] == 2 && frame[2 * 8 + 4] == 8 &&
+    require(frame[2 * 8 + 4] == 2 &&
                 frame[1 * 8 + 2] == 3,
             "task clipping changed window-local pixels or covered unrelated pixels");
 

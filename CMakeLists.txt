@@ -66,6 +66,7 @@ if(QL32_BUILD_TESTS)
   endfunction()
 
   add_cli_conformance_test(cli_stdin 0)
+  add_cli_conformance_test(cli_pause 0)
   add_cli_conformance_test(cli_file 0)
   add_cli_conformance_test(cli_language_slice 0)
   add_cli_conformance_test(cli_expression_rules 0)

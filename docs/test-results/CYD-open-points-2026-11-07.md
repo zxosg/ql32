@@ -204,6 +204,47 @@ so the foreground session displayed `channel handle is not open for this
 session` errors in the captured overlay. Those errors came from the test
 commands, not the attractor worker.
 
+## Memory/concurrency conclusion
+
+The measured operating envelope for the tested CYD SPIFFS firmware is:
+
+- A 320×240 4-bit canvas uses 38,400 bytes. The configured 76,800-byte canvas
+  arena therefore admits two full-screen canvases; a third is rejected by the
+  canvas budget while more than 109 KiB of general free heap remained. Treat
+  two as the full-screen canvas limit for this profile.
+- Ten animated 64×64 workers were created and remained active near saturation
+  (`FREE()` reported 13,400–13,684 bytes total and 10,740–11,252 bytes in the
+  largest block). The next worker failed during execution. The supervisor
+  remained responsive and `SAVE` still worked. Treat ten such workers as a
+  demonstrated ceiling, not a safe target when other workloads are active.
+- A 320×240, eight-iteration Mandelbrot render did not finish within five
+  minutes while the array and channel workers also ran. That combination is
+  outside the practical rendering envelope. As a conservative operating
+  policy, keep one compute-heavy full-screen render active at a time and reduce
+  other worker load when response time matters. The test does not establish a
+  frame-rate guarantee for a lone renderer.
+- Ordinary five-by-five worker cleanup and the five-cycle 64×64 saturation
+  follow-up did not show monotonic total-heap loss. Small-cycle recovery
+  returned the largest block to 110,580 bytes each time, while total-free
+  readings varied by about 2.4–3.0 KiB below baseline and the free-block count
+  rose. The ten-worker OOM pass recovered neither the original total-free
+  value nor largest block after task reaping; the largest block varied
+  substantially between passes. The separate 25-run cleanup suite returned
+  to within 60 bytes of its baseline after reboot. This is consistent with
+  allocation high-water retention and heap fragmentation, but the current
+  measurements do not isolate their individual contributions or prove a leak.
+  The ten-worker saturation pass itself was not followed by a same-run reboot
+  measurement.
+
+OOM recovery is verified: the rejected task reports an error, the board does
+not reset, and the supervisor can save and reap tasks. The separate 25-run
+cleanup suite also passed reboot recovery. No fixed task-count limit is
+justified; the practical limits are workload-specific and should be checked
+with `FREE(0)` and `FREE(1)` before starting another graphics workload. These
+results close the CYD memory/concurrency characterization item at the
+operating-envelope level; the residual post-saturation fragmentation remains
+documented as a limitation.
+
 ## Follow-up
 
 1. Keep future attractor captures in the same serial session as launch. Its

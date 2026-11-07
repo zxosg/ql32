@@ -98,6 +98,7 @@ const char* statusName(vm::TaskStatus status) {
     case vm::TaskStatus::WaitingInput: return "WAITING_INPUT";
     case vm::TaskStatus::WaitingChannel: return "WAITING_CHANNEL";
     case vm::TaskStatus::WaitingTask: return "WAITING_TASK";
+    case vm::TaskStatus::WaitingTime: return "WAITING_TIME";
     case vm::TaskStatus::DebugPaused: return "DEBUG_PAUSED";
     case vm::TaskStatus::Completed: return "COMPLETED";
     case vm::TaskStatus::Failed: return "FAILED";
@@ -262,6 +263,8 @@ void RemoteDebugProtocol::handle(std::string_view line, vm::SessionScheduler& sc
                     ",\"canvas_origin_y\":" + std::to_string(task.viewport.originY) +
                     ",\"canvas_width\":" + std::to_string(task.viewport.canvasWidth) +
                     ",\"canvas_height\":" + std::to_string(task.viewport.canvasHeight) +
+                    ",\"canvas_offset_x\":" + std::to_string(task.viewport.offsetX) +
+                    ",\"canvas_offset_y\":" + std::to_string(task.viewport.offsetY) +
                     ",\"error\":" + json(task.error) + "}";
             }
             payload.push_back(']');
@@ -286,20 +289,27 @@ void RemoteDebugProtocol::handle(std::string_view line, vm::SessionScheduler& sc
             }
             payload = "{\"task_id\":" + std::to_string(task) + ",\"paused\":true}";
         } else if (operation == "task.viewport") {
-            requireArgs(5);
+            if (args.size() != 5 && args.size() != 7)
+                throw std::runtime_error("task.viewport expects five or seven arguments");
             const auto task = number<vm::TaskId>(args[0], "task id");
             const auto originX = number<std::int32_t>(args[1], "canvas origin x");
             const auto originY = number<std::int32_t>(args[2], "canvas origin y");
             const auto width = number<std::uint32_t>(args[3], "canvas width");
             const auto height = number<std::uint32_t>(args[4], "canvas height");
+            const auto offsetX = args.size() == 7 ?
+                number<std::int32_t>(args[5], "canvas offset x") : 0;
+            const auto offsetY = args.size() == 7 ?
+                number<std::int32_t>(args[6], "canvas offset y") : 0;
             if (!scheduler.setTaskViewport(task,
-                    {originX, originY, width, height}))
+                    {originX, originY, width, height, offsetX, offsetY}))
                 throw std::runtime_error("task viewport could not be updated");
             payload = "{\"task_id\":" + std::to_string(task) +
                 ",\"canvas_origin_x\":" + std::to_string(originX) +
                 ",\"canvas_origin_y\":" + std::to_string(originY) +
                 ",\"canvas_width\":" + std::to_string(width) +
-                ",\"canvas_height\":" + std::to_string(height) + "}";
+                ",\"canvas_height\":" + std::to_string(height) +
+                ",\"canvas_offset_x\":" + std::to_string(offsetX) +
+                ",\"canvas_offset_y\":" + std::to_string(offsetY) + "}";
         } else if (operation == "debug.attach") {
             requireArgs(1);
             const auto task = number<vm::TaskId>(args[0], "task id");

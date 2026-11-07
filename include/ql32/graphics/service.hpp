@@ -31,6 +31,10 @@ struct TaskViewport {
     std::int32_t originY = 0;
     std::uint32_t canvasWidth = 0;
     std::uint32_t canvasHeight = 0;
+    // Display translation applied to task-relative window coordinates inside
+    // the fixed screen-space viewport. Positive values move content right/down.
+    std::int32_t offsetX = 0;
+    std::int32_t offsetY = 0;
 };
 
 struct WindowInfo {

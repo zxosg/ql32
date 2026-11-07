@@ -1,5 +1,6 @@
 #include "ql32/vm/scheduler.hpp"
 
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 
@@ -14,6 +15,7 @@ runtime::TaskState taskState(TaskStatus status) {
     case TaskStatus::WaitingInput: return runtime::TaskState::WaitingInput;
     case TaskStatus::WaitingChannel: return runtime::TaskState::WaitingChannel;
     case TaskStatus::WaitingTask: return runtime::TaskState::WaitingTask;
+    case TaskStatus::WaitingTime: return runtime::TaskState::WaitingTime;
     case TaskStatus::DebugPaused: return runtime::TaskState::DebugPaused;
     case TaskStatus::Completed: return runtime::TaskState::Completed;
     case TaskStatus::Failed: return runtime::TaskState::Failed;
@@ -59,8 +61,10 @@ public:
         return scheduler_.setTaskPriority(id, priority);
     }
     bool setTaskViewport(runtime::TaskId id, std::int32_t x, std::int32_t y,
-                         std::uint32_t width, std::uint32_t height) override {
-        return scheduler_.setTaskViewport(id, {x, y, width, height});
+                         std::uint32_t width, std::uint32_t height,
+                         std::int32_t offsetX, std::int32_t offsetY) override {
+        return scheduler_.setTaskViewport(id,
+            {x, y, width, height, offsetX, offsetY});
     }
 
     std::vector<runtime::ChannelInfo> listChannels(runtime::TaskId id) const override {
@@ -107,7 +111,8 @@ public:
                               info.error, info.errorCode, info.errorDetail,
                               info.openChannels, info.viewport.originX,
                               info.viewport.originY, info.viewport.canvasWidth,
-                              info.viewport.canvasHeight});
+                              info.viewport.canvasHeight, info.viewport.offsetX,
+                              info.viewport.offsetY});
         }
         return result;
     }
@@ -143,6 +148,7 @@ struct SessionScheduler::Task {
     std::uint32_t schedulerLastPriority = 0;
     bool schedulerWasEligible = false;
     bool schedulerEligibleThisTick = false;
+    std::chrono::steady_clock::time_point wakeAt{};
 
     void releaseSource() noexcept {
         std::string{}.swap(source);
@@ -553,6 +559,7 @@ std::string SessionScheduler::takeError(TaskId id) {
 
 bool SessionScheduler::tick() {
     if (executionPaused_) return false;
+    const auto now = std::chrono::steady_clock::now();
     const auto wakeParent = [&](Task& child) {
         if (child.waitingParentId == 0) return;
         for (auto& parentPtr : tasks_) {
@@ -581,6 +588,10 @@ bool SessionScheduler::tick() {
     for (auto& candidatePtr : tasks_) {
         Task& candidate = *candidatePtr;
         candidate.schedulerEligibleThisTick = false;
+        if (candidate.status == TaskStatus::WaitingTime) {
+            if (now < candidate.wakeAt) continue;
+            candidate.status = TaskStatus::Runnable;
+        }
         if (candidate.status == TaskStatus::Completed ||
             candidate.status == TaskStatus::Failed ||
             candidate.status == TaskStatus::Cancelled ||
@@ -738,6 +749,11 @@ bool SessionScheduler::tick() {
         } else if (result == ExecutionStatus::WaitingTask) {
             current.started = true;
             current.status = TaskStatus::WaitingTask;
+        } else if (result == ExecutionStatus::WaitingTime) {
+            current.started = true;
+            current.wakeAt = std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(current.interpreter->requestedPauseDurationMs());
+            current.status = TaskStatus::WaitingTime;
         } else if (result == ExecutionStatus::Suspended) {
             current.started = true;
             current.status = TaskStatus::WaitingUi;

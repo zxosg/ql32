@@ -310,9 +310,11 @@ void WindowedService::closeWindow(SessionId session, ChannelId channel) {
             const auto viewport = manager_.taskViewport(session);
             auto bounds = fallback->second;
             bounds.x = static_cast<std::int32_t>(
-                static_cast<std::int64_t>(bounds.x) + viewport.originX);
+                static_cast<std::int64_t>(bounds.x) + viewport.originX +
+                viewport.offsetX);
             bounds.y = static_cast<std::int32_t>(
-                static_cast<std::int64_t>(bounds.y) + viewport.originY);
+                static_cast<std::int64_t>(bounds.y) + viewport.originY +
+                viewport.offsetY);
             consoleBoundsCallback_(intersect(intersect(bounds,
                 {viewport.originX, viewport.originY,
                  viewport.canvasWidth, viewport.canvasHeight}),

@@ -3,6 +3,7 @@
 #include "execution_state.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <variant>
 #include <vector>
 #include <unordered_map>
+#include <thread>
 
 namespace ql32 {
 namespace {
@@ -129,6 +131,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::ChannelRead:
         case Op::ChannelWrite:
         case Op::Input:
+        case Op::Pause:
         case Op::Return:
         case Op::FunctionEnd:
         case Op::SelectBegin:
@@ -230,6 +233,9 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             consumed = static_cast<std::size_t>(instruction.expectsValue) +
                        static_cast<std::size_t>(instruction.channelArgument) +
                        static_cast<std::size_t>(instruction.clearTarget);
+            break;
+        case Op::Pause:
+            consumed = 1;
             break;
         case Op::ForInit:
             for (const ForItemSpec& item : instruction.forItems)
@@ -400,6 +406,7 @@ const char* opcodeName(Op op) {
     case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
     case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
     case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Input: return "INPUT";
+    case Op::Pause: return "PAUSE";
     case Op::JumpIfFalse: return "JUMP_IF_FALSE"; case Op::Jump: return "JUMP";
     case Op::ForInit: return "FOR_INIT"; case Op::ForNext: return "FOR_NEXT";
     case Op::LoopNext: return "LOOP_NEXT"; case Op::ExitLoop: return "EXIT_LOOP";
@@ -417,8 +424,14 @@ const char* opcodeName(Op op) {
 
 void Interpreter::execute(const std::string& source, std::ostream& output,
                           runtime::CancellationToken stop) {
-    const auto status = executeResumable(source, output, stop);
-    if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel)
+    auto status = executeResumable(source, output, stop);
+    while (status == ExecutionStatus::WaitingTime) {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(requestedPauseDurationMs_));
+        status = resume(output, stop);
+    }
+    if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel ||
+        status == ExecutionStatus::WaitingTime)
         throw std::runtime_error("execution suspended; use executeResumable() and resume()");
 }
 
@@ -559,6 +572,19 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     auto& pc = state.pc;
     if (state.debuggerAttached && state.debugPaused)
         return ExecutionStatus::DebugPaused;
+    if (state.pauseUntil) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now < *state.pauseUntil) {
+            const auto remaining = *state.pauseUntil - now;
+            const auto wholeMilliseconds =
+                std::chrono::duration_cast<std::chrono::milliseconds>(remaining);
+            auto roundedMilliseconds = wholeMilliseconds.count();
+            if (wholeMilliseconds < remaining) ++roundedMilliseconds;
+            requestedPauseDurationMs_ = static_cast<std::uint32_t>(roundedMilliseconds);
+            return ExecutionStatus::WaitingTime;
+        }
+        state.pauseUntil.reset();
+    }
     const bool singlePrecision = code.numericPrecision == detail::NumericPrecision::Single;
     const Instruction* activeInstruction = pc == 0 ? nullptr : &code[pc - 1];
     auto quantizeNumeric = [&](double value, const Instruction* at = nullptr) {
@@ -1098,6 +1124,16 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto height = static_cast<std::uint32_t>(requireInteger(4, 1,
                         static_cast<double>(std::numeric_limits<std::uint32_t>::max()),
                         "TASKVIEW canvas height must be a positive 32-bit integer"));
+                    const auto offsetX = arguments.size() > 5 ?
+                        static_cast<std::int32_t>(requireInteger(5,
+                            static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+                            static_cast<double>(std::numeric_limits<std::int32_t>::max()),
+                            "TASKVIEW offset X must be a signed 32-bit integer")) : 0;
+                    const auto offsetY = arguments.size() > 6 ?
+                        static_cast<std::int32_t>(requireInteger(6,
+                            static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+                            static_cast<double>(std::numeric_limits<std::int32_t>::max()),
+                            "TASKVIEW offset Y must be a signed 32-bit integer")) : 0;
                     const auto targetInfo = std::find_if(tasks.begin(), tasks.end(),
                         [target](const runtime::ManagedTaskInfo& task) {
                             return task.id == target;
@@ -1105,17 +1141,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (targetInfo == tasks.end())
                         throw runtime::Error(runtime::ErrorCode::InvalidTaskId,
                                              "no task exists with that ID");
-                    if (!taskControl_->setTaskViewport(target, x, y, width, height))
+                    if (!taskControl_->setTaskViewport(target, x, y, width, height,
+                                                       offsetX, offsetY))
                         throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
                                              "task viewport could not be updated");
                     setErrorContext(runtime::ErrorCode::None);
-                    const auto previousChannel = state.printChannel;
-                    state.printChannel = resolveChannel(default_output_channel_);
-                    writePrintText("Task " + std::to_string(target) +
-                        " viewport set to (" + std::to_string(x) + "," +
-                        std::to_string(y) + ") " + std::to_string(width) + "x" +
-                        std::to_string(height) + "\n", instruction);
-                    state.printChannel = previousChannel;
                     break;
                 }
                 if (instruction.name == "LEFT$" || instruction.name == "RIGHT$" ||
@@ -2489,6 +2519,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             channels_->writeBytes(session_id_, resolveChannel(static_cast<runtime::ChannelId>(channel)),
                                   std::string_view(*bytes).substr(0, static_cast<std::size_t>(count)));
             break;
+        }
+        case Op::Pause: {
+            const double delay = numeric(pop(), instruction);
+            constexpr double maximumDelay =
+                static_cast<double>(std::numeric_limits<std::uint32_t>::max());
+            if (!std::isfinite(delay) || delay < 0 || delay > maximumDelay)
+                runtimeError(instruction,
+                    "PAUSE delay must be between 0 and 4294967295 milliseconds");
+            requestedPauseDurationMs_ = static_cast<std::uint32_t>(std::ceil(delay));
+            state.pauseUntil = std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(requestedPauseDurationMs_);
+            return ExecutionStatus::WaitingTime;
         }
         case Op::Input: {
             std::string prompt;

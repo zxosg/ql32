@@ -3,9 +3,11 @@
 #include "ql32/graphics/windowed_service.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -735,15 +737,24 @@ void testBasicTaskViewCommandIsSupervisorOnly() {
     }
 
     require(scheduler.submit(supervisor,
-                "TASKVIEW " + std::to_string(worker) + ",5,2,12,8\n"),
+                "TASKVIEW " + std::to_string(worker) + ",5,2,12,8,2,-1\n"),
             "supervisor did not accept TASKVIEW");
     require(scheduler.tick(), "scheduler did not execute TASKVIEW");
     const auto changed = scheduler.task(worker);
     require(changed && changed->viewport.originX == 5 &&
                 changed->viewport.originY == 2 &&
                 changed->viewport.canvasWidth == 12 &&
-                changed->viewport.canvasHeight == 8,
+                changed->viewport.canvasHeight == 8 &&
+                changed->viewport.offsetX == 2 &&
+                changed->viewport.offsetY == -1,
             "TASKVIEW did not update the selected task's viewport");
+    require(scheduler.submit(supervisor,
+                "TASKVIEW " + std::to_string(worker) + ",5,2,12,8\n"),
+            "supervisor did not accept TASKVIEW without optional offsets");
+    require(scheduler.tick(), "scheduler did not execute TASKVIEW without offsets");
+    const auto reset = scheduler.task(worker);
+    require(reset && reset->viewport.offsetX == 0 && reset->viewport.offsetY == 0,
+            "omitted TASKVIEW offsets did not default to zero");
     require(scheduler.submit(supervisor,
                 "PRINT #0,GETTASK(KTaskCount)\n"),
             "supervisor did not accept GETTASK count");
@@ -772,6 +783,80 @@ void testBasicTaskViewCommandIsSupervisorOnly() {
                         std::string("missing")) + ", error=" +
             (rejected ? rejected->errorDetail : std::string("missing")) + ")");
     }
+}
+
+void testSincosWorkerTaskViewOffsetBounce() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        640, 480, nullptr);
+    auto storage = std::make_shared<ProgramStorage>();
+    storage->files["taskview/sincos2d.bas"] =
+        "WINDOW 0,0,64,48\n"
+        "PAPER 0\nINK 0\nCLS\nGUPDATE 0\n"
+        "FOR py = 0 TO 46 STEP 2\n"
+        "  FOR px = 0 TO 62 STEP 2\n"
+        "    z = SIN(px * 0.05) * COS(py * 0.05)\n"
+        "    INK 1 + INT((z + 1) * 3)\n"
+        "    PLOT px,py\n"
+        "  END FOR px\n"
+        "END FOR py\n"
+        "GUPDATE\n";
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    services.storage = storage;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 512);
+    std::ostringstream supervisorOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    require(scheduler.submit(supervisor,
+                "TASK \"taskview/sincos2d.bas\"\n"),
+            "supervisor did not launch the sine/cosine worker");
+    require(scheduler.tick(), "scheduler did not launch the sine/cosine worker");
+
+    ql32::vm::TaskId worker = 0;
+    for (const auto& task : scheduler.tasks())
+        if (!task.supervisor) worker = task.id;
+    require(worker != 0, "sine/cosine worker was not created");
+    for (int tick = 0; tick < 500; ++tick) {
+        const auto info = scheduler.task(worker);
+        if (info && info->status == ql32::vm::TaskStatus::WaitingInput) break;
+        require(scheduler.tick(), "sine/cosine worker stopped before drawing its surface");
+    }
+    const auto completed = scheduler.task(worker);
+    require(completed && completed->status == ql32::vm::TaskStatus::WaitingInput,
+            "sine/cosine worker did not finish drawing its surface");
+
+    const auto moveView = [&](std::int32_t offsetX, std::int32_t offsetY) {
+        const auto command = "TASKVIEW " + std::to_string(worker) +
+            ",240,180,32,24," + std::to_string(offsetX) + "," +
+            std::to_string(offsetY) + "\n";
+        require(scheduler.submit(supervisor, command),
+                "supervisor did not accept the sine/cosine view offset");
+        require(scheduler.tick(), "scheduler did not apply the sine/cosine view offset");
+        const auto info = scheduler.task(worker);
+        require(info && info->viewport.originX == 240 &&
+                    info->viewport.originY == 180 &&
+                    info->viewport.canvasWidth == 32 &&
+                    info->viewport.canvasHeight == 24 &&
+                    info->viewport.offsetX == offsetX &&
+                    info->viewport.offsetY == offsetY,
+                "sine/cosine worker did not retain the requested half-window view");
+        const auto windows = graphics->windowManager().compositionOrder();
+        const auto window = std::find_if(windows.begin(), windows.end(),
+            [](const auto& item) {
+                return item.bounds.width == 64 && item.bounds.height == 48;
+            });
+        require(window != windows.end(),
+                "sine/cosine worker did not retain its 64x48 display window");
+        require(window->bounds.x == 240 + offsetX &&
+                    window->bounds.y == 180 + offsetY &&
+                    window->screenClip.x == 240 && window->screenClip.y == 180 &&
+                    window->screenClip.width == 32 && window->screenClip.height == 24,
+                "sine/cosine view did not bounce inside its fixed half-size clip");
+    };
+    moveView(0, 0);
+    moveView(-32, 0);
+    moveView(-32, -24);
+    moveView(0, -24);
+    moveView(0, 0);
 }
 
 void testSupervisorCanToggleDebugBar() {
@@ -1055,6 +1140,38 @@ void testTaskAndVmPausePreserveRunnableSessions() {
             "unpaused VM did not resume its task");
 }
 
+void testPauseWaitIsCooperativeAndUsesMilliseconds() {
+    ql32::vm::SessionScheduler scheduler({}, 16);
+    std::ostringstream delayedOutput;
+    std::ostringstream peerOutput;
+    const auto delayed = scheduler.launch(
+        "PAUSE 50\nPRINT \"delayed\"\n", delayedOutput);
+    const auto peer = scheduler.launch("PRINT \"peer\"\n", peerOutput);
+
+    for (int tick = 0; tick < 12 && scheduler.task(delayed)->status !=
+            ql32::vm::TaskStatus::WaitingTime; ++tick)
+        (void)scheduler.tick();
+    require(scheduler.task(delayed)->status == ql32::vm::TaskStatus::WaitingTime,
+            "PAUSE did not put its task into a timed wait");
+    for (int tick = 0; tick < 12 && scheduler.task(peer)->status !=
+            ql32::vm::TaskStatus::Completed; ++tick)
+        (void)scheduler.tick();
+    require(scheduler.task(peer)->status == ql32::vm::TaskStatus::Completed &&
+                peerOutput.str() == "peer\n",
+            "PAUSE blocked another runnable task");
+    require(delayedOutput.str().empty() &&
+                scheduler.task(delayed)->status == ql32::vm::TaskStatus::WaitingTime,
+            "PAUSE resumed before its requested delay elapsed");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    for (int tick = 0; tick < 12 && scheduler.task(delayed)->status !=
+            ql32::vm::TaskStatus::Completed; ++tick)
+        (void)scheduler.tick();
+    require(scheduler.task(delayed)->status == ql32::vm::TaskStatus::Completed &&
+                delayedOutput.str() == "delayed\n",
+            "PAUSE task did not resume after its delay");
+}
+
 void testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor() {
     auto graphics = std::make_shared<CapturingGraphicsService>();
     ql32::vm::Services services;
@@ -1125,6 +1242,7 @@ int main() {
     testCancellingWorkerDiscardsItsGraphicsAllocations();
     testSupervisorTaskViewportUsesTaskToSessionMapping();
     testBasicTaskViewCommandIsSupervisorOnly();
+    testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();
     testTasksUsesDefaultAndExplicitPrintChannels();
     testKillConfirmationUsesConsoleChannel();
@@ -1135,6 +1253,7 @@ int main() {
     testWaitTaskResumesAfterDialogAndMenu();
     testTaskWaitReturnsChildErrorContext();
     testTaskAndVmPausePreserveRunnableSessions();
+    testPauseWaitIsCooperativeAndUsesMilliseconds();
     testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor();
     testRebootInteractiveCommandCallsSystemService();
     return 0;

@@ -1,7 +1,7 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-06):** Native Linux CMake build and 64/64 CTest cases passed. CYD firmware and retained compositor adapter build with the custom 4 MiB single-app partition. CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor move/resize/clipping, full-screen allocation, rotation behavior, and Wi-Fi station acceptance are hardware-verified. The shared canvas arena, `FREE(1..2)` heap metrics, graphics cleanup on task completion, and console routing for `TASK`/`KILL` have also been exercised on CYD. The SPIFFS profile mounted internal storage and loaded `startup.bas`. An automated serial-REPL memory suite completed 25 worker runs with per-run cleanup and reboot recovery; it measured a 5,796-byte cumulative free-heap decrease before reboot, and task-result retention was not isolated. The four `CLS` forms ran over serial without syntax or VM errors, though overlapping windows prevented visual isolation of clear colors. Resizing `#0` returned out-of-memory under the tested workload. Olimex ESP32-SBC-FabGL Rev B uses a 512 KiB SPIFFS `FFS` partition alongside external `SDC:/`. Both drives mount; YMODEM, directory listing, worker loading, and remote debugger breakpoint/EVAL/watch/step/diagnostics were exercised over USB serial. VGA capture verified printable ASCII; paged `HELP` resumed after `Q`; the 80x56 Mandelbrot demo completed and was captured. Three concurrent workers plus Mandelbrot can exceed compiler memory on CYD. PS/2 input/shortcuts, clock, and Wi-Fi acceptance remain open.
+**Status (2026-11-08):** CYD task cleanup and memory/concurrency behavior have been characterized across the 25-run worker suite, canvas-resize soaks, two-full-screen-canvas tests, and worker saturation/OOM recovery. No monotonic heap loss was observed in repeated cleanup cycles; some ten-worker OOM passes left the largest free block reduced after task reaping. The separate 25-run suite returned total free heap to within 60 bytes of baseline after reboot; the saturation pass itself was not measured across reboot. The measured operating envelope and remaining uncertainty are recorded below and in [the CYD follow-up report](../test-results/CYD-open-points-2026-11-07.md). CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen allocation, rotation, Wi-Fi station behavior, and TASKVIEW offset bounce are hardware-verified. Linux remains the first conformance host; the target matrix below records the remaining board-specific acceptance work.
 
 Supported build families are independent firmware targets:
 
@@ -9,8 +9,8 @@ Supported build families are independent firmware targets:
 | --- | --- | --- |
 | `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance on a LILYGO board pending |
 | `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass; physical PS/2 shortcuts, clock, and Wi-Fi remain open |
-| `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; memory stress still needs isolated measurements |
-| `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Built and flashed; storage mounted, `startup.bas` loaded at boot, task launch/cancellation exercised; 25-run automated memory suite passed per-run cleanup and reboot checks, with cumulative pre-reboot heap drift recorded below |
+| `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified; CYD heap/concurrency operating envelope characterized on SPIFFS profile |
+| `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Built and flashed; storage mounted, `startup.bas` loaded at boot; 25-run cleanup suite, two-full-screen-canvas limit, ten-small-worker saturation, OOM recovery, and reboot recovery verified; post-saturation largest-block reduction remains a documented limitation |
 | `ql32_tenstar_esp32s3` | TENSTAR TS-ESP32-S3, ST7789 240×135, USB serial, QSPI PSRAM, 512 KiB SPIFFS (`FFS`) | Built and flashed; startup and test programs load from SPIFFS; USB REPL reports 240×135×4-bit; 2 MiB PSRAM detected; worker/Mandelbrot stress run cleaned up; Mandelbrot performance and color/rotation checks remain open; sensors deferred |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
@@ -141,6 +141,44 @@ separate workload groups. Retained task-result records are a known source of
 small persistent allocations, but this run did not isolate their contribution.
 The machine-readable run report is written to `memory-test-report.json` by the
 runner.
+
+### CYD memory and concurrency operating envelope (2026-11-07)
+
+Follow-up saturation tests found no monotonic free-heap decline across the
+repeated cleanup cycles. The ordinary five-by-five worker suite recovered to
+within 1,872 bytes before reboot after explicitly reading cancelled-task
+results and reaping them with a second `KILL`; reboot returned to within 60
+bytes of the initial total-free baseline. Five 64×64-worker saturation cycles
+left total-free readings 2,432–2,952 bytes below baseline, but the largest
+block returned to 110,580 bytes after every recovery-window cycle. The
+free-block count rose from 14 to 23–27, consistent with allocator
+fragmentation/high-water variation rather than a steadily growing loss.
+
+The practical graphics and worker limits are workload-specific:
+
+- At 320×240 and 4 bits per pixel, one canvas requires 38,400 bytes. The
+  configured 76,800-byte canvas arena admits two such canvases; a third is
+  rejected by the canvas budget with over 109 KiB of general heap still free.
+- Ten animated 64×64 workers ran with 13.4–13.7 KiB total free heap and a
+  10.7–11.3 KiB largest block. The next worker failed during execution. The
+  task was reported as out of memory while the supervisor remained responsive
+  and `SAVE` succeeded. Ten is a demonstrated saturation ceiling, not a
+  recommended target with additional workloads.
+- A 320×240, eight-iteration Mandelbrot render did not finish within five
+  minutes while array and channel workers were active. Treat that combination
+  as outside the interactive operating envelope; use one compute-heavy
+  full-screen render at a time and reduce other load when response time matters.
+
+After a ten-worker OOM pass and task reaping, `FREE()` sometimes remained well
+below its initial total and largest-block values; the largest block varied
+from 31.7 KiB in one pass to 15.9 KiB in a later pass. The separate 25-run
+cleanup suite returned to within 60 bytes of its initial total-free baseline
+after reboot. OOM handling and supervisor recovery are verified, but the
+remaining post-saturation high-water/fragmentation contribution is not
+isolated and is not evidence of monotonic leakage. Use both `FREE(0)` and
+`FREE(1)` to assess headroom before launching another graphics workload. These
+measurements close the CYD memory/concurrency characterization item; see the
+[full test log](../test-results/CYD-open-points-2026-11-07.md) for checkpoints.
 
 The current implementation includes module-level `OPTION KOptMathSingle` and
 `OPTION KOptMathDouble` (DOUBLE is the default), plus

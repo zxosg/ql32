@@ -118,7 +118,12 @@ passed 64/64 on 2026-11-06.
   `SCREEN` capture now
   streams a reconstructed compositor and console snapshot as an 8-bit indexed
   BMP over YMODEM without a full-frame allocation; a 320×240 capture was
-  received from hardware. The CYD SPIFFS firmware also completed an automated
+  received from hardware. `TASKVIEW` offset cropping is complete and visually
+  confirmed on the CYD: a 160×120 sine/cosine crop bounced across the task
+  canvas with `PAUSE 100`. The demo restores automatic graphics updates after
+  its batched draw; syntax and semantics are documented in
+  [QL32-LANG-001](docs/specification/QL32-LANG-001.md). The CYD SPIFFS firmware
+  also completed an automated
   25-run worker suite with cleanup and reboot recovery; cumulative free-heap
   drift before reboot was 5,796 bytes, with task-result retention not isolated.
 - Olimex Rev B has 512 KiB internal FFS alongside external SDC. Both mounts,
@@ -138,9 +143,17 @@ passed 64/64 on 2026-11-06.
   performance gap. Debug bar was left enabled.
 - A CYD `WINDOW #0` resize returned out-of-memory under the tested workload.
 - CYD memory constraint: three concurrent workers plus Mandelbrot can fail
-  during compiler preparation. After CYD worker cycles, free heap was 5–10 KiB
-  below the reset baseline while the largest block recovered; retained task
-  results and canvas-arena high-water storage were not isolated from a leak.
+  during compiler preparation. CYD saturation is now characterized: two
+  full-screen 4-bit canvases fit the arena, ten animated 64×64 workers ran,
+  and the next worker failed safely while the supervisor and `SAVE` remained
+  usable. Repeated cleanup showed no monotonic heap loss, though the largest
+  block can remain reduced after reaping a ten-worker OOM pass. The separate
+  25-run suite returned total free to within 60 B of baseline after reboot;
+  the saturation pass itself was not measured across reboot. The 320×240
+  eight-iteration render exceeded five minutes with array and channel
+  workers active, so that combination is outside the interactive envelope.
+  Root cause of the variable post-saturation fragmentation/high-water cost is
+  not isolated. See [CYD test results](docs/test-results/CYD-open-points-2026-11-07.md).
 
 See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 [QL32-PLAT-001](docs/specification/QL32-PLAT-001.md), and
@@ -156,32 +169,23 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    and rotation, then test Wi-Fi. The concurrent-draw blinking disappeared
    when the workers stopped; it was not persistent corruption. QMI8658C,
    BMP280, and RGB LED support are deferred by user decision.
-3. **CYD task and memory acceptance:** CYD verified `TASK` command/function
-   forms, `KTaskWait`, child error propagation, idle-worker `LOGON`/`LOGOFF`,
-   and direct `PRIORITY id,0` baseline reset on 2026-11-07. The worker memory
-   suite passed after it was changed to read cancelled `TASKRESULT` data and
-   issue a second `KILL` to reap the hidden terminal record; pre-reboot total
-   heap drift fell from 8,420 B to 1,872 B, and reboot returned within 60 B of
-   baseline. The 100-cycle solo resize soak remained stable. A two-worker
-   320x240 canvas replacement succeeded, but the 8-iteration render had not
-   finished after five minutes. Characterize the residual heap variation and
-   render/concurrency boundary. Details: [CYD test results](docs/test-results/CYD-open-points-2026-11-07.md).
-4. **Olimex/LILYGO acceptance:** verify physical PS/2 input/shortcuts, `REBOOT`,
+3. **Olimex/LILYGO acceptance:** verify physical PS/2 input/shortcuts, `REBOOT`,
    line UI, task/window controls, clock, and Wi-Fi on Olimex; keep LILYGO
    physical acceptance separate. Add an Olimex GPIO/FFS host profile test.
-5. **Performance check:** time the 80×56 attractor and measure the selected CPU
+4. **Performance check:** time the 80×56 attractor and measure the selected CPU
    clock for SINGLE/DOUBLE and 80/160/240 MHz.
-6. **Shared screen across tasks:** replace per-session retained window canvases
+5. **Shared screen across tasks:** replace per-session retained window canvases
    with one display surface shared by all tasks. Window creation must not
    allocate a separate pixel canvas per task/window. Define concurrent drawing
    and visibility/overlap behavior, and verify that adding tasks does not
    consume another full-screen canvas; one 320×240 4-bit canvas currently uses
    38,400 bytes.
-7. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
+6. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
    implement REPL `EDIT linenumber`; later scope palette changes, task-window
-   tiling, BASIC system/build/platform and capability introspection, string
-   splitting, indirect procedure calls, and network channels. BLE and new
-   hardware families remain deferred. Introspection should build on the
+   tiling, BASIC system/build/platform and capability introspection, enhanced
+   `DIR` output with optional file sizes and `<subdir>` directory labels,
+   string splitting, indirect procedure calls, and network channels. BLE and
+   new hardware families remain deferred. Introspection should build on the
    portable board capability descriptors while defining product
    version/build ID, host/board identity, supported BASIC queries (for example
    SPI, I2C, and serial), and how support differs from runtime availability.

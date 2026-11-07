@@ -24,6 +24,7 @@ enum class TaskState {
     WaitingInput,
     WaitingChannel,
     WaitingTask,
+    WaitingTime,
     DebugPaused,
     Completed,
     Failed,
@@ -118,6 +119,8 @@ struct ManagedTaskInfo {
     std::int32_t canvasOriginY = 0;
     std::uint32_t canvasWidth = 0;
     std::uint32_t canvasHeight = 0;
+    std::int32_t canvasOffsetX = 0;
+    std::int32_t canvasOffsetY = 0;
 };
 
 // Control surface available to the interactive BASIC supervisor.
@@ -138,7 +141,8 @@ public:
     virtual std::vector<ManagedTaskInfo> listTasks() const = 0;
     virtual std::vector<ChannelInfo> listChannels(TaskId id) const = 0;
     virtual bool setTaskViewport(TaskId, std::int32_t, std::int32_t,
-                                 std::uint32_t, std::uint32_t) { return false; }
+                                 std::uint32_t, std::uint32_t,
+                                 std::int32_t = 0, std::int32_t = 0) { return false; }
     virtual bool debugAttach(TaskId) { return false; }
     virtual bool debugSetBreakpoint(TaskId, int, bool) { return false; }
     virtual bool debugResume(TaskId, DebugResumeMode) { return false; }
@@ -161,6 +165,7 @@ inline const char* taskStateName(TaskState state) noexcept {
     case TaskState::WaitingInput: return "WAITING_INPUT";
     case TaskState::WaitingChannel: return "WAITING_CHANNEL";
     case TaskState::WaitingTask: return "WAITING_TASK";
+    case TaskState::WaitingTime: return "WAITING_TIME";
     case TaskState::DebugPaused: return "DEBUG_PAUSED";
     case TaskState::Completed: return "COMPLETED";
     case TaskState::Failed: return "FAILED";

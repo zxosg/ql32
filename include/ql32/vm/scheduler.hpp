@@ -23,6 +23,7 @@ enum class TaskStatus {
     WaitingInput,
     WaitingChannel,
     WaitingTask,
+    WaitingTime,
     DebugPaused,
     Completed,
     Failed,
