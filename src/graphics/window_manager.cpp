@@ -682,9 +682,7 @@ void WindowManager::close(WindowId id) {
 }
 
 void WindowManager::closeSession(SessionId owner) {
-    windows_.erase(std::remove_if(windows_.begin(), windows_.end(),
-                                  [owner](const Entry& item) { return item.owner == owner; }),
-                   windows_.end());
+    windows_.remove_if([owner](const Entry& item) { return item.owner == owner; });
     taskViewports_.erase(owner);
 }
 
@@ -765,9 +763,7 @@ void WindowManager::raise(WindowId id) {
     const auto found = std::find_if(windows_.begin(), windows_.end(),
                                     [id](const Entry& item) { return item.id == id; });
     if (found == windows_.end()) throw std::out_of_range("unknown window identifier");
-    Entry raised = std::move(*found);
-    windows_.erase(found);
-    windows_.push_back(std::move(raised));
+    windows_.splice(windows_.end(), windows_, found);
 }
 
 void WindowManager::validate(TaskViewport viewport) {

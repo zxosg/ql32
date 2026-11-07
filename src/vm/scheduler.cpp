@@ -139,6 +139,10 @@ struct SessionScheduler::Task {
     bool paused = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
+    std::int64_t schedulerCredit = 0;
+    std::uint32_t schedulerLastPriority = 0;
+    bool schedulerWasEligible = false;
+    bool schedulerEligibleThisTick = false;
 
     void releaseSource() noexcept {
         std::string{}.swap(source);
@@ -154,6 +158,17 @@ SessionScheduler::SessionScheduler(Services services, std::size_t instructionBud
 
 SessionScheduler::~SessionScheduler() = default;
 
+void SessionScheduler::resetScheduleCredits() noexcept {
+    for (auto& task : tasks_) task->schedulerCredit = 0;
+}
+
+void SessionScheduler::removeFromSchedule(Task& task) noexcept {
+    if (!task.schedulerWasEligible) return;
+    resetScheduleCredits();
+    task.schedulerWasEligible = false;
+    task.schedulerEligibleThisTick = false;
+}
+
 TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     if (nextId_ == 0) throw std::overflow_error("scheduler task IDs exhausted");
     auto task = std::make_unique<Task>();
@@ -165,8 +180,6 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
         services_.network, services_.memory, taskControl_, task->id,
         services_.systemControl, services_.cpuFrequency);
     const TaskId id = task->id;
-    eligibleTasks_.reserve(tasks_.size() + 1);
-    candidateTasks_.reserve(tasks_.size() + 1);
     tasks_.push_back(std::move(task));
     return id;
 }
@@ -184,8 +197,6 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
-    eligibleTasks_.reserve(tasks_.size() + 1);
-    candidateTasks_.reserve(tasks_.size() + 1);
     tasks_.push_back(std::move(task));
     return id;
 }
@@ -231,8 +242,6 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     const TaskId id = task->id;
     supervisorId_ = id;
     if (focusedTaskId_ == 0) focusedTaskId_ = id;
-    eligibleTasks_.reserve(tasks_.size() + 1);
-    candidateTasks_.reserve(tasks_.size() + 1);
     tasks_.push_back(std::move(task));
     return id;
 }
@@ -282,7 +291,7 @@ bool SessionScheduler::suspendTask(TaskId id) noexcept {
         if (current->priority != 0) {
             current->resumePriority = current->priority;
             current->priority = 0;
-            policy_.resetCredits();
+            resetScheduleCredits();
         }
         return current->resumePriority != 0;
     }
@@ -297,7 +306,7 @@ bool SessionScheduler::resumeTask(TaskId id) noexcept {
             current->resumePriority == 0)
             continue;
         current->priority = current->resumePriority;
-        policy_.resetCredits();
+        resetScheduleCredits();
         return true;
     }
     return false;
@@ -334,7 +343,7 @@ bool SessionScheduler::breakTaskExecution(TaskId id) {
         if (childId != 0) (void)cancel(childId);
         current->interpreter->abortExecution();
         current->interpreter->setErrorContext(runtime::ErrorCode::None);
-        policy_.remove(current->id);
+        removeFromSchedule(*current);
         current->releaseSource();
         current->pendingInteractiveTail.clear();
         current->hasPendingSource = false;
@@ -376,7 +385,7 @@ void SessionScheduler::stopWorkersAndReturnToSupervisor() {
             current->error.clear();
             current->errorCode = runtime::ErrorCode::None;
             current->errorDetail.clear();
-            policy_.remove(current->id);
+            removeFromSchedule(*current);
             break;
         }
         focusedTaskId_ = supervisorId_;
@@ -402,7 +411,7 @@ bool SessionScheduler::setTaskPriority(TaskId id,
         // preserve the current weight for a later RESUME.
         current->resumePriority = priority;
         current->priority = priority;
-        policy_.resetCredits();
+        resetScheduleCredits();
         return true;
     }
     return false;
@@ -436,7 +445,7 @@ bool SessionScheduler::debugResume(TaskId id, runtime::DebugResumeMode mode) {
             current->status != TaskStatus::DebugPaused) continue;
         if (!current->interpreter->debugResume(mode)) return false;
         current->status = TaskStatus::Runnable;
-        policy_.resetCredits();
+        resetScheduleCredits();
         return true;
     }
     return false;
@@ -567,10 +576,11 @@ bool SessionScheduler::tick() {
         child.waitingParentId = 0;
     };
 
-    eligibleTasks_.clear();
-    candidateTasks_.clear();
+    bool removedEligibleTask = false;
+    bool changedPriority = false;
     for (auto& candidatePtr : tasks_) {
         Task& candidate = *candidatePtr;
+        candidate.schedulerEligibleThisTick = false;
         if (candidate.status == TaskStatus::Completed ||
             candidate.status == TaskStatus::Failed ||
             candidate.status == TaskStatus::Cancelled ||
@@ -584,13 +594,39 @@ bool SessionScheduler::tick() {
         if (candidate.status == TaskStatus::WaitingInput &&
             !candidate.hasPendingSource)
             continue;
-        eligibleTasks_.push_back({candidate.id, candidate.priority});
-        candidateTasks_.push_back(&candidate);
+        candidate.schedulerEligibleThisTick = true;
+        if (candidate.schedulerWasEligible &&
+            candidate.schedulerLastPriority != candidate.priority)
+            changedPriority = true;
     }
-    const auto selectedIndex = policy_.select(eligibleTasks_);
-    if (!selectedIndex) return false;
+    for (auto& candidatePtr : tasks_) {
+        Task& candidate = *candidatePtr;
+        if (candidate.schedulerWasEligible &&
+            !candidate.schedulerEligibleThisTick)
+            removedEligibleTask = true;
+    }
+    if (removedEligibleTask || changedPriority) resetScheduleCredits();
 
-    Task& current = *candidateTasks_[*selectedIndex];
+    Task* selectedTask = nullptr;
+    std::int64_t totalPriority = 0;
+    for (auto& candidatePtr : tasks_) {
+        Task& candidate = *candidatePtr;
+        if (!candidate.schedulerEligibleThisTick) {
+            candidate.schedulerWasEligible = false;
+            continue;
+        }
+        candidate.schedulerWasEligible = true;
+        candidate.schedulerLastPriority = candidate.priority;
+        candidate.schedulerCredit += static_cast<std::int64_t>(candidate.priority);
+        totalPriority += static_cast<std::int64_t>(candidate.priority);
+        if (candidate.priority > 0 &&
+            (!selectedTask || candidate.schedulerCredit > selectedTask->schedulerCredit))
+            selectedTask = &candidate;
+    }
+    if (!selectedTask || totalPriority == 0) return false;
+    selectedTask->schedulerCredit -= totalPriority;
+
+    Task& current = *selectedTask;
     const bool submittedInteractiveCommand =
         current.interactive && current.interactiveSubmission;
     const auto handleFailure = [&](std::string message, runtime::ErrorCode code,
@@ -614,13 +650,17 @@ bool SessionScheduler::tick() {
         current.releaseSource();
         current.started = false;
         if (current.interactive && (current.supervisor || !outOfMemory)) {
-            if (!submittedInteractiveCommand && current.interpreter)
-                current.interpreter->releaseGraphicsResources();
-            policy_.remove(current.id);
+            if (!submittedInteractiveCommand && current.interpreter) {
+                if (outOfMemory) current.interpreter->discardGraphicsResources();
+                else current.interpreter->releaseGraphicsResources();
+            }
+            removeFromSchedule(current);
             current.status = TaskStatus::WaitingInput;
         } else {
-            policy_.remove(current.id);
+            removeFromSchedule(current);
             current.status = TaskStatus::Failed;
+            if (current.interpreter)
+                current.interpreter->discardGraphicsResources();
             current.interpreter.reset();
         }
         wakeParent(current);
@@ -652,7 +692,7 @@ bool SessionScheduler::tick() {
             current.status = current.hasPendingSource ? TaskStatus::Runnable :
                                                         TaskStatus::WaitingInput;
             if (!current.hasPendingSource) current.releaseSource();
-            policy_.remove(current.id);
+            removeFromSchedule(current);
             return true;
         }
         if (result == ExecutionStatus::RunPending) {
@@ -670,7 +710,7 @@ bool SessionScheduler::tick() {
         }
         if (result == ExecutionStatus::Completed) {
             current.started = false;
-            policy_.remove(current.id);
+            removeFromSchedule(current);
             if (current.interactive) {
                 if (!current.pendingInteractiveTail.empty()) {
                     current.releaseSource();
@@ -740,8 +780,9 @@ bool SessionScheduler::cancel(TaskId id) {
         if (task->id != id || task->status == TaskStatus::Completed ||
             task->status == TaskStatus::Failed || task->status == TaskStatus::Cancelled)
             continue;
+        if (task->interpreter) task->interpreter->discardGraphicsResources();
         task->interpreter.reset();
-        policy_.remove(task->id);
+        removeFromSchedule(*task);
         task->releaseSource();
         task->pendingInteractiveTail.clear();
         task->hasPendingSource = false;

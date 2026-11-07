@@ -6,8 +6,9 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <list>
+#include <map>
 #include <utility>
-#include <unordered_map>
 #include <vector>
 
 namespace ql32::graphics {
@@ -61,7 +62,7 @@ private:
     Block& find(std::uint64_t handle);
     const Block& find(std::uint64_t handle) const;
     std::uint64_t nextHandle_ = 1;
-    std::vector<Block> blocks_;
+    std::list<Block> blocks_;
     CanvasResizeObserver resizeObserver_;
 };
 
@@ -181,8 +182,8 @@ private:
     std::uint32_t screenHeight_;
     CanvasArena arena_;
     WindowId nextId_ = 1;
-    std::vector<Entry> windows_; // bottom-to-top stacking order
-    std::unordered_map<SessionId, TaskViewport> taskViewports_;
+    std::list<Entry> windows_; // bottom-to-top; each entry frees with its owner
+    std::map<SessionId, TaskViewport> taskViewports_;
 };
 
 } // namespace ql32::graphics

@@ -2261,6 +2261,15 @@ void Interpreter::releaseGraphicsResources() noexcept {
     }
 }
 
+void Interpreter::discardGraphicsResources() noexcept {
+    if (!graphics_) return;
+    try {
+        graphics_->discardSession(session_id_);
+    } catch (...) {
+        // Recovery cleanup must not prevent task cancellation or error handling.
+    }
+}
+
 Interpreter::~Interpreter() {
     if (ui_) ui_->cancelSession(session_id_);
     if (channels_) channels_->closeSession(session_id_);

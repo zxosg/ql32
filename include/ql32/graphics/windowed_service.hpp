@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <functional>
+#include <list>
+#include <map>
 #include <unordered_map>
 #include <utility>
 
@@ -50,6 +52,7 @@ public:
     void closeWindow(SessionId session) override;
     void closeWindow(SessionId session, ChannelId channel) override;
     void closeSession(SessionId session) override;
+    void discardSession(SessionId session) override;
     void setUpdateMode(SessionId session, UpdateMode mode) override;
     void update(SessionId session) override;
     WindowInfo windowInfo(SessionId session) override;
@@ -102,11 +105,11 @@ private:
         bool operator==(const SurfaceKey& other) const noexcept {
             return session == other.session && channel == other.channel;
         }
+        bool operator<(const SurfaceKey& other) const noexcept {
+            return session < other.session ||
+                (session == other.session && channel < other.channel);
+        }
     };
-    struct SurfaceKeyHash {
-        std::size_t operator()(const SurfaceKey& key) const noexcept;
-    };
-
     WindowId ensureWindow(SessionId session, ChannelId channel = 1);
     IndexedCanvas& canvas(SessionId session, ChannelId channel = 1);
     void discardFrozenWindows();
@@ -122,9 +125,9 @@ private:
 
     WindowManager manager_;
     std::shared_ptr<FramePresenter> presenter_;
-    std::unordered_map<SurfaceKey, WindowId, SurfaceKeyHash> sessionWindows_;
+    std::map<SurfaceKey, WindowId> sessionWindows_;
     std::vector<WindowId> frozenWindows_;
-    std::unordered_map<SurfaceKey, Point, SurfaceKeyHash> textCursors_;
+    std::map<SurfaceKey, Point> textCursors_;
     std::unordered_map<ChannelId, Rect> defaultWindowBounds_;
     std::function<void(Rect)> consoleBoundsCallback_;
     std::function<void(ColorIndex, ColorIndex)> consoleColorsCallback_;

@@ -725,6 +725,67 @@ void testNewWindowCommandReclaimsFrozenCanvasStorage() {
             "new WINDOW command did not receive the reclaimed canvas budget");
 }
 
+void testDiscardSessionReleasesActiveAndFrozenWindowsByOwner() {
+    using namespace ql32::graphics;
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(24, 8, presenter);
+    graphics.setInk(51, 3);
+    graphics.pixel(51, {1, 1});
+    graphics.setInk(52, 6);
+    graphics.pixel(52, {2, 2});
+    graphics.closeSession(51); // Frozen completed output is still discardable.
+    require(graphics.windowManager().size() == 2,
+            "setup did not retain the completed session canvas");
+
+    graphics.discardSession(51);
+    require(graphics.windowManager().size() == 1,
+            "discard did not release the selected frozen canvas");
+    std::vector<ColorIndex> row(24);
+    graphics.composeDisplayRow(1, row);
+    require(row[1] == 0,
+            "discarded frozen canvas remained available to screen capture");
+    graphics.composeDisplayRow(2, row);
+    require(row[2] == 6,
+            "discarding one session removed another session's canvas");
+    require(presenter->lastFrame.pixels[2 * 24 + 2] == 6,
+            "discard did not refresh the display with the remaining window");
+
+    graphics.discardSession(52);
+    require(graphics.windowManager().size() == 0,
+            "discard did not release an active session canvas");
+    require(presenter->lastFrame.pixels[2 * 24 + 2] == 0,
+            "discard did not clear the released window from the display");
+}
+
+void testRepeatedWindowSessionBurstsReleaseAndRecreate() {
+    WindowedService graphics(64, 32, nullptr);
+    SessionId nextSession = 100;
+    for (int cycle = 0; cycle < 4; ++cycle) {
+        std::array<SessionId, 12> sessions{};
+        for (auto& session : sessions) {
+            session = nextSession++;
+            graphics.setTaskViewport(session, {0, 0, 64, 32});
+            graphics.setInk(session, static_cast<ColorIndex>(session % 16));
+            graphics.pixel(session, {cycle, cycle});
+        }
+        require(graphics.windowManager().size() == sessions.size(),
+                "window burst did not create every session window");
+        for (const auto session : sessions) graphics.discardSession(session);
+        require(graphics.windowManager().size() == 0,
+                "discard left a window after a session burst");
+
+        const auto survivor = nextSession++;
+        graphics.setTaskViewport(survivor, {0, 0, 64, 32});
+        graphics.setInk(survivor, 7);
+        graphics.pixel(survivor, {1, 1});
+        const auto id = graphics.windowForSession(survivor);
+        require(graphics.windowManager().size() == 1 &&
+                    graphics.windowManager().canvas(id).pixel(1, 1) == 7,
+                "window manager failed to create a fresh window after cleanup");
+        graphics.discardSession(survivor);
+    }
+}
+
 void testDebugOverlayComposesAboveGraphics() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
@@ -993,6 +1054,8 @@ int main() {
     testCloseWindowReleasesCanvasAndAllowsReuse();
     testCompletedSessionRemainsAvailableForCapture();
     testNewWindowCommandReclaimsFrozenCanvasStorage();
+    testDiscardSessionReleasesActiveAndFrozenWindowsByOwner();
+    testRepeatedWindowSessionBurstsReleaseAndRecreate();
     testDebugOverlayComposesAboveGraphics();
     testCanvasStorageReleasesAndReusesAllocations();
     testTaskViewportTranslatesAndClipsOwnedWindows();

@@ -52,12 +52,6 @@ Rect unite(Rect first, Rect second) {
 
 } // namespace
 
-std::size_t WindowedService::SurfaceKeyHash::operator()(const SurfaceKey& key) const noexcept {
-    const std::size_t session = std::hash<SessionId>{}(key.session);
-    const std::size_t channel = std::hash<ChannelId>{}(key.channel);
-    return session ^ (channel + 0x9e3779b9u + (session << 6) + (session >> 2));
-}
-
 WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screenHeight,
                                  std::shared_ptr<FramePresenter> presenter)
     : manager_(screenWidth, screenHeight),
@@ -73,7 +67,7 @@ void WindowedService::discardFrozenWindows() {
         owners.push_back(state.owner);
         manager_.close(id);
     }
-    frozenWindows_.clear();
+    std::vector<WindowId>().swap(frozenWindows_);
     std::sort(owners.begin(), owners.end());
     owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
     for (const auto owner : owners) manager_.releaseTaskViewportIfUnused(owner);
@@ -339,6 +333,34 @@ void WindowedService::closeSession(SessionId session) {
         found = sessionWindows_.erase(found);
     }
     manager_.releaseTaskViewportIfUnused(session);
+}
+
+void WindowedService::discardSession(SessionId session) {
+    Rect dirty{};
+    for (const auto& [key, id] : sessionWindows_)
+        if (key.session == session)
+            dirty = unite(dirty, manager_.windowState(id).screenClip);
+    for (const auto id : frozenWindows_)
+        if (manager_.windowState(id).owner == session)
+            dirty = unite(dirty, manager_.windowState(id).screenClip);
+
+    for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
+        if (found->first.session == session) {
+            textCursors_.erase(found->first);
+            found = sessionWindows_.erase(found);
+        } else {
+            ++found;
+        }
+    }
+    frozenWindows_.erase(std::remove_if(frozenWindows_.begin(), frozenWindows_.end(),
+        [this, session](WindowId id) {
+            return manager_.windowState(id).owner == session;
+        }), frozenWindows_.end());
+    if (frozenWindows_.empty()) std::vector<WindowId>().swap(frozenWindows_);
+    manager_.closeSession(session);
+    // Recompose only after releasing the canvases, so a low-memory recovery
+    // path has the best chance of refreshing the physical display as well.
+    presentRegion(dirty);
 }
 
 void WindowedService::setUpdateMode(SessionId session, UpdateMode mode) {

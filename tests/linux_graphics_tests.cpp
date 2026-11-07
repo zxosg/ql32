@@ -47,5 +47,13 @@ int main() {
     require(svg.find("A&lt;&amp;&quot;B") != std::string::npos,
             "text was not escaped for XML");
 
+    constexpr ql32::graphics::SessionId discardedSession = 18;
+    graphics.setInk(discardedSession, 2);
+    graphics.line(discardedSession, {0, 0}, {1, 1});
+    graphics.discardSession(discardedSession);
+    require(!std::filesystem::exists(
+                directory / "ql32-graphics-session-18.svg"),
+            "discarding a session unexpectedly wrote an SVG snapshot");
+
     std::filesystem::remove_all(directory, error);
 }

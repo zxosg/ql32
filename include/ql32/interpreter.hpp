@@ -76,6 +76,9 @@ public:
     // Release retained display memory while keeping this interpreter session
     // available for the next interactive command.
     void releaseGraphicsResources() noexcept;
+    // Drop graphics allocations immediately; used for cancellation and
+    // terminal failures where preserving the last image would waste memory.
+    void discardGraphicsResources() noexcept;
     bool debugAttach() noexcept;
     bool debugSetBreakpoint(int line, bool enabled = true);
     bool debugResume(runtime::DebugResumeMode mode);

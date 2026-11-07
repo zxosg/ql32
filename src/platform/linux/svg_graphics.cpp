@@ -131,6 +131,11 @@ void SvgGraphics::closeSession(graphics::SessionId session) {
     output << "</g>\n</svg>\n";
 }
 
+void SvgGraphics::discardSession(graphics::SessionId session) {
+    std::lock_guard lock(mutex_);
+    windows_.erase(session);
+}
+
 graphics::WindowInfo SvgGraphics::windowInfo(graphics::SessionId) {
     return {width_, height_, 24, static_cast<std::uint16_t>(qlPalette.size()), 0};
 }

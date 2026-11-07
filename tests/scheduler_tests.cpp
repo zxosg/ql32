@@ -511,6 +511,26 @@ void testPriorityWeightsChangeFrequency() {
             "task priority was not retained in task information");
 }
 
+void testSchedulerReleasesTaskBookkeepingAfterWorkerBursts() {
+    ql32::vm::SessionScheduler scheduler({}, 8);
+    std::ostringstream output;
+    for (int cycle = 0; cycle < 4; ++cycle) {
+        std::vector<ql32::vm::TaskId> workers;
+        for (int index = 0; index < 12; ++index) {
+            workers.push_back(scheduler.launchWorker(
+                "REPeat forever\nEND REPeat forever\n", output));
+        }
+        for (int tick = 0; tick < 24; ++tick)
+            require(scheduler.tick(), "worker burst unexpectedly became idle");
+        for (const auto worker : workers)
+            require(scheduler.cancel(worker), "worker cancellation failed");
+        for (const auto worker : workers)
+            require(scheduler.reap(worker), "cancelled worker was not reaped");
+        require(scheduler.activeTaskCount() == 0 && scheduler.tasks().empty(),
+                "reaped worker bookkeeping remained in the scheduler");
+    }
+}
+
 void testSupervisorCanSetSliceAndWorkerPriority() {
     ql32::vm::SessionScheduler scheduler({}, 128);
     std::ostringstream supervisorOutput;
@@ -607,6 +627,30 @@ void testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts() {
             "LOGON could not focus the first worker after its startup program");
     require(scheduler.logoff() == supervisor,
             "LOGOFF did not return focus to the supervisor");
+}
+
+void testCancellingWorkerDiscardsItsGraphicsAllocations() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        32, 8, nullptr);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream supervisorOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    std::ostringstream workerOutput;
+    const auto worker = scheduler.launchWorker(
+        "WINDOW 0,0,32,8\nPAPER 4\nCLS\nREPeat forever\nEND REPeat forever\n",
+        workerOutput);
+    for (int tick = 0; tick < 30 && graphics->windowManager().size() == 0; ++tick)
+        (void)scheduler.tick();
+    require(graphics->windowManager().size() == 1,
+            "worker did not allocate its graphics canvas");
+    require(scheduler.cancel(worker), "worker cancellation failed");
+    require(scheduler.task(worker)->status == ql32::vm::TaskStatus::Cancelled &&
+                graphics->windowManager().size() == 0,
+            "cancelling a worker retained its canvas allocation");
+    require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
+            "cancelling a worker changed the supervisor session");
 }
 
 void testSupervisorTaskViewportUsesTaskToSessionMapping() {
@@ -1075,8 +1119,10 @@ int main() {
     testZeroPriorityTaskIsNeverSelected();
     testWeightedPolicyResetsForRemovalAndPriorityChanges();
     testPriorityWeightsChangeFrequency();
+    testSchedulerReleasesTaskBookkeepingAfterWorkerBursts();
     testSupervisorCanSetSliceAndWorkerPriority();
     testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts();
+    testCancellingWorkerDiscardsItsGraphicsAllocations();
     testSupervisorTaskViewportUsesTaskToSessionMapping();
     testBasicTaskViewCommandIsSupervisorOnly();
     testSupervisorCanToggleDebugBar();

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
+#include <list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -126,17 +127,18 @@ public:
 
 private:
     struct Task;
+    void removeFromSchedule(Task& task) noexcept;
+    void resetScheduleCredits() noexcept;
     Services services_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::size_t instructionBudget_;
     bool executionPaused_ = false;
-    SmoothWeightedRoundRobin policy_;
-    std::vector<SmoothWeightedRoundRobin::Task> eligibleTasks_;
-    std::vector<Task*> candidateTasks_;
     TaskId nextId_ = 1;
     TaskId supervisorId_ = 0;
     TaskId focusedTaskId_ = 0;
-    std::vector<std::unique_ptr<Task>> tasks_;
+    // Each node belongs to one task and is released with it. Unlike a vector,
+    // this does not retain a high-water allocation after a worker burst.
+    std::list<std::unique_ptr<Task>> tasks_;
 };
 
 } // namespace ql32::vm

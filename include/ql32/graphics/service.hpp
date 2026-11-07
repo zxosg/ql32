@@ -171,6 +171,10 @@ public:
         closeWindow(session);
     }
     virtual void closeSession(SessionId session) = 0;
+    // Discard session-owned graphics state when the task is cancelled or
+    // terminated. Services that retain completed output may override this;
+    // the default treats close as a full release.
+    virtual void discardSession(SessionId session) { closeSession(session); }
 
     // Update suppression controls the shared physical display. Drawing still
     // updates retained canvases while automatic presentation is disabled.

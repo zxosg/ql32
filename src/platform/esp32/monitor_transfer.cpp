@@ -2,6 +2,8 @@
 
 #include "ql32/runtime/ymodem.hpp"
 
+#include <esp_heap_caps.h>
+
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -52,6 +54,23 @@ bool handleMonitorTransferCommand(std::string_view input,
     const std::string line = trim(std::string(input));
     const std::size_t separator = line.find_first_of(" \t");
     const std::string command = uppercase(line.substr(0, separator));
+    if (command == "HEAP") {
+#if defined(QL32_HEAP_DIAGNOSTICS)
+        if (separator != std::string::npos &&
+            !trim(line.substr(separator + 1)).empty()) {
+            serial.println("Usage: HEAP");
+            return true;
+        }
+        serial.println("HEAPDUMP|BEGIN");
+        serial.flush();
+        heap_caps_dump_all();
+        serial.println("HEAPDUMP|END");
+        serial.flush();
+#else
+        serial.println("Heap dump is disabled in this firmware profile");
+#endif
+        return true;
+    }
     if (command != "RECV" && command != "SEND" && command != "SCREEN") return false;
 
     std::string path;

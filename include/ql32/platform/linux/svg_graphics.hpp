@@ -28,6 +28,7 @@ public:
               const std::string& value) override;
     void clear(graphics::SessionId session) override;
     void closeSession(graphics::SessionId session) override;
+    void discardSession(graphics::SessionId session) override;
     graphics::WindowInfo windowInfo(graphics::SessionId session) override;
     graphics::RgbColor paletteColor(graphics::SessionId session, std::uint16_t index) override;
 
