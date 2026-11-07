@@ -48,8 +48,8 @@ The latest implementation includes:
   printable ASCII `0x20`–`0x7E`, verified by VGA capture. CYD users have
   confirmed compositor movement, resizing/clipping and rotations; the four
   `CLS` forms ran without syntax or VM errors, though overlapping windows
-  prevented visual isolation of clear colors. Visual confirmation of the latest
-  `PLOT` attractor remains open.
+  prevented visual isolation of clear colors. The attractor's `PLOT` output was
+  captured and visually confirmed on 2026-11-07.
 - TENSTAR TS-ESP32-S3 target with ST7789 240×135 landscape graphics, USB CDC
   REPL, 4 MiB flash layout, QSPI PSRAM, and 512 KiB SPIFFS. `startup.bas`,
   graphics/memory tests, three continuous worker programs, and a Mandelbrot
@@ -113,9 +113,9 @@ passed 64/64 on 2026-11-06.
 - CYD acceptance already includes the TFT/serial REPL, BASIC execution, SD and
   SPIFFS storage checks, rotation/compositor behavior, 1/4/8-bit rotation heap
   stability, Wi-Fi station calls, multi-window workers, scheduling weights,
-  slice changes, suspend/resume, and worker cancellation. The latest attractor
-  using `PLOT` was uploaded/launched in window `#1` at `0,0,320,192`, but visual
-  confirmation of the plot is still pending. CYD serial `SCREEN` capture now
+  slice changes, suspend/resume, and worker cancellation. The attractor's
+  `PLOT` output was captured and visually confirmed on 2026-11-07. CYD serial
+  `SCREEN` capture now
   streams a reconstructed compositor and console snapshot as an 8-bit indexed
   BMP over YMODEM without a full-frame allocation; a 320×240 capture was
   received from hardware. The CYD SPIFFS firmware also completed an automated
@@ -156,12 +156,7 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    and rotation, then test Wi-Fi. The concurrent-draw blinking disappeared
    when the workers stopped; it was not persistent corruption. QMI8658C,
    BMP280, and RGB LED support are deferred by user decision.
-3. **CYD graphics acceptance:** latest `PLOT` attractor visual confirmation is
-   still open. On 2026-11-07, the attractor and a static point/text fixture ran
-   without VM errors, but `SCREEN` produced an all-zero compositor image.
-   Reproduce this discrepancy, compare the physical TFT to the capture, then
-   confirm attractor animation/clipping and console readability.
-4. **CYD task and memory acceptance:** CYD verified `TASK` command/function
+3. **CYD task and memory acceptance:** CYD verified `TASK` command/function
    forms, `KTaskWait`, child error propagation, idle-worker `LOGON`/`LOGOFF`,
    and direct `PRIORITY id,0` baseline reset on 2026-11-07. The worker memory
    suite passed after it was changed to read cancelled `TASKRESULT` data and
@@ -171,19 +166,23 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    320x240 canvas replacement succeeded, but the 8-iteration render had not
    finished after five minutes. Characterize the residual heap variation and
    render/concurrency boundary. Details: [CYD test results](docs/test-results/CYD-open-points-2026-11-07.md).
-5. **Olimex/LILYGO acceptance:** verify physical PS/2 input/shortcuts, `REBOOT`,
+4. **Olimex/LILYGO acceptance:** verify physical PS/2 input/shortcuts, `REBOOT`,
    line UI, task/window controls, clock, and Wi-Fi on Olimex; keep LILYGO
    physical acceptance separate. Add an Olimex GPIO/FFS host profile test.
-6. **Performance check:** time the 80×56 attractor and measure the selected CPU
+5. **Performance check:** time the 80×56 attractor and measure the selected CPU
    clock for SINGLE/DOUBLE and 80/160/240 MHz.
-7. **Backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
+6. **Shared screen across tasks:** replace per-session retained window canvases
+   with one display surface shared by all tasks. Window creation must not
+   allocate a separate pixel canvas per task/window. Define concurrent drawing
+   and visibility/overlap behavior, and verify that adding tasks does not
+   consume another full-screen canvas; one 320×240 4-bit canvas currently uses
+   38,400 bytes.
+7. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
    implement REPL `EDIT linenumber`; later scope palette changes, task-window
-   tiling and shared display buffers, BASIC system/build/platform and capability
-   introspection, string splitting, indirect procedure calls, and network
-   channels. BLE and new hardware families remain deferred. Shared-buffer work
-   must define drawing/visibility semantics and memory ownership; a full
-   320×240 4-bit retained canvas uses 38,400 bytes. Introspection should build
-   on the portable board capability descriptors while defining product
+   tiling, BASIC system/build/platform and capability introspection, string
+   splitting, indirect procedure calls, and network channels. BLE and new
+   hardware families remain deferred. Introspection should build on the
+   portable board capability descriptors while defining product
    version/build ID, host/board identity, supported BASIC queries (for example
    SPI, I2C, and serial), and how support differs from runtime availability.
 

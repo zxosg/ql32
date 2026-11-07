@@ -2729,7 +2729,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
             const std::string argument = trim(normalizedLine.substr(4));
-            const std::string path = parseQuotedPath(argument, "LOAD");
+            const std::string path = normalizePath(parseQuotedPath(argument, "LOAD"));
             const std::string contents = storage_->readText(path);
             std::map<int, std::string> candidate;
             std::istringstream file(contents);
@@ -2773,7 +2773,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
             const std::string argument = trim(normalizedLine.substr(4));
-            const std::string path = parseQuotedPath(argument, "SAVE");
+            const std::string path = normalizePath(parseQuotedPath(argument, "SAVE"));
             class ProgramSource final : public runtime::TextStreamSource {
             public:
                 explicit ProgramSource(const std::map<int, std::string>& program)

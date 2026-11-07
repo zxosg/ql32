@@ -137,11 +137,32 @@ void testInteractiveFileCommands() {
         interpreter.executeInteractive("CD work/child\nRENAME \"item.bas\", \"moved.bas\"\n", output);
         require(storage->exists("work/child/moved.bas") && !storage->exists("work/child/item.bas"),
                 "RENAME did not resolve both paths relative to CD");
+
+        storage->writeText("from-ffs.bas", "10 PRINT \"wrong directory\"\n");
+        storage->writeText("work/child/from-ffs.bas",
+                           "10 PRINT \"loaded from FFS current directory\"\n");
+        std::ostringstream cdLoadOutput;
+        interpreter.executeInteractive(
+            "CD \"FFS:/work/child\"\nLOAD \"from-ffs.bas\"\nLIST\nRUN\n",
+            cdLoadOutput);
+        require(cdLoadOutput.str() ==
+                    "10 PRINT \"loaded from FFS current directory\"\n"
+                    "loaded from FFS current directory\n",
+                "LOAD did not resolve relative to a drive-qualified CD path");
+
+        interpreter.executeInteractive(
+            "10 PRINT \"saved to FFS current directory\"\nSAVE \"saved-from-ffs.bas\"\n",
+            output);
+        require(storage->exists("work/child/saved-from-ffs.bas") &&
+                    !storage->exists("saved-from-ffs.bas"),
+                "SAVE did not resolve relative to a drive-qualified CD path");
+
         storage->writeText("work/child/item.bas", "content");
         interpreter.execute("drive$ = \"SDC:/\"\n", output);
         interpreter.executeInteractive("FORMAT drive$\n", output);
         require(storage->list("").empty(), "FORMAT drive path did not erase storage recursively");
 
+        interpreter.executeInteractive("CD \"/\"\n", output);
         storage->writeText("plain.bas",
             "PRINT \"first\"\n\nPRINT \"second\"\n");
         std::ostringstream plainOutput;

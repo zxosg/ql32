@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -304,6 +305,7 @@ bool protocolInputLine = false;
 bool serialSawCarriageReturn = false;
 bool replReadyMessageShown = false;
 bool replPromptShown = false;
+std::uint32_t lastDebugOverlayRefresh = 0;
 
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
 ql32::runtime::YModemSource screenCaptureSource() {
@@ -463,10 +465,37 @@ bool acceptsInput() {
     return status && *status == ql32::vm::TaskStatus::WaitingInput;
 }
 
+void refreshDebugOverlay() {
+    if (!graphics || !graphics->debugOverlayEnabled()) return;
+    const std::uint32_t now = millis();
+    if (static_cast<std::uint32_t>(now - lastDebugOverlayRefresh) < 1000) return;
+    lastDebugOverlayRefresh = now;
+
+    const auto freeBytes = boardMemory.freeBytes();
+    const auto heap = boardMemory.fragmentationInfo();
+    const std::size_t activeTasks = scheduler ? scheduler->activeTaskCount() : 0;
+    char clockText[9] = "--:--:--";
+    if (const auto timestamp = boardClock.unixTimeSeconds()) {
+        const std::time_t value = static_cast<std::time_t>(*timestamp);
+        std::tm parts{};
+        if (gmtime_r(&value, &parts))
+            std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
+                          parts.tm_hour, parts.tm_min, parts.tm_sec);
+    }
+    char line[64]{};
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u %s",
+        static_cast<unsigned long long>(freeBytes / 1024),
+        static_cast<unsigned long long>(heap ? heap->largestFreeBlockBytes / 1024 : 0),
+        static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
+        static_cast<unsigned>(activeTasks), clockText);
+    graphics->setDebugOverlayText(line);
+}
+
 void advanceScheduler() {
     if (!scheduler) return;
     if (!scheduler->executionPaused()) (void)scheduler->tick();
     if (uiPresenter) uiPresenter->refresh();
+    refreshDebugOverlay();
 
     scheduler->visitTaskErrors([](ql32::vm::TaskId id, const char* error, void*) {
         Serial.printf("BASIC session %llu VM error: %s\n",
