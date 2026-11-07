@@ -108,6 +108,33 @@ void DirectoryStorage::writeText(const std::string& path, const std::string& con
     }
 }
 
+void DirectoryStorage::writeTextStream(
+        const std::string& path, const runtime::TextStreamSource& source) {
+    const auto resolved = resolve(path, true);
+    std::ofstream file(resolved, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        std::error_code error(errno, std::generic_category());
+        fail(resolved, error);
+    }
+    class FileSink final : public runtime::TextStreamSink {
+    public:
+        explicit FileSink(std::ofstream& file) : file_(file) {}
+        void write(std::string_view chunk) override {
+            file_.write(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+            if (!file_)
+                throw ServiceError(ServiceErrorCode::IoError,
+                                   "storage: streamed write failed");
+        }
+    private:
+        std::ofstream& file_;
+    } sink(file);
+    source.writeTo(sink);
+    file.flush();
+    if (!file)
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: streamed write failed");
+}
+
 std::vector<runtime::FileEntry> DirectoryStorage::list(const std::string& path) {
     const auto resolved = path.empty() ? root_ : resolve(path, false);
     std::error_code error;

@@ -59,10 +59,8 @@ std::size_t WindowedService::SurfaceKeyHash::operator()(const SurfaceKey& key) c
 }
 
 WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screenHeight,
-                                 std::shared_ptr<FramePresenter> presenter,
-                                 std::size_t maximumWindows,
-                                 std::size_t maximumCanvasBytes)
-    : manager_(screenWidth, screenHeight, maximumWindows, maximumCanvasBytes),
+                                 std::shared_ptr<FramePresenter> presenter)
+    : manager_(screenWidth, screenHeight),
       presenter_(std::move(presenter)) {}
 
 void WindowedService::discardFrozenWindows() {

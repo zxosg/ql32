@@ -85,15 +85,7 @@ void refreshDebugOverlay() {
 
     const auto freeBytes = boardMemory.freeBytes();
     const auto heap = boardMemory.fragmentationInfo();
-    std::size_t activeTasks = 0;
-    if (scheduler) {
-        for (const auto& task : scheduler->tasks()) {
-            if (task.status != ql32::vm::TaskStatus::Completed &&
-                task.status != ql32::vm::TaskStatus::Failed &&
-                task.status != ql32::vm::TaskStatus::Cancelled)
-                ++activeTasks;
-        }
-    }
+    const std::size_t activeTasks = scheduler ? scheduler->activeTaskCount() : 0;
     char clockText[9] = "--:--:--";
     if (const auto timestamp = boardClock.unixTimeSeconds()) {
         const std::time_t value = static_cast<std::time_t>(*timestamp);
@@ -261,8 +253,8 @@ void receiveSerialCharacter(char character) {
 bool acceptsInput() {
     if (uiPresenter && uiPresenter->active()) return true;
     if (!scheduler) return false;
-    const auto state = scheduler->task(scheduler->focusedTask());
-    return state && state->status == ql32::vm::TaskStatus::WaitingInput;
+    const auto status = scheduler->taskStatus(scheduler->focusedTask());
+    return status && *status == ql32::vm::TaskStatus::WaitingInput;
 }
 
 void advanceScheduler() {
@@ -271,29 +263,22 @@ void advanceScheduler() {
     refreshDebugOverlay();
     if (uiPresenter) uiPresenter->refresh();
 
-    const auto tasks = scheduler->tasks();
-    for (const auto& task : tasks) {
-        const std::string error = scheduler->takeError(task.id);
-        if (!error.empty()) {
-            Serial.printf("BASIC session %llu VM error: %s\n",
-                          static_cast<unsigned long long>(task.id), error.c_str());
-            if (basicOutput)
-                *basicOutput << "BASIC session " << task.id << " VM error: " << error << '\n';
-        }
-    }
+    scheduler->visitTaskErrors([](ql32::vm::TaskId id, const char* error, void* context) {
+        Serial.printf("BASIC session %llu VM error: %s\n",
+                      static_cast<unsigned long long>(id), error);
+        if (auto* output = static_cast<std::ostream*>(context))
+            *output << "BASIC session " << id << " VM error: " << error << '\n';
+    }, basicOutput.get());
 
-    const bool sessionWaitingForUi = std::any_of(tasks.begin(), tasks.end(),
-        [](const ql32::vm::TaskInfo& task) {
-            return task.status == ql32::vm::TaskStatus::WaitingUi;
-        });
+    const bool sessionWaitingForUi = scheduler->hasWaitingUiTask();
     if (uiPresenter && !uiPresenter->active() && !uiPresenter->beginNext() &&
         sessionWaitingForUi)
         Serial.println("suspended session has no queued UI request");
 
     const auto focused = scheduler->focusedTask();
-    const auto state = scheduler->task(focused);
-    if (!state) return;
-    if (state->status == ql32::vm::TaskStatus::WaitingInput &&
+    const auto status = scheduler->taskStatus(focused);
+    if (!status) return;
+    if (*status == ql32::vm::TaskStatus::WaitingInput &&
         (!uiPresenter || !uiPresenter->active())) {
         if (!replReadyMessageShown) {
             Serial.println("BASIC REPL ready (USB serial)");
@@ -313,6 +298,11 @@ void advanceScheduler() {
 
 void setup() {
     Serial.begin(115200);
+    if (!boardMemory.initializeEmergencyReserve(
+            ql32::platform::esp32::defaultEmergencyReserveBytes)) {
+        Serial.println("Fatal: unable to reserve memory for recovery operations");
+        return;
+    }
 
     if (!ql32::boards::esp32_2432s028::capabilities().valid()) {
         Serial.println("QL/32 ESP32-2432S028 capability profile invalid");
@@ -337,7 +327,7 @@ void setup() {
         },
         [] { if (tftConsole) tftConsole->reconfigure(); });
     graphics = std::make_shared<ql32::graphics::WindowedService>(
-        display.width(), display.height(), framePresenter, 4, 76800);
+        display.width(), display.height(), framePresenter);
     graphics->setCanvasResizeObserver(
         [](ql32::graphics::CanvasResizePhase phase, std::size_t oldBytes,
            std::size_t newBytes) {

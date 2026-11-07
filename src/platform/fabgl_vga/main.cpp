@@ -459,8 +459,8 @@ void receiveSerialCharacter(char character) {
 bool acceptsInput() {
     if (uiPresenter && uiPresenter->active()) return true;
     if (!scheduler) return false;
-    const auto state = scheduler->task(scheduler->focusedTask());
-    return state && state->status == ql32::vm::TaskStatus::WaitingInput;
+    const auto status = scheduler->taskStatus(scheduler->focusedTask());
+    return status && *status == ql32::vm::TaskStatus::WaitingInput;
 }
 
 void advanceScheduler() {
@@ -468,35 +468,28 @@ void advanceScheduler() {
     if (!scheduler->executionPaused()) (void)scheduler->tick();
     if (uiPresenter) uiPresenter->refresh();
 
-    const auto tasks = scheduler->tasks();
-    for (const auto& task : tasks) {
-        const std::string error = scheduler->takeError(task.id);
-        if (!error.empty()) {
-            Serial.printf("BASIC session %llu VM error: %s\n",
-                          static_cast<unsigned long long>(task.id), error.c_str());
-            char consoleError[256];
-            const int length = std::snprintf(consoleError, sizeof(consoleError),
-                "BASIC session %llu VM error: %s\n",
-                static_cast<unsigned long long>(task.id), error.c_str());
-            if (length > 0)
-                screenConsole.write(consoleError,
-                    std::min<std::size_t>(static_cast<std::size_t>(length),
-                                          sizeof(consoleError) - 1));
-        }
-    }
+    scheduler->visitTaskErrors([](ql32::vm::TaskId id, const char* error, void*) {
+        Serial.printf("BASIC session %llu VM error: %s\n",
+                      static_cast<unsigned long long>(id), error);
+        char consoleError[256];
+        const int length = std::snprintf(consoleError, sizeof(consoleError),
+            "BASIC session %llu VM error: %s\n",
+            static_cast<unsigned long long>(id), error);
+        if (length > 0)
+            screenConsole.write(consoleError,
+                std::min<std::size_t>(static_cast<std::size_t>(length),
+                                      sizeof(consoleError) - 1));
+    }, nullptr);
 
-    const bool sessionWaitingForUi = std::any_of(tasks.begin(), tasks.end(),
-        [](const ql32::vm::TaskInfo& task) {
-            return task.status == ql32::vm::TaskStatus::WaitingUi;
-        });
+    const bool sessionWaitingForUi = scheduler->hasWaitingUiTask();
     if (uiPresenter && !uiPresenter->active() && !uiPresenter->beginNext() &&
         sessionWaitingForUi)
         Serial.println("suspended session has no queued UI request");
 
     const auto focused = scheduler->focusedTask();
-    const auto state = scheduler->task(focused);
-    if (!state) return;
-    if (state->status == ql32::vm::TaskStatus::WaitingInput &&
+    const auto status = scheduler->taskStatus(focused);
+    if (!status) return;
+    if (*status == ql32::vm::TaskStatus::WaitingInput &&
         (!uiPresenter || !uiPresenter->active())) {
         if (!replReadyMessageShown) {
             Serial.println("BASIC REPL ready (USB serial and PS/2 keyboard)");
@@ -561,6 +554,11 @@ bool handleKeyboardShortcut(const ql32::input::KeyEvent& event) {
 
 void setup() {
     Serial.begin(115200);
+    if (!boardMemory.initializeEmergencyReserve(
+            ql32::platform::esp32::defaultEmergencyReserveBytes)) {
+        Serial.println("Fatal: unable to reserve memory for recovery operations");
+        return;
+    }
     userSpiBus.begin();
 
     if (!ql32_board::capabilities().valid()) {
@@ -581,11 +579,8 @@ void setup() {
         canvas, [](ql32::graphics::Rect region) { screenConsole.restoreOverlay(region); });
     const auto screenWidth = static_cast<std::uint32_t>(canvas.getWidth());
     const auto screenHeight = static_cast<std::uint32_t>(canvas.getHeight());
-    const std::size_t fullScreen4BitBytes =
-        (static_cast<std::size_t>(screenWidth) * screenHeight + 1) / 2;
     graphics = std::make_shared<ql32::graphics::WindowedService>(
-        screenWidth, screenHeight, framePresenter, 4,
-        fullScreen4BitBytes * 2);
+        screenWidth, screenHeight, framePresenter);
     graphics->setDefaultWindowBounds(0,
         {0, static_cast<std::int32_t>(screenHeight - consoleHeight), screenWidth, consoleHeight});
     graphics->setDefaultWindowBounds(1,

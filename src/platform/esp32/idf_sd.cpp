@@ -191,6 +191,46 @@ void IdfSdStorage::writeText(const std::string& path, const std::string& content
     ::close(descriptor);
 }
 
+void IdfSdStorage::writeTextStream(
+        const std::string& path, const runtime::TextStreamSource& source) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    int descriptor = ::open(fullPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (descriptor < 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage stream open"));
+    class FileSink final : public runtime::TextStreamSink {
+    public:
+        explicit FileSink(int descriptor) : descriptor_(descriptor) {}
+        void write(std::string_view chunk) override {
+            std::size_t offset = 0;
+            while (offset < chunk.size()) {
+                const auto written = ::write(descriptor_, chunk.data() + offset,
+                                             chunk.size() - offset);
+                if (written <= 0)
+                    throw ServiceError(ServiceErrorCode::IoError,
+                                       errorText("storage stream write"));
+                offset += static_cast<std::size_t>(written);
+            }
+        }
+    private:
+        int descriptor_;
+    } sink(descriptor);
+    try {
+        source.writeTo(sink);
+        if (::fsync(descriptor) != 0)
+            throw ServiceError(ServiceErrorCode::IoError,
+                               errorText("storage stream sync"));
+        const int closing = descriptor;
+        descriptor = -1;
+        if (::close(closing) != 0)
+            throw ServiceError(ServiceErrorCode::IoError,
+                               errorText("storage stream close"));
+    } catch (...) {
+        if (descriptor >= 0) ::close(descriptor);
+        throw;
+    }
+}
+
 std::vector<runtime::FileEntry> IdfSdStorage::list(const std::string& path) {
     ensureAvailable();
     const std::string fullPath = resolve(path, true);

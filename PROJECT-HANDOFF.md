@@ -156,17 +156,21 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    and rotation, then test Wi-Fi. The concurrent-draw blinking disappeared
    when the workers stopped; it was not persistent corruption. QMI8658C,
    BMP280, and RGB LED support are deferred by user decision.
-3. **CYD regression:** visually confirm the `PLOT` attractor in `#1` resized to
-   `0,0,320,192`; note animation/clipping and console readability. `SCREEN`
-   snapshots retained QL/32 output and the console model, not pixels drawn
-   outside the compositor.
-4. **CYD task and memory acceptance:** exercise `TASK` command/function with
-   `KTaskWait`, child failure/error propagation, and direct `PRIORITY id,0`
-   baseline reset. Isolate source buffers, task-result records, and canvas-arena
-   high-water storage. The 25-run worker suite recovered per run and after
-   reboot, but showed 5,796 bytes cumulative free-heap drift before reboot.
-   Set an acceptance threshold and record the CYD concurrency boundary where
-   Mandelbrot compilation exhausts memory.
+3. **CYD graphics acceptance:** latest `PLOT` attractor visual confirmation is
+   still open. On 2026-11-07, the attractor and a static point/text fixture ran
+   without VM errors, but `SCREEN` produced an all-zero compositor image.
+   Reproduce this discrepancy, compare the physical TFT to the capture, then
+   confirm attractor animation/clipping and console readability.
+4. **CYD task and memory acceptance:** CYD verified `TASK` command/function
+   forms, `KTaskWait`, child error propagation, idle-worker `LOGON`/`LOGOFF`,
+   and direct `PRIORITY id,0` baseline reset on 2026-11-07. The worker memory
+   suite passed after it was changed to read cancelled `TASKRESULT` data and
+   issue a second `KILL` to reap the hidden terminal record; pre-reboot total
+   heap drift fell from 8,420 B to 1,872 B, and reboot returned within 60 B of
+   baseline. The 100-cycle solo resize soak remained stable. A two-worker
+   320x240 canvas replacement succeeded, but the 8-iteration render had not
+   finished after five minutes. Characterize the residual heap variation and
+   render/concurrency boundary. Details: [CYD test results](docs/test-results/CYD-open-points-2026-11-07.md).
 5. **Olimex/LILYGO acceptance:** verify physical PS/2 input/shortcuts, `REBOOT`,
    line UI, task/window controls, clock, and Wi-Fi on Olimex; keep LILYGO
    physical acceptance separate. Add an Olimex GPIO/FFS host profile test.
@@ -174,10 +178,14 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    clock for SINGLE/DOUBLE and 80/160/240 MHz.
 7. **Backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
    implement REPL `EDIT linenumber`; later scope palette changes, task-window
-   tiling and shared display buffers, string splitting, indirect procedure
-   calls, and network channels. BLE and new hardware families remain deferred.
-   Shared-buffer work must define drawing/visibility semantics and memory
-   ownership; a full 320×240 4-bit retained canvas uses 38,400 bytes.
+   tiling and shared display buffers, BASIC system/build/platform and capability
+   introspection, string splitting, indirect procedure calls, and network
+   channels. BLE and new hardware families remain deferred. Shared-buffer work
+   must define drawing/visibility semantics and memory ownership; a full
+   320×240 4-bit retained canvas uses 38,400 bytes. Introspection should build
+   on the portable board capability descriptors while defining product
+   version/build ID, host/board identity, supported BASIC queries (for example
+   SPI, I2C, and serial), and how support differs from runtime availability.
 
 ## Starting a new chat
 

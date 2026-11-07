@@ -126,6 +126,7 @@ struct SessionScheduler::Task {
     TaskStatus status = TaskStatus::Runnable;
     std::string error;
     runtime::ErrorCode errorCode = runtime::ErrorCode::None;
+    bool errorPending = false;
     std::string errorDetail;
     std::string pendingInteractiveTail;
     TaskId waitingChildId = 0;
@@ -531,7 +532,13 @@ bool SessionScheduler::setTaskViewport(TaskId id, graphics::TaskViewport viewpor
 
 std::string SessionScheduler::takeError(TaskId id) {
     for (auto& current : tasks_)
-        if (current->id == id) return std::exchange(current->error, {});
+        if (current->id == id) {
+            current->errorPending = false;
+            if (current->error.empty() &&
+                current->errorCode == runtime::ErrorCode::OutOfMemory)
+                return "out of memory";
+            return std::exchange(current->error, {});
+        }
     return {};
 }
 
@@ -588,8 +595,16 @@ bool SessionScheduler::tick() {
         current.interactive && current.interactiveSubmission;
     const auto handleFailure = [&](std::string message, runtime::ErrorCode code,
                                    std::string detail) {
-        current.error = std::move(message);
+        const bool outOfMemory = code == runtime::ErrorCode::OutOfMemory;
+        if (outOfMemory) {
+            if (services_.memory) (void)services_.memory->releaseEmergencyReserve();
+            std::string{}.swap(current.error);
+            std::string{}.swap(detail);
+        } else {
+            current.error = std::move(message);
+        }
         current.errorCode = code;
+        current.errorPending = true;
         current.errorDetail = std::move(detail);
         if (current.interpreter)
             current.interpreter->setErrorContext(current.errorCode, current.errorDetail);
@@ -598,7 +613,7 @@ bool SessionScheduler::tick() {
         current.pendingInteractiveTail.clear();
         current.releaseSource();
         current.started = false;
-        if (current.interactive) {
+        if (current.interactive && (current.supervisor || !outOfMemory)) {
             if (!submittedInteractiveCommand && current.interpreter)
                 current.interpreter->releaseGraphicsResources();
             policy_.remove(current.id);
@@ -715,6 +730,8 @@ bool SessionScheduler::tick() {
         handleFailure("unknown scheduler failure", runtime::ErrorCode::GeneralFailure,
                       "unknown scheduler failure");
     }
+    if (services_.memory && !services_.memory->emergencyReserveHeld())
+        (void)services_.memory->restoreEmergencyReserve();
     return true;
 }
 
@@ -732,8 +749,8 @@ bool SessionScheduler::cancel(TaskId id) {
         task->paused = false;
         task->status = TaskStatus::Cancelled;
         task->errorCode = runtime::ErrorCode::TaskCancelled;
-        task->error = runtime::errorText(task->errorCode);
-        task->errorDetail = "task " + std::to_string(id) + " was killed";
+        std::string{}.swap(task->error);
+        std::string{}.swap(task->errorDetail);
         const TaskId parentId = task->waitingParentId;
         const TaskId childId = task->waitingChildId;
         task->waitingParentId = 0;
@@ -745,9 +762,9 @@ bool SessionScheduler::cancel(TaskId id) {
                 if (parent->id != parentId || !parent->interpreter) continue;
                 parent->waitingChildId = 0;
                 parent->errorCode = runtime::ErrorCode::TaskCancelled;
-                parent->error = runtime::errorText(parent->errorCode);
-                parent->errorDetail = "waited task " + std::to_string(id) + " was killed";
-                parent->interpreter->setErrorContext(parent->errorCode, parent->errorDetail);
+                std::string{}.swap(parent->error);
+                std::string{}.swap(parent->errorDetail);
+                parent->interpreter->setErrorContext(parent->errorCode);
                 parent->started = true;
                 if (parent->status != TaskStatus::Cancelled &&
                     parent->status != TaskStatus::Completed &&
@@ -767,6 +784,7 @@ bool SessionScheduler::kill(TaskId id) {
     for (auto task = tasks_.begin(); task != tasks_.end(); ++task) {
         if ((*task)->id != id) continue;
         if ((*task)->supervisor) return false;
+        runtime::EmergencyReserveLease emergency(services_.memory.get());
         if ((*task)->status == TaskStatus::Completed ||
             (*task)->status == TaskStatus::Failed ||
             (*task)->status == TaskStatus::Cancelled) {
@@ -827,6 +845,42 @@ std::vector<TaskInfo> SessionScheduler::tasks() const {
         result.push_back(std::move(info));
     }
     return result;
+}
+
+std::optional<TaskStatus> SessionScheduler::taskStatus(TaskId id) const noexcept {
+    for (const auto& current : tasks_)
+        if (current->id == id) return current->status;
+    return std::nullopt;
+}
+
+std::size_t SessionScheduler::activeTaskCount() const noexcept {
+    std::size_t count = 0;
+    for (const auto& current : tasks_)
+        if (current->status != TaskStatus::Completed &&
+            current->status != TaskStatus::Failed &&
+            current->status != TaskStatus::Cancelled)
+            ++count;
+    return count;
+}
+
+bool SessionScheduler::hasWaitingUiTask() const noexcept {
+    for (const auto& current : tasks_)
+        if (current->status == TaskStatus::WaitingUi) return true;
+    return false;
+}
+
+void SessionScheduler::visitTaskErrors(
+        void (*visitor)(TaskId, const char*, void*), void* context) {
+    if (!visitor) return;
+    for (auto& current : tasks_) {
+        if (!current->errorPending) continue;
+        const char* message = current->error.empty() &&
+            current->errorCode == runtime::ErrorCode::OutOfMemory
+                ? "out of memory" : current->error.c_str();
+        visitor(current->id, message, context);
+        current->errorPending = false;
+        std::string{}.swap(current->error);
+    }
 }
 
 } // namespace ql32::vm

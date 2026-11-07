@@ -259,7 +259,7 @@ void testGraphicsUpdateCommandDispatch() {
 
 void testWindowedGraphicsUpdateBatching() {
     auto presenter = std::make_shared<CapturingPresenter>();
-    WindowedService graphics(10, 10, presenter, 2);
+    WindowedService graphics(10, 10, presenter);
     graphics.setUpdateMode(1, UpdateMode::Off);
     graphics.setInk(1, 2);
     graphics.circle(1, {4, 5}, 0);
@@ -359,7 +359,7 @@ void testClsChannelAndColorSyntax() {
 
 void testClsColorArgumentsClearWithNewPaper() {
     auto presenter = std::make_shared<CapturingPresenter>();
-    auto graphics = std::make_shared<WindowedService>(12, 10, presenter, 2);
+    auto graphics = std::make_shared<WindowedService>(12, 10, presenter);
     ql32::Interpreter interpreter({}, {}, {}, graphics);
     std::ostringstream output;
     interpreter.execute("INK 1\nPLOT 3,4\nCLS 2,3\n", output);
@@ -373,7 +373,7 @@ void testClsColorArgumentsClearWithNewPaper() {
 
 void testPixelAndFilledShapesRenderOnRetainedCanvas() {
     auto presenter = std::make_shared<CapturingPresenter>();
-    auto graphics = std::make_shared<WindowedService>(16, 16, presenter, 2);
+    auto graphics = std::make_shared<WindowedService>(16, 16, presenter);
     ql32::Interpreter interpreter({}, {}, {}, graphics);
     std::ostringstream output;
     interpreter.execute(
@@ -492,7 +492,7 @@ void testPrintChannelRouting() {
         graphics->events.end(), "unqualified PRINT did not target channel #1");
 
     auto presenter = std::make_shared<CapturingPresenter>();
-    auto window = std::make_shared<WindowedService>(60, 24, presenter, 2);
+    auto window = std::make_shared<WindowedService>(60, 24, presenter);
     ql32::Interpreter windowInterpreter({}, {}, {}, window);
     std::ostringstream windowConsole;
     windowInterpreter.execute("PRINT #1,\"A\"\nPRINT #1,\"B\"\n", windowConsole);
@@ -534,7 +534,7 @@ void testChannelDefaultRoutingAndGraphicsSelectors() {
         }) != graphics->events.end(), "CIRCLE #0 was not dispatched to the console window");
 
     auto presenter = std::make_shared<CapturingPresenter>();
-    auto windowed = std::make_shared<WindowedService>(100, 80, presenter, 3);
+    auto windowed = std::make_shared<WindowedService>(100, 80, presenter);
     ql32::Interpreter windowInterpreter({}, {}, {}, windowed);
     std::ostringstream windowConsole;
     windowInterpreter.execute(
@@ -603,7 +603,7 @@ void testListChannelRouting() {
 void testWindowMovementRestoresCoveredContent() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
-    WindowedService graphics(100, 80, presenter, 4, 0);
+    WindowedService graphics(100, 80, presenter);
     constexpr SessionId background = 101;
     constexpr SessionId foreground = 202;
 
@@ -631,7 +631,7 @@ void testWindowMovementRestoresCoveredContent() {
 
 void testCanvasReshapeReusesFullScreenStorage() {
     using namespace ql32::graphics;
-    WindowManager manager(240, 320, 1, 0);
+    WindowManager manager(240, 320);
     const auto id = manager.create(1, {0, 0, 240, 320}, PixelDepth::Four);
     auto& canvas = manager.canvas(id);
     canvas.setPaper(5);
@@ -660,8 +660,7 @@ void testCanvasReshapeReusesFullScreenStorage() {
 void testCloseWindowReleasesCanvasAndAllowsReuse() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
-    constexpr std::size_t oneFullCanvasBytes = 20 * 10 / 2;
-    WindowedService graphics(20, 10, presenter, 2, oneFullCanvasBytes);
+    WindowedService graphics(20, 10, presenter);
     graphics.setPaper(11, 2);
     graphics.clear(11);
     require(graphics.windowManager().size() == 1,
@@ -681,7 +680,7 @@ void testCloseWindowReleasesCanvasAndAllowsReuse() {
 
 void testCompletedSessionRemainsAvailableForCapture() {
     using namespace ql32::graphics;
-    WindowedService graphics(8, 8, nullptr, 4, 0);
+    WindowedService graphics(8, 8, nullptr);
     graphics.setInk(31, 2);
     graphics.pixel(31, {2, 2});
     graphics.setInk(31, 4);
@@ -706,10 +705,9 @@ void testCompletedSessionRemainsAvailableForCapture() {
             "new graphics session did not draw after frozen image cleanup");
 }
 
-void testNewWindowCommandReclaimsFrozenCanvasBudget() {
+void testNewWindowCommandReclaimsFrozenCanvasStorage() {
     using namespace ql32::graphics;
-    constexpr std::size_t fullCanvasBytes = 16 * 8 / 2;
-    WindowedService graphics(16, 8, nullptr, 4, fullCanvasBytes);
+    WindowedService graphics(16, 8, nullptr);
 
     graphics.setInk(41, 3);
     graphics.pixel(41, {2, 2});
@@ -730,7 +728,7 @@ void testNewWindowCommandReclaimsFrozenCanvasBudget() {
 void testDebugOverlayComposesAboveGraphics() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
-    WindowedService graphics(24, 16, presenter, 2);
+    WindowedService graphics(24, 16, presenter);
     graphics.setInk(51, 7);
     graphics.fillRectangle(51, {0, 0}, 24, 16);
     graphics.setDebugOverlayText("A");
@@ -751,7 +749,7 @@ void testDebugOverlayComposesAboveGraphics() {
 
 void testCanvasStorageReleasesAndReusesAllocations() {
     using namespace ql32::graphics;
-    WindowManager manager(16, 8, 5, 32);
+    WindowManager manager(16, 8);
     const auto first = manager.create(1, {0, 0, 4, 4}, PixelDepth::Four);
     const auto middle = manager.create(2, {4, 0, 4, 4}, PixelDepth::Four);
     const auto last = manager.create(3, {8, 0, 4, 4}, PixelDepth::Four);
@@ -768,14 +766,12 @@ void testCanvasStorageReleasesAndReusesAllocations() {
     manager.canvas(reused).setPixel(3, 3, 12);
     require(manager.canvas(reused).pixel(3, 3) == 12,
             "canvas arena did not reuse released canvas space");
-    bool limited = false;
-    try {
-        (void)manager.create(5, {0, 4, 4, 4}, PixelDepth::Four);
-        (void)manager.create(6, {4, 4, 4, 4}, PixelDepth::Four);
-    } catch (const std::runtime_error&) {
-        limited = true;
-    }
-    require(limited, "canvas arena exceeded its configured byte limit");
+    std::vector<WindowId> additional;
+    for (SessionId owner = 5; owner < 15; ++owner)
+        additional.push_back(manager.create(owner, {0, 4, 1, 1}, PixelDepth::Four));
+    require(manager.size() == 13,
+            "window manager retained a fixed window-count or canvas-byte cap");
+    for (const auto window : additional) manager.close(window);
 
     manager.close(reused);
     manager.setPixelDepth(last, PixelDepth::Eight);
@@ -785,7 +781,7 @@ void testCanvasStorageReleasesAndReusesAllocations() {
 
 void testTaskViewportTranslatesAndClipsOwnedWindows() {
     using namespace ql32::graphics;
-    WindowManager manager(8, 6, 5, 0);
+    WindowManager manager(8, 6);
     const auto background = manager.create(9, {0, 0, 8, 6});
     manager.canvas(background).setPaper(3);
     manager.canvas(background).clear();
@@ -829,7 +825,7 @@ void testTaskViewportTranslatesAndClipsOwnedWindows() {
 void testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
-    WindowedService graphics(8, 6, presenter, 4, 0);
+    WindowedService graphics(8, 6, presenter);
     const auto background = graphics.windowManager().create(99, {0, 0, 8, 6});
     graphics.windowManager().canvas(background).setPaper(3);
     graphics.windowManager().canvas(background).clear();
@@ -862,7 +858,7 @@ void testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin() {
 
 void testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink() {
     using namespace ql32::graphics;
-    WindowManager manager(16, 10, 4, 256);
+    WindowManager manager(16, 10);
     const auto first = manager.create(1, {0, 0, 3, 3}, PixelDepth::Four);
     const auto target = manager.create(2, {3, 0, 3, 3}, PixelDepth::Four);
     const auto third = manager.create(3, {6, 0, 3, 3}, PixelDepth::Four);
@@ -916,7 +912,7 @@ void testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink() {
 
 void testFailedCanvasResizePreservesAllWindows() {
     using namespace ql32::graphics;
-    WindowManager manager(16, 8, 4, 64);
+    WindowManager manager(16, 8);
     const auto first = manager.create(1, {0, 0, 4, 4}, PixelDepth::Four);
     const auto target = manager.create(2, {4, 0, 4, 4}, PixelDepth::Four);
     const auto last = manager.create(3, {8, 0, 4, 4}, PixelDepth::Four);
@@ -996,7 +992,7 @@ int main() {
     testCanvasReshapeReusesFullScreenStorage();
     testCloseWindowReleasesCanvasAndAllowsReuse();
     testCompletedSessionRemainsAvailableForCapture();
-    testNewWindowCommandReclaimsFrozenCanvasBudget();
+    testNewWindowCommandReclaimsFrozenCanvasStorage();
     testDebugOverlayComposesAboveGraphics();
     testCanvasStorageReleasesAndReusesAllocations();
     testTaskViewportTranslatesAndClipsOwnedWindows();

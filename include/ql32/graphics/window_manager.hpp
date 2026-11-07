@@ -6,7 +6,6 @@
 #include <array>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <utility>
 #include <unordered_map>
 #include <vector>
@@ -40,9 +39,7 @@ using CanvasResizeObserver =
 // one canvas is resized or released.
 class CanvasArena {
 public:
-    explicit CanvasArena(std::size_t maximumBytes = 0) noexcept
-        : maximumBytes_(maximumBytes == 0 ? std::numeric_limits<std::size_t>::max()
-                                          : maximumBytes) {}
+    CanvasArena() = default;
     CanvasArena(const CanvasArena&) = delete;
     CanvasArena& operator=(const CanvasArena&) = delete;
 
@@ -63,7 +60,6 @@ private:
     struct Block { std::uint64_t handle; std::vector<std::uint8_t> bytes; };
     Block& find(std::uint64_t handle);
     const Block& find(std::uint64_t handle) const;
-    std::size_t maximumBytes_;
     std::uint64_t nextHandle_ = 1;
     std::vector<Block> blocks_;
     CanvasResizeObserver resizeObserver_;
@@ -124,9 +120,7 @@ private:
 // frames after changes, restoring content that was previously covered.
 class WindowManager {
 public:
-    WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight,
-                  std::size_t maximumWindows,
-                  std::size_t maximumCanvasBytes = 0);
+    WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight);
 
     WindowId create(SessionId owner, Rect bounds,
                     PixelDepth depth = PixelDepth::Four);
@@ -185,8 +179,6 @@ private:
 
     std::uint32_t screenWidth_;
     std::uint32_t screenHeight_;
-    std::size_t maximumWindows_;
-    std::size_t maximumCanvasBytes_;
     CanvasArena arena_;
     WindowId nextId_ = 1;
     std::vector<Entry> windows_; // bottom-to-top stacking order

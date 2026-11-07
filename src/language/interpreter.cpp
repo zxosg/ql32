@@ -2765,10 +2765,35 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                                                         "storage service unavailable");
             const std::string argument = trim(normalizedLine.substr(4));
             const std::string path = parseQuotedPath(argument, "SAVE");
-            std::string contents;
-            for (const auto& [number, body] : program_)
-                contents += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
-            storage_->writeText(path, contents);
+            class ProgramSource final : public runtime::TextStreamSource {
+            public:
+                explicit ProgramSource(const std::map<int, std::string>& program)
+                    : program_(program) {}
+
+                void writeTo(runtime::TextStreamSink& sink) const override {
+                    char numberBuffer[24];
+                    for (const auto& [number, body] : program_) {
+                        const auto converted = std::to_chars(
+                            numberBuffer, numberBuffer + sizeof(numberBuffer), number);
+                        if (converted.ec != std::errc{})
+                            throw runtime::ServiceError(
+                                runtime::ServiceErrorCode::IoError,
+                                "storage: could not serialize BASIC line number");
+                        sink.write(std::string_view(
+                            numberBuffer, static_cast<std::size_t>(converted.ptr - numberBuffer)));
+                        if (!body.empty()) {
+                            sink.write(" ");
+                            sink.write(body);
+                        }
+                        sink.write("\n");
+                    }
+                }
+
+            private:
+                const std::map<int, std::string>& program_;
+            } source(program_);
+            runtime::EmergencyReserveLease reserve(memory_.get());
+            storage_->writeTextStreamAtomic(path, source);
         } else if (word == "DELETE" || word.rfind("DELETE ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");

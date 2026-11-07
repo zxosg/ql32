@@ -17,9 +17,7 @@ namespace ql32::graphics {
 class WindowedService final : public Service {
 public:
     WindowedService(std::uint32_t screenWidth, std::uint32_t screenHeight,
-                    std::shared_ptr<FramePresenter> presenter,
-                    std::size_t maximumWindows = 4,
-                    std::size_t maximumCanvasBytes = 0);
+                    std::shared_ptr<FramePresenter> presenter);
 
     void setInk(SessionId session, ColorIndex color) override;
     void setInk(SessionId session, ChannelId channel, ColorIndex color) override;

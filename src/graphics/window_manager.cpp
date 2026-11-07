@@ -173,16 +173,8 @@ const CanvasArena::Block& CanvasArena::find(std::uint64_t handle) const {
 }
 
 std::uint64_t CanvasArena::allocate(std::size_t bytes) {
-    if (bytes == 0 || bytes > maximumBytes_)
-        throw std::runtime_error("window manager canvas memory limit reached");
-    std::size_t used = 0;
-    for (const auto& block : blocks_) {
-        if (block.bytes.size() > maximumBytes_ - used)
-            throw std::runtime_error("window manager canvas memory limit reached");
-        used += block.bytes.size();
-    }
-    if (bytes > maximumBytes_ - used)
-        throw std::runtime_error("window manager canvas memory limit reached");
+    if (bytes == 0)
+        throw std::invalid_argument("canvas storage must be positive");
     if (nextHandle_ == 0) throw std::overflow_error("canvas arena handles exhausted");
     std::vector<std::uint8_t> storage(bytes, 0);
     const auto handle = nextHandle_;
@@ -201,17 +193,6 @@ void CanvasArena::release(std::uint64_t handle) noexcept {
 void CanvasArena::replace(std::uint64_t handle, std::vector<std::uint8_t>&& bytes) {
     auto& target = find(handle);
     if (bytes.empty()) throw std::runtime_error("canvas dimensions must be positive");
-    if (bytes.size() > maximumBytes_)
-        throw std::runtime_error("window manager canvas memory limit reached");
-    std::size_t otherBytes = 0;
-    for (const auto& block : blocks_) {
-        if (block.handle == handle) continue;
-        if (block.bytes.size() > maximumBytes_ - otherBytes)
-            throw std::runtime_error("window manager canvas memory limit reached");
-        otherBytes += block.bytes.size();
-    }
-    if (bytes.size() > maximumBytes_ - otherBytes)
-        throw std::runtime_error("window manager canvas memory limit reached");
 
     // The replacement is fully populated by IndexedCanvas before this point.
     // vector::swap is non-throwing: the old pixels remain live until the
@@ -640,19 +621,14 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
     height_ = height;
 }
 
-WindowManager::WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight,
-                             std::size_t maximumWindows,
-                             std::size_t maximumCanvasBytes)
+WindowManager::WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight)
     : screenWidth_(screenWidth), screenHeight_(screenHeight),
-      maximumWindows_(maximumWindows), maximumCanvasBytes_(maximumCanvasBytes),
-      arena_(maximumCanvasBytes) {
+      arena_() {
     if (screenWidth_ == 0 || screenHeight_ == 0)
         throw std::invalid_argument("window manager screen dimensions must be positive");
     if (screenWidth_ > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
         screenHeight_ > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()))
         throw std::out_of_range("window manager screen exceeds supported coordinates");
-    if (maximumWindows_ == 0)
-        throw std::invalid_argument("window manager maximum window count must be positive");
 }
 
 void WindowManager::validate(Rect bounds) {
@@ -676,20 +652,7 @@ WindowId WindowManager::create(SessionId owner, Rect bounds, PixelDepth depth) {
         screenX + bounds.width > std::numeric_limits<std::int32_t>::max() ||
         screenY + bounds.height > std::numeric_limits<std::int32_t>::max())
         throw std::out_of_range("window bounds exceed supported screen coordinates");
-    if (windows_.size() >= maximumWindows_)
-        throw std::runtime_error("window manager window limit reached");
-    const auto newBytes = checkedCanvasBytes(bounds.width, bounds.height, depth);
-    if (maximumCanvasBytes_ != 0) {
-        std::size_t allocated = 0;
-        for (const auto& entry : windows_) {
-            const auto bytes = entry.canvas.storageBytes();
-            if (bytes > maximumCanvasBytes_ - allocated)
-                throw std::runtime_error("window manager canvas memory limit reached");
-            allocated += bytes;
-        }
-        if (newBytes > maximumCanvasBytes_ - allocated)
-            throw std::runtime_error("window manager canvas memory limit reached");
-    }
+    (void)checkedCanvasBytes(bounds.width, bounds.height, depth);
     if (nextId_ == 0) throw std::overflow_error("window identifiers exhausted");
     const WindowId id = nextId_++;
     windows_.push_back({id, owner, bounds, true,
@@ -773,19 +736,7 @@ void WindowManager::setBounds(WindowId id, Rect bounds) {
         x + bounds.width > std::numeric_limits<std::int32_t>::max() ||
         y + bounds.height > std::numeric_limits<std::int32_t>::max())
         throw std::out_of_range("window bounds exceed supported screen coordinates");
-    const auto newBytes = checkedCanvasBytes(bounds.width, bounds.height, entry.canvas.depth());
-    if (maximumCanvasBytes_ != 0) {
-        std::size_t allocated = newBytes;
-        if (allocated > maximumCanvasBytes_)
-            throw std::runtime_error("window manager canvas memory limit reached");
-        for (const auto& item : windows_) {
-            if (item.id == id) continue;
-            const auto bytes = item.canvas.storageBytes();
-            if (bytes > maximumCanvasBytes_ - allocated)
-                throw std::runtime_error("window manager canvas memory limit reached");
-            allocated += bytes;
-        }
-    }
+    (void)checkedCanvasBytes(bounds.width, bounds.height, entry.canvas.depth());
     if (bounds.width == entry.bounds.width && bounds.height == entry.bounds.height) {
         entry.bounds = bounds;
         return;
@@ -796,19 +747,7 @@ void WindowManager::setBounds(WindowId id, Rect bounds) {
 
 void WindowManager::setPixelDepth(WindowId id, PixelDepth depth) {
     auto& entry = find(id);
-    const auto newBytes = checkedCanvasBytes(entry.bounds.width, entry.bounds.height, depth);
-    if (maximumCanvasBytes_ != 0) {
-        std::size_t allocated = newBytes;
-        if (allocated > maximumCanvasBytes_)
-            throw std::runtime_error("window manager canvas memory limit reached");
-        for (const auto& item : windows_) {
-            if (item.id == id) continue;
-            const auto bytes = item.canvas.storageBytes();
-            if (bytes > maximumCanvasBytes_ - allocated)
-                throw std::runtime_error("window manager canvas memory limit reached");
-            allocated += bytes;
-        }
-    }
+    (void)checkedCanvasBytes(entry.bounds.width, entry.bounds.height, depth);
     entry.canvas.setDepth(depth);
 }
 
@@ -1010,8 +949,6 @@ void WindowManager::tile() {
             throw std::length_error("tiled canvas size exceeds addressable memory");
         requiredBytes += bytes;
     }
-    if (maximumCanvasBytes_ != 0 && requiredBytes > maximumCanvasBytes_)
-        throw std::runtime_error("window manager canvas memory limit reached");
     std::vector<Rect> localBounds;
     localBounds.reserve(visible.size());
     for (std::size_t index = 0; index < visible.size(); ++index) {

@@ -472,16 +472,12 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         if (status == ExecutionStatus::Completed) execution_.reset();
         return status;
     } catch (const std::bad_alloc&) {
+        if (memory_) (void)memory_->releaseEmergencyReserve();
         if (ui_) ui_->cancelSession(session_id_);
-        std::string detail = preparingProgram ? "out of memory preparing BASIC program" :
-                                                 "out of memory executing BASIC program";
-        if (!preparingProgram && execution_ && execution_->pc != 0 &&
-            execution_->pc <= execution_->code.size()) {
-            const Instruction& current = execution_->code[execution_->pc - 1];
-            detail += " at line " + std::to_string(current.line);
-        }
         execution_.reset();
-        setErrorContext(runtime::ErrorCode::OutOfMemory, detail);
+        const char* detail = preparingProgram ? "out of memory preparing BASIC program" :
+                                                "out of memory executing BASIC program";
+        setErrorContext(runtime::ErrorCode::OutOfMemory, {});
         throw std::runtime_error(detail);
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
@@ -532,10 +528,11 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
         setErrorContext(error.languageCode(), error.detail());
         throw;
     } catch (const std::bad_alloc&) {
+        if (memory_) (void)memory_->releaseEmergencyReserve();
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        setErrorContext(runtime::ErrorCode::OutOfMemory, "out of memory resuming BASIC program");
-        throw;
+        setErrorContext(runtime::ErrorCode::OutOfMemory, {});
+        throw std::runtime_error("out of memory resuming BASIC program");
     } catch (const std::exception& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
@@ -1192,14 +1189,28 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (!memory_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "memory service unavailable");
-                    std::uint64_t selector = 0;
-                    if (!arguments.empty()) {
-                        const auto* number = std::get_if<double>(&arguments[0]);
-                        if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
-                            *number < 0 || *number > 2)
-                            runtimeError(instruction, "FREE selector must be 0, 1, or 2");
-                        selector = static_cast<std::uint64_t>(*number);
+                    // The no-argument form is intended for convenient heap
+                    // logging. Keep the selector form numeric for existing
+                    // programs that request one metric at a time.
+                    if (arguments.empty()) {
+                        std::string values = std::to_string(memory_->freeBytes());
+                        if (const auto info = memory_->fragmentationInfo()) {
+                            values += "," + std::to_string(info->largestFreeBlockBytes) +"," +
+                                      std::to_string(info->freeBlockCount);
+                        } else {
+                            // Preserve CSV column positions on platforms that
+                            // cannot report allocator fragmentation details.
+                            values += ",,";
+                        }
+                        pushValue(std::move(values));
+                        break;
                     }
+                    std::uint64_t selector = 0;
+                    const auto* number = std::get_if<double>(&arguments[0]);
+                    if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
+                        *number < 0 || *number > 2)
+                        runtimeError(instruction, "FREE selector must be 0, 1, or 2");
+                    selector = static_cast<std::uint64_t>(*number);
                     if (selector == 0) {
                         pushValue(static_cast<double>(memory_->freeBytes()));
                     } else {

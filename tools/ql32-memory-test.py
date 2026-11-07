@@ -190,17 +190,48 @@ def start_worker(console: SerialConsole, case: str, filename: str) -> tuple[int,
     return task_id, output
 
 
-def kill_worker(console: SerialConsole, task_id: int) -> bytes:
+def cancel_worker(console: SerialConsole, task_id: int) -> tuple[bytes, str, int]:
     output = console.command(f"KILL {task_id}")
-    output += console.command("TASKS #0")
     expected_cancel = re.compile(
         rb"BASIC session " + str(task_id).encode() + rb" VM error: Task cancelled\r?\n",
         re.IGNORECASE,
     )
-    console.check_output(expected_cancel.sub(b"", output), f"kill task {task_id}")
+    console.check_output(expected_cancel.sub(b"", output), f"cancel task {task_id}")
+    status = console.command(
+        f'PRINT #serial_probe,"TASKRETAIN|";TASKRESULT({task_id},1)'
+    )
+    console.check_output(status, f"read cancelled task {task_id} result")
+    match = re.search(rb"TASKRETAIN\|(CANCELLED)", status, re.IGNORECASE)
+    if not match:
+        raise TestFailure(f"cancelled task {task_id} result was not retained: {status[-500:]!r}")
+    count_output = console.command(
+        'PRINT #serial_probe,"TASKCOUNT|";GETTASK(0)'
+    )
+    count_match = re.search(rb"TASKCOUNT\|(\d+)", count_output)
+    if not count_match:
+        raise TestFailure(f"could not read task count after cancellation: {count_output[-500:]!r}")
+    return output + status + count_output, match.group(1).decode("ascii"), int(count_match.group(1))
+
+
+def reap_worker(console: SerialConsole, task_id: int) -> tuple[bytes, int]:
+    output = console.command(f"KILL {task_id}")
+    console.check_output(output, f"reap cancelled task {task_id}")
+    output += console.command("TASKS #0")
     if re.search(rb"(?m)^\s*" + str(task_id).encode() + rb"\s+WORKER\b", output):
-        raise TestFailure(f"task {task_id} still appears in TASKS after KILL")
-    return output
+        raise TestFailure(f"task {task_id} still appears in TASKS after reap")
+    count_output = console.command(
+        'PRINT #serial_probe,"TASKCOUNT|";GETTASK(0)'
+    )
+    count_match = re.search(rb"TASKCOUNT\|(\d+)", count_output)
+    if not count_match:
+        raise TestFailure(f"could not read task count after reap: {count_output[-500:]!r}")
+    return output + count_output, int(count_match.group(1))
+
+
+def kill_worker(console: SerialConsole, task_id: int) -> bytes:
+    output, _status, _count = cancel_worker(console, task_id)
+    reap_output, _count = reap_worker(console, task_id)
+    return output + reap_output
 
 
 def run_worker_case(console: SerialConsole, name: str, filename: str,
@@ -231,7 +262,11 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
                 debug_log += console.command("CONTINUE")
                 console.check_output(debug_log, "debugger attach/inspect/continue")
             after_active, _ = sample(console, name, f"during{repetition}")
-            cleanup_log = kill_worker(console, task_id)
+            cancel_log, cancelled_status, task_count_after_cancel = cancel_worker(
+                console, task_id
+            )
+            after_cancel, _ = sample(console, name, f"cancelled{repetition}")
+            reap_log, task_count_after_reap = reap_worker(console, task_id)
             task_id = None
             after, _ = sample(console, name, f"after{repetition}")
             if name in {"channel", "combined"}:
@@ -260,7 +295,11 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
                 "released_report": (serial_metric_dict(released_report)
                                     if released_report is not None else None),
                 "during": serial_metric_dict(after_active),
+                "after_cancel": serial_metric_dict(after_cancel),
                 "after": serial_metric_dict(after),
+                "cancelled_result_status": cancelled_status,
+                "task_count_after_cancel": task_count_after_cancel,
+                "task_count_after_reap": task_count_after_reap,
                 "active_total_drop": dropped,
                 "release_recovered": release_recovered,
                 "recovered_total": total_recovered,
@@ -270,6 +309,7 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
                     "largest": after.largest - baseline.largest,
                 },
                 "debugger_output": debug_log.decode("utf-8", errors="replace") if debugger else None,
+                "cleanup_output": (cancel_log + reap_log).decode("utf-8", errors="replace"),
             })
             if not total_recovered or not largest_recovered:
                 raise TestFailure(

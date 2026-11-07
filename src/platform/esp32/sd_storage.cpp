@@ -136,6 +136,41 @@ void SdStorage::writeText(const std::string& path, const std::string& contents) 
                            "storage: incomplete write: " + path);
 }
 
+void SdStorage::writeTextStream(
+        const std::string& path, const runtime::TextStreamSource& source) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    fs::File file = filesystem_.open(resolved.c_str(), FILE_WRITE);
+    if (!file)
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: cannot open for writing: " + path);
+    class FileSink final : public runtime::TextStreamSink {
+    public:
+        explicit FileSink(fs::File& file) : file_(file) {}
+        void write(std::string_view chunk) override {
+            const auto* data = reinterpret_cast<const std::uint8_t*>(chunk.data());
+            std::size_t offset = 0;
+            while (offset < chunk.size()) {
+                const auto written = file_.write(data + offset, chunk.size() - offset);
+                if (written == 0)
+                    throw ServiceError(ServiceErrorCode::IoError,
+                                       "storage: incomplete streamed write");
+                offset += written;
+            }
+        }
+    private:
+        fs::File& file_;
+    } sink(file);
+    try {
+        source.writeTo(sink);
+        file.flush();
+        file.close();
+    } catch (...) {
+        file.close();
+        throw;
+    }
+}
+
 std::vector<runtime::FileEntry> SdStorage::list(const std::string& path) {
     const std::string resolved = resolve(path, true);
     ensureAvailable();

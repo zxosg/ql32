@@ -116,6 +116,13 @@ public:
     bool reap(TaskId id);
     std::optional<TaskInfo> task(TaskId id) const;
     std::vector<TaskInfo> tasks() const;
+    std::optional<TaskStatus> taskStatus(TaskId id) const noexcept;
+    std::size_t activeTaskCount() const noexcept;
+    bool hasWaitingUiTask() const noexcept;
+    // Visits and clears pending errors without allocating a TaskInfo snapshot.
+    // The callback must not mutate this scheduler.
+    void visitTaskErrors(void (*visitor)(TaskId, const char*, void*),
+                         void* context);
 
 private:
     struct Task;

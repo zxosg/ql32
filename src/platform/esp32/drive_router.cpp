@@ -38,6 +38,11 @@ void DriveRouterStorage::writeText(const std::string& path, const std::string& c
     forPath(path).writeText(path, contents);
 }
 
+void DriveRouterStorage::writeTextStream(
+        const std::string& path, const runtime::TextStreamSource& source) {
+    forPath(path).writeTextStream(path, source);
+}
+
 std::vector<runtime::FileEntry> DriveRouterStorage::list(const std::string& path) {
     return forPath(path).list(path);
 }

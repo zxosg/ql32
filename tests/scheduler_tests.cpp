@@ -303,6 +303,25 @@ void testInteractiveSessionRecoversFromCommandErrors() {
             "interactive session output was incorrect after error recovery");
 }
 
+void testSchedulerOffersNonAllocatingTaskStatusAndErrorViews() {
+    ql32::vm::SessionScheduler scheduler({}, 8);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    require(scheduler.activeTaskCount() == 1 &&
+                scheduler.taskStatus(repl) == ql32::vm::TaskStatus::WaitingInput &&
+                !scheduler.hasWaitingUiTask(),
+            "non-allocating scheduler status queries returned incorrect state");
+    require(scheduler.submit(repl, "PRINT )\n") && scheduler.tick(),
+            "scheduler did not produce an error for the status-view test");
+    std::string captured;
+    scheduler.visitTaskErrors([](ql32::vm::TaskId id, const char* error, void* context) {
+        require(id == 1, "task error visitor received the wrong task ID");
+        static_cast<std::string*>(context)->assign(error);
+    }, &captured);
+    require(!captured.empty() && scheduler.takeError(repl).empty(),
+            "scheduler did not visit and clear a pending task error");
+}
+
 void testInteractiveUiWaitResumesThroughScheduler() {
     auto ui = std::make_shared<ql32::ui::QueuedService>();
     ql32::vm::Services services;
@@ -561,7 +580,7 @@ void testSupervisorCanSetSliceAndWorkerPriority() {
 
 void testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts() {
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
-        32, 8, nullptr, 4, 0);
+        32, 8, nullptr);
     ql32::vm::Services services;
     services.graphics = graphics;
     ql32::vm::SessionScheduler scheduler(std::move(services), 16);
@@ -592,7 +611,7 @@ void testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts() {
 
 void testSupervisorTaskViewportUsesTaskToSessionMapping() {
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
-        32, 16, nullptr, 5, 0);
+        32, 16, nullptr);
     // Consume a graphics session ID before task IDs are allocated so the test
     // detects accidental use of TaskId as the window owner SessionId.
     ql32::Interpreter unrelatedSession;
@@ -657,7 +676,7 @@ void testSupervisorTaskViewportUsesTaskToSessionMapping() {
 
 void testBasicTaskViewCommandIsSupervisorOnly() {
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
-        32, 16, nullptr, 5, 0);
+        32, 16, nullptr);
     ql32::vm::Services services;
     services.graphics = graphics;
     ql32::vm::SessionScheduler scheduler(std::move(services), 16);
@@ -1048,6 +1067,7 @@ int main() {
     testInteractiveSessionUsesSlicesAndKeepsReplState();
     testInteractiveStartupProgramSharesReplSession();
     testInteractiveSessionRecoversFromCommandErrors();
+    testSchedulerOffersNonAllocatingTaskStatusAndErrorViews();
     testInteractiveUiWaitResumesThroughScheduler();
     testInteractiveRunUnwindsReplAndContinuesTrailingCommands();
     testBreakDuringDeferredRunDiscardsTrailingCommands();

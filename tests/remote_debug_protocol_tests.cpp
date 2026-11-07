@@ -147,7 +147,7 @@ void testRemoteTaskViewportControl() {
     capabilities.storageRoots = {"FFS:/"};
     ql32::platform::esp32::RemoteDebugProtocol protocol(std::move(capabilities));
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
-        32, 16, nullptr, 5, 0);
+        32, 16, nullptr);
     ql32::vm::Services services;
     services.graphics = graphics;
     ql32::vm::SessionScheduler scheduler(std::move(services), 32);

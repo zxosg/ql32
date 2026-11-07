@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
             auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
                 "ql32-screen.ppm");
             auto graphics = std::make_shared<ql32::graphics::WindowedService>(
-                640, 480, presenter, 4);
+                640, 480, presenter);
             auto memory = std::make_shared<ql32::platform::linux_host::MemoryService>();
             ql32::Interpreter interpreter(storage, channels, ui, graphics, {}, memory);
             ql32::platform::linux_host::ConsoleUi console(ui, std::cin, std::cout, graphics);
@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         std::shared_ptr<ql32::graphics::Service> graphics;
         if (!consoleOnly)
             graphics = std::make_shared<ql32::graphics::WindowedService>(
-                640, 480, presenter, 4);
+                640, 480, presenter);
         auto memory = std::make_shared<ql32::platform::linux_host::MemoryService>();
         ql32::Interpreter interpreter(storage, channels, ui, graphics, {}, memory);
         if (hasProgram) {

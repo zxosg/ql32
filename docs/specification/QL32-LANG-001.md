@@ -446,12 +446,16 @@ not a compatibility claim. See [Annex32's bitwise reference](https://cicciocb.co
 the [SuperBASIC operator appendix](https://superbasic-manual.readthedocs.io/en/latest/Appendices/Appendix11.html),
 and the OPL samples noted in [docs/reference](../reference/README.md).
 
-`FREE()` and `FREE(0)` return the current free-memory estimate in bytes.
-`FREE(1)` returns the largest contiguous free block in bytes, and `FREE(2)`
-returns the number of free blocks reported by the allocator. ESP32 reports
-these values for byte-addressable heap. Linux supports only selector 0; the
-other selectors report that allocator fragmentation metrics are unavailable.
-Selectors must be integer values from 0 through 2. `ql32.inc` defines
+`FREE()` returns a comma-delimited string containing the current free-memory
+estimate in bytes, the largest contiguous free block in bytes, and the number
+of free blocks reported by the allocator, in that order. A platform without
+fragmentation metrics leaves the unavailable fields empty while preserving the
+comma positions. `FREE(0)` returns the free-memory estimate as a number;
+`FREE(1)` returns the largest contiguous free block as a number, and `FREE(2)`
+returns the number of free blocks as a number. ESP32 reports all three values
+for byte-addressable heap. Linux supports only selector 0; selector 1 and 2
+report that allocator fragmentation metrics are unavailable. Selectors must
+be integer values from 0 through 2. `ql32.inc` defines
 `KFreeTotal`, `KFreeContiguous`, and `KFreeFragments` for the selector values.
 Values are platform memory snapshots, not exact counts of memory owned by the
 current BASIC session. The target shell's separate `MEM` command is not

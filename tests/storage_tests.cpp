@@ -15,6 +15,14 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+class ThrowAfterPartialWrite final : public ql32::runtime::TextStreamSource {
+public:
+    void writeTo(ql32::runtime::TextStreamSink& sink) const override {
+        sink.write("partial replacement");
+        throw std::runtime_error("injected stream failure");
+    }
+};
+
 void testDirectoryStorage() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -28,6 +36,18 @@ void testDirectoryStorage() {
         storage.writeText("subdir/program.bas", "20 PRINT \"saved\"\n");
         require(storage.readText("subdir/program.bas") == "20 PRINT \"saved\"\n",
                 "atomic overwrite did not replace the previous file");
+
+        ThrowAfterPartialWrite failingSource;
+        bool streamFailed = false;
+        try {
+            storage.writeTextStreamAtomic("subdir/program.bas", failingSource);
+        } catch (const std::runtime_error&) {
+            streamFailed = true;
+        }
+        require(streamFailed &&
+                    storage.readText("subdir/program.bas") == "20 PRINT \"saved\"\n" &&
+                    storage.list("subdir").size() == 1,
+                "failed streamed replacement damaged the previous file");
 
         const auto entries = storage.list("subdir");
         require(entries.size() == 1 && entries.front().name == "program.bas" &&
