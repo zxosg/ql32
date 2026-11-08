@@ -728,17 +728,29 @@ void testUnsignedBitFunctionsAndRadixLiterals() {
         "PRINT BIN$(0)\n"
         "PRINT ROL(&H80000001,1)\n"
         "PRINT HEX$(ROR(&H80000001,1))\n"
+        "PRINT HEX$(SRA(&H80000000,1))\n"
+        "PRINT HEX$(SRL(&H80000000,1))\n"
+        "PRINT HEX$(SLA(&H80000001,1))\n"
+        "PRINT HEX$(SLL(&H80000000,1))\n"
+        "PRINT HEX$(SRA(&H80000000,32))\n"
+        "PRINT HEX$(SRA(&H7FFFFFFF,40))\n"
+        "PRINT HEX$(SRL(&HFFFFFFFF,32))\n"
+        "PRINT HEX$(SLA(&HFFFFFFFF,40))\n"
+        "PRINT HEX$(SLL(0,32))\n"
+        "PRINT HEX$(SLL(0,40))\n"
         "PRINT ROL(1,-1)\n"
         "PRINT ROL(1,33)\n"
         "PRINT HEX$(&HFFFFFFFF)\n"
         "PRINT BIN$(&HFFFFFFFF)\n", output);
     require(output.str() ==
-                "51966\n45\n2800\nAF0\n51966\n3501\nFFFFFFFF\n0\n3\nC0000000\n2147483648\n2\nFFFFFFFF\n11111111111111111111111111111111\n",
+                "51966\n45\n2800\nAF0\n51966\n3501\nFFFFFFFF\n0\n3\nC0000000\nC0000000\n40000000\n2\n1\nFFFFFFFF\n0\n0\n0\nFFFFFFFF\nFFFFFFFF\n2147483648\n2\nFFFFFFFF\n11111111111111111111111111111111\n",
             "32-bit bit functions or radix literals returned incorrect values");
 
     for (const std::string& source : {
              "PRINT &H100000000\n", "PRINT &B102\n", "PRINT &H\n",
-             "PRINT BAND(-1,0)\n", "PRINT BNOT(1.5)\n", "PRINT ROR(1,0.5)\n"}) {
+             "PRINT BAND(-1,0)\n", "PRINT BNOT(1.5)\n", "PRINT ROR(1,0.5)\n",
+             "PRINT SRA(1,-1)\n", "PRINT SRL(1,0.5)\n",
+             "PRINT SLA(1,-1)\n", "PRINT SLL(1,1.5)\n"}) {
         bool rejected = false;
         try {
             std::ostringstream ignored;

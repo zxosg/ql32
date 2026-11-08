@@ -17,13 +17,14 @@ def _frame(marker: int, sequence: int, payload: bytes) -> bytes:
 class SimulatedDevice:
     """Small serial peer that speaks the monitor's YMODEM batch exchange."""
 
-    def __init__(self, *, retry_first_data=False):
+    def __init__(self, *, retry_first_data=False, cancel_upload_data=False):
         self.incoming = deque()
         self.outgoing = bytearray()
         self.command = None
         self.phase = ""
         self.data_packets = 0
         self.retry_first_data = retry_first_data
+        self.cancel_upload_data = cancel_upload_data
         self.commands = []
         self.cancelled_by_host = False
 
@@ -72,6 +73,12 @@ class SimulatedDevice:
                     return
                 del self.outgoing[:size]
                 self.data_packets += 1
+                if self.cancel_upload_data:
+                    self.incoming.extend(bytes((ymodem.CAN, ymodem.CAN)))
+                    self.incoming.extend(
+                        b"Transfer failed: YMODEM receive timed out\r\n> ")
+                    self.phase = ""
+                    return
                 response = ymodem.NAK if self.retry_first_data and self.data_packets == 1 else ymodem.ACK
                 self.incoming.append(response)
             elif self.phase == "upload_data" and self.outgoing[:1] == bytes((ymodem.EOT,)):
@@ -126,6 +133,17 @@ class YModemTests(unittest.TestCase):
                              progress=lambda *_: None)
             self.assertEqual(device.commands, ['RECV "FFS:/program.bas"'])
             self.assertEqual(device.data_packets, 2)
+
+    def test_upload_reports_receiver_error_after_cancel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "program.bas"
+            source.write_bytes(b"PRINT 42\n")
+            device = SimulatedDevice(cancel_upload_data=True)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"transfer cancelled by device: Transfer failed: YMODEM receive timed out"):
+                ymodem.send_file(device, source, "FFS:/program.bas",
+                                 wait_for_prompt=False, progress=lambda *_: None)
 
     def test_download_and_screen_capture(self):
         with tempfile.TemporaryDirectory() as directory:

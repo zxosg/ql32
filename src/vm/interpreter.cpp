@@ -1081,6 +1081,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 if (instruction.name == "BAND" || instruction.name == "BOR" ||
                     instruction.name == "BXOR" || instruction.name == "BNOT" ||
                     instruction.name == "ROL" || instruction.name == "ROR" ||
+                    instruction.name == "SRA" || instruction.name == "SRL" ||
+                    instruction.name == "SLA" || instruction.name == "SLL" ||
                     instruction.name == "HEX$" || instruction.name == "BIN$") {
                     constexpr std::uint64_t mask = 0xffffffffULL;
                     const auto requireWord = [&](std::size_t index) -> std::uint32_t {
@@ -1114,6 +1116,40 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             instruction.name == "ROL" ?
                                 static_cast<std::uint32_t>((first << count) | (first >> (32u - count))) :
                                 static_cast<std::uint32_t>((first >> count) | (first << (32u - count)));
+                        pushValue(static_cast<double>(result));
+                    } else if (instruction.name == "SRA" || instruction.name == "SRL" ||
+                               instruction.name == "SLA" || instruction.name == "SLL") {
+                        const auto* countValue = std::get_if<double>(&arguments[1]);
+                        if (!countValue) runtimeError(instruction,
+                                                      "shift count must be a nonnegative integer");
+                        if (!std::isfinite(*countValue) || std::trunc(*countValue) != *countValue ||
+                            *countValue < 0.0)
+                            runtimeError(instruction,
+                                         "shift count must be a nonnegative integer");
+                        std::uint32_t result = first;
+                        if (*countValue >= 32.0) {
+                            if (instruction.name == "SRA")
+                                result = (first & 0x80000000u) != 0 ? 0xffffffffu : 0u;
+                            else if (instruction.name == "SLL")
+                                result = 0xffffffffu;
+                            else
+                                result = 0;
+                        } else {
+                            const unsigned count = static_cast<unsigned>(*countValue);
+                            if (count == 0) {
+                                result = first;
+                            } else if (instruction.name == "SRA") {
+                                result = first >> count;
+                                if ((first & 0x80000000u) != 0)
+                                    result |= 0xffffffffu << (32u - count);
+                            } else if (instruction.name == "SRL") {
+                                result = first >> count;
+                            } else if (instruction.name == "SLA") {
+                                result = first << count;
+                            } else {
+                                result = (first << count) | ((1u << count) - 1u);
+                            }
+                        }
                         pushValue(static_cast<double>(result));
                     } else if (instruction.name == "HEX$") {
                         char buffer[9];

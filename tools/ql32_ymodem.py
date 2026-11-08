@@ -59,6 +59,26 @@ def wait_for(port, expected, message, cancelled=None):
     raise RuntimeError(message)
 
 
+def _read_device_failure(port, timeout=1.0):
+    """Return the monitor's diagnostic line after its YMODEM CAN sequence."""
+    data = bytearray()
+    deadline = time.monotonic() + timeout
+    marker = b"Transfer failed:"
+    while time.monotonic() < deadline:
+        chunk = port.read(1)
+        if not chunk:
+            time.sleep(0.01)
+            continue
+        data.extend(chunk)
+        start = data.find(marker)
+        if start >= 0:
+            end = data.find(b"\n", start)
+            if end >= 0:
+                return data[start:end].rstrip(b"\r").decode(
+                    "utf-8", errors="replace")
+    return None
+
+
 def packet(port, marker, sequence, payload):
     if len(payload) not in (128, BLOCK):
         raise ValueError("invalid YMODEM packet size")
@@ -195,7 +215,12 @@ def send_file(port, source, device_path=None, *, wait_for_prompt=True,
         return _send_file(port, source, device_path,
                           wait_for_prompt=wait_for_prompt,
                           progress=progress, cancelled=cancelled)
-    except Exception:
+    except Exception as error:
+        if isinstance(error, RuntimeError) and str(error) == "transfer cancelled by device":
+            detail = _read_device_failure(port)
+            if detail:
+                raise RuntimeError(f"{error}: {detail}") from error
+            raise
         try:
             port.write(bytes((CAN, CAN)))
         except Exception:

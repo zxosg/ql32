@@ -226,6 +226,7 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_tenstar_esp32s3_graphics_tests PRIVATE
     tests/fakes include)
   target_compile_features(ql32_tenstar_esp32s3_graphics_tests PRIVATE cxx_std_17)
+  target_link_libraries(ql32_tenstar_esp32s3_graphics_tests PRIVATE ql32_portable)
   add_test(NAME ql32_tenstar_esp32s3_graphics_tests
     COMMAND ql32_tenstar_esp32s3_graphics_tests)
 
@@ -248,6 +249,7 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_esp32_cyd_graphics_tests PRIVATE
     tests/fakes include)
   target_compile_features(ql32_esp32_cyd_graphics_tests PRIVATE cxx_std_17)
+  target_link_libraries(ql32_esp32_cyd_graphics_tests PRIVATE ql32_portable)
   add_test(NAME ql32_esp32_cyd_graphics_tests COMMAND ql32_esp32_cyd_graphics_tests)
 
   add_executable(ql32_esp32_cyd_console_tests

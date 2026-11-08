@@ -1,7 +1,10 @@
 #include "ql32/platform/esp32_cyd/graphics.hpp"
 #include "ql32/platform/esp32_cyd/frame_presenter.hpp"
+#include "ql32/graphics/windowed_service.hpp"
 
+#include <algorithm>
 #include <array>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -134,6 +137,35 @@ void testFramePresenterStreamsAddressedRows() {
             "CYD rows were not sent through one address window and SPI transaction");
 }
 
+void testRotationReconfiguresOverlayAfterGeometryUpdate() {
+    using namespace ql32::graphics;
+    using namespace ql32::platform::esp32_cyd;
+    CydIli9341Display display;
+    std::weak_ptr<WindowedService> graphicsRef;
+    Ili9341FramePresenter presenter(display, {}, [&] {
+        const auto graphics = graphicsRef.lock();
+        if (!graphics) return;
+        const auto width = static_cast<std::uint32_t>(display.width());
+        const auto height = static_cast<std::uint32_t>(display.height());
+        const auto overlayHeight = std::min<std::uint32_t>(64, height);
+        graphics->invalidateSystemRegion(
+            {0, static_cast<std::int32_t>(height - overlayHeight), width, overlayHeight});
+    });
+    auto graphics = std::make_shared<WindowedService>(320, 240,
+        std::shared_ptr<FramePresenter>(&presenter, [](FramePresenter*) {}));
+    graphicsRef = graphics;
+
+    for (const std::uint16_t degrees : {90, 180, 270, 0, 90, 180}) {
+        graphics->setRotation(1, degrees);
+        const auto info = graphics->windowInfo(1, 1);
+        const bool landscape = degrees == 0 || degrees == 180;
+        require(info.width == (landscape ? 320u : 240u) &&
+                    info.height == (landscape ? 240u : 320u) &&
+                    info.rotationDegrees == degrees,
+                "CYD rotation did not synchronize display and compositor geometry");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -141,5 +173,6 @@ int main() {
     testOwnershipAndValidation();
     testRotationAndWindowQueries();
     testFramePresenterStreamsAddressedRows();
+    testRotationReconfiguresOverlayAfterGeometryUpdate();
     return 0;
 }

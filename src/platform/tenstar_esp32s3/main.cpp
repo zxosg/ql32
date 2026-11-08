@@ -408,6 +408,13 @@ void advanceScheduler() {
 
 void setup() {
     Serial.begin(115200);
+    // USB CDC's Arduino default RX queue is 256 bytes. A YMODEM STX frame is
+    // 1029 bytes, so an unpaced host write can overflow that queue before the
+    // monitor transfer loop consumes the frame. Keep one complete frame plus
+    // headroom buffered on the Tenstar USB REPL.
+    constexpr std::size_t kUsbCdcRxBufferBytes = 2048;
+    if (Serial.setRxBufferSize(kUsbCdcRxBufferBytes) < kUsbCdcRxBufferBytes)
+        Serial.println("Warning: USB CDC RX buffer could not be enlarged");
     if (!boardMemory.initializeEmergencyReserve(
             ql32::platform::esp32::defaultEmergencyReserveBytes)) {
         Serial.println("Fatal: unable to reserve memory for recovery operations");

@@ -89,9 +89,12 @@ graphics::WindowInfo St7789FramePresenter::setRotation(std::uint16_t degrees) {
         throw std::invalid_argument("rotation must be 0, 90, 180, or 270 degrees");
     display_.setRotationDegrees(degrees);
     rotationDegrees_ = degrees;
-    if (rotationChanged_) rotationChanged_();
     return {static_cast<std::uint32_t>(display_.width()),
             static_cast<std::uint32_t>(display_.height()), 16, 256, rotationDegrees_};
+}
+
+void St7789FramePresenter::rotationApplied() {
+    if (rotationChanged_) rotationChanged_();
 }
 
 } // namespace ql32::platform::tenstar_esp32s3

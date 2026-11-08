@@ -17,7 +17,7 @@ session.
 
 ## Repository state reviewed
 
-Reviewed 2026-11-06: `main` is at [`f1fadad`](https://github.com/zxosg/ql32/commit/f1fadad)
+Reviewed 2026-11-08: `main` is at [`f1fadad`](https://github.com/zxosg/ql32/commit/f1fadad)
 and matches `origin/main`. The working tree contains uncommitted TENSTAR target,
 graphics/console adapter, test, SPIFFS, monitor-transfer, README, and
 specification changes. Inspect `git status` before staging or committing; do
@@ -66,14 +66,15 @@ The latest implementation includes:
   cycle, depth, size and module-preamble checks.
 - Recent language helpers: UTF-8 `LEFT$`, `RIGHT$`, `MID$`; `SIN`,
   `COS`, `INT`; unsigned 32-bit `BAND`, `BOR`, `BXOR`, `BNOT`,
-  `ROL`, `ROR`; `&H`/`&B` literals and `HEX$`/`BIN$`. Graphics
-  refresh batching uses `GUPDATE`.
-On 2026-11-06 the native Linux CMake build and all 64 CTest cases passed. The
-Tenstar PlatformIO environment also built successfully. The ESP32-S3 board was
-flashed with the firmware and a 512 KiB SPIFFS image; esptool detected 4 MiB
-embedded flash and 2 MiB PSRAM. The USB REPL returned `GWIDTH()=240`,
-`GHEIGHT()=135`, and `GDEPTH()=4`; `/startup.bas`, the graphics smoke test, and
-the memory test ran without VM errors.
+  `ROL`, `ROR`, `SRA`, `SRL`, `SLA`, `SLL`; `&H`/`&B` literals and
+  `HEX$`/`BIN$`. Graphics refresh batching uses `GUPDATE`.
+On 2026-11-08 the native Linux CMake build and full CTest suite passed (65/65).
+The scheduler pager assertion was stale: its expected text used lowercase
+`Enter=page`, while the current prompt is `Enter=Page, L=Line, Q=Quit`. The test
+was updated to the prompt contract, preserving the assertion that only the
+pager's session suspends while another task continues. CYD and Tenstar firmware
+builds and Tenstar graphics regression coverage also passed; detailed board
+results are in [the 2026-11-08 acceptance report](docs/test-results/board-acceptance-performance-2026-11-08.md).
 
 On 2026-11-05, the Olimex firmware was rebuilt and flashed. Board checks
 verified the full printable ASCII glyph set in a 320x200 VGA capture, paged
@@ -139,8 +140,17 @@ passed 64/64 on 2026-11-06.
   65 KiB; the largest free block stayed at 2,064,372 bytes. The user observed
   a few blinking pixels under concurrent drawing and confirmed they stopped
   after workers closed. Mandelbrot itself remained runnable after a further
-  28 seconds alone and was cancelled; its runtime is the current Tenstar
-  performance gap. Debug bar was left enabled.
+  28 seconds alone and was cancelled. The bounded Mandelbrot workload
+  completed once in 33.929 seconds; later attempts did not complete within the
+  observation window, so that workload has no reliable median. The finite
+  attractor benchmark now runs as a task and completed once in 26.681 seconds
+  at its requested 80 MHz/SINGLE setting; actual CPU frequency is not read back
+  yet. Display
+  color blocks and all four rotations were visually confirmed after fixing the
+  rotation callback ordering. The 2026-11-08 YMODEM investigation found that
+  the 1,029-byte STX frame exceeded the default 256-byte USB CDC RX queue;
+  Tenstar now configures a 2,048-byte queue. An unpaced benchmark upload passed
+  after the fix, and the temporary file was deleted. Debug bar was left enabled.
 - A CYD `WINDOW #0` resize returned out-of-memory under the tested workload.
 - CYD memory constraint: three concurrent workers plus Mandelbrot can fail
   during compiler preparation. CYD saturation is now characterized: two
@@ -161,30 +171,53 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. **Tenstar performance:** characterize why the 80×56 Mandelbrot program was
-   still runnable after 28 seconds alone at `SLICE 64`. Compare other slices,
-   then decide whether to optimize the BASIC workload, interpreter execution,
-   or ST7789 update path. Keep the debug bar enabled for heap/task observation.
-2. **Tenstar display/network acceptance:** visually verify ST7789 color order
-   and rotation, then test Wi-Fi. The concurrent-draw blinking disappeared
-   when the workers stopped; it was not persistent corruption. QMI8658C,
-   BMP280, and RGB LED support are deferred by user decision.
-3. **Olimex/LILYGO acceptance:** verify physical PS/2 input/shortcuts, `REBOOT`,
-   line UI, task/window controls, clock, and Wi-Fi on Olimex; keep LILYGO
-   physical acceptance separate. Add an Olimex GPIO/FFS host profile test.
-4. **Performance check:** time the 80×56 attractor and measure the selected CPU
-   clock for SINGLE/DOUBLE and 80/160/240 MHz.
-5. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
-   implement REPL `EDIT linenumber`; later scope palette changes, task-window
-   management, BASIC system/build/platform and capability introspection,
+1. **Performance characterization:** complete the SINGLE/DOUBLE × 80/160/240
+   MHz timing matrix on each ESP32 board. A bounded benchmark source is at
+   `examples/attractor-benchmark.bas`; the attractor has one 26.681-second
+   sample at requested 80 MHz/SINGLE, but no actual-frequency readback or
+   median. The separate Mandelbrot workload completed once in 33.929 seconds
+   and later timed out. CPU readback diagnostics were removed after the
+   attempt. The YMODEM root cause is now identified and
+   fixed on Tenstar: its USB CDC queue was 256 bytes for a 1,029-byte data
+   frame. Firmware with a 2,048-byte queue passed an unpaced 1,027-byte upload.
+   A first attractor timing is 26.681 s at requested 80 MHz/SINGLE. Repeat
+   with actual-frequency readback and three samples per configuration; also
+   repeat transfer with a larger file and consecutive batches.
+2. **Board acceptance left open by user choice:** Tenstar Wi-Fi was skipped;
+   Olimex physical PS/2 shortcuts, clock, Wi-Fi and related checks were skipped;
+   LILYGO physical acceptance was skipped. Current results and profiles are in
+   the board acceptance report. Do not treat these checks as passed.
+3. **Tenstar performance follow-up:** determine whether the variable Mandelbrot
+   duration comes from BASIC math, interpreter execution, or display transfer.
+   Keep the debug bar available for heap/task observation. QMI8658C, BMP280,
+   and RGB LED support remain deferred by user decision.
+4. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
+   later scope palette changes, task-window management, BASIC
+   system/build/platform and capability introspection,
    enhanced `DIR` output with optional file sizes and `<subdir>` directory
-   labels, string splitting, indirect procedure calls, and network channels.
+   labels, `DATA`/`READ`/`RESTORE` statements, string splitting, indirect
+   procedure calls, and network channels.
    BLE and new hardware families remain deferred. Introspection should build
    on the portable board capability descriptors while defining product
    version/build ID, host/board identity, supported BASIC queries (for example
    SPI, I2C, and serial), and how support differs from runtime availability.
 
 ## Recently completed
+
+- **REPL program editing and line deletion (2026-11-08):** The numbered-line
+  REPL editor has been implemented and fixed. `DELETE lineNumber1,...` is also
+  implemented and validates the remaining program after deletion. These are
+  no longer backlog items; see [QL32-LANG-001](docs/specification/QL32-LANG-001.md)
+  and [QL32-API-001](docs/specification/QL32-API-001.md).
+
+- **32-bit shifts (2026-11-08):** Added `SRA`, `SRL`, `SLA`, and `SLL` with
+  32-bit fill semantics, saturation for counts of 32 or greater, and errors
+  for negative/fractional counts. The host runtime tests passed. CYD firmware
+  built and flashed; on-device examples yielded `C0000000`, `40000000`, `2`,
+  and `1`, large-count results matched the specified fill behavior, and
+  invalid counts raised VM errors. See
+  [QL32-LANG-001](docs/specification/QL32-LANG-001.md) and
+  [QL32-API-001](docs/specification/QL32-API-001.md).
 
 - **Supervisor diagnostics and task window modes (2026-11-08):** Added the
   CYD `DEBUGBAR ON|OFF` overlay for heap totals, largest free block, allocation

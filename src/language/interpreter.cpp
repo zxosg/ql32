@@ -109,8 +109,8 @@ constexpr std::string_view builtinFunctions[] = {
     "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
     "MID$", "REPT$", "CODE", "ASC", "CHR$", "LOC", "UPPER$", "LOWER$",
     "STR$", "VAL", "EVAL", "EVAL$",
-    "BAND", "BOR", "BXOR", "BNOT", "ROL",
-    "ROR", "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
+    "BAND", "BOR", "BXOR", "BNOT", "ROL", "ROR", "SRA", "SRL", "SLA", "SLL",
+    "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
     "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
@@ -242,7 +242,9 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "MID$" || instruction.name == "REPT$") return {2, true};
     if (instruction.name == "BAND" || instruction.name == "BOR" ||
         instruction.name == "BXOR" || instruction.name == "ROL" ||
-        instruction.name == "ROR") return {2, true};
+        instruction.name == "ROR" || instruction.name == "SRA" ||
+        instruction.name == "SRL" || instruction.name == "SLA" ||
+        instruction.name == "SLL") return {2, true};
     if (instruction.name == "BNOT" || instruction.name == "HEX$" ||
         instruction.name == "BIN$") return {1, true};
     if (instruction.name == "SIN" || instruction.name == "COS" ||

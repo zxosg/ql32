@@ -1,17 +1,17 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-08):** CYD task cleanup and memory/concurrency behavior have been characterized across the 25-run worker suite, canvas-resize soaks, two-full-screen-canvas tests, and worker saturation/OOM recovery. No monotonic heap loss was observed in repeated cleanup cycles; some ten-worker OOM passes left the largest free block reduced after task reaping. The separate 25-run suite returned total free heap to within 60 bytes of baseline after reboot; the saturation pass itself was not measured across reboot. The measured operating envelope and remaining uncertainty are recorded below and in [the CYD follow-up report](../test-results/CYD-open-points-2026-11-07.md). CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen allocation, rotation, Wi-Fi station behavior, and TASKVIEW offset bounce are hardware-verified. Linux remains the first conformance host; the target matrix below records the remaining board-specific acceptance work.
+**Status (2026-11-08):** CYD task cleanup and memory/concurrency behavior have been characterized across the 25-run worker suite, canvas-resize soaks, two-full-screen-canvas tests, and worker saturation/OOM recovery. No monotonic heap loss was observed in repeated cleanup cycles; some ten-worker OOM passes left the largest free block reduced after task reaping. The separate 25-run suite returned total free heap to within 60 bytes of baseline after reboot; the saturation pass itself was not measured across reboot. The measured operating envelope and remaining uncertainty are recorded below and in [the CYD follow-up report](../test-results/CYD-open-points-2026-11-07.md). CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen allocation, rotation, Wi-Fi station behavior, and TASKVIEW offset bounce are hardware-verified. The 2026-11-08 follow-up also visually checked the four-color pattern at all four rotations; initial `#0` clipping came from its console overlay, so corrected geometry used graphics channel `#1`. Tenstar display colors and repeated rotations are verified after a rotation-order fix; Wi-Fi was skipped. Olimex and LILYGO physical checks in the current acceptance plan were skipped by user choice. See [the dated acceptance report](../test-results/board-acceptance-performance-2026-11-08.md). Linux remains the first conformance host.
 
 Supported build families are independent firmware targets:
 
 | Profile | Display / input | Status |
 | --- | --- | --- |
-| `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance on a LILYGO board pending |
-| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass; physical PS/2 shortcuts, clock, and Wi-Fi remain open |
+| `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance skipped by user on 2026-11-08 |
+| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass; current physical follow-up skipped by user |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Optional SD-only deployment; firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified |
 | `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Preferred CYD profile; built and flashed; storage mounted, `startup.bas` loaded at boot; 25-run cleanup suite, two-full-screen-canvas limit, ten-small-worker saturation, OOM recovery, and reboot recovery verified; post-saturation largest-block reduction remains a documented limitation |
-| `ql32_tenstar_esp32s3` | TENSTAR TS-ESP32-S3, ST7789 240×135, USB serial, QSPI PSRAM, 512 KiB SPIFFS (`FFS`) | Built and flashed; startup and test programs load from SPIFFS; USB REPL reports 240×135×4-bit; 2 MiB PSRAM detected; worker/Mandelbrot stress run cleaned up; Mandelbrot performance and color/rotation checks remain open; sensors deferred |
+| `ql32_tenstar_esp32s3` | TENSTAR TS-ESP32-S3, ST7789 240×135, USB serial, QSPI PSRAM, 512 KiB SPIFFS (`FFS`) | Built and flashed; startup and test programs load from SPIFFS; USB REPL reports 240×135×4-bit; 2 MiB PSRAM detected; worker/Mandelbrot stress run cleaned up; display colors and rotations visually checked after rotation-order fix; Wi-Fi skipped; performance matrix open; sensors deferred |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
 | `linux` | Host adapter | Development and conformance host |
@@ -61,13 +61,26 @@ requests and is covered by host state-machine tests. The Tenstar ESP32-S3
 profile builds and flashes the shared interpreter with an ST7789 display
 adapter, scrolling console, 512 KiB SPIFFS, and USB serial REPL. The board
 reports 240×135×4-bit, initializes the display path, and detects its 2 MiB
-PSRAM. A repeated 80×60 window test reported a 2,896-byte free-heap decrease
+PSRAM. Repeated color-block rotation checks exposed a presenter callback that
+ran before window-manager geometry changed; the callback now runs after
+rotation is applied. The regression test and visual checks at 90°, 180°, 270°,
+and 0° passed. Tenstar USB CDC had a second issue: an unpaced 1,029-byte YMODEM
+frame timed out mid-read against the framework's 256-byte default RX queue.
+Configuring a 2,048-byte queue fixed the tested upload; the 1,027-byte
+benchmark source transferred unpaced and was removed afterward. The
+benchmark's first run used `taskId=TASK("FFS:/attractor-benchmark.bas")` and
+completed in 26.681 seconds at requested 80 MHz/SINGLE; `LOAD`/`RUN` was the
+wrong launch route for this module preamble and produced an assignment-parser
+error. Actual frequency readback and repeated samples remain outstanding. A
+repeated 80×60 window test reported a 2,896-byte free-heap decrease
 while open, with 2,512 bytes recovered on close; largest free block remained
 2,064,372 bytes. Three continuous workers and Mandelbrot stayed runnable
 together; closing the tasks recovered about 65 KiB, and the user confirmed
 concurrent-draw blinking stopped after the workers closed. Mandelbrot remained
-runnable after 28 seconds alone and was cancelled. Visual color-order, rotation,
-and Wi-Fi acceptance remain open.
+runnable after 28 seconds alone and was cancelled. A later bounded run completed
+in 33.929 seconds once; subsequent attempts exceeded the observation window, so
+there is no reliable performance median. Wi-Fi was skipped by user choice.
+Repeated large and multi-file YMODEM transfers remain untested.
 
 The `esp32_2432s028` target applies the same BASIC graphics contract to the
 common ESP32-2432S028R yellow-board variant using an ILI9341 TFT. Its USB serial

@@ -37,6 +37,10 @@ public:
     virtual WindowInfo setRotation(std::uint16_t) {
         throw std::runtime_error("display rotation unsupported");
     }
+    // Called after the owning graphics service updates its geometry to the
+    // dimensions returned by setRotation(). Platform overlays can safely
+    // reconfigure at this point.
+    virtual void rotationApplied() {}
 };
 
 } // namespace ql32::graphics

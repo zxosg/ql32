@@ -23,6 +23,7 @@ public:
                            graphics::Rect region,
                            const graphics::FramePresenter::RowProvider& rowProvider) override;
     graphics::WindowInfo setRotation(std::uint16_t degrees) override;
+    void rotationApplied() override;
 
 private:
     CydIli9341Display& display_;

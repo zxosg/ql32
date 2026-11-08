@@ -196,7 +196,7 @@ void testOptionalPagerSuspendsOnlyReplAndContinuesTail() {
             "PAGER ON did not suspend after filling the output window");
     const auto firstPage = ui->takeNextRequest();
     require(firstPage && firstPage->kind == ql32::ui::RequestKind::Input &&
-                firstPage->title.find("Enter=page") != std::string::npos,
+                firstPage->title == "Enter=Page, L=Line, Q=Quit",
             "pager did not request its next-page input asynchronously");
 
     for (int tick = 0; tick < 8 && scheduler.task(worker)->status !=

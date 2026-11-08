@@ -489,6 +489,7 @@ void WindowedService::setRotation(SessionId session, std::uint16_t degrees) {
             manager_.setBounds(id, {0, 0, display.width, display.height});
     }
     rotationDegrees_ = degrees;
+    presenter_->rotationApplied();
     presentIfConfigured();
 }
 

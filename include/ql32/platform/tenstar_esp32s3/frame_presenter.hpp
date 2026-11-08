@@ -21,6 +21,7 @@ public:
                            const std::array<graphics::RgbColor, 256>&,
                            graphics::Rect, const RowProvider&) override;
     graphics::WindowInfo setRotation(std::uint16_t degrees) override;
+    void rotationApplied() override;
 
 private:
     TenstarSt7789Display& display_;

@@ -1,6 +1,9 @@
 #include "ql32/platform/tenstar_esp32s3/frame_presenter.hpp"
+#include "ql32/graphics/windowed_service.hpp"
 
+#include <algorithm>
 #include <cassert>
+#include <memory>
 #include <stdexcept>
 
 using namespace ql32;
@@ -51,4 +54,28 @@ int main() {
         rejectedGeometry = true;
     }
     assert(rejectedGeometry);
+
+    std::weak_ptr<graphics::WindowedService> graphicsRef;
+    St7789FramePresenter overlayPresenter(display, {}, [&] {
+        const auto service = graphicsRef.lock();
+        if (!service) return;
+        const auto width = static_cast<std::uint32_t>(display.width());
+        const auto height = static_cast<std::uint32_t>(display.height());
+        const auto overlayHeight = std::min<std::uint32_t>(40, height);
+        service->invalidateSystemRegion({
+            0, static_cast<std::int32_t>(height - overlayHeight),
+            width, overlayHeight});
+    });
+    auto service = std::make_shared<graphics::WindowedService>(240, 135,
+        std::shared_ptr<graphics::FramePresenter>(&overlayPresenter,
+                                                  [](graphics::FramePresenter*) {}));
+    graphicsRef = service;
+    for (const std::uint16_t degrees : {90, 180, 270, 0, 90, 180}) {
+        service->setRotation(1, degrees);
+        const auto info = service->windowInfo(1, 1);
+        const bool landscape = degrees == 0 || degrees == 180;
+        assert(info.width == (landscape ? 240u : 135u));
+        assert(info.height == (landscape ? 135u : 240u));
+        assert(info.rotationDegrees == degrees);
+    }
 }

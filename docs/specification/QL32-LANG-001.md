@@ -451,12 +451,17 @@ QL/32-specific string utilities, not OPL's width- and precision-based
 QL/32 keeps `AND`, `OR`, `XOR`, and `NOT` as logical operators that return
 numeric `1` or `0`. Bit manipulation uses the explicit functions `BAND(a,b)`,
 `BOR(a,b)`, `BXOR(a,b)`, `BNOT(a)`, `ROL(value,count)`, and
-`ROR(value,count)`. They operate on unsigned 32-bit values represented as
+`ROR(value,count)`. `SRA`, `SRL`, `SLA`, and `SLL` provide right and left
+shifts. They operate on unsigned 32-bit values represented as
 exact binary64 integers, from 0 through 4294967295. A value outside that range,
 a fraction, or a non-finite value raises an invalid-argument error. `BNOT`
 inverts exactly 32 bits. Rotation counts may be any finite integer; they wrap
 modulo 32, including negative counts. Results are unsigned values in the same
-range.
+range. Shift counts must be nonnegative integers. `SRA` fills vacated high
+bits with the original most significant bit; `SRL` fills them with zero.
+`SLA` fills vacated low bits with zero; `SLL` fills them with one. For counts
+of 32 or more, `SRA` returns all sign bits, `SRL` and `SLA` return zero, and
+`SLL` returns `&HFFFFFFFF`. These shift definitions are QL/32-specific.
 
 Hexadecimal integer literals use `&H` or `&h`; binary literals use `&B` or
 `&b`. Both accept at most 32 bits and must contain at least one valid digit.
