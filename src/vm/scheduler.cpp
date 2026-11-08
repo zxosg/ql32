@@ -66,6 +66,12 @@ public:
         return scheduler_.setTaskViewport(id,
             {x, y, width, height, offsetX, offsetY});
     }
+    runtime::WindowMode windowMode() const noexcept override {
+        return scheduler_.windowMode();
+    }
+    bool setWindowMode(runtime::WindowMode mode) override {
+        return scheduler_.setWindowMode(mode);
+    }
 
     std::vector<runtime::ChannelInfo> listChannels(runtime::TaskId id) const override {
         return scheduler_.taskChannels(id);
@@ -134,6 +140,7 @@ struct SessionScheduler::Task {
     bool errorPending = false;
     std::string errorDetail;
     std::string pendingInteractiveTail;
+    std::optional<InteractiveLineEdit> pendingLineEdit;
     TaskId waitingChildId = 0;
     TaskId waitingParentId = 0;
     bool started = false;
@@ -142,6 +149,7 @@ struct SessionScheduler::Task {
     bool interactiveSubmission = false;
     bool hasPendingSource = true;
     bool paused = false;
+    bool manualViewport = false;
     std::uint32_t priority = 4;
     std::uint32_t resumePriority = 4;
     std::int64_t schedulerCredit = 0;
@@ -187,6 +195,8 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
         services_.systemControl, services_.cpuFrequency);
     const TaskId id = task->id;
     tasks_.push_back(std::move(task));
+    if (windowMode_ == runtime::WindowMode::Isolated)
+        (void)reflowIsolatedViewports();
     return id;
 }
 
@@ -204,6 +214,8 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->hasPendingSource = true;
     const TaskId id = task->id;
     tasks_.push_back(std::move(task));
+    if (windowMode_ == runtime::WindowMode::Isolated)
+        (void)reflowIsolatedViewports();
     return id;
 }
 
@@ -249,6 +261,8 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     supervisorId_ = id;
     if (focusedTaskId_ == 0) focusedTaskId_ = id;
     tasks_.push_back(std::move(task));
+    if (windowMode_ == runtime::WindowMode::Isolated)
+        (void)reflowIsolatedViewports();
     return id;
 }
 
@@ -265,6 +279,15 @@ bool SessionScheduler::submit(TaskId id, std::string source) {
         return true;
     }
     return false;
+}
+
+std::optional<InteractiveLineEdit> SessionScheduler::takePendingLineEdit(
+    TaskId id) noexcept {
+    for (auto& current : tasks_) {
+        if (current->id == id)
+            return std::exchange(current->pendingLineEdit, std::nullopt);
+    }
+    return std::nullopt;
 }
 
 bool SessionScheduler::logon(TaskId id) {
@@ -352,6 +375,7 @@ bool SessionScheduler::breakTaskExecution(TaskId id) {
         removeFromSchedule(*current);
         current->releaseSource();
         current->pendingInteractiveTail.clear();
+        current->pendingLineEdit.reset();
         current->hasPendingSource = false;
         current->interactiveSubmission = false;
         current->started = false;
@@ -383,6 +407,7 @@ void SessionScheduler::stopWorkersAndReturnToSupervisor() {
                 current->interpreter->setErrorContext(runtime::ErrorCode::None);
             current->releaseSource();
             current->pendingInteractiveTail.clear();
+            current->pendingLineEdit.reset();
             current->hasPendingSource = false;
             current->interactiveSubmission = false;
             current->started = false;
@@ -537,12 +562,84 @@ bool SessionScheduler::setTaskViewport(TaskId id, graphics::TaskViewport viewpor
         try {
             services_.graphics->setTaskViewport(
                 current->interpreter->graphicsSessionId(), viewport);
+            current->manualViewport = true;
             return true;
         } catch (const std::exception&) {
             return false;
         }
     }
     return false;
+}
+
+bool SessionScheduler::reflowSharedViewports() {
+    if (!services_.graphics) return false;
+    const auto [width, height] = services_.graphics->displaySize();
+    if (width == 0 || height == 0) return false;
+    try {
+        for (auto& current : tasks_) {
+            if (!current->interpreter || current->status == TaskStatus::Completed ||
+                current->status == TaskStatus::Failed ||
+                current->status == TaskStatus::Cancelled) continue;
+            services_.graphics->setTaskViewport(
+                current->interpreter->graphicsSessionId(), {0, 0, width, height});
+        }
+    } catch (const std::exception&) {
+        return false;
+    }
+    return true;
+}
+
+bool SessionScheduler::reflowIsolatedViewports(bool includeManual) {
+    if (!services_.graphics) return false;
+    const auto [screenWidth, screenHeight] = services_.graphics->displaySize();
+    if (screenWidth == 0 || screenHeight == 0) return false;
+    std::vector<Task*> targets;
+    for (auto& current : tasks_) {
+        if (!current->interpreter || current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled ||
+            (!includeManual && current->manualViewport)) continue;
+        targets.push_back(current.get());
+    }
+    if (targets.empty()) return true;
+
+    const auto count = static_cast<std::uint64_t>(targets.size());
+    std::uint64_t columns = 1;
+    std::uint64_t rows = count;
+    while (columns < rows) {
+        ++columns;
+        rows = count / columns + (count % columns != 0);
+    }
+    if (screenHeight > screenWidth) std::swap(columns, rows);
+    if (columns > screenWidth || rows > screenHeight) return false;
+
+    try {
+        for (std::uint64_t index = 0; index < count; ++index) {
+            const auto column = index % columns;
+            const auto row = index / columns;
+            const auto left = column * screenWidth / columns;
+            const auto right = (column + 1) * screenWidth / columns;
+            const auto top = row * screenHeight / rows;
+            const auto bottom = (row + 1) * screenHeight / rows;
+            services_.graphics->setTaskViewport(
+                targets[static_cast<std::size_t>(index)]->interpreter->graphicsSessionId(),
+                {static_cast<std::int32_t>(left), static_cast<std::int32_t>(top),
+                 static_cast<std::uint32_t>(right - left),
+                 static_cast<std::uint32_t>(bottom - top)});
+        }
+    } catch (const std::exception&) {
+        return false;
+    }
+    return true;
+}
+
+bool SessionScheduler::setWindowMode(runtime::WindowMode mode) {
+    const bool applied = mode == runtime::WindowMode::Isolated ?
+        reflowIsolatedViewports(true) : reflowSharedViewports();
+    if (!applied) return false;
+    for (auto& current : tasks_) current->manualViewport = false;
+    windowMode_ = mode;
+    return true;
 }
 
 std::string SessionScheduler::takeError(TaskId id) {
@@ -696,6 +793,7 @@ bool SessionScheduler::tick() {
                 throw std::logic_error(
                     "interactive continuation requested outside the REPL session");
             current.releaseSource();
+            current.pendingLineEdit = current.interpreter->takePendingLineEdit();
             current.source = current.interpreter->takePendingInteractiveTail();
             current.hasPendingSource = !current.source.empty();
             current.interactiveSubmission = current.hasPendingSource;
@@ -832,6 +930,8 @@ bool SessionScheduler::cancel(TaskId id) {
                 break;
             }
         }
+        if (windowMode_ == runtime::WindowMode::Isolated)
+            (void)reflowIsolatedViewports();
         return true;
     }
     return false;

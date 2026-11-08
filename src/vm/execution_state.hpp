@@ -37,6 +37,7 @@ struct RuntimeArray { std::vector<std::size_t> lengths; std::vector<Value> value
 struct SelectState { double value = 0; bool matched = false; };
 struct DialogBuilder {
     std::string title;
+    ui::DialogOptions options;
     std::vector<ui::DialogField> fields;
     std::vector<ui::FieldValue> results;
     std::string acceptLabel = "OK";

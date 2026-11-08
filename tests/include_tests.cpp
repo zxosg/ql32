@@ -74,6 +74,23 @@ void testIncludeInNumberedProgram() {
             "numbered BASIC program did not expand its included library at RUN");
 }
 
+void testDialogFlagsAreAvailableFromQl32Include() {
+    const auto sourceRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+    auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(
+        sourceRoot / "data");
+    ql32::Interpreter interpreter(storage);
+    std::ostringstream output;
+    interpreter.executeResumable(
+        "INCLUDE \"ql32.inc\"\n"
+        "PRINT KDlgButRight;\",\";KDlgNoTitle;\",\";KDlgFillScreen;\",\";"
+        "KDlgNoDrag;\",\";KDlgDensePack;\",\";KDlgHideButtons;\",\";"
+        "KDlgPosTopLeft;\",\";KDlgPosTopRight;\",\";"
+        "KDlgPosBottomLeft;\",\";KDlgPosBottomRight\n",
+        output);
+    require(output.str() == "1,2,4,8,16,32,64,128,256,512\n",
+            "ql32.inc dialog option constants were missing or had incorrect values");
+}
+
 void testIncludeSafetyAndPlacement() {
     TempTree files;
     files.write("cycle.bas", "INCLUDE \"cycle.bas\"\n");
@@ -117,6 +134,7 @@ int main() {
     try {
         testNestedIncludesAndLibraryFunctions();
         testIncludeInNumberedProgram();
+        testDialogFlagsAreAvailableFromQl32Include();
         testIncludeSafetyAndPlacement();
     } catch (const std::exception& error) {
         std::cerr << "include test failed: " << error.what() << '\n';

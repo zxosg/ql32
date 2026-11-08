@@ -102,6 +102,114 @@ void testCommitValidationRotationAndMenu() {
             "menu did not skip disabled item or preserve ID");
 }
 
+void testDialogLayoutOptionsAndHiddenButtonHotkeys() {
+    auto service = std::make_shared<ql32::ui::QueuedService>();
+    auto capture = std::make_shared<Capture>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 240, capture);
+    ql32::ui::GraphicPresenter ui(service, graphics);
+
+    ql32::ui::DialogOptions rightButtons;
+    rightButtons.buttonsRight = true;
+    const auto right = service->beginDialog(1,
+        "Options for a detailed configuration dialog", {
+        {ql32::ui::FieldKind::Edit, "Name", std::string("Ada")}},
+        "Apply", "Cancel", rightButtons);
+    require(ui.beginNext(), "right-button dialog did not open");
+    require(ui.bounds().width > 200,
+            "right-side buttons did not reserve a separate button column");
+    ui.handleKey(key(ql32::input::Key::Escape));
+    require(service->poll(right)->kind == ql32::ui::ResultKind::Cancelled,
+            "right-button dialog did not cancel by keyboard");
+
+    ql32::ui::DialogOptions hidden;
+    hidden.noTitle = true;
+    hidden.fullScreen = true;
+    hidden.noDrag = true;
+    hidden.densePack = true;
+    hidden.hideButtons = true;
+    const auto accept = service->beginDialog(2, "This title is hidden", {
+        {ql32::ui::FieldKind::Edit, "Name", std::string("Grace")}},
+        "Save", "Discard", hidden);
+    require(ui.beginNext(), "full-screen hidden-button dialog did not open");
+    require(ui.bounds().x == 0 && ui.bounds().y == 0 &&
+            ui.bounds().width == 320 && ui.bounds().height == 240,
+            "full-screen option did not use the complete display");
+    ui.handleKey(key(ql32::input::Key::Enter));
+    require(service->poll(accept)->kind == ql32::ui::ResultKind::Submitted,
+            "hidden-button dialog could not be accepted with Enter");
+
+    const auto cancel = service->beginDialog(3, "No buttons", {},
+        "Save", "Cancel", hidden);
+    require(ui.beginNext(), "second hidden-button dialog did not open");
+    ui.handleKey(key(ql32::input::Key::Escape));
+    require(service->poll(cancel)->kind == ql32::ui::ResultKind::Cancelled,
+            "hidden-button dialog could not be cancelled with Escape");
+}
+
+void testDialogCornerPositionFlags() {
+    auto service = std::make_shared<ql32::ui::QueuedService>();
+    auto capture = std::make_shared<Capture>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 240, capture);
+    ql32::ui::GraphicPresenter ui(service, graphics);
+
+    const auto centered = service->beginDialog(1, "Centered", {});
+    require(ui.beginNext(), "centered dialog did not open");
+    auto bounds = ui.bounds();
+    require(bounds.x == (320 - static_cast<int>(bounds.width)) / 2 &&
+            bounds.y == (240 - static_cast<int>(bounds.height)) / 2,
+            "dialog default position was not centered");
+    ui.handleKey(key(ql32::input::Key::Escape));
+    service->poll(centered);
+
+    ql32::ui::DialogOptions topLeft;
+    topLeft.positionX = -1;
+    topLeft.positionY = -1;
+    const auto first = service->beginDialog(2, "Top left", {}, "OK", "Cancel", topLeft);
+    require(ui.beginNext(), "top-left dialog did not open");
+    bounds = ui.bounds();
+    require(bounds.x == 0 && bounds.y == 0,
+            "top-left dialog was not positioned in the display corner");
+    ui.handleKey(key(ql32::input::Key::Escape));
+    service->poll(first);
+
+    ql32::ui::DialogOptions topRight;
+    topRight.positionX = 1;
+    topRight.positionY = -1;
+    const auto second = service->beginDialog(3, "Top right", {}, "OK", "Cancel",
+                                              topRight);
+    require(ui.beginNext(), "top-right dialog did not open");
+    bounds = ui.bounds();
+    require(bounds.x + static_cast<int>(bounds.width) == 320 && bounds.y == 0,
+            "top-right dialog was not positioned in the display corner");
+    ui.handleKey(key(ql32::input::Key::Escape));
+    service->poll(second);
+
+    ql32::ui::DialogOptions bottomLeft;
+    bottomLeft.positionX = -1;
+    bottomLeft.positionY = 1;
+    const auto third = service->beginDialog(4, "Bottom left", {}, "OK", "Cancel",
+                                             bottomLeft);
+    require(ui.beginNext(), "bottom-left dialog did not open");
+    bounds = ui.bounds();
+    require(bounds.x == 0 && bounds.y + static_cast<int>(bounds.height) == 240,
+            "bottom-left dialog was not positioned in the display corner");
+    ui.handleKey(key(ql32::input::Key::Escape));
+    service->poll(third);
+
+    ql32::ui::DialogOptions bottomRight;
+    bottomRight.positionX = 1;
+    bottomRight.positionY = 1;
+    const auto last = service->beginDialog(5, "Bottom right", {}, "OK", "Cancel",
+                                           bottomRight);
+    require(ui.beginNext(), "bottom-right dialog did not open");
+    bounds = ui.bounds();
+    require(bounds.x + static_cast<int>(bounds.width) == 320 &&
+            bounds.y + static_cast<int>(bounds.height) == 240,
+            "bottom-right dialog was not positioned in the display corner");
+    ui.handleKey(key(ql32::input::Key::Escape));
+    service->poll(last);
+}
+
 void testCancellationAndLayers() {
     auto service = std::make_shared<ql32::ui::QueuedService>();
     auto capture = std::make_shared<Capture>();
@@ -201,13 +309,38 @@ void testLineInputPromptIsVisibleAndKeyboardAccessible() {
             std::get<std::string>(result->fields.at(0)) == "L" && !ui.active(),
             "line input did not accept and submit keyboard text");
 }
+
+void testInfoToastColorsAndBlinkOptions() {
+    auto service = std::make_shared<ql32::ui::QueuedService>();
+    auto capture = std::make_shared<Capture>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, capture);
+    ql32::ui::GraphicPresenter ui(service, graphics);
+    service->showInfo(1, "colored", 3000, -1, 1, 2, 6, 0);
+    ui.refresh();
+    require(capture->count > 0, "colored info toast was not presented");
+    bool sawInk = false;
+    bool sawPaper = false;
+    for (const auto color : capture->latest.pixels) {
+        sawInk = sawInk || color == 2;
+        sawPaper = sawPaper || color == 6;
+    }
+    require(sawInk && sawPaper, "info toast ignored its ink or paper color");
+
+    const auto toast = service->currentInfo();
+    require(toast && toast->ink == 2 && toast->paper == 6 &&
+            toast->displayMode == 0,
+            "info service did not retain toast colors and display mode");
+}
 } // namespace
 
 int main() {
     testFitsEveryDisplay();
     testCommitValidationRotationAndMenu();
+    testDialogLayoutOptionsAndHiddenButtonHotkeys();
+    testDialogCornerPositionFlags();
     testCancellationAndLayers();
     testConfirmSerialAndLongMessage();
     testFrameVisibleOnLightAndDarkBackgrounds();
     testLineInputPromptIsVisibleAndKeyboardAccessible();
+    testInfoToastColorsAndBlinkOptions();
 }

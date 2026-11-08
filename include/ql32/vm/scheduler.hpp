@@ -78,6 +78,7 @@ public:
     // runs as source before the session begins accepting REPL input.
     TaskId launchInteractive(std::ostream& output, std::string initialProgram = {});
     bool submit(TaskId id, std::string source);
+    std::optional<InteractiveLineEdit> takePendingLineEdit(TaskId id) noexcept;
     bool logon(TaskId id);
     TaskId logoff();
     TaskId focusedTask() const noexcept;
@@ -109,6 +110,8 @@ public:
     bool debugRemoveWatch(TaskId id, const std::string& expression);
     std::vector<runtime::ChannelInfo> taskChannels(TaskId id) const;
     bool setTaskViewport(TaskId id, graphics::TaskViewport viewport);
+    runtime::WindowMode windowMode() const noexcept { return windowMode_; }
+    bool setWindowMode(runtime::WindowMode mode);
     std::string takeError(TaskId id);
     bool tick();
     bool cancel(TaskId id);
@@ -129,10 +132,13 @@ public:
 private:
     struct Task;
     void removeFromSchedule(Task& task) noexcept;
+    bool reflowIsolatedViewports(bool includeManual = false);
+    bool reflowSharedViewports();
     void resetScheduleCredits() noexcept;
     Services services_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::size_t instructionBudget_;
+    runtime::WindowMode windowMode_ = runtime::WindowMode::Shared;
     bool executionPaused_ = false;
     TaskId nextId_ = 1;
     TaskId supervisorId_ = 0;

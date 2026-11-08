@@ -122,6 +122,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Not:
         case Op::Print:
         case Op::PrintChannel:
+        case Op::PrintStyle:
         case Op::PrintSeparator:
         case Op::PrintEnd:
         case Op::PrintBegin:
@@ -214,6 +215,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             produced = 1;
             break;
         case Op::PrintChannel:
+        case Op::PrintStyle:
             consumed = 1;
             break;
         case Op::ChannelDefault:
@@ -401,7 +403,8 @@ const char* opcodeName(Op op) {
     case Op::GreaterEqual: return "GREATER_EQUAL"; case Op::And: return "AND";
     case Op::Or: return "OR"; case Op::Xor: return "XOR"; case Op::Negate: return "NEGATE";
     case Op::Not: return "NOT"; case Op::PrintBegin: return "PRINT_BEGIN";
-    case Op::PrintChannel: return "PRINT_CHANNEL"; case Op::Print: return "PRINT";
+    case Op::PrintChannel: return "PRINT_CHANNEL"; case Op::PrintStyle: return "PRINT_STYLE";
+    case Op::Print: return "PRINT";
     case Op::PrintSeparator: return "PRINT_SEPARATOR"; case Op::PrintEnd: return "PRINT_END";
     case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
     case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
@@ -482,7 +485,10 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
             throw runtime::Error(runtime::ErrorCode::ServiceUnavailable,
                                  "platform could not set requested CPU frequency");
         const auto status = runExecution(output, stop, instructionBudget);
-        if (status == ExecutionStatus::Completed) execution_.reset();
+        if (status == ExecutionStatus::Completed) {
+            if (ui_) ui_->clearBusy(session_id_);
+            execution_.reset();
+        }
         return status;
     } catch (const std::bad_alloc&) {
         if (memory_) (void)memory_->releaseEmergencyReserve();
@@ -528,7 +534,10 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
         throw std::invalid_argument("instruction budget must be positive");
     try {
         const auto status = runExecution(output, stop, instructionBudget);
-        if (status == ExecutionStatus::Completed) execution_.reset();
+        if (status == ExecutionStatus::Completed) {
+            if (ui_) ui_->clearBusy(session_id_);
+            execution_.reset();
+        }
         return status;
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
@@ -1440,6 +1449,121 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     }
                     break;
                 }
+                if (instruction.name == "BUSY") {
+                    if (!ui_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                           "UI service unavailable");
+                    if (arguments.empty()) {
+                        ui_->clearBusy(session_id_);
+                        break;
+                    }
+                    std::uint8_t ink = 0, paper = 7, displayMode = 0;
+                    for (std::size_t i = 0; i < instruction.optionCount; ++i) {
+                        const auto* option = std::get_if<double>(&arguments[i]);
+                        if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
+                            runtimeError(instruction, "BUSY style values must be integers");
+                        if (instruction.parameters[i] == "INK" ||
+                            instruction.parameters[i] == "PAPER") {
+                            if (*option < 0 || *option > 7)
+                                runtimeError(instruction, "BUSY ink and paper must be in 0..7");
+                            if (instruction.parameters[i] == "INK")
+                                ink = static_cast<std::uint8_t>(*option);
+                            else paper = static_cast<std::uint8_t>(*option);
+                        } else {
+                            if (*option < 0 || *option > 2)
+                                runtimeError(instruction, "BUSY FLASH mode must be 0, 1, or 2");
+                            displayMode = static_cast<std::uint8_t>(*option);
+                        }
+                    }
+                    const auto textIndex = instruction.optionCount;
+                    const auto* text = std::get_if<std::string>(&arguments[textIndex]);
+                    if (!text) runtimeError(instruction, "BUSY text must be a string");
+                    int positionX = -1;
+                    int positionY = 1;
+                    if (arguments.size() > textIndex + 1) {
+                        const auto* position = std::get_if<double>(&arguments[textIndex + 1]);
+                        if (!position || !std::isfinite(*position) ||
+                            std::trunc(*position) != *position)
+                            runtimeError(instruction,
+                                "BUSY position must be a DINIT corner flag");
+                        if (*position == 64.0) {
+                            positionX = -1; positionY = -1;
+                        } else if (*position == 128.0) {
+                            positionX = 1; positionY = -1;
+                        } else if (*position == 256.0) {
+                            positionX = -1; positionY = 1;
+                        } else if (*position == 512.0) {
+                            positionX = 1; positionY = 1;
+                        } else {
+                            runtimeError(instruction,
+                                "BUSY position must be a DINIT corner flag");
+                        }
+                    }
+                    ui_->showBusy(session_id_, *text, positionX, positionY,
+                                  ink, paper, displayMode);
+                    break;
+                }
+                if (instruction.name == "IPRINT") {
+                    if (!ui_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                           "UI service unavailable");
+                    std::uint8_t ink = 0, paper = 7, displayMode = 0;
+                    for (std::size_t i = 0; i < instruction.optionCount; ++i) {
+                        const auto* option = std::get_if<double>(&arguments[i]);
+                        if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
+                            runtimeError(instruction, "IPRINT style values must be integers");
+                        if (instruction.parameters[i] == "INK" ||
+                            instruction.parameters[i] == "PAPER") {
+                            if (*option < 0 || *option > 7)
+                                runtimeError(instruction, "IPRINT ink and paper must be in 0..7");
+                            if (instruction.parameters[i] == "INK")
+                                ink = static_cast<std::uint8_t>(*option);
+                            else paper = static_cast<std::uint8_t>(*option);
+                        } else {
+                            if (*option < 0 || *option > 2)
+                                runtimeError(instruction, "IPRINT FLASH mode must be 0, 1, or 2");
+                            displayMode = static_cast<std::uint8_t>(*option);
+                        }
+                    }
+                    const auto textIndex = instruction.optionCount;
+                    const auto* text = std::get_if<std::string>(&arguments[textIndex]);
+                    if (!text) runtimeError(instruction, "IPRINT text must be a string");
+                    double durationSeconds = 3.0;
+                    if (arguments.size() > textIndex + 1) {
+                        const auto* duration = std::get_if<double>(&arguments[textIndex + 1]);
+                        if (!duration || !std::isfinite(*duration) || *duration <= 0 ||
+                            *duration > static_cast<double>(
+                                std::numeric_limits<std::uint32_t>::max()) / 1000.0)
+                            runtimeError(instruction,
+                                "IPRINT duration must be positive seconds within range");
+                        durationSeconds = *duration;
+                    }
+                    int positionX = -1;
+                    int positionY = 1;
+                    if (arguments.size() > textIndex + 2) {
+                        const auto* position = std::get_if<double>(&arguments[textIndex + 2]);
+                        if (!position || !std::isfinite(*position) ||
+                            std::trunc(*position) != *position)
+                            runtimeError(instruction,
+                                "IPRINT position must be a DINIT corner flag");
+                        if (*position == 64.0) {
+                            positionX = -1; positionY = -1;
+                        } else if (*position == 128.0) {
+                            positionX = 1; positionY = -1;
+                        } else if (*position == 256.0) {
+                            positionX = -1; positionY = 1;
+                        } else if (*position == 512.0) {
+                            positionX = 1; positionY = 1;
+                        } else {
+                            runtimeError(instruction,
+                                "IPRINT position must be a DINIT corner flag");
+                        }
+                    }
+                    const auto durationMs = static_cast<std::uint32_t>(std::clamp(
+                        std::round(durationSeconds * 1000.0), 1.0,
+                        static_cast<double>(std::numeric_limits<std::uint32_t>::max())));
+                    ui_->showInfo(session_id_, *text, durationMs, positionX, positionY,
+                                  ink, paper, displayMode);
+                    break;
+                }
                 if (instruction.name == "ALERT" || instruction.name == "CONFIRM") {
                     if (!ui_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                            "UI service unavailable");
@@ -1491,9 +1615,42 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         if (uiSession_->nextUiBuilderHandle > 9007199254740991ULL)
                             runtimeError(instruction, "UI builder handle limit exceeded");
                         const std::uint64_t handle = uiSession_->nextUiBuilderHandle++;
-                        if (instruction.name == "DINIT")
-                            uiSession_->dialogs.emplace(handle, DialogBuilder{stringArgument(0)});
-                        else
+                        if (instruction.name == "DINIT") {
+                            DialogBuilder dialog;
+                            if (!arguments.empty()) dialog.title = stringArgument(0);
+                            if (arguments.size() > 1) {
+                                const double rawOptions = numericArgument(1);
+                                constexpr std::uint32_t knownOptions = 0x3ff;
+                                if (!std::isfinite(rawOptions) || std::trunc(rawOptions) != rawOptions ||
+                                    rawOptions < 0 || rawOptions > knownOptions)
+                                    runtimeError(instruction, "invalid DINIT options mask");
+                                const auto options = static_cast<std::uint32_t>(rawOptions);
+                                const auto positionFlags = options & 0x3c0u;
+                                if (positionFlags && (positionFlags & (positionFlags - 1u)) != 0)
+                                    runtimeError(instruction,
+                                        "DINIT accepts only one dialog corner position");
+                                dialog.options.buttonsRight = (options & 1u) != 0;
+                                dialog.options.noTitle = (options & 2u) != 0;
+                                dialog.options.fullScreen = (options & 4u) != 0;
+                                dialog.options.noDrag = (options & 8u) != 0;
+                                dialog.options.densePack = (options & 16u) != 0;
+                                dialog.options.hideButtons = (options & 32u) != 0;
+                                if (options & 64u) {
+                                    dialog.options.positionX = -1;
+                                    dialog.options.positionY = -1;
+                                } else if (options & 128u) {
+                                    dialog.options.positionX = 1;
+                                    dialog.options.positionY = -1;
+                                } else if (options & 256u) {
+                                    dialog.options.positionX = -1;
+                                    dialog.options.positionY = 1;
+                                } else if (options & 512u) {
+                                    dialog.options.positionX = 1;
+                                    dialog.options.positionY = 1;
+                                }
+                            }
+                            uiSession_->dialogs.emplace(handle, std::move(dialog));
+                        } else
                             uiSession_->menus.emplace(handle, MenuBuilder{stringArgument(0)});
                         pushValue(static_cast<double>(handle));
                     } else if (instruction.name == "DTEXT" || instruction.name == "DEDIT" ||
@@ -1582,7 +1739,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             state.pendingUiBuilderHandle = handle;
                             state.pendingUiRequest = ui_->beginDialog(
                                 session_id_, dialog.title, dialog.fields,
-                                dialog.acceptLabel, dialog.cancelLabel);
+                                dialog.acceptLabel, dialog.cancelLabel, dialog.options);
                             return ExecutionStatus::Suspended;
                         }
                     } else if (instruction.name == "MCARD") {
@@ -2406,6 +2563,28 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             const bool result = instruction.op == Op::And ? (a && b) :
                                 instruction.op == Op::Or ? (a || b) : (a != b);
             stack.emplace_back(result ? 1.0 : 0.0);
+            break;
+        }
+        case Op::PrintStyle: {
+            const double value = numeric(pop(), instruction);
+            if (!std::isfinite(value) || std::trunc(value) != value || value < 0 ||
+                value > std::numeric_limits<graphics::ColorIndex>::max())
+                runtimeError(instruction, "PRINT color must be an integer palette index");
+            if (state.printChannel == 1) {
+                if (!graphics_)
+                    throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                "graphics service unavailable");
+                const auto channel = resolveChannel(1);
+                const auto paletteSize = graphics_->windowInfo(session_id_, channel).paletteSize;
+                if (static_cast<std::uint32_t>(value) >= paletteSize)
+                    runtimeError(instruction, "PRINT color index exceeds the current window palette");
+                if (instruction.name == "INK")
+                    graphics_->setInk(session_id_, channel,
+                        static_cast<graphics::ColorIndex>(value));
+                else
+                    graphics_->setPaper(session_id_, channel,
+                        static_cast<graphics::ColorIndex>(value));
+            }
             break;
         }
         case Op::Print:

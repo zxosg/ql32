@@ -18,7 +18,7 @@ enum class NumericPrecision { Double, Single };
 enum class Op {
     Push, Load, Store, Add, Subtract, Multiply, Divide, IntegerDivide, Modulo,
     Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
-    And, Or, Xor, Negate, Not, PrintBegin, PrintChannel, Print, PrintSeparator, PrintEnd,
+    And, Or, Xor, Negate, Not, PrintBegin, PrintChannel, PrintStyle, Print, PrintSeparator, PrintEnd,
     ChannelDefault, ChannelRoute, ChannelSeek, ChannelRead, ChannelWrite, Input, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
     DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd,
@@ -154,6 +154,7 @@ struct Instruction {
     bool explicitNext = false;
     bool clearTarget = false;
     std::size_t argCount = 0;
+    std::size_t optionCount = 0;
     bool expectsValue = false;
     bool builtin = false;
     bool channelArgument = false;

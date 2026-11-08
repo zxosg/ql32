@@ -13,6 +13,10 @@ CONST KEspCpuFreq240 = 240
 CONST KGupdateOff = 0
 CONST KGupdateOn = 1
 CONST KGupdateAuto = 1
+' IPRINT and BUSY display modes
+CONST KInfoFlashOff = 0
+CONST KInfoFlashText = 1
+CONST KInfoFlashPaperInk = 2
 ' OPEN device kinds
 CONST KDeviceFile = 1
 CONST KDeviceSerial = 2
@@ -39,6 +43,17 @@ CONST KPullDown = 2
 CONST KAdcResolution12 = 12
 CONST KTimerOneShot = 0
 CONST KTimerPeriodic = 1
+' DINIT dialog layout flags; combine with BOR(flag1, flag2)
+CONST KDlgButRight = 1
+CONST KDlgNoTitle = 2
+CONST KDlgFillScreen = 4
+CONST KDlgNoDrag = 8
+CONST KDlgDensePack = 16
+CONST KDlgHideButtons = 32
+CONST KDlgPosTopLeft = 64
+CONST KDlgPosTopRight = 128
+CONST KDlgPosBottomLeft = 256
+CONST KDlgPosBottomRight = 512
 ' Serial configuration
 CONST KSerial8N1 = 0
 CONST KFlowNone = 0

@@ -27,6 +27,16 @@ namespace ql32 {
 namespace {
 std::atomic<runtime::SessionId> nextInterpreterSessionId{1};
 
+ui::DialogOptions pagerInputOptions() {
+    ui::DialogOptions options;
+    options.noTitle = true;
+    options.hideButtons = true;
+    options.keyInput = true;
+    options.positionX = 1;
+    options.positionY = 1;
+    return options;
+}
+
 using detail::ArrayArgumentCandidate;
 using detail::ForItemSpec;
 using detail::Instruction;
@@ -87,9 +97,9 @@ constexpr Keyword keywords[] = {
 };
 
 constexpr std::string_view builtinCommands[] = {
-    "WRITE", "CLOSE", "INPUT", "ALERT", "DTEXT", "DEDIT", "DINT", "DFLOAT",
+    "WRITE", "CLOSE", "INPUT", "ALERT", "IPRINT", "BUSY", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
-    "INK", "PAPER", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
+    "INK", "PAPER", "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
     "DEALLOC", "XFER", "PAUSE"
 };
@@ -105,8 +115,8 @@ constexpr std::string_view builtinFunctions[] = {
 };
 
 constexpr std::string_view shellHelpCommands[] = {
-    "HELP", "RUN", "LIST", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
-    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "TASKRESULT", "LOGON",
+    "HELP", "RUN", "LIST", "EDIT", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
+    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "WHERE", "LOCALS", "GLOBALS",
     "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
@@ -209,6 +219,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "TASKVIEW") return {5, false};
     if (instruction.name == "TASK") return {1, instruction.expectsValue};
     if (instruction.name == "TASKRESULT") return {2, true};
+    if (instruction.name == "IPRINT") return {1, false};
+    if (instruction.name == "BUSY") return {1, false};
     if (instruction.name == "ERR") return {0, true};
     if (instruction.name == "ERR$") return {1, true};
     if (instruction.name == "ERRX$") return {0, true};
@@ -243,7 +255,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "READ$" || instruction.name == "EOF") return {1, true};
     if (instruction.name == "WRITE") return {2, false};
     if (instruction.name == "CLOSE") return {1, false};
-    if (instruction.name == "DINIT" || instruction.name == "MINIT") return {1, true};
+    if (instruction.name == "DINIT") return {0, true};
+    if (instruction.name == "MINIT") return {1, true};
     if (instruction.name == "DTEXT") return {2, false};
     if (instruction.name == "DEDIT" || instruction.name == "DCHECK") return {3, false};
     if (instruction.name == "DINT" || instruction.name == "DFLOAT") return {5, false};
@@ -733,7 +746,8 @@ private:
                 if (instruction.channelArgument && instruction.argCount == 0)
                     error(instruction, "channel selector is missing");
                 const std::size_t passedArguments = instruction.argCount -
-                    static_cast<std::size_t>(instruction.channelArgument);
+                    static_cast<std::size_t>(instruction.channelArgument) -
+                    instruction.optionCount;
                 if (instruction.name == "FREE") {
                     if (passedArguments > 1)
                         error(instruction, "FREE accepts zero or one selector (0, 1, or 2)");
@@ -767,6 +781,15 @@ private:
                 } else if (instruction.name == "TASKVIEW") {
                     if (passedArguments != 5 && passedArguments != 7)
                         error(instruction, "TASKVIEW expects task ID, origin X/Y, canvas width/height, and optional offset X/Y");
+                } else if (instruction.name == "DINIT") {
+                    if (passedArguments > 2)
+                        error(instruction, "DINIT expects an optional title and options mask");
+                } else if (instruction.name == "IPRINT") {
+                    if (passedArguments < 1 || passedArguments > 3)
+                        error(instruction, "IPRINT expects text, optional duration, and optional position");
+                } else if (instruction.name == "BUSY") {
+                    if (passedArguments > 2)
+                        error(instruction, "BUSY expects text and an optional position, or OFF");
                 } else if (instruction.name == "MID$") {
                     if (passedArguments < 2 || passedArguments > 3)
                         error(instruction, "MID$ expects a string, start, and optional length");
@@ -785,7 +808,8 @@ private:
                 } else if (instruction.name != "IN" && instruction.name != "IOREAD" &&
                            instruction.name != "IOWRITE" && instruction.name != "POKE" &&
                            instruction.name != "OUT" && instruction.name != "XFER" &&
-                           instruction.name != "TASKVIEW" &&
+                           instruction.name != "TASKVIEW" && instruction.name != "DINIT" &&
+                           instruction.name != "IPRINT" && instruction.name != "BUSY" &&
                            passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
@@ -1655,6 +1679,51 @@ private:
                 emitCall(name, hasMode ? 1 : 0, false);
                 return;
             }
+            if (name.text == "IPRINT") {
+                std::vector<std::string> options;
+                while (check(Kind::BuiltinCommand) &&
+                       (peek().text == "INK" || peek().text == "PAPER" ||
+                        peek().text == "FLASH")) {
+                    const Token option = advance();
+                    expression();
+                    options.push_back(option.text);
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' after IPRINT style option");
+                }
+                const std::size_t arguments = commandArguments();
+                if (arguments < 1 || arguments > 3)
+                    error(name, "IPRINT expects text, optional duration, and optional position");
+                emitCall(name, options.size() + arguments, false);
+                code_.back().optionCount = options.size();
+                code_.back().parameters = std::move(options);
+                return;
+            }
+            if (name.text == "BUSY") {
+                if (check(Kind::Identifier) && peek().text == "OFF") {
+                    advance();
+                    if (!commandArgumentTerminator())
+                        error(peek(), "expected end of line after BUSY OFF");
+                    emitCall(name, 0, false);
+                    return;
+                }
+                std::vector<std::string> options;
+                while (check(Kind::BuiltinCommand) &&
+                       (peek().text == "INK" || peek().text == "PAPER" ||
+                        peek().text == "FLASH")) {
+                    const Token option = advance();
+                    expression();
+                    options.push_back(option.text);
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' after BUSY style option");
+                }
+                const std::size_t arguments = commandArguments();
+                if (arguments < 1 || arguments > 2)
+                    error(name, "BUSY expects text and an optional position, or OFF");
+                emitCall(name, options.size() + arguments, false);
+                code_.back().optionCount = options.size();
+                code_.back().parameters = std::move(options);
+                return;
+            }
             const bool supportsChannelSelector =
                 name.text == "INK" || name.text == "PAPER" || name.text == "PLOT" ||
                 name.text == "LINE" ||
@@ -1708,6 +1777,14 @@ private:
                 expression();
                 emit(Op::PrintChannel, keyword);
                 if (!match(Kind::Comma)) match(Kind::Semicolon);
+            }
+            while (check(Kind::BuiltinCommand) &&
+                   (peek().text == "INK" || peek().text == "PAPER")) {
+                const Token style = advance();
+                expression();
+                emit(Op::PrintStyle, style, 0.0, style.text);
+                if (!match(Kind::Comma))
+                    error(peek(), "expected ',' after PRINT color option");
             }
             if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End)) {
                 emit(Op::PrintEnd, keyword);
@@ -2175,6 +2252,7 @@ void Interpreter::abortExecution() noexcept {
     execution_.reset();
     pendingRunSource_.clear();
     pendingInteractiveTail_.clear();
+    pendingLineEdit_.reset();
     clearPager();
     requestedPauseDurationMs_ = 0;
 }
@@ -2185,6 +2263,10 @@ std::string Interpreter::takePendingRunSource() noexcept {
 
 std::string Interpreter::takePendingInteractiveTail() noexcept {
     return std::exchange(pendingInteractiveTail_, std::string{});
+}
+
+std::optional<InteractiveLineEdit> Interpreter::takePendingLineEdit() noexcept {
+    return std::exchange(pendingLineEdit_, std::nullopt);
 }
 
 bool Interpreter::hasPendingInteractivePager() const noexcept {
@@ -2254,7 +2336,7 @@ ExecutionStatus Interpreter::resumeInteractivePager(std::ostream& output) {
         writePagerPage(output, action == "L" || action == "LINE" ? 1 : pendingPagerPageRows_);
         if (pendingPagerOffset_ < pendingPagerText_.size()) {
             pendingPagerRequest_ = ui_->beginInput(session_id_,
-                "--More-- Enter=page, L=line, Q=quit: ");
+                "Enter=Page, L=Line, Q=Quit", pagerInputOptions());
             return ExecutionStatus::Suspended;
         }
     }
@@ -2615,7 +2697,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         pendingPagerChannel_ = channel;
         writePagerPage(output, pageRows);
         pendingPagerRequest_ = ui_->beginInput(session_id_,
-            "--More-- Enter=page, L=line, Q=quit: ");
+            "Enter=Page, L=Line, Q=Quit", pagerInputOptions());
         return true;
     };
     bool commandMode = false;
@@ -2623,7 +2705,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
     for (std::string line; std::getline(probe, line);) {
         const std::size_t numberEnd = lineNumberEnd(line);
         const std::string word = command(line);
-        if (numberEnd != 0 || word == "HELP" || word == "PAGER" ||
+        if (numberEnd != 0 || word == "HELP" || word == "EDIT" ||
+            word.rfind("EDIT ", 0) == 0 || word == "PAGER" ||
             word.rfind("PAGER ", 0) == 0 || word == "RUN" || word == "LIST" ||
             word.rfind("LIST ", 0) == 0 || word.rfind("LIST#", 0) == 0 ||
             word == "NEW" || word == "REBOOT" ||
@@ -2635,6 +2718,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "FORMAT" || word.rfind("FORMAT ", 0) == 0 ||
             word == "CD" || word.rfind("CD ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
+            word == "WINDOWMODE" || word.rfind("WINDOWMODE ", 0) == 0 ||
             word == "DEBUGBAR" || word.rfind("DEBUGBAR ", 0) == 0 ||
             word == "DEBUG" || word.rfind("DEBUG ", 0) == 0 ||
             word == "BREAK" || word.rfind("BREAK ", 0) == 0 ||
@@ -2689,7 +2773,26 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         const std::string word = command(line);
         if (word.empty()) continue;
         const std::string normalizedLine = trim(line);
-        if (word == "HELP") {
+        if (word == "EDIT" || word.rfind("EDIT ", 0) == 0) {
+            const std::string argument = trim(normalizedLine.substr(4));
+            int lineNumber = 0;
+            const auto parsed = std::from_chars(argument.data(),
+                argument.data() + argument.size(), lineNumber);
+            if (argument.empty() || parsed.ec != std::errc{} ||
+                parsed.ptr != argument.data() + argument.size() ||
+                lineNumber < 1 || lineNumber > 32767)
+                throw std::runtime_error("EDIT requires a line number in 1..32767");
+            const auto line = program_.find(lineNumber);
+            if (line == program_.end())
+                throw std::runtime_error("EDIT line not found: " +
+                                         std::to_string(lineNumber));
+            pendingLineEdit_ = InteractiveLineEdit{
+                std::to_string(lineNumber) +
+                    (line->second.empty() ? std::string{} : " " + line->second),
+                lineNumber};
+            preserveInteractiveTail();
+            return ExecutionStatus::InteractivePending;
+        } else if (word == "HELP") {
             if (writeGeneratedListing(default_output_channel_, commandHelpListing())) {
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;
@@ -2881,6 +2984,31 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 throw std::runtime_error("usage: DEBUGBAR ON|OFF");
             graphics_->setDebugOverlayEnabled(argument == "ON");
             output << "Debug bar " << (argument == "ON" ? "ON" : "OFF") << '\n';
+        } else if (word == "WINDOWMODE" || word.rfind("WINDOWMODE ", 0) == 0) {
+            if (!taskControl_ || !graphics_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "window mode service unavailable");
+            const auto tasks = taskControl_->listTasks();
+            const auto self = std::find_if(tasks.begin(), tasks.end(), [this](const auto& task) {
+                return task.id == task_id_;
+            });
+            if (self == tasks.end() || !self->supervisor)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "WINDOWMODE is supervisor-only");
+            const std::string argument = command(trim(normalizedLine.substr(10)));
+            if (argument.empty()) {
+                writeChannelText(0, std::string("Window mode: ") +
+                    (taskControl_->windowMode() == runtime::WindowMode::Isolated ?
+                        "ISOLATED\n" : "SHARED\n"));
+                continue;
+            }
+            runtime::WindowMode mode;
+            if (argument == "ISOLATED") mode = runtime::WindowMode::Isolated;
+            else if (argument == "SHARED") mode = runtime::WindowMode::Shared;
+            else throw std::runtime_error("usage: WINDOWMODE [ISOLATED|SHARED]");
+            if (!taskControl_->setWindowMode(mode))
+                throw std::runtime_error("unable to apply window mode");
+            writeChannelText(0, std::string("Window mode set to ") + argument + "\n");
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(5));
             const std::uint64_t outputChannel = argument.empty() ?
@@ -3278,15 +3406,26 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
                           std::ostream& diagnostics, bool showPrompt,
                           std::function<bool()> dispatchUiRequest) {
     std::string line;
+    std::optional<InteractiveLineEdit> pendingEdit;
     while (true) {
         if (showPrompt) {
             output << "ql32> " << std::flush;
         }
         if (!std::getline(input, line)) break;
+        if (pendingEdit) {
+            if (line.find_first_not_of(" \t\r") == std::string::npos)
+                line = std::to_string(pendingEdit->lineNumber);
+            pendingEdit.reset();
+        }
         try {
             ExecutionStatus status = executeInteractiveResumable(line + "\n", output);
             while (status != ExecutionStatus::Completed) {
                 if (status == ExecutionStatus::InteractivePending) {
+                    if (auto edit = takePendingLineEdit()) {
+                        pendingEdit = std::move(edit);
+                        output << "Editing line: " << pendingEdit->text
+                               << " (enter a replacement line; blank deletes)\n";
+                    }
                     const std::string tail = takePendingInteractiveTail();
                     if (tail.empty()) {
                         status = ExecutionStatus::Completed;
@@ -3327,6 +3466,7 @@ void Interpreter::clear() {
     execution_.reset();
     pendingRunSource_.clear();
     pendingInteractiveTail_.clear();
+    pendingLineEdit_.reset();
     clearPager();
     *uiSession_ = detail::UISessionState{};
     variables_.clear();

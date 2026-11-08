@@ -65,6 +65,7 @@ std::shared_ptr<ql32::ui::QueuedService> uiService =
 std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
 std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
 std::string inputLine;
+int editingLineNumber = 0;
 bool protocolInputLine = false;
 bool serialSawCarriageReturn = false;
 bool replReadyMessageShown = false;
@@ -192,6 +193,8 @@ void eraseInputCharacter() {
 
 void submitInputLine() {
     const bool isProtocolRequest = protocolInputLine;
+    if (inputLine.empty() && editingLineNumber > 0)
+        inputLine = std::to_string(editingLineNumber);
     Serial.println();
     if (inputLine == "@SCREEN" &&
         ql32::platform::esp32::handleMonitorTransferCommand(
@@ -213,6 +216,7 @@ void submitInputLine() {
         Serial.println("BASIC session is busy");
     }
     inputLine.clear();
+    editingLineNumber = 0;
     protocolInputLine = false;
     if (!isProtocolRequest) replPromptShown = false;
 }
@@ -279,8 +283,14 @@ void advanceScheduler() {
             replReadyMessageShown = true;
         }
         if (!replPromptShown) {
+            const auto edit = scheduler->takePendingLineEdit(focused);
+            if (edit) {
+                inputLine = std::move(edit->text);
+                editingLineNumber = edit->lineNumber;
+            }
             if (focused == replTask) Serial.print("> ");
             else Serial.printf("task %llu> ", static_cast<unsigned long long>(focused));
+            if (edit) Serial.print(inputLine.c_str());
             replPromptShown = true;
         }
     } else {

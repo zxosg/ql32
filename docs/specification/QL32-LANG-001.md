@@ -130,7 +130,9 @@ option_constant := "KOptMathDouble" | "KOptMathSingle"
 comment       := ("REMark" | "REM" | "'") characters_to_end_of_line
 assignment    := identifier "=" expression
 print         := "PRINT" ["#" expression [("," | ";")]]
+                [print_style_option {"," print_style_option} ","]
                 [expression (print_separator expression)* [print_separator]]
+print_style_option := ("INK" | "PAPER") expression
 print_separator := ";" | "!" | "," | "\\"
 expression    := literal | identifier | "(" expression ")" | unary | binary
 ```
@@ -251,7 +253,12 @@ trailing separator suppresses PRINT's automatic final line feed; a trailing
 backslash supplies one explicitly. `PRINT` without items emits a line feed.
 The Linux text stream has no device width, so `!` does not wrap and comma tabs
 are fixed at eight character columns. `TO column`, channel selection, and
-device-specific wrapping are deferred to display/output integration.
+device-specific wrapping are deferred to display/output integration. On
+graphical output, leading `INK color` and `PAPER color` options set the current
+window colors before the first expression, for example
+`PRINT INK 3, PAPER 6, "hello"`. Commas after the first expression retain their
+normal tab-stop meaning. Graphical text uses 5×7 glyphs in 6×8 cells; the
+active paper color fills the gap column and other unlit pixels in each cell.
 
 Numbers print using locale-independent shortest round-trip decimal notation;
 zero, including negative zero, prints as `0`. Strings print as their contents.
@@ -631,10 +638,14 @@ channel operations. File endpoints support reads and writes; serial endpoints
 write to serial output, and null endpoints discard output. Value-returning
 operations use function syntax while `WRITE channel, text$` and `CLOSE channel`
 are statement commands. See
-[QL32-API-001](QL32-API-001.md). `EDIT linenumber` is planned as a REPL
-editing command: it will load the numbered line into the input editor so Enter
-replaces it; submitting an empty numbered line deletes it. The target shell's
-`STOP` and, later, `CONT`, remain future work.
+[QL32-API-001](QL32-API-001.md). `EDIT linenumber` loads an existing numbered
+line into the REPL editor. On serial REPLs the line is prefilled in the input
+buffer; Enter replaces it, and clearing the buffer then pressing Enter submits
+the line number alone, deleting that line. The host stream REPL displays the
+selected line and accepts a replacement numbered line; an empty response
+deletes it. Invalid numbers and line numbers that are not in the stored program
+are rejected without changing the program. The target shell's `STOP` and,
+later, `CONT`, remain future work.
 
 Channels are universal session-owned I/O handles. `#0` is reserved for the
 command/error console and keyboard input; `#1` is reserved for user/program
@@ -813,6 +824,19 @@ and reports its ID, while `worker_id = TASK("worker.bas")` returns the ID for
 later use. Parentheses remain part of other syntax such as definition
 parameter lists, array indexing, string slicing, and grouping. These rules
 apply to built-ins and user-defined procedures/functions alike.
+`IPRINT [INK color,] [PAPER color,] [FLASH mode,] text$[, durationSeconds[, position]]`
+posts a non-blocking graphical information toast. Duration must be positive
+and defaults to three seconds. Position defaults to bottom-left and may be set
+to one of the four `KDlgPos...` corner flags from `ql32.inc`. Ink and paper
+default to palette indices 0 and 7. `FLASH` defaults to `KInfoFlashOff`; modes
+are `KInfoFlashOff` (steady), `KInfoFlashText` (text color alternates between
+ink and paper), and `KInfoFlashPaperInk` (ink and paper swap). The toast has no
+title or buttons and disappears automatically. `IPRINT` is QL/32-specific.
+`BUSY [INK color,] [PAPER color,] [FLASH mode,] text$[, position]` schedules a
+no-title, no-button busy toast after three seconds; it persists until
+`BUSY OFF`. It uses the same color, mode, and corner defaults as `IPRINT`.
+Program completion and runtime errors clear it automatically. This is
+QL/32-specific behavior inspired by OPL's delayed `BUSY` message.
 OPL-inspired `ALERT` and `CONFIRM`
 are M2 native APIs, drawing is M3, and declarative `DINIT`, `DEDIT`, `DINT`,
 `DIALOG`, `MINIT`, `MCARD`, and `MENU` are M4 APIs. SuperBASIC remains the core

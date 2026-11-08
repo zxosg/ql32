@@ -537,12 +537,15 @@ void IndexedCanvas::text(Point topLeft, const std::string& value) {
         if (raw == '\r') continue;
         const auto character = raw < 128 ? static_cast<char>(raw) : '?';
         const auto pattern = glyph(character);
-        for (std::int64_t row = 0; row < 7; ++row) {
-            for (std::int64_t column = 0; column < 5; ++column) {
+        // Fill the complete 6x8 character cell first. The glyph occupies
+        // only 5x7 pixels; the remaining column and row must use paper too.
+        for (std::int64_t row = 0; row < 8; ++row) {
+            for (std::int64_t column = 0; column < 6; ++column) {
                 const auto px = x + column;
                 const auto py = y + row;
                 if (px < 0 || py < 0 || px >= width_ || py >= height_) continue;
-                const bool set = (pattern[static_cast<std::size_t>(column)] & (1u << row)) != 0;
+                const bool set = column < 5 && row < 7 &&
+                    (pattern[static_cast<std::size_t>(column)] & (1u << row)) != 0;
                 writePixel(static_cast<std::size_t>(py) * width_ +
                            static_cast<std::size_t>(px), set ? ink_ : paper_);
             }

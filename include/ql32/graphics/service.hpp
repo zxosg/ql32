@@ -5,6 +5,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace ql32::graphics {
 
@@ -208,6 +209,9 @@ public:
         throw std::runtime_error("task viewport positioning unsupported");
     }
     virtual TaskViewport taskViewport(SessionId) const { return {}; }
+    virtual std::pair<std::uint32_t, std::uint32_t> displaySize() const noexcept {
+        return {0, 0};
+    }
     virtual void setRotation(SessionId, std::uint16_t degrees) {
         throw std::runtime_error("display rotation unsupported");
     }

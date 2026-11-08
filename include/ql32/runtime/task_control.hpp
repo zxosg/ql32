@@ -18,6 +18,8 @@ using TaskId = std::uint64_t;
 inline constexpr std::uint32_t maximumTaskPriority = 2147483647U;
 inline constexpr std::size_t maximumInstructionBudget = 65536;
 
+enum class WindowMode { Isolated, Shared };
+
 enum class TaskState {
     Runnable,
     WaitingUi,
@@ -143,6 +145,8 @@ public:
     virtual bool setTaskViewport(TaskId, std::int32_t, std::int32_t,
                                  std::uint32_t, std::uint32_t,
                                  std::int32_t = 0, std::int32_t = 0) { return false; }
+    virtual WindowMode windowMode() const noexcept { return WindowMode::Shared; }
+    virtual bool setWindowMode(WindowMode) { return false; }
     virtual bool debugAttach(TaskId) { return false; }
     virtual bool debugSetBreakpoint(TaskId, int, bool) { return false; }
     virtual bool debugResume(TaskId, DebugResumeMode) { return false; }

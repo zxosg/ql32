@@ -10,7 +10,7 @@ namespace ql32::ui {
 RequestId QueuedService::begin(SessionId session, RequestKind kind, std::string title,
                                std::string message, std::vector<DialogField> fields,
                                std::vector<MenuItem> items, std::string acceptLabel,
-                               std::string cancelLabel) {
+                               std::string cancelLabel, DialogOptions dialogOptions) {
     std::lock_guard lock(mutex_);
     while (nextId_ == 0 || requests_.find(nextId_) != requests_.end()) {
         ++nextId_;
@@ -22,6 +22,7 @@ RequestId QueuedService::begin(SessionId session, RequestKind kind, std::string 
                     std::move(fields), std::move(items)};
     request.acceptLabel = std::move(acceptLabel);
     request.cancelLabel = std::move(cancelLabel);
+    request.dialogOptions = dialogOptions;
     requests_.emplace(id, PendingRequest{std::move(request), false, std::nullopt});
     queue_.push_back(id);
     return id;
@@ -40,7 +41,8 @@ RequestId QueuedService::beginConfirm(SessionId session, std::string title,
 RequestId QueuedService::beginDialog(SessionId session, std::string title,
                                      std::vector<DialogField> fields,
                                      std::string acceptLabel,
-                                     std::string cancelLabel) {
+                                     std::string cancelLabel,
+                                     DialogOptions options) {
     for (const DialogField& field : fields) {
         const bool validValue = field.kind == FieldKind::Text ?
             std::holds_alternative<std::monostate>(field.initialValue) :
@@ -72,7 +74,8 @@ RequestId QueuedService::beginDialog(SessionId session, std::string title,
         }
     }
     return begin(session, RequestKind::Dialog, std::move(title), {},
-                 std::move(fields), {}, std::move(acceptLabel), std::move(cancelLabel));
+                 std::move(fields), {}, std::move(acceptLabel), std::move(cancelLabel),
+                 options);
 }
 
 RequestId QueuedService::beginMenu(SessionId session, std::string title,
@@ -86,8 +89,75 @@ RequestId QueuedService::beginMenu(SessionId session, std::string title,
     return begin(session, RequestKind::Menu, std::move(title), {}, {}, std::move(items));
 }
 
-RequestId QueuedService::beginInput(SessionId session, std::string prompt) {
-    return begin(session, RequestKind::Input, std::move(prompt), {});
+RequestId QueuedService::beginInput(SessionId session, std::string prompt,
+                                    DialogOptions options) {
+    return begin(session, RequestKind::Input, std::move(prompt), {}, {}, {},
+                 "OK", "Cancel", options);
+}
+
+void QueuedService::showInfo(SessionId session, std::string text,
+                             std::uint32_t durationMs, int positionX,
+                             int positionY, std::uint8_t ink,
+                             std::uint8_t paper, std::uint8_t displayMode) {
+    std::lock_guard lock(mutex_);
+    if (nextInfoId_ == 0) nextInfoId_ = 1;
+    const RequestId id = nextInfoId_++;
+    if (nextInfoId_ == 0) nextInfoId_ = 1;
+    infoToasts_.clear();
+    infoToasts_[session] = InfoToast{id, session, std::move(text), durationMs,
+                                     positionX, positionY};
+    infoToasts_[session].ink = ink;
+    infoToasts_[session].paper = paper;
+    infoToasts_[session].displayMode = displayMode;
+}
+
+void QueuedService::showBusy(SessionId session, std::string text,
+                             int positionX, int positionY,
+                             std::uint8_t ink, std::uint8_t paper,
+                             std::uint8_t displayMode) {
+    std::lock_guard lock(mutex_);
+    if (nextInfoId_ == 0) nextInfoId_ = 1;
+    const RequestId id = nextInfoId_++;
+    if (nextInfoId_ == 0) nextInfoId_ = 1;
+    InfoToast toast{id, session, std::move(text), 0, positionX, positionY};
+    toast.busy = true;
+    toast.delayMs = 3000;
+    toast.requestedAt = std::chrono::steady_clock::now();
+    toast.ink = ink;
+    toast.paper = paper;
+    toast.displayMode = displayMode;
+    infoToasts_.clear();
+    infoToasts_[session] = std::move(toast);
+}
+
+void QueuedService::clearBusy(SessionId session) {
+    std::lock_guard lock(mutex_);
+    const auto toast = infoToasts_.find(session);
+    if (toast != infoToasts_.end() && toast->second.busy)
+        infoToasts_.erase(toast);
+}
+
+std::optional<InfoToast> QueuedService::currentInfo() {
+    std::lock_guard lock(mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    const InfoToast* latest = nullptr;
+    for (const auto& [session, toast] : infoToasts_) {
+        (void)session;
+        if (toast.busy && now < toast.requestedAt +
+                                   std::chrono::milliseconds(toast.delayMs)) continue;
+        if (!latest || toast.id > latest->id) latest = &toast;
+    }
+    return latest ? std::optional<InfoToast>(*latest) : std::nullopt;
+}
+
+void QueuedService::dismissInfo(RequestId id) {
+    std::lock_guard lock(mutex_);
+    for (auto toast = infoToasts_.begin(); toast != infoToasts_.end(); ++toast) {
+        if (toast->second.id == id) {
+            infoToasts_.erase(toast);
+            return;
+        }
+    }
 }
 
 std::optional<Result> QueuedService::poll(RequestId request) {
@@ -110,6 +180,7 @@ void QueuedService::cancelSession(SessionId session) {
         if (request->second.request.session == session) request = requests_.erase(request);
         else ++request;
     }
+    infoToasts_.erase(session);
 }
 
 std::optional<Request> QueuedService::takeNextRequest() {

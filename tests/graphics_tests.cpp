@@ -491,6 +491,17 @@ void testPrintChannelRouting() {
         [](const Event& event) { return event.name == "TEXT" && event.text == "default"; }) !=
         graphics->events.end(), "unqualified PRINT did not target channel #1");
 
+    graphics->events.clear();
+    interpreter.execute("PRINT #1,INK 3,PAPER 6,\"styled\"\n", console);
+    require(graphics->events.size() >= 3 &&
+            graphics->events[0].name == "INK" && graphics->events[0].a == 3 &&
+            graphics->events[1].name == "PAPER" && graphics->events[1].a == 6 &&
+            std::any_of(graphics->events.begin(), graphics->events.end(),
+                [](const Event& event) {
+                    return event.name == "TEXT" && event.text == "styled";
+                }),
+            "PRINT leading INK/PAPER options were not applied before its text");
+
     auto presenter = std::make_shared<CapturingPresenter>();
     auto window = std::make_shared<WindowedService>(60, 24, presenter);
     ql32::Interpreter windowInterpreter({}, {}, {}, window);
@@ -1032,6 +1043,25 @@ void testEveryPrintableAsciiCharacterHasAGlyph() {
     }
 }
 
+void testTextCellsFillCharacterGapsWithPaper() {
+    IndexedCanvas canvas(12, 8, PixelDepth::Four);
+    canvas.setInk(3);
+    canvas.setPaper(6);
+    canvas.clear();
+    canvas.text({0, 0}, "A");
+    bool sawInk = false;
+    for (std::uint32_t y = 0; y < 8; ++y) {
+        require(canvas.pixel(5, y) == 6,
+                "text cell's inter-character column was not filled with paper");
+        for (std::uint32_t x = 0; x < 5; ++x)
+            sawInk = sawInk || canvas.pixel(x, y) == 3;
+    }
+    for (std::uint32_t x = 0; x < 6; ++x)
+        require(canvas.pixel(x, 7) == 6,
+                "text cell's bottom row was not filled with paper");
+    require(sawInk, "text glyph did not use the active ink color");
+}
+
 void testCloseWindowCommandDispatch() {
     auto graphics = std::make_shared<RecordingGraphics>();
     ql32::Interpreter interpreter({}, {}, {}, graphics);
@@ -1071,5 +1101,6 @@ int main() {
     testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
     testFailedCanvasResizePreservesAllWindows();
     testEveryPrintableAsciiCharacterHasAGlyph();
+    testTextCellsFillCharacterGapsWithPaper();
     testCloseWindowCommandDispatch();
 }

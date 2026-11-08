@@ -4,6 +4,7 @@
 #include "ql32/input/service.hpp"
 #include "ql32/ui/service.hpp"
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -44,6 +45,11 @@ private:
     std::optional<Request> request_;
     graphics::Rect bounds_{};
     std::unique_ptr<graphics::IndexedCanvas> panel_;
+    std::optional<InfoToast> infoToast_;
+    std::unique_ptr<graphics::IndexedCanvas> infoPanel_;
+    graphics::Rect infoBounds_{};
+    std::chrono::steady_clock::time_point infoExpiresAt_{};
+    bool infoFlashPhase_ = false;
     std::vector<Row> rows_;
     std::vector<std::string> edits_;
     std::vector<FieldValue> values_;
@@ -56,10 +62,17 @@ private:
     std::uint32_t serialEscapeAt_ = 0;
     std::uint32_t screenWidth_ = 0;
     std::uint32_t screenHeight_ = 0;
+    int buttonColumnWidth_ = 0;
 
     void finish();
     void layout();
+    void refreshInfo();
+    void layoutInfo();
     void paint();
+    int titleHeight() const noexcept;
+    int footerHeight() const noexcept;
+    int rowPitch() const noexcept;
+    int rightButtonWidth() const noexcept;
     void rebuildRows();
     void ensureFocusVisible();
     void moveFocus(int delta);

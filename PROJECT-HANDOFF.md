@@ -174,21 +174,26 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    physical acceptance separate. Add an Olimex GPIO/FFS host profile test.
 4. **Performance check:** time the 80×56 attractor and measure the selected CPU
    clock for SINGLE/DOUBLE and 80/160/240 MHz.
-5. **Shared screen across tasks:** replace per-session retained window canvases
-   with one display surface shared by all tasks. Window creation must not
-   allocate a separate pixel canvas per task/window. Define concurrent drawing
-   and visibility/overlap behavior, and verify that adding tasks does not
-   consume another full-screen canvas; one 320×240 4-bit canvas currently uses
-   38,400 bytes.
-6. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
+5. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
    implement REPL `EDIT linenumber`; later scope palette changes, task-window
-   tiling, BASIC system/build/platform and capability introspection, enhanced
-   `DIR` output with optional file sizes and `<subdir>` directory labels,
-   string splitting, indirect procedure calls, and network channels. BLE and
-   new hardware families remain deferred. Introspection should build on the
-   portable board capability descriptors while defining product
+   management, BASIC system/build/platform and capability introspection,
+   enhanced `DIR` output with optional file sizes and `<subdir>` directory
+   labels, string splitting, indirect procedure calls, and network channels.
+   BLE and new hardware families remain deferred. Introspection should build
+   on the portable board capability descriptors while defining product
    version/build ID, host/board identity, supported BASIC queries (for example
    SPI, I2C, and serial), and how support differs from runtime availability.
+
+## Recently completed
+
+- **Supervisor diagnostics and task window modes (2026-11-08):** Added the
+  CYD `DEBUGBAR ON|OFF` overlay for heap totals, largest free block, allocation
+  count, active tasks, and wall-clock time. Added supervisor-only
+  `WINDOWMODE [ISOLATED|SHARED]`; isolated mode tiles active task viewports and
+  shared mode restores full-display viewports. Linux tests pass, and the CYD
+  was flashed and checked with three live sin/cos workers, the visible debug
+  bar, mode switching, and cleanup. See
+  [QL32-API-001](docs/specification/QL32-API-001.md) for command behavior.
 
 ## Starting a new chat
 

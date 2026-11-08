@@ -272,6 +272,26 @@ void testInteractiveSessionUsesSlicesAndKeepsReplState() {
             "interactive session lost state between REPL submissions");
 }
 
+void testEditPrefillIsDeliveredToInteractiveInputHost() {
+    ql32::vm::SessionScheduler scheduler({}, 8);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    require(scheduler.submit(repl, "10 PRINT \"before\"\n") && scheduler.tick(),
+            "interactive session did not store a line for EDIT");
+    require(scheduler.submit(repl, "EDIT 10\n") && scheduler.tick(),
+            "interactive session did not accept EDIT");
+    const auto edit = scheduler.takePendingLineEdit(repl);
+    require(edit && edit->lineNumber == 10 && edit->text == "10 PRINT \"before\"",
+            "scheduler did not deliver the selected source line to the input host");
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput,
+            "EDIT did not return the session to its input prompt");
+    require(scheduler.submit(repl, "10 PRINT \"after\"\n") && scheduler.tick(),
+            "interactive session did not accept the edited line");
+    require(scheduler.submit(repl, "LIST\n") && scheduler.tick() &&
+                output.str() == "10 PRINT \"after\"\n",
+            "edited line did not replace the stored program source");
+}
+
 void testInteractiveStartupProgramSharesReplSession() {
     ql32::vm::SessionScheduler scheduler({}, 1);
     std::ostringstream output;
@@ -785,6 +805,57 @@ void testBasicTaskViewCommandIsSupervisorOnly() {
     }
 }
 
+void testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(
+        320, 240, nullptr);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream supervisorOutput;
+    std::ostringstream firstOutput;
+    std::ostringstream secondOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    const auto first = scheduler.launchWorker("PRINT \"first\"\n", firstOutput);
+    const auto second = scheduler.launchWorker("PRINT \"second\"\n", secondOutput);
+
+    require(scheduler.submit(supervisor, "WINDOWMODE ISOLATED\n"),
+            "supervisor did not accept WINDOWMODE ISOLATED");
+    for (int tick = 0; tick < 30 && scheduler.windowMode() !=
+            ql32::runtime::WindowMode::Isolated; ++tick)
+        require(scheduler.tick(), "scheduler stopped before applying isolated mode");
+    require(scheduler.windowMode() == ql32::runtime::WindowMode::Isolated,
+            "WINDOWMODE ISOLATED did not update the scheduler mode");
+    const auto supervisorView = scheduler.task(supervisor)->viewport;
+    const auto firstView = scheduler.task(first)->viewport;
+    const auto secondView = scheduler.task(second)->viewport;
+    require(supervisorView.originX == 0 && supervisorView.originY == 0 &&
+                supervisorView.canvasWidth == 160 && supervisorView.canvasHeight == 120 &&
+                firstView.originX == 160 && firstView.originY == 0 &&
+                secondView.originX == 0 && secondView.originY == 120,
+            "isolated mode did not assign distinct tiled viewports");
+
+    std::ostringstream thirdOutput;
+    const auto third = scheduler.launchWorker("PRINT \"third\"\n", thirdOutput);
+    const auto thirdView = scheduler.task(third)->viewport;
+    require(thirdView.originX == 160 && thirdView.originY == 120 &&
+                scheduler.task(supervisor)->viewport.canvasWidth == 160,
+            "new task did not inherit the isolated viewport layout");
+
+    require(scheduler.submit(supervisor, "WINDOWMODE SHARED\n"),
+            "supervisor did not accept WINDOWMODE SHARED");
+    for (int tick = 0; tick < 30 && scheduler.windowMode() !=
+            ql32::runtime::WindowMode::Shared; ++tick)
+        require(scheduler.tick(), "scheduler stopped before restoring shared mode");
+    require(scheduler.windowMode() == ql32::runtime::WindowMode::Shared,
+            "WINDOWMODE SHARED did not update the scheduler mode");
+    for (const auto id : {supervisor, first, second, third}) {
+        const auto view = scheduler.task(id)->viewport;
+        require(view.originX == 0 && view.originY == 0 &&
+                    view.canvasWidth == 320 && view.canvasHeight == 240,
+                "shared mode did not restore a full-display task viewport");
+    }
+}
+
 void testSincosWorkerTaskViewOffsetBounce() {
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
         640, 480, nullptr);
@@ -1226,6 +1297,7 @@ int main() {
     testUiWaitDoesNotBlockOtherSessions();
     testOptionalPagerSuspendsOnlyReplAndContinuesTail();
     testInteractiveSessionUsesSlicesAndKeepsReplState();
+    testEditPrefillIsDeliveredToInteractiveInputHost();
     testInteractiveStartupProgramSharesReplSession();
     testInteractiveSessionRecoversFromCommandErrors();
     testSchedulerOffersNonAllocatingTaskStatusAndErrorViews();
@@ -1242,6 +1314,7 @@ int main() {
     testCancellingWorkerDiscardsItsGraphicsAllocations();
     testSupervisorTaskViewportUsesTaskToSessionMapping();
     testBasicTaskViewCommandIsSupervisorOnly();
+    testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();
     testTasksUsesDefaultAndExplicitPrintChannels();

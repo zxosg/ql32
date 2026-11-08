@@ -33,6 +33,11 @@ enum class ExecutionStatus {
     RunPending, InteractivePending
 };
 
+struct InteractiveLineEdit {
+    std::string text;
+    int lineNumber = 0;
+};
+
 class Interpreter {
 public:
     explicit Interpreter(std::shared_ptr<runtime::StorageService> storage = {},
@@ -93,6 +98,7 @@ public:
     runtime::SessionId graphicsSessionId() const noexcept { return session_id_; }
     std::string takePendingRunSource() noexcept;
     std::string takePendingInteractiveTail() noexcept;
+    std::optional<InteractiveLineEdit> takePendingLineEdit() noexcept;
     bool hasPendingInteractivePager() const noexcept;
     ExecutionStatus resumeInteractivePager(std::ostream& output);
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
@@ -118,6 +124,7 @@ private:
     std::string current_directory_;
     std::string pendingRunSource_;
     std::string pendingInteractiveTail_;
+    std::optional<InteractiveLineEdit> pendingLineEdit_;
     bool pagerEnabled_ = false;
     std::string pendingPagerText_;
     std::size_t pendingPagerOffset_ = 0;

@@ -179,7 +179,7 @@ void testHelpCommandCatalog() {
     interpreter.executeInteractive("help\nPRINT \"after help\"\n", output);
     const std::string help = output.str();
     require(help.find("Shell commands:\n") != std::string::npos &&
-                help.find("HELP, RUN, LIST") != std::string::npos,
+                help.find("HELP, RUN, LIST, EDIT") != std::string::npos,
             "HELP did not list the shell commands");
     require(help.find("BASIC statements and commands:\n") != std::string::npos &&
                 help.find("SELect") != std::string::npos && help.find("WRITE") != std::string::npos,
@@ -215,6 +215,51 @@ void testPersistentRepl() {
             "REPL did not keep state or recover after a bad entry");
     require(diagnostics.str().find("expected expression") != std::string::npos,
             "REPL did not report a bad entry");
+}
+
+void testEditStoredLineFromRepl() {
+    ql32::Interpreter replace;
+    std::istringstream replaceInput(
+        "10 PRINT \"old\"\n"
+        "EDIT 10\n"
+        "10 PRINT \"new\"\n"
+        "LIST\n"
+        "RUN\n");
+    std::ostringstream replaceOutput;
+    std::ostringstream replaceDiagnostics;
+    replace.runRepl(replaceInput, replaceOutput, replaceDiagnostics);
+    require(replaceDiagnostics.str().empty(),
+            "EDIT replacement produced a REPL error");
+    require(replaceOutput.str().find("Editing line: 10 PRINT \"old\"") !=
+                std::string::npos &&
+                replaceOutput.str().find("10 PRINT \"new\"\n") != std::string::npos &&
+                endsWith(replaceOutput.str(), "new\n"),
+            "EDIT did not prefill, replace, list, and run the selected line");
+
+    ql32::Interpreter erase;
+    std::istringstream eraseInput(
+        "10 PRINT \"gone\"\n"
+        "EDIT 10\n"
+        "\n"
+        "LIST\n");
+    std::ostringstream eraseOutput;
+    std::ostringstream eraseDiagnostics;
+    erase.runRepl(eraseInput, eraseOutput, eraseDiagnostics);
+    require(eraseDiagnostics.str().empty() &&
+                eraseOutput.str() ==
+                    "Editing line: 10 PRINT \"gone\" (enter a replacement line; blank deletes)\n",
+            "blank response to EDIT did not delete the selected line");
+
+    ql32::Interpreter invalid;
+    std::istringstream invalidInput("10 PRINT \"kept\"\nEDIT 0\nEDIT 99\nLIST\n");
+    std::ostringstream invalidOutput;
+    std::ostringstream invalidDiagnostics;
+    invalid.runRepl(invalidInput, invalidOutput, invalidDiagnostics);
+    require(invalidDiagnostics.str().find("line number in 1..32767") !=
+                std::string::npos &&
+                invalidDiagnostics.str().find("line not found: 99") != std::string::npos &&
+                invalidOutput.str().find("10 PRINT \"kept\"\n") != std::string::npos,
+            "EDIT did not reject invalid or missing lines without changing the program");
 }
 
 void testStoredProgramDiagnosticsAndArrayTypes() {
@@ -801,12 +846,31 @@ void testUiCallsSuspendAndResumePerSession() {
             "REPL host presenter did not resume a stored program after confirmation");
 }
 
+void testInfoToastStyleOptionChains() {
+    auto service = std::make_shared<ql32::ui::QueuedService>();
+    ql32::Interpreter interpreter({}, {}, service);
+    std::ostringstream output;
+    interpreter.execute(
+        "IPRINT INK 3, PAPER 6, FLASH 1, \"hello\", 4, 128\n", output);
+    const auto toast = service->currentInfo();
+    require(toast && toast->text == "hello" && toast->durationMs == 4000 &&
+            toast->positionX == 1 && toast->positionY == -1 &&
+            toast->ink == 3 && toast->paper == 6 && toast->displayMode == 1,
+            "IPRINT style chain did not preserve color, mode, duration, and position");
+
+    interpreter.execute(
+        "BUSY PAPER 2, INK 5, FLASH 2, \"working\", 64\n", output);
+    require(interpreter.executeResumable("BUSY OFF\n", output) ==
+                ql32::ExecutionStatus::Completed,
+            "BUSY style chain did not execute or BUSY OFF did not clear it");
+}
+
 void testDialogMenuBasicCallsSuspendAndResume() {
     auto service = std::make_shared<ql32::ui::QueuedService>();
     ql32::Interpreter interpreter({}, {}, service);
     std::ostringstream output;
     const std::string source =
-        "dialogHandle = DINIT(\"Profile\")\n"
+        "dialogHandle = DINIT(\"Profile\", 127)\n"
         "DTEXT dialogHandle, \"Profile fields\"\n"
         "DEDIT dialogHandle, \"Name\", \"Ada\"\n"
         "DINT dialogHandle, \"Age\", 36, 0, 150\n"
@@ -827,7 +891,12 @@ void testDialogMenuBasicCallsSuspendAndResume() {
     const auto dialog = service->takeNextRequest();
     require(dialog && dialog->kind == ql32::ui::RequestKind::Dialog &&
                 dialog->fields.size() == 6 && dialog->acceptLabel == "Apply" &&
-                dialog->cancelLabel == "Cancel",
+                dialog->cancelLabel == "Cancel" &&
+                dialog->dialogOptions.buttonsRight && dialog->dialogOptions.noTitle &&
+                dialog->dialogOptions.fullScreen && dialog->dialogOptions.noDrag &&
+                dialog->dialogOptions.densePack && dialog->dialogOptions.hideButtons &&
+                dialog->dialogOptions.positionX == -1 &&
+                dialog->dialogOptions.positionY == -1,
             "BASIC dialog builders did not produce the declared dialog schema");
     require(service->submitDialog(dialog->id, {
                 std::monostate{}, std::string("Grace"), 42.0, 2.75, 1.0, false}),
@@ -886,6 +955,7 @@ int main() {
         testAtomicProgramLineAndBlocks();
         testHelpCommandCatalog();
         testPersistentRepl();
+        testEditStoredLineFromRepl();
         testStoredProgramDiagnosticsAndArrayTypes();
         testKeywordAbbreviationCoverage();
         testForwardCallsAndKnownSemanticErrors();
@@ -904,6 +974,7 @@ int main() {
         testCpuFrequencyOption();
         testQ32ErrorFunctions();
         testUiCallsSuspendAndResumePerSession();
+        testInfoToastStyleOptionChains();
         testDialogMenuBasicCallsSuspendAndResume();
     } catch (const std::exception& error) {
         std::cerr << "runtime test failed: " << error.what() << '\n';

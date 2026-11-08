@@ -64,6 +64,9 @@ public:
     void setWindowBounds(SessionId session, ChannelId channel, Rect bounds) override;
     void setTaskViewport(SessionId session, TaskViewport viewport) override;
     TaskViewport taskViewport(SessionId session) const override;
+    std::pair<std::uint32_t, std::uint32_t> displaySize() const noexcept override {
+        return {manager_.screenWidth(), manager_.screenHeight()};
+    }
     void setRotation(SessionId session, std::uint16_t degrees) override;
     void setDebugOverlayEnabled(bool enabled) override;
     bool debugOverlayEnabled() const noexcept override { return debugOverlayEnabled_; }
