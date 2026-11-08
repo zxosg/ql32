@@ -149,6 +149,14 @@ void WindowedService::setPaper(SessionId session, ChannelId channel, ColorIndex 
         consoleColorsCallback_(target.ink(), target.paper());
 }
 
+void WindowedService::setOverMode(SessionId session, OverMode mode) {
+    setOverMode(session, 1, mode);
+}
+
+void WindowedService::setOverMode(SessionId session, ChannelId channel, OverMode mode) {
+    canvas(session, channel).setOverMode(mode);
+}
+
 void WindowedService::line(SessionId session, Point from, Point to) {
     line(session, 1, from, to);
 }
@@ -168,7 +176,7 @@ void WindowedService::pixel(SessionId session, Point position) {
 
 void WindowedService::pixel(SessionId session, ChannelId channel, Point position) {
     auto& target = canvas(session, channel);
-    target.setPixel(position.x, position.y, target.ink());
+    target.plotPixel(position.x, position.y);
     presentRegion(screenRegion(session, channel, position.x, position.y, 1, 1));
 }
 
@@ -259,7 +267,7 @@ void WindowedService::writeText(SessionId session, const std::string& value) {
                 cursor.x = 0;
                 cursor.y += 8;
             }
-            target.text(cursor, std::string(1, ch < 128 ? static_cast<char>(ch) : '?'));
+            target.printText(cursor, std::string(1, ch < 128 ? static_cast<char>(ch) : '?'));
             dirty = unite(dirty, {cursor.x, cursor.y, 6, 8});
             cursor.x += 6;
         }

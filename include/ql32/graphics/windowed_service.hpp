@@ -25,6 +25,8 @@ public:
     void setInk(SessionId session, ChannelId channel, ColorIndex color) override;
     void setPaper(SessionId session, ColorIndex color) override;
     void setPaper(SessionId session, ChannelId channel, ColorIndex color) override;
+    void setOverMode(SessionId session, OverMode mode) override;
+    void setOverMode(SessionId session, ChannelId channel, OverMode mode) override;
     void line(SessionId session, Point from, Point to) override;
     void line(SessionId session, ChannelId channel, Point from, Point to) override;
     void pixel(SessionId session, Point position) override;

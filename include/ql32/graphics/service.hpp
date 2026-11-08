@@ -55,6 +55,7 @@ struct RgbColor {
 };
 
 enum class UpdateMode : std::uint8_t { Auto, On, Off };
+enum class OverMode : std::uint8_t { Set = 0, Clear = 1, Invert = 2 };
 
 // Platform-neutral drawing contract. An implementation owns pixel windows and
 // drawing state per session/channel. A task viewport translates and clips its
@@ -75,6 +76,11 @@ public:
     virtual void setPaper(SessionId session, ChannelId channel, ColorIndex color) {
         (void)channel;
         setPaper(session, color);
+    }
+    virtual void setOverMode(SessionId, OverMode) {}
+    virtual void setOverMode(SessionId session, ChannelId channel, OverMode mode) {
+        (void)channel;
+        setOverMode(session, mode);
     }
     virtual void line(SessionId session, Point from, Point to) = 0;
     virtual void line(SessionId session, ChannelId channel, Point from, Point to) {

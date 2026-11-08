@@ -1,5 +1,6 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
+#include "ql32/platform/esp32/serial_key_decoder.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -171,6 +172,44 @@ void testAtomicProgramLineAndBlocks() {
             "multi-line block could not be stored and run");
 }
 
+void testDeleteProgramLinesAtomically() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.executeInteractive(
+        "10 FOR x = 1 TO 2\n"
+        "20 FOR y = 1 TO 2\n"
+        "30 PRINT x\n"
+        "40 END FOR y\n"
+        "50 END FOR x\n", output);
+
+    interpreter.executeInteractive("DELETE 20,40\n", output);
+    std::ostringstream listing;
+    interpreter.executeInteractive("LIST\n", listing);
+    require(listing.str().find("20 ") == std::string::npos &&
+                listing.str().find("40 ") == std::string::npos &&
+                listing.str().find("10 FOR x") != std::string::npos &&
+                listing.str().find("50 END FOR x") != std::string::npos,
+            "DELETE line list did not remove the inner loop while retaining the outer loop");
+
+    bool invalidDeletionRejected = false;
+    try {
+        interpreter.executeInteractive("DELETE 10,30\n", output);
+    } catch (const std::runtime_error&) {
+        invalidDeletionRejected = true;
+    }
+    require(invalidDeletionRejected, "DELETE accepted a line list that breaks block structure");
+
+    std::ostringstream afterRejectedDeletion;
+    interpreter.executeInteractive("LIST\n", afterRejectedDeletion);
+    require(afterRejectedDeletion.str() == listing.str(),
+            "invalid DELETE line list changed the stored program");
+
+    std::ostringstream runOutput;
+    interpreter.executeInteractive("RUN\n", runOutput);
+    require(runOutput.str() == "1\n2\n",
+            "outer loop did not remain executable after deleting the inner loop");
+}
+
 void testHelpCommandCatalog() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -181,6 +220,9 @@ void testHelpCommandCatalog() {
     require(help.find("Shell commands:\n") != std::string::npos &&
                 help.find("HELP, RUN, LIST, EDIT") != std::string::npos,
             "HELP did not list the shell commands");
+    require(help.find("DELETE lineNumber1,... atomically deletes numbered program lines") !=
+                std::string::npos && help.find("DELETE path$ removes a file") != std::string::npos,
+            "HELP did not explain the two DELETE forms");
     require(help.find("BASIC statements and commands:\n") != std::string::npos &&
                 help.find("SELect") != std::string::npos && help.find("WRITE") != std::string::npos,
             "HELP did not list BASIC keywords and commands");
@@ -260,6 +302,74 @@ void testEditStoredLineFromRepl() {
                 invalidDiagnostics.str().find("line not found: 99") != std::string::npos &&
                 invalidOutput.str().find("10 PRINT \"kept\"\n") != std::string::npos,
             "EDIT did not reject invalid or missing lines without changing the program");
+}
+
+void testEditWithoutLineNumberUsesLastOrFirstLine() {
+    ql32::Interpreter firstLine;
+    std::istringstream firstInput(
+        "30 PRINT \"thirty\"\n"
+        "10 PRINT \"ten\"\n"
+        "20 PRINT \"twenty\"\n"
+        "EDIT\n"
+        "10 PRINT \"ten edited\"\n"
+        "LIST\n");
+    std::ostringstream firstOutput;
+    std::ostringstream firstDiagnostics;
+    firstLine.runRepl(firstInput, firstOutput, firstDiagnostics);
+    require(firstDiagnostics.str().empty() &&
+                firstOutput.str().find("Editing line: 10 PRINT \"ten\"") !=
+                    std::string::npos &&
+                firstOutput.str().find("10 PRINT \"ten edited\"\n") !=
+                    std::string::npos,
+            "EDIT without a line number did not select the first program line");
+
+    ql32::Interpreter lastLine;
+    std::istringstream lastInput(
+        "10 PRINT \"ten\"\n"
+        "20 PRINT \"twenty\"\n"
+        "EDIT 20\n"
+        "20 PRINT \"twenty edited\"\n"
+        "EDIT\n"
+        "20 PRINT \"twenty again\"\n"
+        "LIST\n");
+    std::ostringstream lastOutput;
+    std::ostringstream lastDiagnostics;
+    lastLine.runRepl(lastInput, lastOutput, lastDiagnostics);
+    const std::string listing = lastOutput.str();
+    const auto firstSelected = listing.find("Editing line: 20 PRINT \"twenty\"");
+    const auto secondSelected = listing.find("Editing line: 20 PRINT \"twenty edited\"");
+    require(lastDiagnostics.str().empty() && firstSelected != std::string::npos &&
+                secondSelected != std::string::npos && secondSelected > firstSelected &&
+                listing.find("20 PRINT \"twenty again\"\n") != std::string::npos,
+            "EDIT without a line number did not revisit the last edited line");
+}
+
+void testSerialKeyDecoder() {
+    ql32::platform::esp32::SerialKeyDecoder decoder;
+    require(!decoder.feed('\x1b') && !decoder.feed('['),
+            "ANSI cursor sequence prefix was exposed as text");
+    const auto left = decoder.feed('D');
+    require(left && left->key == ql32::platform::esp32::SerialKey::Left,
+            "ANSI left arrow was not decoded");
+    require(!decoder.feed('\x1b') && !decoder.feed('['),
+            "ANSI Up sequence prefix was exposed as text");
+    const auto up = decoder.feed('A');
+    require(up && up->key == ql32::platform::esp32::SerialKey::Up,
+            "ANSI Up arrow was not decoded");
+    require(!decoder.feed('\x1b') && !decoder.feed('[') && !decoder.feed('1'),
+            "ANSI Home sequence prefix was exposed as text");
+    const auto home = decoder.feed('~');
+    require(home && home->key == ql32::platform::esp32::SerialKey::Home,
+            "ANSI Home key was not decoded");
+    require(!decoder.feed('\x1b') && !decoder.feed('[') && !decoder.feed('4'),
+            "ANSI End sequence prefix was exposed as text");
+    const auto end = decoder.feed('~');
+    require(end && end->key == ql32::platform::esp32::SerialKey::End,
+            "ANSI End key was not decoded");
+    const auto character = decoder.feed('x');
+    require(character && character->key == ql32::platform::esp32::SerialKey::Character &&
+                character->character == 'x',
+            "printable serial input was not preserved after cursor sequences");
 }
 
 void testStoredProgramDiagnosticsAndArrayTypes() {
@@ -540,11 +650,45 @@ void testStringExtractionFunctions() {
                 "\nQL/\nQL/32\n32\n\nL/3\n/32\n\n5\ncaf\u00e9\n\u00e9\U0001f642\n\u00e9\U0001f642\n",
             "string extraction functions returned incorrect character slices");
 
+    std::ostringstream repeated;
+    interpreter.execute(
+        "PRINT REPT$(\"ab\",3)\n"
+        "PRINT REPT$(\"🙂é\",2)\n"
+        "PRINT REPT$(\"x\",0)\n"
+        "PRINT REPT$(\"\",5)\n", repeated);
+    require(repeated.str() == "ababab\n🙂é🙂é\n\n\n",
+            "REPT$ did not repeat the complete string the requested number of times");
+
+    std::ostringstream charactersAndSearch;
+    interpreter.execute(
+        "PRINT CODE(\"café🙂\")\n"
+        "PRINT ASC(\"🙂\")\n"
+        "PRINT CODE(\"\")\n"
+        "PRINT CHR$(65)\n"
+        "PRINT CHR$(&H1F642)\n"
+        "PRINT LOC(\"Hello world\",\"WORLD\")\n"
+        "PRINT LOC(\"café🙂\",\"é🙂\")\n"
+        "PRINT LOC(\"abc\",\"\")\n"
+        "PRINT LOC(\"abc\",\"z\")\n"
+        "PRINT UPPER$(\"Hello ql/32 Hé\")\n"
+        "PRINT LOWER$(\"Hello ql/32 Hé\")\n"
+        "PRINT STR$(12.5)\n"
+        "PRINT STR$(-0)\n", charactersAndSearch);
+    require(charactersAndSearch.str() ==
+                "99\n128578\n0\nA\n🙂\n7\n4\n1\n0\nHELLO QL/32 Hé\n"
+                "hello ql/32 hé\n12.5\n0\n",
+            "character conversion or LOC returned an unexpected result");
+
     for (const std::string& expression : {
              "PRINT LEFT$(\"x\",-1)\n",
              "PRINT RIGHT$(\"x\",1.5)\n",
              "PRINT MID$(\"x\",0)\n",
-             "PRINT MID$(\"x\",1,-1)\n"}) {
+             "PRINT MID$(\"x\",1,-1)\n",
+             "PRINT REPT$(\"x\",-1)\n",
+             "PRINT REPT$(\"x\",1.5)\n",
+             "PRINT CHR$(-1)\n",
+             "PRINT CHR$(55296)\n",
+             "PRINT CHR$(1.5)\n"}) {
         bool rejected = false;
         try {
             std::ostringstream ignored;
@@ -553,6 +697,20 @@ void testStringExtractionFunctions() {
             rejected = error.code() == ql32::runtime::ErrorCode::InvalidArgument;
         }
         require(rejected, "string extraction accepted an invalid index or length");
+    }
+    for (const std::string& expression : {
+             "PRINT UPPER$(3)\n",
+             "PRINT LOWER$(3)\n",
+             "PRINT STR$(\"3\")\n",
+             "PRINT LOC(\"abc\",3)\n"}) {
+        bool typeRejected = false;
+        try {
+            std::ostringstream ignored;
+            interpreter.execute(expression, ignored);
+        } catch (const ql32::runtime::Error& error) {
+            typeRejected = error.code() == ql32::runtime::ErrorCode::TypeMismatch;
+        }
+        require(typeRejected, "string helper accepted an argument of the wrong type");
     }
 }
 
@@ -953,9 +1111,12 @@ int main() {
         testGotoLineNumbersAndLabels();
         testCancellation();
         testAtomicProgramLineAndBlocks();
+        testDeleteProgramLinesAtomically();
         testHelpCommandCatalog();
         testPersistentRepl();
         testEditStoredLineFromRepl();
+        testEditWithoutLineNumberUsesLastOrFirstLine();
+        testSerialKeyDecoder();
         testStoredProgramDiagnosticsAndArrayTypes();
         testKeywordAbbreviationCoverage();
         testForwardCallsAndKnownSemanticErrors();

@@ -35,6 +35,7 @@
 #include "ql32/platform/esp32/system_control.hpp"
 #include "ql32/platform/esp32/monitor_transfer.hpp"
 #include "ql32/platform/esp32/remote_debug_protocol.hpp"
+#include "ql32/platform/esp32/serial_key_decoder.hpp"
 #include "ql32/platform/esp32_cyd/graphics.hpp"
 #include "ql32/platform/esp32_cyd/frame_presenter.hpp"
 #include "ql32/platform/esp32_cyd/text_console.hpp"
@@ -71,6 +72,10 @@ std::shared_ptr<ql32::ui::QueuedService> uiService =
 std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
 std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
 std::string inputLine;
+std::string lastSubmittedLine;
+std::string inputPrompt;
+std::size_t inputCursor = 0;
+ql32::platform::esp32::SerialKeyDecoder serialKeyDecoder;
 int editingLineNumber = 0;
 bool protocolInputLine = false;
 bool serialSawCarriageReturn = false;
@@ -187,20 +192,70 @@ ql32::runtime::YModemSource screenCaptureSource() {
 void appendInputCharacter(char character) {
     if (inputLine.size() >= 1024) return;
     if (inputLine.empty() && character == '@') protocolInputLine = true;
-    inputLine.push_back(character);
-    if (!protocolInputLine) Serial.write(static_cast<std::uint8_t>(character));
+    const bool atEnd = inputCursor == inputLine.size();
+    inputLine.insert(inputCursor, 1, character);
+    ++inputCursor;
+    if (!protocolInputLine) {
+        if (atEnd) Serial.write(static_cast<std::uint8_t>(character));
+        else {
+            Serial.print("\r");
+            Serial.print(inputPrompt.c_str());
+            Serial.print(inputLine.c_str());
+            const auto suffix = inputLine.size() - inputCursor;
+            for (std::size_t i = 0; i < suffix; ++i) Serial.write('\b');
+        }
+    }
 }
 
 void eraseInputCharacter() {
-    if (inputLine.empty()) return;
-    inputLine.pop_back();
-    if (!protocolInputLine) Serial.print("\b \b");
+    if (inputCursor == 0) return;
+    const bool atEnd = inputCursor == inputLine.size();
+    const auto oldLength = inputLine.size();
+    inputLine.erase(inputCursor - 1, 1);
+    --inputCursor;
+    if (!protocolInputLine) {
+        if (atEnd) Serial.print("\b \b");
+        else {
+            Serial.print("\r");
+            Serial.print(inputPrompt.c_str());
+            Serial.print(inputLine.c_str());
+            const auto erased = oldLength - inputLine.size();
+            for (std::size_t i = 0; i < erased; ++i) Serial.write(' ');
+            const auto backspaces = inputLine.size() - inputCursor + erased;
+            for (std::size_t i = 0; i < backspaces; ++i) Serial.write('\b');
+        }
+    }
+}
+
+void deleteInputCharacter() {
+    if (inputCursor >= inputLine.size()) return;
+    const auto oldLength = inputLine.size();
+    inputLine.erase(inputCursor, 1);
+    Serial.print("\r");
+    Serial.print(inputPrompt.c_str());
+    Serial.print(inputLine.c_str());
+    const auto erased = oldLength - inputLine.size();
+    for (std::size_t i = 0; i < erased; ++i) Serial.write(' ');
+    const auto backspaces = inputLine.size() - inputCursor + erased;
+    for (std::size_t i = 0; i < backspaces; ++i) Serial.write('\b');
+}
+
+void redrawInputCursor() {
+    if (protocolInputLine) return;
+    Serial.print("\r");
+    Serial.print(inputPrompt.c_str());
+    Serial.print(inputLine.c_str());
+    const auto suffix = inputLine.size() - inputCursor;
+    for (std::size_t i = 0; i < suffix; ++i) Serial.write('\b');
 }
 
 void submitInputLine() {
     const bool isProtocolRequest = protocolInputLine;
     if (inputLine.empty() && editingLineNumber > 0)
         inputLine = std::to_string(editingLineNumber);
+    if (!isProtocolRequest && !inputLine.empty() &&
+        (!uiPresenter || !uiPresenter->active()))
+        lastSubmittedLine = inputLine;
     Serial.println();
     if (inputLine == "@SCREEN" &&
         ql32::platform::esp32::handleMonitorTransferCommand(
@@ -222,6 +277,9 @@ void submitInputLine() {
         Serial.println("BASIC session is busy");
     }
     inputLine.clear();
+    inputCursor = 0;
+    inputPrompt.clear();
+    serialKeyDecoder.reset();
     editingLineNumber = 0;
     protocolInputLine = false;
     if (!isProtocolRequest) replPromptShown = false;
@@ -248,10 +306,51 @@ void receiveSerialCharacter(char character) {
         return;
     }
     serialSawCarriageReturn = false;
-    if (character == '\b' || character == 127) eraseInputCharacter();
-    else if ((character >= 32 && character <= 126) ||
-             (protocolInputLine && character == '\t'))
-        appendInputCharacter(character);
+    if (protocolInputLine) {
+        if (character == '\b' || character == 127) eraseInputCharacter();
+        else if ((character >= 32 && character <= 126) || character == '\t')
+            appendInputCharacter(character);
+        return;
+    }
+    const auto key = serialKeyDecoder.feed(character);
+    if (!key) return;
+    switch (key->key) {
+    case ql32::platform::esp32::SerialKey::Character:
+        appendInputCharacter(key->character);
+        break;
+    case ql32::platform::esp32::SerialKey::Backspace:
+        eraseInputCharacter();
+        break;
+    case ql32::platform::esp32::SerialKey::Delete:
+        deleteInputCharacter();
+        break;
+    case ql32::platform::esp32::SerialKey::Up:
+        if (inputLine.empty() && !lastSubmittedLine.empty()) {
+            inputLine = lastSubmittedLine;
+            inputCursor = inputLine.size();
+            Serial.print(inputLine.c_str());
+        }
+        break;
+    case ql32::platform::esp32::SerialKey::Left:
+        if (inputCursor > 0) { --inputCursor; Serial.write('\b'); }
+        break;
+    case ql32::platform::esp32::SerialKey::Right:
+        if (inputCursor < inputLine.size()) {
+            Serial.write(static_cast<std::uint8_t>(inputLine[inputCursor++]));
+        }
+        break;
+    case ql32::platform::esp32::SerialKey::Home:
+        inputCursor = 0;
+        redrawInputCursor();
+        break;
+    case ql32::platform::esp32::SerialKey::End:
+        inputCursor = inputLine.size();
+        redrawInputCursor();
+        break;
+    case ql32::platform::esp32::SerialKey::Enter:
+        submitInputLine();
+        break;
+    }
 }
 
 bool acceptsInput() {
@@ -292,10 +391,17 @@ void advanceScheduler() {
             const auto edit = scheduler->takePendingLineEdit(focused);
             if (edit) {
                 inputLine = std::move(edit->text);
+                inputCursor = inputLine.size();
                 editingLineNumber = edit->lineNumber;
             }
-            if (focused == replTask) Serial.print("> ");
-            else Serial.printf("task %llu> ", static_cast<unsigned long long>(focused));
+            if (focused == replTask) inputPrompt = "> ";
+            else {
+                char prompt[32];
+                std::snprintf(prompt, sizeof(prompt), "task %llu> ",
+                    static_cast<unsigned long long>(focused));
+                inputPrompt = prompt;
+            }
+            Serial.print(inputPrompt.c_str());
             if (edit) Serial.print(inputLine.c_str());
             replPromptShown = true;
         }

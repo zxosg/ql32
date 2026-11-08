@@ -1,0 +1,4 @@
+10 FOR i%=0 TO 320
+15 INK BAND(i%,7)
+20 LINE 320-i%,0,i%,192
+30 END FOR i%

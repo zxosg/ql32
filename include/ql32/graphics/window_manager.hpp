@@ -83,26 +83,31 @@ public:
     std::uint16_t paletteSize() const noexcept;
     ColorIndex ink() const noexcept { return ink_; }
     ColorIndex paper() const noexcept { return paper_; }
+    OverMode overMode() const noexcept { return overMode_; }
     std::size_t storageBytes() const noexcept;
 
     void setDepth(PixelDepth depth);
     void setInk(ColorIndex color);
     void setPaper(ColorIndex color);
+    void setOverMode(OverMode mode) noexcept { overMode_ = mode; }
     void clear();
     void scrollUp(std::uint32_t pixelRows);
     void setPixel(std::int32_t x, std::int32_t y, ColorIndex color);
+    void plotPixel(std::int32_t x, std::int32_t y);
     ColorIndex pixel(std::uint32_t x, std::uint32_t y) const;
     void line(Point from, Point to);
     void rectangle(Point topLeft, std::int32_t width, std::int32_t height,
                    bool filled = false);
     void circle(Point center, std::int32_t radius, bool filled = false);
     void text(Point topLeft, const std::string& value);
+    void printText(Point topLeft, const std::string& value);
     void resize(std::uint32_t width, std::uint32_t height);
 
 private:
     friend class WindowManager;
     ColorIndex readPixel(std::size_t index) const noexcept;
     void writePixel(std::size_t index, ColorIndex color) noexcept;
+    void renderText(Point topLeft, const std::string& value, bool useOverMode);
     std::uint8_t* pixelData() noexcept;
     const std::uint8_t* pixelData() const noexcept;
     IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth,
@@ -112,6 +117,7 @@ private:
     PixelDepth depth_;
     ColorIndex ink_ = 7;
     ColorIndex paper_ = 0;
+    OverMode overMode_ = OverMode::Set;
     CanvasArena* arena_ = nullptr;
     std::uint64_t arenaHandle_ = 0;
     std::vector<ColorIndex> pixels_;

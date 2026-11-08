@@ -322,6 +322,70 @@ std::size_t utf8Length(const std::string& text) {
     return count;
 }
 
+std::uint32_t firstCodePoint(std::string_view text) {
+    if (text.empty()) return 0;
+    const auto first = static_cast<unsigned char>(text[0]);
+    if (first < 0x80) return first;
+    std::size_t count = 0;
+    std::uint32_t value = 0;
+    if (first >= 0xc2 && first <= 0xdf) { count = 2; value = first & 0x1f; }
+    else if (first >= 0xe0 && first <= 0xef) { count = 3; value = first & 0x0f; }
+    else if (first >= 0xf0 && first <= 0xf4) { count = 4; value = first & 0x07; }
+    else return first;
+    if (text.size() < count) return first;
+    for (std::size_t i = 1; i < count; ++i) {
+        const auto byte = static_cast<unsigned char>(text[i]);
+        if ((byte & 0xc0) != 0x80) return first;
+        value = (value << 6) | (byte & 0x3f);
+    }
+    if ((count == 3 && value < 0x800) || (count == 4 && value < 0x10000) ||
+        value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) return first;
+    return value;
+}
+
+std::string encodeCodePoint(std::uint32_t value) {
+    std::string result;
+    if (value <= 0x7f) {
+        result.push_back(static_cast<char>(value));
+    } else if (value <= 0x7ff) {
+        result.push_back(static_cast<char>(0xc0 | (value >> 6)));
+        result.push_back(static_cast<char>(0x80 | (value & 0x3f)));
+    } else if (value <= 0xffff) {
+        result.push_back(static_cast<char>(0xe0 | (value >> 12)));
+        result.push_back(static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
+        result.push_back(static_cast<char>(0x80 | (value & 0x3f)));
+    } else {
+        result.push_back(static_cast<char>(0xf0 | (value >> 18)));
+        result.push_back(static_cast<char>(0x80 | ((value >> 12) & 0x3f)));
+        result.push_back(static_cast<char>(0x80 | ((value >> 6) & 0x3f)));
+        result.push_back(static_cast<char>(0x80 | (value & 0x3f)));
+    }
+    return result;
+}
+
+unsigned char foldAscii(unsigned char byte) {
+    return byte >= 'A' && byte <= 'Z' ? static_cast<unsigned char>(byte + ('a' - 'A')) : byte;
+}
+
+std::size_t locateString(std::string_view haystack, std::string_view needle) {
+    if (needle.empty()) return 1;
+    if (needle.size() > haystack.size()) return 0;
+    for (std::size_t start = 0; start + needle.size() <= haystack.size(); ++start) {
+        const auto lead = static_cast<unsigned char>(haystack[start]);
+        if ((lead & 0xc0) == 0x80) continue;
+        bool equal = true;
+        for (std::size_t i = 0; i < needle.size(); ++i) {
+            if (foldAscii(static_cast<unsigned char>(haystack[start + i])) !=
+                foldAscii(static_cast<unsigned char>(needle[i]))) {
+                equal = false;
+                break;
+            }
+        }
+        if (equal) return utf8Length(std::string(haystack.substr(0, start))) + 1;
+    }
+    return 0;
+}
+
 void writeText(const std::string& text, std::ostream& output, std::size_t& column) {
     output << text;
     column += utf8Length(text);
@@ -1157,6 +1221,85 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     setErrorContext(runtime::ErrorCode::None);
                     break;
                 }
+                if (instruction.name == "CODE" || instruction.name == "ASC") {
+                    const auto* text = std::get_if<std::string>(&arguments[0]);
+                    if (!text) runtimeError(instruction, "string value required");
+                    pushValue(static_cast<double>(firstCodePoint(*text)));
+                    break;
+                }
+                if (instruction.name == "CHR$") {
+                    const auto* number = std::get_if<double>(&arguments[0]);
+                    if (!number) runtimeError(instruction, "numeric character code required");
+                    if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                        *number < 0.0 || *number > 0x10ffff ||
+                        (*number >= 0xd800 && *number <= 0xdfff))
+                        runtimeError(instruction,
+                                     "CHR$ code must be a Unicode scalar value");
+                    pushValue(encodeCodePoint(static_cast<std::uint32_t>(*number)));
+                    break;
+                }
+                if (instruction.name == "LOC") {
+                    const auto* haystack = std::get_if<std::string>(&arguments[0]);
+                    const auto* needle = std::get_if<std::string>(&arguments[1]);
+                    if (!haystack || !needle)
+                        runtimeError(instruction, "string value required for LOC");
+                    pushValue(static_cast<double>(locateString(*haystack, *needle)));
+                    break;
+                }
+                if (instruction.name == "UPPER$" || instruction.name == "LOWER$") {
+                    const auto* text = std::get_if<std::string>(&arguments[0]);
+                    if (!text) runtimeError(instruction, "string value required");
+                    std::string result = *text;
+                    for (char& character : result) {
+                        const auto byte = static_cast<unsigned char>(character);
+                        if (instruction.name == "UPPER$" && byte >= 'a' && byte <= 'z')
+                            character = static_cast<char>(byte - ('a' - 'A'));
+                        else if (instruction.name == "LOWER$" && byte >= 'A' && byte <= 'Z')
+                            character = static_cast<char>(byte + ('a' - 'A'));
+                    }
+                    pushValue(std::move(result));
+                    break;
+                }
+                if (instruction.name == "STR$") {
+                    const auto* number = std::get_if<double>(&arguments[0]);
+                    if (!number) runtimeError(instruction, "numeric value required");
+                    if (!std::isfinite(*number))
+                        runtimeError(instruction, "STR$ requires a finite number");
+                    pushValue(*number == 0.0 ? std::string("0") : formatNumber(*number));
+                    break;
+                }
+                if (instruction.name == "REPT$") {
+                    const auto* text = std::get_if<std::string>(&arguments[0]);
+                    if (!text) runtimeError(instruction, "string value required");
+                    const auto* number = std::get_if<double>(&arguments[1]);
+                    if (!number) runtimeError(instruction, "numeric repeat count required");
+                    if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                        *number < 0.0)
+                        runtimeError(instruction,
+                                     "REPT$ count must be a nonnegative integer");
+                    if (text->empty() || *number == 0.0) {
+                        pushValue(std::string{});
+                        break;
+                    }
+                    const std::string empty;
+                    const auto maxCopies = empty.max_size() / text->size();
+                    if (static_cast<long double>(*number) >
+                        static_cast<long double>(maxCopies))
+                        runtimeError(instruction, "REPT$ result is too long");
+                    const auto copies = static_cast<std::size_t>(*number);
+                    std::string result;
+                    try {
+                        result.reserve(text->size() * copies);
+                        for (std::size_t i = 0; i < copies; ++i)
+                            result.append(*text);
+                    } catch (const std::bad_alloc&) {
+                        runtimeError(instruction, "REPT$ result could not be allocated");
+                    } catch (const std::length_error&) {
+                        runtimeError(instruction, "REPT$ result is too long");
+                    }
+                    pushValue(std::move(result));
+                    break;
+                }
                 if (instruction.name == "LEFT$" || instruction.name == "RIGHT$" ||
                     instruction.name == "MID$") {
                     const auto* text = std::get_if<std::string>(&arguments[0]);
@@ -1794,7 +1937,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     break;
                 }
                 if (instruction.name == "INK" || instruction.name == "PAPER" ||
-                    instruction.name == "PLOT" || instruction.name == "LINE" ||
+                    instruction.name == "OVER" || instruction.name == "PLOT" ||
+                    instruction.name == "LINE" ||
                     instruction.name == "RECT" ||
                     instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
                     instruction.name == "CLS" || instruction.name == "WINDOW" ||
@@ -1854,6 +1998,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         else
                             graphics_->setPaper(session_id_, channel,
                                 static_cast<graphics::ColorIndex>(color));
+                    } else if (instruction.name == "OVER") {
+                        const auto mode = integerArgument(0,
+                            "OVER mode must be 0 (set), 1 (clear), or 2 (invert)");
+                        if (mode < 0 || mode > 2)
+                            runtimeError(instruction,
+                                "OVER mode must be 0 (set), 1 (clear), or 2 (invert)");
+                        graphics_->setOverMode(session_id_, channel,
+                            static_cast<graphics::OverMode>(mode));
                     } else if (instruction.name == "WINDOW") {
                         const auto x = integerArgument(0, "window position out of range");
                         const auto y = integerArgument(1, "window position out of range");

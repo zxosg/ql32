@@ -99,14 +99,17 @@ constexpr Keyword keywords[] = {
 constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "IPRINT", "BUSY", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
-    "INK", "PAPER", "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "CLS", "ROTATE", "WINDOW",
+    "INK", "PAPER", "OVER", "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
+    "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
     "DEALLOC", "XFER", "PAUSE"
 };
 
 constexpr std::string_view builtinFunctions[] = {
     "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
-    "MID$", "VAL", "EVAL", "EVAL$", "BAND", "BOR", "BXOR", "BNOT", "ROL",
+    "MID$", "REPT$", "CODE", "ASC", "CHR$", "LOC", "UPPER$", "LOWER$",
+    "STR$", "VAL", "EVAL", "EVAL$",
+    "BAND", "BOR", "BXOR", "BNOT", "ROL",
     "ROR", "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
     "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
@@ -138,6 +141,10 @@ std::string commandHelpListing() {
     std::ostringstream listing;
     listing << "Shell commands:\n";
     appendHelpNames(listing, shellHelpCommands);
+    listing << "EDIT [lineNumber] opens a stored line; bare EDIT reopens the last "
+            << "edited line, or the first program line.\n";
+    listing << "DELETE lineNumber1,... atomically deletes numbered program lines; "
+            << "DELETE path$ removes a file.\n";
     listing << "BASIC statements and commands:\n";
     bool first = true;
     for (const Keyword& keyword : keywords) {
@@ -225,10 +232,14 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "ERR$") return {1, true};
     if (instruction.name == "ERRX$") return {0, true};
     if (instruction.name == "LEN") return {1, true};
+    if (instruction.name == "CODE" || instruction.name == "ASC" ||
+        instruction.name == "CHR$" || instruction.name == "UPPER$" ||
+        instruction.name == "LOWER$" || instruction.name == "STR$") return {1, true};
+    if (instruction.name == "LOC") return {2, true};
     if (instruction.name == "VAL" || instruction.name == "EVAL" ||
         instruction.name == "EVAL$") return {1, true};
     if (instruction.name == "LEFT$" || instruction.name == "RIGHT$") return {2, true};
-    if (instruction.name == "MID$") return {2, true};
+    if (instruction.name == "MID$" || instruction.name == "REPT$") return {2, true};
     if (instruction.name == "BAND" || instruction.name == "BOR" ||
         instruction.name == "BXOR" || instruction.name == "ROL" ||
         instruction.name == "ROR") return {2, true};
@@ -266,6 +277,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "DGET" || instruction.name == "DGET$") return {2, true};
     if (instruction.name == "MCARD") return {4, false};
     if (instruction.name == "INK" || instruction.name == "PAPER") return {1, false};
+    if (instruction.name == "OVER") return {1, false};
     if (instruction.name == "PLOT") return {2, false};
     if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
     if (instruction.name == "CIRCLE") return {3, false};
@@ -451,7 +463,8 @@ private:
         std::string text(source_.substr(start, offset_ - start));
         std::string upper = text;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        if (upper == "TASK" || upper == "ERR" || upper == "ERR$" || upper == "ERRX$")
+        if (upper == "TASK" || upper == "ERR" || upper == "ERR$" || upper == "ERRX$" ||
+            (upper == "LOC" && peek() == '('))
             return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
         if (upper == "OFF" || upper == "AUTO")
             return {Kind::Identifier, upper, 0, line_, column, start, text.size()};
@@ -1725,7 +1738,8 @@ private:
                 return;
             }
             const bool supportsChannelSelector =
-                name.text == "INK" || name.text == "PAPER" || name.text == "PLOT" ||
+                name.text == "INK" || name.text == "PAPER" || name.text == "OVER" ||
+                name.text == "PLOT" ||
                 name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
                 name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW" ||
@@ -2776,16 +2790,26 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         if (word == "EDIT" || word.rfind("EDIT ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(4));
             int lineNumber = 0;
-            const auto parsed = std::from_chars(argument.data(),
-                argument.data() + argument.size(), lineNumber);
-            if (argument.empty() || parsed.ec != std::errc{} ||
-                parsed.ptr != argument.data() + argument.size() ||
-                lineNumber < 1 || lineNumber > 32767)
-                throw std::runtime_error("EDIT requires a line number in 1..32767");
+            if (argument.empty()) {
+                if (lastEditedLine_ && program_.find(*lastEditedLine_) != program_.end())
+                    lineNumber = *lastEditedLine_;
+                else if (!program_.empty())
+                    lineNumber = program_.begin()->first;
+                else
+                    throw std::runtime_error("EDIT requires a stored program line");
+            } else {
+                const auto parsed = std::from_chars(argument.data(),
+                    argument.data() + argument.size(), lineNumber);
+                if (parsed.ec != std::errc{} ||
+                    parsed.ptr != argument.data() + argument.size() ||
+                    lineNumber < 1 || lineNumber > 32767)
+                    throw std::runtime_error("EDIT requires a line number in 1..32767");
+            }
             const auto line = program_.find(lineNumber);
             if (line == program_.end())
                 throw std::runtime_error("EDIT line not found: " +
                                          std::to_string(lineNumber));
+            lastEditedLine_ = lineNumber;
             pendingLineEdit_ = InteractiveLineEdit{
                 std::to_string(lineNumber) +
                     (line->second.empty() ? std::string{} : " " + line->second),
@@ -2834,6 +2858,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             systemControl_->reboot();
         } else if (word == "NEW") {
             program_.clear();
+            lastEditedLine_.reset();
             clear();
         } else if (word == "RUN") {
             clear();
@@ -2889,6 +2914,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 else candidate[number] = body;
             }
             program_.swap(candidate);
+            lastEditedLine_.reset();
             clear();
         } else if (word == "SAVE" || word.rfind("SAVE ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2925,10 +2951,54 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             runtime::EmergencyReserveLease reserve(memory_.get());
             storage_->writeTextStreamAtomic(path, source);
         } else if (word == "DELETE" || word.rfind("DELETE ", 0) == 0) {
-            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                                        "storage service unavailable");
-            const std::string path = normalizePath(parsePathValue(normalizedLine.substr(6), "DELETE"));
-            storage_->remove(path);
+            const std::string argument = trim(normalizedLine.substr(6));
+            if (!argument.empty() &&
+                (std::isdigit(static_cast<unsigned char>(argument.front())) ||
+                 argument.front() == '-')) {
+                std::vector<int> lineNumbers;
+                std::size_t offset = 0;
+                while (offset < argument.size()) {
+                    while (offset < argument.size() &&
+                           std::isspace(static_cast<unsigned char>(argument[offset])))
+                        ++offset;
+                    int number = 0;
+                    const auto parsed = std::from_chars(argument.data() + offset,
+                        argument.data() + argument.size(), number);
+                    if (parsed.ec != std::errc{} || parsed.ptr == argument.data() + offset)
+                        throw std::runtime_error("DELETE expects numbered program lines or a string path");
+                    if (number < 1 || number > 32767)
+                        throw std::runtime_error("program line number must be in 1..32767");
+                    lineNumbers.push_back(number);
+                    offset = static_cast<std::size_t>(parsed.ptr - argument.data());
+                    while (offset < argument.size() &&
+                           std::isspace(static_cast<unsigned char>(argument[offset])))
+                        ++offset;
+                    if (offset == argument.size()) break;
+                    if (argument[offset] != ',')
+                        throw std::runtime_error("DELETE line numbers must be comma-separated");
+                    ++offset;
+                    if (trim(argument.substr(offset)).empty())
+                        throw std::runtime_error("DELETE requires a line number after ','");
+                }
+
+                std::sort(lineNumbers.begin(), lineNumbers.end());
+                lineNumbers.erase(std::unique(lineNumbers.begin(), lineNumbers.end()),
+                                  lineNumbers.end());
+                auto candidate = program_;
+                for (const int number : lineNumbers) {
+                    if (candidate.erase(number) == 0)
+                        throw std::runtime_error("DELETE line not found: " +
+                                                 std::to_string(number));
+                }
+                validateProgramLines(candidate, storage_.get());
+                program_.swap(candidate);
+            } else {
+                if (!storage_)
+                    throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                "storage service unavailable");
+                const std::string path = normalizePath(parsePathValue(argument, "DELETE"));
+                storage_->remove(path);
+            }
         } else if (word == "RENAME" || word.rfind("RENAME ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");

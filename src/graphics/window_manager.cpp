@@ -247,7 +247,8 @@ IndexedCanvas::~IndexedCanvas() {
 
 IndexedCanvas::IndexedCanvas(IndexedCanvas&& other) noexcept
     : width_(other.width_), height_(other.height_), depth_(other.depth_),
-      ink_(other.ink_), paper_(other.paper_), arena_(other.arena_),
+      ink_(other.ink_), paper_(other.paper_), overMode_(other.overMode_),
+      arena_(other.arena_),
       arenaHandle_(other.arenaHandle_), pixels_(std::move(other.pixels_)) {
     other.arena_ = nullptr;
     other.arenaHandle_ = 0;
@@ -261,6 +262,7 @@ IndexedCanvas& IndexedCanvas::operator=(IndexedCanvas&& other) noexcept {
     depth_ = other.depth_;
     ink_ = other.ink_;
     paper_ = other.paper_;
+    overMode_ = other.overMode_;
     arena_ = other.arena_;
     arenaHandle_ = other.arenaHandle_;
     pixels_ = std::move(other.pixels_);
@@ -404,6 +406,25 @@ void IndexedCanvas::setPixel(std::int32_t x, std::int32_t y, ColorIndex color) {
     writePixel(static_cast<std::size_t>(y) * width_ + static_cast<std::uint32_t>(x), color);
 }
 
+void IndexedCanvas::plotPixel(std::int32_t x, std::int32_t y) {
+    if (x < 0 || y < 0 || static_cast<std::uint32_t>(x) >= width_ ||
+        static_cast<std::uint32_t>(y) >= height_) return;
+    const auto index = static_cast<std::size_t>(y) * width_ +
+                       static_cast<std::uint32_t>(x);
+    switch (overMode_) {
+    case OverMode::Set:
+        writePixel(index, ink_);
+        break;
+    case OverMode::Clear:
+        writePixel(index, paper_);
+        break;
+    case OverMode::Invert:
+        writePixel(index, static_cast<ColorIndex>((readPixel(index) ^ ink_) &
+                                                   colorMask(depth_)));
+        break;
+    }
+}
+
 ColorIndex IndexedCanvas::pixel(std::uint32_t x, std::uint32_t y) const {
     if (x >= width_ || y >= height_) throw std::out_of_range("canvas pixel is outside bounds");
     return readPixel(static_cast<std::size_t>(y) * width_ + x);
@@ -442,8 +463,7 @@ void IndexedCanvas::line(Point from, Point to) {
     const std::int64_t sy = y < endY ? 1 : -1;
     std::int64_t error = dx + dy;
     for (;;) {
-        if (x >= 0 && y >= 0 && x < width_ && y < height_)
-            writePixel(static_cast<std::size_t>(y) * width_ + static_cast<std::size_t>(x), ink_);
+        plotPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y));
         if (x == endX && y == endY) break;
         const std::int64_t twiceError = error * 2;
         if (twiceError >= dy) { error += dy; x += sx; }
@@ -467,7 +487,7 @@ void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t he
         const auto clippedBottom = std::min<std::int64_t>(height_ - 1, bottom);
         for (auto y = top; y <= clippedBottom; ++y)
             for (auto x = left; x <= clippedRight; ++x)
-                setPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), ink_);
+                plotPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y));
         return;
     }
     line(topLeft, {static_cast<std::int32_t>(right), topLeft.y});
@@ -499,7 +519,7 @@ void IndexedCanvas::circle(Point center, std::int32_t radius, bool filled) {
             const auto right = std::min<std::int64_t>(width_ - 1,
                 static_cast<std::int64_t>(center.x) + span);
             for (auto x = left; x <= right; ++x)
-                setPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), ink_);
+                plotPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y));
         }
         return;
     }
@@ -513,11 +533,11 @@ void IndexedCanvas::circle(Point center, std::int32_t radius, bool filled) {
             {center.x - x, center.y - y}, {center.x - y, center.y - x},
             {center.x + y, center.y - x}, {center.x + x, center.y - y}
         };
-        for (const auto& point : points) {
-            if (point[0] >= 0 && point[1] >= 0 && point[0] < width_ && point[1] < height_)
-                writePixel(static_cast<std::size_t>(point[1]) * width_ +
-                           static_cast<std::size_t>(point[0]), ink_);
-        }
+        for (const auto& point : points)
+            if (point[0] >= 0 && point[1] >= 0 &&
+                point[0] < width_ && point[1] < height_)
+                plotPixel(static_cast<std::int32_t>(point[0]),
+                          static_cast<std::int32_t>(point[1]));
         ++y;
         if (error < 0) error += 2 * y + 1;
         else { --x; error += 2 * (y - x + 1); }
@@ -525,6 +545,15 @@ void IndexedCanvas::circle(Point center, std::int32_t radius, bool filled) {
 }
 
 void IndexedCanvas::text(Point topLeft, const std::string& value) {
+    renderText(topLeft, value, true);
+}
+
+void IndexedCanvas::printText(Point topLeft, const std::string& value) {
+    renderText(topLeft, value, false);
+}
+
+void IndexedCanvas::renderText(Point topLeft, const std::string& value,
+                               bool useOverMode) {
     std::int64_t originX = topLeft.x;
     std::int64_t x = originX;
     std::int64_t y = topLeft.y;
@@ -546,8 +575,13 @@ void IndexedCanvas::text(Point topLeft, const std::string& value) {
                 if (px < 0 || py < 0 || px >= width_ || py >= height_) continue;
                 const bool set = column < 5 && row < 7 &&
                     (pattern[static_cast<std::size_t>(column)] & (1u << row)) != 0;
-                writePixel(static_cast<std::size_t>(py) * width_ +
-                           static_cast<std::size_t>(px), set ? ink_ : paper_);
+                if (set && useOverMode) {
+                    plotPixel(static_cast<std::int32_t>(px),
+                              static_cast<std::int32_t>(py));
+                } else {
+                    writePixel(static_cast<std::size_t>(py) * width_ +
+                               static_cast<std::size_t>(px), set ? ink_ : paper_);
+                }
             }
         }
         x += 6;
@@ -603,6 +637,7 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
     IndexedCanvas resized(width, height, depth_);
     resized.setInk(ink_);
     resized.setPaper(paper_);
+    resized.setOverMode(overMode_);
     resized.clear();
     const auto copyWidth = std::min(width_, width);
     const auto copyHeight = std::min(height_, height);

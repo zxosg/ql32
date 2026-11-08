@@ -426,6 +426,25 @@ claiming source compatibility with either dialect. See the
 [SuperBASIC string-slicing reference](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html),
 [`LEN` reference](https://superbasic-manual.readthedocs.io/en/latest/L/len.html),
 and OPL/Annex references in [docs/reference](../reference/README.md).
+`REPT$(string$, count)` returns `count` complete copies of the string, so
+`REPT$("ab", 3)` returns `"ababab"`. A zero count or empty input returns an
+empty string; negative or fractional counts are invalid. This OPL-inspired
+function is QL/32-specific and differs from SuperBASIC `FILL$`, whose second
+argument is the requested output length.
+`CODE(string$)` returns the Unicode code point of the first character, or 0
+for an empty string; `ASC` is an OPL-compatible alias. `CHR$(code)` returns
+the UTF-8 string for a Unicode scalar value (0 through 0x10FFFF, excluding
+surrogates). `LOC(haystack$, needle$)` returns the one-based code-point
+position of the first match, or 0 if absent; an empty needle returns 1. Search
+folds ASCII letter case and compares non-ASCII UTF-8 bytes exactly. These
+functions are QL/32-specific adaptations of the SuperBASIC and OPL interfaces;
+their character-code semantics do not claim compatibility with historical
+8-bit character sets.
+`UPPER$(string$)` and `LOWER$(string$)` change ASCII letters and leave all
+other UTF-8 bytes unchanged. `STR$(number)` returns the same compact numeric
+format used by `PRINT`; it accepts finite numeric values only. These are
+QL/32-specific string utilities, not OPL's width- and precision-based
+`GEN$`, `FIX$`, `NUM$`, or `SCI$` formatters.
 
 ### 32-bit integer bit functions and literals
 
@@ -488,7 +507,11 @@ function calls are bound when `RUN` compiles the complete program. Unnumbered
 statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
 interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
-`DELETE`, `RENAME`, `FORMAT`, and `CD`. `LOAD "path.bas"` accepts either
+`DELETE`, `RENAME`, `FORMAT`, and `CD`. `DELETE lineNumber1,...` atomically
+removes the listed numbered program lines and validates the result once, so a
+matching block start and end can be removed in one command. `DELETE path$`
+continues to remove a file; a quoted string or string variable is treated as a
+path. `LOAD "path.bas"` accepts either
 numbered BASIC source or unnumbered source. Unnumbered non-empty lines receive
 line numbers 10, 20, and so on in
 file order; blank lines are skipped. A file cannot mix numbered and unnumbered
@@ -523,10 +546,13 @@ session. `CD` accepts a quoted path, a string variable, or a bare path such as
 walk the directory tree, and a drive-qualified path selects its root or a
 directory on that drive.
 
-`DELETE path$` removes a file and `RENAME path$,newpath$` moves a file. Their
-paths are resolved relative to the current directory unless drive-qualified.
-Rename fails if the destination already exists; delete applies to files, not
-directories. `FORMAT path$` recursively deletes all files and subdirectories
+`DELETE lineNumber1,...` deletes the listed program lines atomically. The
+candidate program is validated once after all removals, and a failed edit
+leaves the stored program unchanged. `DELETE path$` removes a file and
+`RENAME path$,newpath$` moves a file. Their paths are resolved relative to the
+current directory unless drive-qualified. Rename fails if the destination
+already exists; file deletion applies to files, not directories. `FORMAT path$`
+recursively deletes all files and subdirectories
 inside the selected directory while leaving that directory in place. To erase
 a volume, pass its root, for example `FORMAT "SDC:/"`. Formatting is
 destructive. File commands accept quoted paths or string variables; `CD`,
@@ -638,14 +664,17 @@ channel operations. File endpoints support reads and writes; serial endpoints
 write to serial output, and null endpoints discard output. Value-returning
 operations use function syntax while `WRITE channel, text$` and `CLOSE channel`
 are statement commands. See
-[QL32-API-001](QL32-API-001.md). `EDIT linenumber` loads an existing numbered
-line into the REPL editor. On serial REPLs the line is prefilled in the input
-buffer; Enter replaces it, and clearing the buffer then pressing Enter submits
-the line number alone, deleting that line. The host stream REPL displays the
-selected line and accepts a replacement numbered line; an empty response
-deletes it. Invalid numbers and line numbers that are not in the stored program
-are rejected without changing the program. The target shell's `STOP` and,
-later, `CONT`, remain future work.
+[QL32-API-001](QL32-API-001.md). `EDIT [lineNumber]` loads a stored numbered
+line into the REPL editor. With no number, it opens the last line selected with
+`EDIT`, or the first program line when no line has been edited yet. On serial
+REPLs, Left/Right move the cursor, Home/End move to the line boundaries, and
+Backspace/Delete remove characters. Up on an empty prompt recalls the last
+submitted BASIC line. Enter replaces the line; clearing the
+buffer then pressing Enter submits the line number alone, deleting that line.
+The host stream REPL displays the selected line and accepts a replacement
+numbered line; an empty response deletes it. Invalid numbers and line numbers
+that are not in the stored program are rejected without changing the program.
+The target shell's `STOP` and, later, `CONT`, remain future work.
 
 Channels are universal session-owned I/O handles. `#0` is reserved for the
 command/error console and keyboard input; `#1` is reserved for user/program
@@ -658,6 +687,11 @@ example `PRINT #out, text$`, `LIST #out`, `PLOT #window, x, y`, or
 `CIRCLE #window, x, y, radius, 1`. `RECT` and `CIRCLE` accept an optional
 `fill` flag: omit it or use `0` for an outline, or use `1` for a solid shape.
 `PLOT` draws one pixel in the selected window's current ink color. Unqualified
+`OVER mode` selects how covered pixels are written by graphics commands:
+`0` sets pixels to `INK`, `1` clears them to `PAPER`, and `2` XORs the existing
+palette index with `INK`. `OVER` applies to `PLOT`, `LINE`, `RECT`, `CIRCLE`,
+and graphics `TEXT`; it does not affect `PRINT`. Its state belongs to the
+selected graphics channel and defaults to `0`.
 graphics commands use the current graphics output default; channel-qualified
 graphics commands use a `#channel` selector. The clear command accepts
 `CLS`, `CLS #channel`, `CLS ink,paper`, or `CLS #channel,ink,paper`; the color

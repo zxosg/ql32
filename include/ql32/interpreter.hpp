@@ -135,6 +135,7 @@ private:
     // represent. No channel-to-channel route chains are retained.
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;
     std::map<int, std::string> program_;
+    std::optional<int> lastEditedLine_;
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;
     std::shared_ptr<runtime::ChannelService> channels_;

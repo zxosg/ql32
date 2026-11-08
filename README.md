@@ -26,7 +26,7 @@ targets.
 
 The host CLI includes expressions, structured blocks, procedures, functions,
 locals, arrays, `SELect ON`, numbered-line commands (`LIST`, `RUN`, `NEW`,
-`LOAD`, `SAVE`, `DIR`, `CD`, `DELETE`, `RENAME`, and `FORMAT`), and a persistent
+`LOAD`, `SAVE`, `DIR`, `CD`, `DELETE` for lines or files, `RENAME`, and `FORMAT`), and a persistent
 terminal REPL. `CD` maintains a per-session current directory; file commands
 accept relative paths, including `.` and `..`. `FORMAT` recursively clears a
 selected directory, including a drive root. The M2 host slice
@@ -173,7 +173,7 @@ environment explicitly when uploading:
 ```bash
 pio run -e lilygo_vga32 -t upload
 pio run -e olimex_esp32_sbc_fabgl -t upload
-pio run -e esp32_2432s028 -t upload
+pio run -e esp32_2432s028_spiffs -t upload
 ```
 
 ### Serial file transfer

@@ -17,3 +17,7 @@ runtime services, and UI independent of a particular board or graphics library.
 - Add tests with each language or VM behavior change.
 - Keep compatibility claims explicit: SMSQ/E-compatible behavior requires a reference and a conformance test; otherwise label it QL/32-specific.
 
+## Board preference
+
+- For CYD work, use the `esp32_2432s028_spiffs` profile. It mounts internal SPIFFS as `FFS:` at boot; do not switch to the SD-only profile unless explicitly requested.
+
