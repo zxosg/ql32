@@ -169,6 +169,13 @@ public:
     virtual void writeText(SessionId session, const std::string& value) {
         text(session, {0, 0}, value);
     }
+    virtual void writeText(SessionId session, ChannelId channel,
+                           const std::string& value) {
+        (void)channel;
+        writeText(session, value);
+    }
+    virtual bool setTextPosition(SessionId, ChannelId, std::uint32_t,
+                                 std::uint32_t) { return false; }
     virtual void clear(SessionId session) = 0;
     virtual void clear(SessionId session, ChannelId channel) {
         (void)channel;

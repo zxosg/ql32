@@ -19,7 +19,7 @@ enum class Op {
     Push, Load, Store, Add, Subtract, Multiply, Divide, IntegerDivide, Modulo,
     Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     And, Or, Xor, Negate, Not, PrintBegin, PrintChannel, PrintStyle, Print, PrintSeparator, PrintEnd,
-    ChannelDefault, ChannelRoute, ChannelSeek, ChannelRead, ChannelWrite, Input, JumpIfFalse, Jump,
+    ChannelDefault, ChannelRoute, ChannelSeek, ChannelRead, ChannelWrite, At, Input, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
     DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd,
     Pause

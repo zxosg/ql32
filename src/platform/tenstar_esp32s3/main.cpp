@@ -485,6 +485,10 @@ void setup() {
     graphics->setConsoleClearCallback([] {
         if (tftConsole) tftConsole->clear();
     });
+    graphics->setConsoleTextPositionCallback([](std::uint32_t row,
+                                                 std::uint32_t column) {
+        if (tftConsole) tftConsole->setTextPosition(row, column);
+    });
 
     const bool storageReady = SPIFFS.begin(true);
     if (storageReady && !SPIFFS.exists("/supervisor"))

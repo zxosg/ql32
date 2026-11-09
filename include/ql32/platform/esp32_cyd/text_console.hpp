@@ -20,6 +20,7 @@ class TftTextConsole final : public std::streambuf {
 public:
     explicit TftTextConsole(Adafruit_ILI9341& display);
     void clear();
+    void setTextPosition(std::uint32_t row, std::uint32_t column);
     void reconfigure();
     void setBounds(graphics::Rect bounds);
     void setColors(graphics::ColorIndex ink, graphics::ColorIndex paper);
@@ -42,6 +43,8 @@ private:
     std::deque<std::string> lines_;
     std::size_t visibleRows_;
     std::size_t columns_;
+    std::size_t cursorRow_ = 0;
+    std::size_t cursorColumn_ = 0;
     std::int16_t firstRowY_;
     std::int16_t firstColumnX_;
     graphics::Rect bounds_{};

@@ -47,7 +47,7 @@ using detail::SelectItemSpec;
 
 enum class Kind {
     End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
-    Print, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
+    Print, At, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
     Select, On, Remainder, Remark,
     For, To, Step, Next, Repeat, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
@@ -75,7 +75,8 @@ struct Keyword {
 };
 
 constexpr Keyword keywords[] = {
-    {"PRINT", "PRINT", Kind::Print, "PRINT"}, {"DIM", "DIM", Kind::Dim, "DIM"},
+    {"PRINT", "PRINT", Kind::Print, "PRINT"}, {"AT", "AT", Kind::At, "AT"},
+    {"DIM", "DIM", Kind::Dim, "DIM"},
     {"SELECT", "SEL", Kind::Select, "SELect"}, {"ON", "ON", Kind::On, "ON"},
     {"REMARK", "REM", Kind::Remark, "REMark"},
     {"GO", "GO", Kind::Go, "GO"}, {"GOTO", "GOTO", Kind::Goto, "GOTO"},
@@ -1532,6 +1533,22 @@ private:
             return;
         }
         if (check(Kind::If)) { blockIf(); return; }
+        if (match(Kind::At)) {
+            const Token keyword = previous();
+            Instruction instruction{Op::At, 0.0, {}, keyword.line, keyword.column};
+            if (match(Kind::Hash)) {
+                expression();
+                instruction.channelArgument = true;
+                if (!match(Kind::Comma)) error(peek(), "expected ',' after AT channel");
+            }
+            expression(); // row
+            if (!match(Kind::Comma)) error(peek(), "expected ',' between AT row and column");
+            expression(); // column
+            if (!commandArgumentTerminator())
+                error(peek(), "expected end of statement after AT position");
+            code_.push_back(std::move(instruction));
+            return;
+        }
         if (check(Kind::Go) || check(Kind::Goto)) { gotoStatement(); return; }
         if (check(Kind::For)) { blockFor(); return; }
         if (check(Kind::Repeat)) { blockRepeat(); return; }
@@ -1553,6 +1570,7 @@ private:
             const Token marker = previous();
             expression();
             if (!check(Kind::Identifier) &&
+                !check(Kind::At) &&
                 !(check(Kind::BuiltinFunction) && peek().text == "IN") &&
                 !(check(Kind::BuiltinCommand) && peek().text == "OUT"))
                 error(peek(), "expected AT, IN, or OUT after channel handle");

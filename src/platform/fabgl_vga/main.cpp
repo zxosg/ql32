@@ -107,7 +107,14 @@ public:
     void clear() {
         lines_.clear();
         lines_.emplace_back();
+        cursorRow_ = cursorColumn_ = 0;
         redraw(true);
+    }
+
+    void setTextPosition(std::uint32_t row, std::uint32_t column) {
+        cursorRow_ = std::min<std::size_t>(row, rows_ - 1);
+        cursorColumn_ = std::min<std::size_t>(column, columns_ - 1);
+        while (lines_.size() <= cursorRow_) lines_.emplace_back();
     }
 
     void restoreOverlay(ql32::graphics::Rect region) {
@@ -149,25 +156,38 @@ public:
             const unsigned char character = static_cast<unsigned char>(data[index]);
             if (character == '\r') continue;
             if (character == '\n') {
-                lines_.emplace_back();
-                if (lines_.size() > rows_) lines_.pop_front();
+                cursorColumn_ = 0;
+                if (++cursorRow_ >= rows_) {
+                    cursorRow_ = rows_ - 1;
+                    lines_.pop_front();
+                    lines_.emplace_back();
+                } else if (lines_.size() <= cursorRow_) lines_.emplace_back();
                 changed = true;
                 continue;
             }
             if (character == '\b' || character == 127) {
-                if (!lines_.back().empty()) {
-                    lines_.back().pop_back();
+                if (cursorColumn_ > 0) {
+                    --cursorColumn_;
+                    if (cursorRow_ < lines_.size() &&
+                        cursorColumn_ < lines_[cursorRow_].size())
+                        lines_[cursorRow_][cursorColumn_] = ' ';
                     changed = true;
                 }
                 continue;
             }
             if (character < 32 || character >= 127) continue;
-            if (lines_.back().size() >= columns_) {
-                lines_.emplace_back();
-                if (lines_.size() > rows_) lines_.pop_front();
-                changed = true;
+            if (cursorColumn_ >= columns_) {
+                cursorColumn_ = 0;
+                if (++cursorRow_ >= rows_) {
+                    cursorRow_ = rows_ - 1;
+                    lines_.pop_front();
+                    lines_.emplace_back();
+                } else if (lines_.size() <= cursorRow_) lines_.emplace_back();
             }
-            lines_.back().push_back(static_cast<char>(character));
+            while (lines_.size() <= cursorRow_) lines_.emplace_back();
+            auto& line = lines_[cursorRow_];
+            while (line.size() <= cursorColumn_) line.push_back(' ');
+            line[cursorColumn_++] = static_cast<char>(character);
             changed = true;
         }
         if (changed) redraw(false);
@@ -223,6 +243,8 @@ private:
     std::deque<std::string> lines_;
     std::size_t columns_ = 1;
     std::size_t rows_ = consoleRows;
+    std::size_t cursorRow_ = 0;
+    std::size_t cursorColumn_ = 0;
     int firstRowY_ = 0;
     ql32::graphics::Rect bounds_{};
     std::uint8_t ink_ = consoleInk;
@@ -723,6 +745,10 @@ void setup() {
         screenConsole.setColors(ink, paper);
     });
     graphics->setConsoleClearCallback([] { screenConsole.clear(); });
+    graphics->setConsoleTextPositionCallback([](std::uint32_t row,
+                                                 std::uint32_t column) {
+        screenConsole.setTextPosition(row, column);
+    });
 
     ps2.begin(fabgl::PS2Preset::KeyboardPort0);
     if (auto* keyboard = fabgl::PS2Controller::keyboard()) {

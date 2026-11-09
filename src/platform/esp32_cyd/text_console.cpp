@@ -127,11 +127,18 @@ void TftTextConsole::composePaletteRegionRow(
 void TftTextConsole::clear() {
     lines_.clear();
     lines_.emplace_back();
+    cursorRow_ = cursorColumn_ = 0;
     if (invalidate_) { invalidate_(bounds_); return; }
     display_.fillRect(firstColumnX_, firstRowY_,
                       static_cast<std::int16_t>(bounds_.width),
                       static_cast<std::int16_t>(bounds_.height),
                       backgroundColor_);
+}
+
+void TftTextConsole::setTextPosition(std::uint32_t row, std::uint32_t column) {
+    cursorRow_ = std::min<std::size_t>(row, visibleRows_ - 1);
+    cursorColumn_ = std::min<std::size_t>(column, columns_ - 1);
+    while (lines_.size() <= cursorRow_) lines_.emplace_back();
 }
 
 TftTextConsole::int_type TftTextConsole::overflow(int_type character) {
@@ -158,11 +165,13 @@ void TftTextConsole::put(char character) {
     if (static_cast<unsigned char>(character) < 32 ||
         static_cast<unsigned char>(character) >= 127)
         character = '?';
-    if (lines_.back().size() >= columns_) advanceLine();
-    lines_.back().push_back(character);
-
-    const auto row = lines_.size() - 1;
-    const auto column = lines_.back().size() - 1;
+    if (cursorColumn_ >= columns_) advanceLine();
+    while (lines_.size() <= cursorRow_) lines_.emplace_back();
+    auto& line = lines_[cursorRow_];
+    while (line.size() <= cursorColumn_) line.push_back(' ');
+    line[cursorColumn_] = character;
+    const auto row = cursorRow_;
+    const auto column = cursorColumn_++;
     if (invalidate_) {
         invalidate_({firstColumnX_ + static_cast<std::int32_t>(column * characterWidth),
                      firstRowY_ + static_cast<std::int32_t>(row * characterHeight),
@@ -177,10 +186,14 @@ void TftTextConsole::put(char character) {
 }
 
 void TftTextConsole::advanceLine() {
-    lines_.emplace_back();
-    if (lines_.size() > visibleRows_) {
+    cursorColumn_ = 0;
+    if (++cursorRow_ >= visibleRows_) {
+        cursorRow_ = visibleRows_ - 1;
         lines_.pop_front();
+        lines_.emplace_back();
         redraw();
+    } else if (lines_.size() <= cursorRow_) {
+        lines_.emplace_back();
     }
 }
 

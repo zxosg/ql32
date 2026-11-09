@@ -243,14 +243,38 @@ void WindowedService::text(SessionId session, ChannelId channel, Point topLeft,
 }
 
 void WindowedService::writeText(SessionId session, const std::string& value) {
-    const SurfaceKey key{session, 1};
+    writeText(session, 1, value);
+}
+
+bool WindowedService::setTextPosition(SessionId session, ChannelId channel,
+                                      std::uint32_t row, std::uint32_t column) {
+    if (channel == 0) {
+        if (!consoleTextPositionCallback_) return false;
+        consoleTextPositionCallback_(row, column);
+        return true;
+    }
+    const auto info = windowInfo(session, channel);
+    const auto columns = std::max<std::uint32_t>(1, info.width / 6);
+    const auto rows = std::max<std::uint32_t>(1, info.height / 8);
+    const auto boundedColumn = std::min(column, columns - 1);
+    const auto boundedRow = std::min(row, rows - 1);
+    textCursors_[{session, channel}] = {
+        static_cast<std::int32_t>(boundedColumn * 6),
+        static_cast<std::int32_t>(boundedRow * 8)};
+    return true;
+}
+
+void WindowedService::writeText(SessionId session, ChannelId channel,
+                                const std::string& value) {
+    if (channel == 0) return;
+    const SurfaceKey key{session, channel};
     auto& cursor = textCursors_[key];
-    const auto info = windowInfo(session);
+    const auto info = windowInfo(session, channel);
     const auto columns = std::max<std::uint32_t>(1, info.width / 6);
     const auto rows = std::max<std::uint32_t>(1, info.height / 8);
     const auto maxX = static_cast<std::int32_t>(columns * 6);
     const auto maxY = static_cast<std::int32_t>(rows * 8);
-    const auto id = ensureWindow(session, 1);
+    const auto id = ensureWindow(session, channel);
     const auto& bounds = manager_.windowState(id).bounds;
     auto& target = manager_.canvas(id);
     Rect dirty{};

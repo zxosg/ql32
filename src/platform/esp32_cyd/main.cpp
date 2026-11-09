@@ -485,6 +485,10 @@ void setup() {
     graphics->setConsoleClearCallback([] {
         if (tftConsole) tftConsole->clear();
     });
+    graphics->setConsoleTextPositionCallback([](std::uint32_t row,
+                                                 std::uint32_t column) {
+        if (tftConsole) tftConsole->setTextPosition(row, column);
+    });
 
 #if defined(QL32_CYD_USE_SPIFFS)
     sdBus.begin(ql32::boards::esp32_2432s028::sdSck,

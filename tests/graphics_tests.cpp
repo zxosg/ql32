@@ -122,6 +122,17 @@ public:
     void text(SessionId session, Point topLeft, const std::string& value) override {
         events.push_back({"TEXT", session, topLeft, {}, 0, 0, value});
     }
+    void writeText(SessionId session, ChannelId channel,
+                   const std::string& value) override {
+        events.push_back({"PRINT_TEXT", session, {}, {}, 0, 0, value, channel});
+    }
+    bool setTextPosition(SessionId session, ChannelId channel,
+                         std::uint32_t row, std::uint32_t column) override {
+        events.push_back({"AT", session,
+            {static_cast<std::int32_t>(row), static_cast<std::int32_t>(column)},
+            {}, 0, 0, {}, channel});
+        return true;
+    }
     void clear(SessionId session) override {
         events.push_back({"CLS", session});
     }
@@ -1072,6 +1083,72 @@ void testCloseWindowCommandDispatch() {
             "CLOSEWINDOW command was not dispatched");
 }
 
+void testAtPositionsDefaultAndOpenedScreenChannels() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(nullptr);
+    ql32::Interpreter interpreter({}, channels, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "AT 5,10\n"
+        "PRINT \"default\"\n"
+        "wchan=OPEN(4)\n"
+        "AT #wchan,2,7\n"
+        "PRINT #wchan,\"window\"\n"
+        "AT #0,3,4\n"
+        "PRINT #0,\"console\"\n", output);
+    const auto atEvents = std::count_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) { return event.name == "AT"; });
+    const auto windowPrint = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) {
+            return event.name == "PRINT_TEXT" && event.channel == 2 &&
+                   event.text == "window";
+        });
+    const auto defaultAt = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) {
+            return event.name == "AT" && event.channel == 1 &&
+                   event.first.x == 5 && event.first.y == 10;
+        });
+    const auto windowAt = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) {
+            return event.name == "AT" && event.channel == 2 &&
+                   event.first.x == 2 && event.first.y == 7;
+        });
+    const auto consoleAt = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) {
+            return event.name == "AT" && event.channel == 0 &&
+                   event.first.x == 3 && event.first.y == 4;
+        });
+    require(atEvents == 3 && defaultAt != graphics->events.end() &&
+                windowAt != graphics->events.end() && consoleAt != graphics->events.end() &&
+                windowPrint != graphics->events.end(),
+            "AT did not preserve row/column order and route each screen channel");
+}
+
+void testScreenPrintPositionsArePerChannelAndSeparateFromText() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(80, 64, presenter);
+    graphics->setDefaultWindowBounds(2, {0, 0, 32, 40});
+    graphics->setDefaultWindowBounds(3, {40, 0, 32, 40});
+    require(graphics->setTextPosition(9, 2, 2, 1),
+            "screen channel rejected AT position");
+    require(graphics->setTextPosition(9, 3, 0, 4),
+            "second screen channel rejected AT position");
+    graphics->text(9, 2, {24, 24}, "B");
+    graphics->writeText(9, 2, "A");
+    graphics->writeText(9, 3, "C");
+    const auto hasInk = [&](std::uint32_t x, std::uint32_t y) {
+        for (std::uint32_t row = y; row < y + 7; ++row)
+            for (std::uint32_t column = x; column < x + 5; ++column)
+                if (presenter->lastFrame.pixels[row * presenter->lastFrame.width + column] == 7)
+                    return true;
+        return false;
+    };
+    require(hasInk(6, 16), "AT did not position PRINT at the requested cell");
+    require(hasInk(24, 24), "TEXT pixel positioning did not draw independently");
+    require(hasInk(64, 0), "second screen channel did not retain its own PRINT position");
+    require(!hasInk(24, 0), "TEXT changed the independent PRINT position");
+}
+
 } // namespace
 
 int main() {
@@ -1103,4 +1180,6 @@ int main() {
     testEveryPrintableAsciiCharacterHasAGlyph();
     testTextCellsFillCharacterGapsWithPaper();
     testCloseWindowCommandDispatch();
+    testAtPositionsDefaultAndOpenedScreenChannels();
+    testScreenPrintPositionsArePerChannelAndSeparateFromText();
 }

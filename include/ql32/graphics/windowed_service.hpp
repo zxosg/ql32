@@ -49,6 +49,10 @@ public:
     void text(SessionId session, ChannelId channel, Point topLeft,
               const std::string& value) override;
     void writeText(SessionId session, const std::string& value) override;
+    void writeText(SessionId session, ChannelId channel,
+                   const std::string& value) override;
+    bool setTextPosition(SessionId session, ChannelId channel,
+                         std::uint32_t row, std::uint32_t column) override;
     void clear(SessionId session) override;
     void clear(SessionId session, ChannelId channel) override;
     void closeWindow(SessionId session) override;
@@ -85,6 +89,10 @@ public:
     }
     void setConsoleClearCallback(std::function<void()> callback) {
         consoleClearCallback_ = std::move(callback);
+    }
+    void setConsoleTextPositionCallback(
+        std::function<void(std::uint32_t, std::uint32_t)> callback) {
+        consoleTextPositionCallback_ = std::move(callback);
     }
     void setWindowPixelDepth(SessionId session, PixelDepth depth);
     void setWindowVisible(SessionId session, bool visible);
@@ -137,6 +145,7 @@ private:
     std::function<void(Rect)> consoleBoundsCallback_;
     std::function<void(ColorIndex, ColorIndex)> consoleColorsCallback_;
     std::function<void()> consoleClearCallback_;
+    std::function<void(std::uint32_t, std::uint32_t)> consoleTextPositionCallback_;
     Frame frame_;
     std::uint16_t rotationDegrees_ = 0;
     UpdateMode updateMode_ = UpdateMode::Auto;

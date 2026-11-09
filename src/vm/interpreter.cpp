@@ -126,6 +126,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::PrintSeparator:
         case Op::PrintEnd:
         case Op::PrintBegin:
+        case Op::At:
         case Op::ChannelDefault:
         case Op::ChannelRoute:
         case Op::ChannelSeek:
@@ -230,6 +231,9 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             break;
         case Op::ChannelWrite:
             consumed = 3;
+            break;
+        case Op::At:
+            consumed = 2 + static_cast<std::size_t>(instruction.channelArgument);
             break;
         case Op::Input:
             consumed = static_cast<std::size_t>(instruction.expectsValue) +
@@ -473,6 +477,7 @@ const char* opcodeName(Op op) {
     case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
     case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
     case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Input: return "INPUT";
+    case Op::At: return "AT";
     case Op::Pause: return "PAUSE";
     case Op::JumpIfFalse: return "JUMP_IF_FALSE"; case Op::Jump: return "JUMP";
     case Op::ForInit: return "FOR_INIT"; case Op::ForNext: return "FOR_NEXT";
@@ -723,7 +728,17 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             state.printChannelColumn += utf8Length(text);
         } else {
             if (!channels_) runtimeError(at, "channel output is unavailable");
-            channels_->write(session_id_, state.printChannel, text);
+            const auto opened = channels_->listOpen(session_id_);
+            const auto endpoint = std::find_if(opened.begin(), opened.end(),
+                [&](const runtime::ChannelInfo& info) {
+                    return info.handle == state.printChannel;
+                });
+            if (endpoint != opened.end() && endpoint->type == runtime::ChannelType::Window) {
+                if (!graphics_) runtimeError(at, "screen output is unavailable");
+                graphics_->writeText(session_id_, state.printChannel, text);
+            } else {
+                channels_->write(session_id_, state.printChannel, text);
+            }
         }
     };
     auto printColumn = [&]() -> std::size_t& {
@@ -2809,6 +2824,45 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         case Op::PrintBegin:
             state.printChannel = resolveChannel(default_output_channel_);
             break;
+        case Op::At: {
+            const double columnValue = numeric(pop(), instruction);
+            const double rowValue = numeric(pop(), instruction);
+            double channelValue = static_cast<double>(resolveChannel(default_output_channel_));
+            if (instruction.channelArgument) channelValue = numeric(pop(), instruction);
+            const auto validCoordinate = [](double value) {
+                return std::isfinite(value) && std::trunc(value) == value && value >= 0 &&
+                    value <= static_cast<double>(std::numeric_limits<std::uint32_t>::max());
+            };
+            if (!validCoordinate(rowValue) || !validCoordinate(columnValue))
+                runtimeError(instruction, "AT row and column must be nonnegative integers");
+            if (!std::isfinite(channelValue) || std::trunc(channelValue) != channelValue ||
+                channelValue < 0 || channelValue > 9007199254740991.0)
+                runtimeError(instruction, "AT channel must be a nonnegative integer");
+            const auto channel = resolveChannel(static_cast<runtime::ChannelId>(channelValue));
+            bool screenChannel = channel == 0 || channel == 1;
+            if (channel > 1 && channels_) {
+                const auto opened = channels_->listOpen(session_id_);
+                const auto endpoint = std::find_if(opened.begin(), opened.end(),
+                    [&](const runtime::ChannelInfo& info) { return info.handle == channel; });
+                screenChannel = endpoint != opened.end() &&
+                    endpoint->type == runtime::ChannelType::Window;
+            }
+            if (!screenChannel)
+                runtimeError(instruction, "AT supports only console and screen channels");
+            const bool positioned = graphics_ && graphics_->setTextPosition(session_id_,
+                channel, static_cast<std::uint32_t>(rowValue),
+                static_cast<std::uint32_t>(columnValue));
+            if (!positioned && channel == 0) {
+                output << "\x1b[" << (static_cast<std::uint32_t>(rowValue) + 1)
+                       << ';' << (static_cast<std::uint32_t>(columnValue) + 1) << 'H';
+                output_column_ = static_cast<std::size_t>(columnValue);
+            } else if (!positioned) {
+                runtimeError(instruction, "screen positioning is unavailable");
+            }
+            if (channel == 0) output_column_ = static_cast<std::size_t>(columnValue);
+            else state.printChannelColumn = static_cast<std::size_t>(columnValue);
+            break;
+        }
         case Op::PrintChannel: {
             const double channel = numeric(pop(), instruction);
             if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
