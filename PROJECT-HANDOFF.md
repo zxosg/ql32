@@ -202,6 +202,8 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    Keep the debug bar available for heap/task observation. QMI8658C, BMP280,
    and RGB LED support remain deferred by user decision.
 4. **Other backlog:** scope palette changes, task-window management, BASIC
+   random-number support (`RND()`, `RND(value)`, `RND(low,high)`, and
+   `RANDOMIZE seed`),
    system/build/platform and capability introspection,
    enhanced `DIR` output with optional file sizes and `<subdir>` directory
    labels, `DATA`/`READ`/`RESTORE` statements, string splitting, indirect

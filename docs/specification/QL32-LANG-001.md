@@ -184,6 +184,29 @@ which is useful when converting drawing positions to pixel coordinates. These
 functions are available for later language slices and are not part of the M1
 compatibility claim.
 
+### Planned random-number functions (not implemented)
+
+The planned QL/32 random-number interface is:
+
+```basic
+RND()                 REM real value in [0, 1)
+RND(value)            REM real value in [0, value)
+RND(low, high)        REM real value in [low, high)
+RANDOMIZE seed        REM seed the current session's generator
+```
+
+The lower endpoint is included and the upper endpoint is excluded. Thus
+`RND(2, 5)` may return `2`, but never `5`. `RND(low, high)` is the comma-form
+equivalent of the Minerva/SMSQ-style `RND(low TO high)` range; the `TO` spelling
+is not part of the planned QL/32 syntax, so the existing comma-separated
+function-call parser can be retained. `RND()` accepts an empty argument list.
+`RANDOMIZE` is a statement command without parentheses and takes a seed.
+
+The generator state is per BASIC session; `RANDOMIZE seed` resets that
+session's sequence. Exact seed type/range and behavior for zero, negative, or
+equal bounds remain to be specified during implementation. This feature is
+planned and does not yet make a compatibility claim for Minerva or SMSQ/E.
+
 `VAL(string$)` converts a complete decimal numeric value, including exponent
 notation, to the selected numeric precision. Leading and trailing whitespace
 is ignored; trailing nonnumeric text, expression syntax, and non-finite values
