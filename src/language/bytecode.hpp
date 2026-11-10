@@ -19,7 +19,8 @@ enum class Op {
     Push, Load, Store, Add, Subtract, Multiply, Divide, IntegerDivide, Modulo,
     Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     And, Or, Xor, Negate, Not, PrintBegin, PrintChannel, PrintStyle, Print, PrintSeparator, PrintEnd,
-    ChannelDefault, ChannelRoute, ChannelSeek, ChannelRead, ChannelWrite, At, Input, JumpIfFalse, Jump,
+    ChannelDefault, ChannelRoute, ChannelSeek, ChannelRead, ChannelWrite, At, Read, Restore, Stop,
+    Input, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
     DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd,
     Pause
@@ -183,6 +184,11 @@ struct FunctionMetadata {
     std::vector<std::string> locals;
 };
 
+struct DataItem {
+    std::size_t address = 0;
+    int basicLine = 0;
+};
+
 // Chunked instruction storage keeps bytecode growth from requiring one large
 // contiguous allocation on memory-constrained targets.
 struct InstructionSequence : std::deque<Instruction> {
@@ -191,6 +197,7 @@ struct InstructionSequence : std::deque<Instruction> {
     std::unordered_map<std::string, FunctionMetadata> functions;
     std::unordered_map<std::string, std::size_t> arrays;
     std::unordered_map<std::string, Value> constants;
+    std::vector<DataItem> dataItems;
 };
 
 InstructionSequence compileSource(const std::string& source);

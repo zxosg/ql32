@@ -141,6 +141,9 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::ChannelSeek:
         case Op::ChannelRead:
         case Op::ChannelWrite:
+        case Op::Read:
+        case Op::Restore:
+        case Op::Stop:
         case Op::Input:
         case Op::Pause:
         case Op::Return:
@@ -244,6 +247,11 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::At:
             consumed = 2 + static_cast<std::size_t>(instruction.channelArgument);
             break;
+        case Op::Restore:
+            break;
+        case Op::Read:
+            consumed = instruction.rank;
+            break;
         case Op::Input:
             consumed = static_cast<std::size_t>(instruction.expectsValue) +
                        static_cast<std::size_t>(instruction.channelArgument) +
@@ -293,6 +301,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::PrintEnd:
         case Op::PrintBegin:
         case Op::SelectEnd:
+        case Op::Stop:
             break;
         }
         if (depth < consumed) invalid(instruction, "operand stack underflow");
@@ -318,12 +327,14 @@ void verifyBytecode(const detail::InstructionSequence& code) {
 
 double numeric(const Value& value, const Instruction& at) {
     if (const auto* number = std::get_if<double>(&value)) return *number;
-    throw std::runtime_error("line " + std::to_string(at.line) + ", column " +
+    const int line = at.basicLine != 0 ? at.basicLine : at.line;
+    throw std::runtime_error("line " + std::to_string(line) + ", column " +
                              std::to_string(at.column) + ": numeric value required");
 }
 
 [[noreturn]] void runtimeError(const Instruction& at, const char* message) {
-    const std::string detail = "line " + std::to_string(at.line) + ", column " +
+    const int line = at.basicLine != 0 ? at.basicLine : at.line;
+    const std::string detail = "line " + std::to_string(line) + ", column " +
                                std::to_string(at.column) + ": " + message;
     throw runtime::Error(runtime::errorCodeForMessage(detail), detail);
 }
@@ -485,7 +496,9 @@ const char* opcodeName(Op op) {
     case Op::PrintSeparator: return "PRINT_SEPARATOR"; case Op::PrintEnd: return "PRINT_END";
     case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
     case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
-    case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Input: return "INPUT";
+    case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Read: return "READ";
+    case Op::Restore: return "RESTORE"; case Op::Stop: return "STOP";
+    case Op::Input: return "INPUT";
     case Op::At: return "AT";
     case Op::Pause: return "PAUSE";
     case Op::JumpIfFalse: return "JUMP_IF_FALSE"; case Op::Jump: return "JUMP";
@@ -566,6 +579,8 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         if (status == ExecutionStatus::Completed) {
             if (ui_) ui_->clearBusy(session_id_);
             execution_.reset();
+    } else if (status == ExecutionStatus::ProgramStopped) {
+        stoppedExecution_ = std::move(execution_);
         }
         return status;
     } catch (const std::bad_alloc&) {
@@ -615,6 +630,8 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
         if (status == ExecutionStatus::Completed) {
             if (ui_) ui_->clearBusy(session_id_);
             execution_.reset();
+        } else if (status == ExecutionStatus::ProgramStopped) {
+            stoppedExecution_ = std::move(execution_);
         }
         return status;
     } catch (const runtime::Error& error) {
@@ -724,6 +741,72 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             callFrames.back().locals[name] = std::move(value);
         else variables_[name] = std::move(value);
     };
+    auto storeDataReadValue = [&](const Instruction& at, const std::string& target,
+                                  std::size_t rank, const std::vector<double>& indices,
+                                  Value value) {
+        const auto validateValue = [&](const std::string& name, bool arrayElement) {
+            if (!name.empty() && name.back() == '$') {
+                if (!std::holds_alternative<std::string>(value))
+                    runtimeError(at, arrayElement ?
+                        "string value required for array element" : "string value required");
+            } else {
+                const double number = numeric(value, at);
+                if (!std::isfinite(number)) runtimeError(at, "numeric value must be finite");
+                if (!name.empty() && name.back() == '%' &&
+                    (std::trunc(number) != number ||
+                     number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
+                     number > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
+                    runtimeError(at, arrayElement ?
+                        "Int32 array element out of range" : "Int32 value out of range");
+                if (name.empty() || name.back() != '%')
+                    value = quantizeNumeric(number, &at);
+            }
+        };
+
+        if (rank == 0) {
+            validateValue(target, false);
+            for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
+                if (frame->dynamicEvaluation) continue;
+                const auto local = frame->locals.find(target);
+                if (local != frame->locals.end()) {
+                    local->second = std::move(value);
+                    return;
+                }
+            }
+            variables_[target] = std::move(value);
+            return;
+        }
+
+        std::string actualName = target;
+        for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
+            if (frame->dynamicEvaluation) continue;
+            const auto alias = frame->arrayAliases.find(actualName);
+            if (alias != frame->arrayAliases.end()) {
+                actualName = alias->second;
+                break;
+            }
+        }
+        const auto found = arrays.find(actualName);
+        if (found == arrays.end()) runtimeError(at, "array is not dimensioned");
+        RuntimeArray& array = found->second;
+        if (array.lengths.size() != rank || indices.size() != rank)
+            runtimeError(at, "incorrect array rank");
+        validateValue(actualName, true);
+        std::size_t offset = 0;
+        std::size_t stride = 1;
+        for (std::size_t i = rank; i-- > 0;) {
+            const double index = indices[i];
+            if (!std::isfinite(index) || std::trunc(index) != index || index < 0 ||
+                index > 2147483647.0)
+                runtimeError(at, "array index must be a nonnegative integer");
+            const auto dimensionIndex = static_cast<std::size_t>(index);
+            if (dimensionIndex >= array.lengths[i])
+                runtimeError(at, "array index out of bounds");
+            offset += dimensionIndex * stride;
+            stride *= array.lengths[i];
+        }
+        array.values[offset] = std::move(value);
+    };
     auto writePrintText = [&](const std::string& text, const Instruction& at) {
         if (state.printChannel == 0) {
             output << text;
@@ -755,9 +838,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     };
     auto resolveArrayName = [&](const Instruction& instruction) {
         std::string name = instruction.name;
-        if (!callFrames.empty()) {
-            const auto alias = callFrames.back().arrayAliases.find(name);
-            if (alias != callFrames.back().arrayAliases.end()) name = alias->second;
+        for (auto frame = callFrames.rbegin(); frame != callFrames.rend(); ++frame) {
+            if (frame->dynamicEvaluation) continue;
+            const auto alias = frame->arrayAliases.find(name);
+            if (alias != frame->arrayAliases.end()) {
+                name = alias->second;
+                break;
+            }
         }
         return name;
     };
@@ -872,6 +959,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (state.debugMode != runtime::DebugResumeMode::Continue &&
             !state.stepStarted) state.stepStarted = true;
         switch (instruction.op) {
+        case Op::Stop:
+            return ExecutionStatus::ProgramStopped;
         case Op::Call: {
             if (state.diagnosticsEnabled && !instruction.builtin) ++state.procedureCalls;
             std::vector<StackEntry> arguments(instruction.argCount);
@@ -2084,9 +2173,20 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             runtimeError(instruction, description);
                         return static_cast<std::int32_t>(value);
                     };
+                    const auto pixelArgument = [&](std::size_t index,
+                                                    const char* description) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number) runtimeError(instruction, "numeric value required");
+                        if (!std::isfinite(*number)) runtimeError(instruction, description);
+                        const double pixel = std::floor(*number);
+                        if (pixel < std::numeric_limits<std::int32_t>::min() ||
+                            pixel > std::numeric_limits<std::int32_t>::max())
+                            runtimeError(instruction, description);
+                        return static_cast<std::int32_t>(pixel);
+                    };
                     const auto pointArguments = [&]() {
-                        return graphics::Point{integerArgument(0, "pixel coordinate out of range"),
-                                               integerArgument(1, "pixel coordinate out of range")};
+                        return graphics::Point{pixelArgument(0, "pixel coordinate out of range"),
+                                               pixelArgument(1, "pixel coordinate out of range")};
                     };
                     const auto fillRequested = [&](std::size_t index) {
                         const auto fill = integerArgument(index, "fill flag must be 0 or 1");
@@ -2143,10 +2243,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         graphics_->setOverMode(session_id_, channel,
                             static_cast<graphics::OverMode>(mode));
                     } else if (instruction.name == "WINDOW") {
-                        const auto x = integerArgument(0, "window position out of range");
-                        const auto y = integerArgument(1, "window position out of range");
-                        const auto width = integerArgument(2, "window size must be positive");
-                        const auto height = integerArgument(3, "window size must be positive");
+                        const auto x = pixelArgument(0, "window position out of range");
+                        const auto y = pixelArgument(1, "window position out of range");
+                        const auto width = pixelArgument(2, "window size must be positive");
+                        const auto height = pixelArgument(3, "window size must be positive");
                         if (width <= 0 || height <= 0)
                             runtimeError(instruction, "window size must be positive");
                         graphics_->setWindowBounds(session_id_, channel,
@@ -2157,13 +2257,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } else if (instruction.name == "LINE") {
                         const auto from = pointArguments();
                         const auto to = graphics::Point{
-                            integerArgument(2, "pixel coordinate out of range"),
-                            integerArgument(3, "pixel coordinate out of range")};
+                            pixelArgument(2, "pixel coordinate out of range"),
+                            pixelArgument(3, "pixel coordinate out of range")};
                         graphics_->line(session_id_, channel, from, to);
                     } else if (instruction.name == "RECT") {
                         const auto topLeft = pointArguments();
-                        const auto width = integerArgument(2, "rectangle size must be positive");
-                        const auto height = integerArgument(3, "rectangle size must be positive");
+                        const auto width = pixelArgument(2, "rectangle size must be positive");
+                        const auto height = pixelArgument(3, "rectangle size must be positive");
                         if (width <= 0 || height <= 0)
                             runtimeError(instruction, "rectangle size must be positive");
                         if (arguments.size() > 4 && fillRequested(4))
@@ -2174,7 +2274,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                                                  topLeft, width, height);
                     } else if (instruction.name == "CIRCLE") {
                         const auto center = pointArguments();
-                        const auto radius = integerArgument(2, "circle radius must be nonnegative");
+                        const auto radius = pixelArgument(2, "circle radius must be nonnegative");
                         if (radius < 0) runtimeError(instruction, "circle radius must be nonnegative");
                         if (arguments.size() > 3 && fillRequested(3))
                             graphics_->fillCircle(session_id_, channel, center, radius);
@@ -2355,14 +2455,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     state.pendingChannelRead.reset();
                     pushValue(line ? Value(*line) : Value(std::string{}));
                 } else if (instruction.name == "EOF") {
-                    if (!channels_)
-                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                                    "channel service unavailable");
-                    const auto channel = channelArgument(0);
-                    const auto inputChannel = resolveChannel(channel);
-                    if (inputChannel <= 1)
-                        runtimeError(instruction, "selected channel does not support EOF");
-                    pushValue(channels_->atEnd(session_id_, inputChannel) ? 1.0 : 0.0);
+                    if (arguments.empty()) {
+                        pushValue(state.dataPointer >= code.dataItems.size() ? 1.0 : 0.0);
+                    } else {
+                        if (!channels_)
+                            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "channel service unavailable");
+                        const auto channel = channelArgument(0);
+                        const auto inputChannel = resolveChannel(channel);
+                        if (inputChannel <= 1)
+                            runtimeError(instruction, "selected channel does not support EOF");
+                        pushValue(channels_->atEnd(session_id_, inputChannel) ? 1.0 : 0.0);
+                    }
                 } else if (instruction.name == "WRITE") {
                     const auto channel = resolveChannel(channelArgument(0));
                     const std::string text = textArgument(1) + "\n";
@@ -2486,21 +2590,33 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             pc = frame.returnAddress;
             const bool returnsValue = frame.function;
             const bool dynamicEvaluation = frame.dynamicEvaluation;
+            const bool dataRead = frame.dataRead;
             const bool stringifyResult = frame.stringifyResult;
             const std::size_t dynamicCodeStart = frame.dynamicCodeStart;
+            const std::size_t readInstructionIndex = frame.callInstruction;
+            const std::string readTarget = frame.dataReadTarget;
+            const std::size_t readRank = frame.dataReadRank;
+            std::vector<double> readIndices = std::move(frame.dataReadIndices);
             if (dynamicEvaluation) {
                 if (stringifyResult) {
                     if (const auto* number = std::get_if<double>(&result))
                         result = formatNumber(*number);
-                } else if (!std::holds_alternative<double>(result)) {
+                } else if (!dataRead && !std::holds_alternative<double>(result)) {
                     runtimeError(instruction, "EVAL expression must return a number");
                 }
             }
             callFrames.pop_back();
-            if (dynamicEvaluation)
+            if (dynamicEvaluation && !dataRead)
                 code.erase(code.begin() + static_cast<std::ptrdiff_t>(dynamicCodeStart),
                            code.end());
-            if (returnsValue) pushValue(std::move(result));
+            if (dataRead) {
+                if (readInstructionIndex >= code.size())
+                    runtimeError(instruction, "READ continuation is invalid");
+                storeDataReadValue(code[readInstructionIndex], readTarget, readRank,
+                                   readIndices, std::move(result));
+            } else if (returnsValue) {
+                pushValue(std::move(result));
+            }
             break;
         }
         case Op::FunctionEnd:
@@ -2978,6 +3094,35 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             else state.printChannelColumn = column;
             break;
         }
+        case Op::Read: {
+            if (state.dataPointer >= code.dataItems.size())
+                runtimeError(instruction, "End of DATA");
+            std::vector<double> indices(instruction.rank);
+            for (std::size_t i = instruction.rank; i-- > 0;)
+                indices[i] = numeric(pop(), instruction);
+
+            const detail::DataItem& item = code.dataItems[state.dataPointer++];
+            if (item.address >= code.size())
+                runtimeError(instruction, "DATA expression address is invalid");
+            RuntimeFrame frame;
+            frame.returnAddress = pc;
+            frame.callInstruction = pc - 1;
+            frame.callSourceLine = instruction.line;
+            frame.callSourceColumn = instruction.column;
+            frame.callBasicLine = instruction.basicLine;
+            frame.function = true;
+            frame.dynamicEvaluation = true;
+            frame.dataRead = true;
+            frame.dataReadTarget = instruction.name;
+            frame.dataReadRank = instruction.rank;
+            frame.dataReadIndices = std::move(indices);
+            callFrames.push_back(std::move(frame));
+            pc = item.address;
+            break;
+        }
+        case Op::Restore:
+            state.dataPointer = std::min(instruction.target, code.dataItems.size());
+            break;
         case Op::PrintChannel: {
             const double channel = numeric(pop(), instruction);
             if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||

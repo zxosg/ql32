@@ -75,6 +75,130 @@ void testInterpreterSessions() {
     require(firstOutput.str() == "42\n", "interpreter did not retain its own variables");
 }
 
+void testDiagnosticsUseBasicLineNumbers() {
+    ql32::Interpreter runtimeFailure;
+    std::ostringstream output;
+    bool runtimeHasBasicLine = false;
+    try {
+        runtimeFailure.execute("100 PRINT 1 / 0\n", output);
+    } catch (const std::runtime_error& error) {
+        runtimeHasBasicLine = std::string(error.what()).find("line 100, column") !=
+                              std::string::npos;
+    }
+    require(runtimeHasBasicLine,
+            "runtime diagnostic reported source order instead of BASIC line number");
+
+    ql32::Interpreter syntaxFailure;
+    bool syntaxHasBasicLine = false;
+    try {
+        syntaxFailure.execute("240 PRINT (1 + )\n", output);
+    } catch (const std::runtime_error& error) {
+        syntaxHasBasicLine = std::string(error.what()).find("line 240, column") !=
+                             std::string::npos;
+    }
+    require(syntaxHasBasicLine,
+            "syntax diagnostic reported source order instead of BASIC line number");
+
+    ql32::Interpreter lexicalFailure;
+    bool lexicalHasBasicLine = false;
+    try {
+        lexicalFailure.execute("360 PRINT @\n", output);
+    } catch (const std::runtime_error& error) {
+        lexicalHasBasicLine = std::string(error.what()).find("line 360, column") !=
+                              std::string::npos;
+    }
+    require(lexicalHasBasicLine,
+            "lexical diagnostic reported source order instead of BASIC line number");
+}
+
+void testEmbeddedDataReadRestoreAndEof() {
+    ql32::Interpreter numbered;
+    std::ostringstream numberedOutput;
+    numbered.execute(
+        "10 x=2\n"
+        "20 DATA x*10,\"alpha\",3\n"
+        "30 x=7\n"
+        "40 READ n%,s$,value%\n"
+        "50 PRINT n%\n"
+        "60 PRINT s$\n"
+        "70 PRINT value%\n"
+        "80 PRINT EOF()\n", numberedOutput);
+    require(numberedOutput.str() == "70\nalpha\n3\n1\n",
+            "READ did not evaluate DATA expressions at read time or update EOF()");
+
+    ql32::Interpreter lineRestore;
+    std::ostringstream lineOutput;
+    lineRestore.execute(
+        "10 DATA \"one\"\n"
+        "20 DATA \"two\"\n"
+        "30 READ first$\n"
+        "40 RESTORE 20\n"
+        "50 READ second$\n"
+        "60 PRINT first$\n"
+        "70 PRINT second$\n", lineOutput);
+    require(lineOutput.str() == "one\ntwo\n",
+            "RESTORE line number did not select the first DATA item at that line");
+
+    ql32::Interpreter labelRestore;
+    std::ostringstream labelOutput;
+    labelRestore.execute(
+        "RESTORE later\n"
+        "DATA \"first\"\n"
+        "later: DATA \"second\",\"third\"\n"
+        "READ selected$\n"
+        "RESTORE\n"
+        "READ beginning$\n"
+        "PRINT selected$\n"
+        "PRINT beginning$\n"
+        "PRINT EOF()\n", labelOutput);
+    require(labelOutput.str() == "second\nfirst\n0\n",
+            "RESTORE label or bare RESTORE positioned the DATA cursor incorrectly");
+
+    ql32::Interpreter arrayRead;
+    std::ostringstream arrayOutput;
+    arrayRead.execute(
+        "DIM values%(1)\n"
+        "DATA 12,34\n"
+        "READ values%(0),values%(1)\n"
+        "PRINT values%(0)\n"
+        "PRINT values%(1)\n", arrayOutput);
+    require(arrayOutput.str() == "12\n34\n",
+            "READ did not assign items to indexed array targets");
+
+    ql32::Interpreter procedureRead;
+    std::ostringstream procedureOutput;
+    procedureRead.execute(
+        "DEFINE PROCEDURE getnext\n"
+        "  READ item$\n"
+        "END DEFINE getnext\n"
+        "DATA \"A\",\"B\"\n"
+        "getnext\n"
+        "READ item$\n"
+        "PRINT item$\n", procedureOutput);
+    require(procedureOutput.str() == "B\n",
+            "DATA pointer was not shared between main code and a procedure");
+
+    ql32::Interpreter rerun;
+    std::ostringstream rerunOutput;
+    const std::string rerunnable =
+        "READ item$\nPRINT item$\nDATA \"repeat\"\n";
+    rerun.execute(rerunnable, rerunOutput);
+    rerun.execute(rerunnable, rerunOutput);
+    require(rerunOutput.str() == "repeat\nrepeat\n",
+            "a new RUN did not reset the DATA pointer to the beginning");
+
+    bool exhaustionReported = false;
+    try {
+        ql32::Interpreter exhausted;
+        std::ostringstream ignored;
+        exhausted.execute("READ a\nDATA 1\nREAD b\n", ignored);
+    } catch (const std::runtime_error& error) {
+        exhaustionReported = std::string(error.what()).find("End of DATA") !=
+                             std::string::npos;
+    }
+    require(exhaustionReported, "READ past the end did not report End of DATA");
+}
+
 void testGotoLineNumbersAndLabels() {
     std::ostringstream output;
     ql32::Interpreter numbered;
@@ -208,6 +332,35 @@ void testDeleteProgramLinesAtomically() {
     interpreter.executeInteractive("RUN\n", runOutput);
     require(runOutput.str() == "1\n2\n",
             "outer loop did not remain executable after deleting the inner loop");
+}
+
+void testStopContinueReturnsToPromptAndResumesNextStatement() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.executeInteractive(
+        "10 DATA 7,8\n"
+        "20 READ a%: STOP: READ b%: PRINT a% ! b%\n", output);
+    interpreter.executeInteractive("RUN\n", output);
+    require(output.str().empty(), "STOP did not return before the following statement");
+
+    interpreter.executeInteractive("a%=9\n", output);
+    interpreter.executeInteractive("CONTINUE\n", output);
+    require(output.str() == "9 8\n",
+            "CONTINUE did not resume after STOP with variables and DATA position intact");
+
+    interpreter.executeInteractive("RUN\n", output);
+    require(output.str() == "9 8\n",
+            "RUN did not stop at the new run's STOP statement");
+    interpreter.executeInteractive("20 PRINT \"edited\"\n", output);
+    bool continuationRejected = false;
+    try {
+        interpreter.executeInteractive("CONTINUE\n", output);
+    } catch (const std::runtime_error& error) {
+        continuationRejected = std::string(error.what()).find("no BASIC program stopped") !=
+                               std::string::npos;
+    }
+    require(continuationRejected,
+            "CONTINUE resumed stale bytecode after the stored program changed");
 }
 
 void testHelpCommandCatalog() {
@@ -1165,10 +1318,13 @@ void testDialogMenuBasicCallsSuspendAndResume() {
 int main() {
     try {
         testInterpreterSessions();
+        testDiagnosticsUseBasicLineNumbers();
+        testEmbeddedDataReadRestoreAndEof();
         testGotoLineNumbersAndLabels();
         testCancellation();
         testAtomicProgramLineAndBlocks();
         testDeleteProgramLinesAtomically();
+        testStopContinueReturnsToPromptAndResumesNextStatement();
         testHelpCommandCatalog();
         testPersistentRepl();
         testEditStoredLineFromRepl();

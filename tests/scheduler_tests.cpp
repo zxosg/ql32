@@ -272,6 +272,29 @@ void testInteractiveSessionUsesSlicesAndKeepsReplState() {
             "interactive session lost state between REPL submissions");
 }
 
+void testStopContinueReturnsToPromptWithoutSuspendingSession() {
+    ql32::vm::SessionScheduler scheduler({}, 8);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    require(scheduler.submit(repl,
+                "10 value=7\n20 STOP\n30 PRINT value\n"),
+            "interactive session rejected program lines containing STOP");
+    for (int tick = 0; tick < 20 && scheduler.tick(); ++tick) {}
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput,
+            "program line entry did not return to the prompt");
+    require(scheduler.submit(repl, "RUN\n"), "interactive session rejected RUN");
+    for (int tick = 0; tick < 40 && scheduler.tick(); ++tick) {}
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput &&
+                output.str().empty(),
+            "STOP did not return to the prompt before the next program statement");
+    require(scheduler.submit(repl, "value=11\nCONTINUE\n"),
+            "interactive session rejected CONTINUE after a prompt command");
+    for (int tick = 0; tick < 40 && scheduler.tick(); ++tick) {}
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput &&
+                output.str() == "11\n",
+            "CONTINUE did not resume the stopped BASIC run in the same session");
+}
+
 void testEditPrefillIsDeliveredToInteractiveInputHost() {
     ql32::vm::SessionScheduler scheduler({}, 8);
     std::ostringstream output;
@@ -1297,6 +1320,7 @@ int main() {
     testUiWaitDoesNotBlockOtherSessions();
     testOptionalPagerSuspendsOnlyReplAndContinuesTail();
     testInteractiveSessionUsesSlicesAndKeepsReplState();
+    testStopContinueReturnsToPromptWithoutSuspendingSession();
     testEditPrefillIsDeliveredToInteractiveInputHost();
     testInteractiveStartupProgramSharesReplSession();
     testInteractiveSessionRecoversFromCommandErrors();

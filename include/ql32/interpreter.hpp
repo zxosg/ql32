@@ -31,7 +31,7 @@ namespace detail { struct VMExecutionState; struct UISessionState; }
 using Value = std::variant<double, std::string>;
 enum class ExecutionStatus {
     Completed, Suspended, WaitingChannel, WaitingTask, WaitingTime, Yielded, DebugPaused,
-    RunPending, InteractivePending
+    RunPending, InteractivePending, ProgramStopped
 };
 
 struct InteractiveLineEdit {
@@ -156,6 +156,7 @@ private:
     runtime::ErrorCode errorCode_ = runtime::ErrorCode::None;
     std::string errorDetail_;
     std::unique_ptr<detail::VMExecutionState> execution_;
+    std::unique_ptr<detail::VMExecutionState> stoppedExecution_;
     bool debuggerAttached_ = false;
     bool diagnosticsEnabled_ = false;
     bool traceEnabled_ = false;

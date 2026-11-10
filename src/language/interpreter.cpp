@@ -47,7 +47,7 @@ using detail::SelectItemSpec;
 
 enum class Kind {
     End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
-    Print, At, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
+    Print, At, Data, Read, Restore, Stop, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
     Select, On, Remainder, Remark,
     For, To, Step, Next, Repeat, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
@@ -76,6 +76,9 @@ struct Keyword {
 
 constexpr Keyword keywords[] = {
     {"PRINT", "PRINT", Kind::Print, "PRINT"}, {"AT", "AT", Kind::At, "AT"},
+    {"DATA", "DATA", Kind::Data, "DATA"}, {"READ", "READ", Kind::Read, "READ"},
+    {"RESTORE", "RESTORE", Kind::Restore, "RESTORE"},
+    {"STOP", "STOP", Kind::Stop, "STOP"},
     {"DIM", "DIM", Kind::Dim, "DIM"},
     {"SELECT", "SEL", Kind::Select, "SELect"}, {"ON", "ON", Kind::On, "ON"},
     {"REMARK", "REM", Kind::Remark, "REMark"},
@@ -124,7 +127,7 @@ constexpr std::string_view shellHelpCommands[] = {
     "HELP", "RUN", "LIST", "EDIT", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
     "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
-    "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "WHERE", "LOCALS", "GLOBALS",
+    "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
     "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
     "DIAGNOSTICS", "TRACE", "DEBUGBAR"
 };
@@ -162,6 +165,8 @@ std::string commandHelpListing() {
     }
     listing << '\n' << "Built-in functions:\n";
     appendHelpNames(listing, builtinFunctions);
+    listing << "STOP returns a program to the prompt; CONTINUE resumes after STOP. "
+            << "DEBUG CONTINUE resumes the attached debugger target.\n";
     listing << "Some commands require optional runtime services (storage, task control, "
             << "debugger, graphics, network, or system control).\n";
     return listing.str();
@@ -270,7 +275,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
         instruction.name == "PEEK_W" || instruction.name == "PEEK_L") return {1, true};
     if (instruction.name == "DEALLOC") return {1, false};
     if (instruction.name == "POKE_W" || instruction.name == "POKE_L") return {2, false};
-    if (instruction.name == "READ$" || instruction.name == "EOF") return {1, true};
+    if (instruction.name == "READ$") return {1, true};
+    if (instruction.name == "EOF") return {0, true};
     if (instruction.name == "WRITE") return {2, false};
     if (instruction.name == "CLOSE") return {1, false};
     if (instruction.name == "DINIT") return {0, true};
@@ -325,6 +331,7 @@ public:
                 advance();
                 ++line_;
                 column_ = 1;
+                lineStartOffset_ = offset_;
             } else if (c == '\'') {
                 skipComment();
             } else if (std::isdigit(static_cast<unsigned char>(c)) ||
@@ -374,6 +381,7 @@ public:
 private:
     std::string_view source_;
     std::size_t offset_ = 0;
+    std::size_t lineStartOffset_ = 0;
     int line_ = 1;
     int column_ = 1;
 
@@ -382,9 +390,25 @@ private:
         return offset_ + ahead < source_.size() ? source_[offset_ + ahead] : '\0';
     }
     void advance() { ++offset_; ++column_; }
+    int reportedLine() const {
+        std::size_t start = lineStartOffset_;
+        while (start < source_.size() &&
+               (source_[start] == ' ' || source_[start] == '\t' || source_[start] == '\r'))
+            ++start;
+        std::size_t end = start;
+        while (end < source_.size() &&
+               std::isdigit(static_cast<unsigned char>(source_[end])))
+            ++end;
+        if (end == start || end >= source_.size() ||
+            (source_[end] != ' ' && source_[end] != '\t')) return line_;
+        int number = 0;
+        const auto parsed = std::from_chars(source_.data() + start, source_.data() + end,
+                                            number);
+        return parsed.ec == std::errc{} && number > 0 && number <= 32767 ? number : line_;
+    }
     [[noreturn]] void fail(const char* message) const {
         throw runtime::Error(runtime::ErrorCode::Syntax,
-            "line " + std::to_string(line_) + ", column " +
+            "line " + std::to_string(reportedLine()) + ", column " +
             std::to_string(column_) + ": " + message);
     }
     Token single(Kind kind) const { return {kind, std::string(1, peek()), 0, line_, column_}; }
@@ -600,6 +624,7 @@ public:
             return {};
         }
         resolveSourceJumps(tolerateUnresolvedSourceJumps);
+        resolveDataRestores();
         resolveCalls(tolerateUnresolvedCalls);
         for (const auto& [name, definition] : definitions_) {
             code_.functions.emplace(name, detail::FunctionMetadata{
@@ -704,6 +729,37 @@ private:
             instruction.target = target->address;
         }
     }
+    void resolveDataRestores() {
+        for (Instruction& instruction : code_) {
+            if (instruction.op != Op::Restore) continue;
+            if (instruction.targetIsLineNumber) {
+                const bool hasNumberedData = std::any_of(code_.dataItems.begin(),
+                    code_.dataItems.end(), [](const detail::DataItem& item) {
+                        return item.basicLine != 0;
+                    });
+                if (!hasNumberedData)
+                    error(instruction, "RESTORE line number requires numbered DATA lines");
+                std::size_t item = 0;
+                while (item < code_.dataItems.size() &&
+                       (code_.dataItems[item].basicLine == 0 ||
+                        code_.dataItems[item].basicLine < instruction.sourceLineTarget))
+                    ++item;
+                instruction.target = item;
+                continue;
+            }
+            if (instruction.name.empty()) continue;
+
+            const auto label = labels_.find(
+                instruction.ownerDefinition.get() + "\x1f" + instruction.name);
+            if (label == labels_.end())
+                error(instruction, "RESTORE label does not exist");
+            std::size_t item = 0;
+            while (item < code_.dataItems.size() &&
+                   code_.dataItems[item].address < label->second.address)
+                ++item;
+            instruction.target = item;
+        }
+    }
 
     bool isCurrentParameter(const std::string& name) const {
         const auto definition = definitions_.find(currentDefinitionName_);
@@ -726,6 +782,10 @@ private:
         return current_ + 1 < tokens_.size() &&
                (tokens_[current_ + 1].kind == Kind::Print ||
                 tokens_[current_ + 1].kind == Kind::At ||
+                tokens_[current_ + 1].kind == Kind::Data ||
+                tokens_[current_ + 1].kind == Kind::Read ||
+                tokens_[current_ + 1].kind == Kind::Restore ||
+                tokens_[current_ + 1].kind == Kind::Stop ||
                 tokens_[current_ + 1].kind == Kind::If ||
                 tokens_[current_ + 1].kind == Kind::Else ||
                 tokens_[current_ + 1].kind == Kind::EndKeyword ||
@@ -750,12 +810,12 @@ private:
     }
     [[noreturn]] void error(const Token& token, const char* message) const {
         throw runtime::Error(runtime::ErrorCode::Syntax,
-            "line " + std::to_string(token.line) + ", column " +
+            "line " + std::to_string(currentBasicLine_ != 0 ? currentBasicLine_ : token.line) + ", column " +
             std::to_string(token.column) + ": " + message);
     }
     [[noreturn]] void error(const Instruction& instruction, const char* message) const {
         throw runtime::Error(runtime::ErrorCode::Syntax,
-            "line " + std::to_string(instruction.line) + ", column " +
+            "line " + std::to_string(instruction.basicLine != 0 ? instruction.basicLine : instruction.line) + ", column " +
             std::to_string(instruction.column) + ": " + message);
     }
     void emit(Op op, const Token& token, Value value = 0.0, std::string name = {},
@@ -776,6 +836,9 @@ private:
                 if (instruction.name == "FREE") {
                     if (passedArguments > 1)
                         error(instruction, "FREE accepts zero or one selector (0, 1, or 2)");
+                } else if (instruction.name == "EOF") {
+                    if (passedArguments > 1)
+                        error(instruction, "EOF expects zero arguments or one channel");
                 } else if (instruction.name == "RND") {
                     if (passedArguments > 2)
                         error(instruction, "RND expects zero, one, or two arguments");
@@ -836,6 +899,7 @@ private:
                 } else if (instruction.name != "IN" && instruction.name != "IOREAD" &&
                            instruction.name != "IOWRITE" && instruction.name != "POKE" &&
                            instruction.name != "OUT" && instruction.name != "XFER" &&
+                           instruction.name != "EOF" &&
                            instruction.name != "TASKVIEW" && instruction.name != "DINIT" &&
                            instruction.name != "IPRINT" && instruction.name != "BUSY" &&
                            passedArguments != arguments) {
@@ -1470,7 +1534,8 @@ private:
         statementBody(moduleScope);
         if (first < code_.size()) {
             code_[first].statementStart = true;
-            code_[first].basicLine = basicLine;
+            for (std::size_t index = first; index < code_.size(); ++index)
+                if (code_[index].basicLine == 0) code_[index].basicLine = basicLine;
         }
     }
     void statementBody(bool moduleScope) {
@@ -1545,6 +1610,106 @@ private:
             return;
         }
         if (check(Kind::If)) { blockIf(); return; }
+        if (match(Kind::Data)) {
+            const Token keyword = previous();
+            if (commandArgumentTerminator())
+                error(keyword, "DATA requires at least one item");
+            const std::size_t skipIndex = code_.size();
+            code_.push_back({Op::Jump, 0.0, {}, keyword.line, keyword.column});
+            do {
+                const std::size_t address = code_.size();
+                expression();
+                Instruction finish{Op::Return, 0.0, {}, keyword.line, keyword.column};
+                finish.expectsValue = true;
+                code_.push_back(std::move(finish));
+                code_.dataItems.push_back({address, currentBasicLine_});
+                if (!match(Kind::Comma)) break;
+                if (commandArgumentTerminator())
+                    error(peek(), "expected DATA item after ','");
+            } while (true);
+            if (!commandArgumentTerminator())
+                error(peek(), "expected end of statement after DATA items");
+            code_[skipIndex].target = code_.size();
+            return;
+        }
+        if (match(Kind::Read)) {
+            const Token keyword = previous();
+            if (commandArgumentTerminator())
+                error(keyword, "READ requires one or more variable targets");
+            while (true) {
+                if (!check(Kind::Identifier))
+                    error(peek(), "READ target must be a variable or array element");
+                const Token target = advance();
+                if (constants_.find(target.text) != constants_.end() ||
+                    isBuiltinName(target.text) || definitions_.find(target.text) != definitions_.end())
+                    error(target, "READ target is not assignable");
+
+                std::size_t rank = 0;
+                if (check(Kind::LeftParen)) {
+                    const auto array = arrays_.find(target.text);
+                    const bool parameter = isCurrentParameter(target.text);
+                    if (array == arrays_.end() && !parameter)
+                        error(target, "READ array target must be dimensioned");
+                    rank = callArguments();
+                    if (rank == 0) error(target, "READ array target needs an index");
+                    if (array != arrays_.end() && rank != array->second)
+                        error(target, "incorrect array rank");
+                    if (parameter) {
+                        auto& definition = definitions_[currentDefinitionName_];
+                        const auto found = std::find(definition.parameters.begin(),
+                                                     definition.parameters.end(), target.text);
+                        if (found != definition.parameters.end()) {
+                            auto& parameterRank = definition.parameterArrayRanks[
+                                static_cast<std::size_t>(found - definition.parameters.begin())];
+                            if (parameterRank != 0 && parameterRank != rank)
+                                error(target, "incorrect array parameter rank");
+                            parameterRank = rank;
+                        }
+                    }
+                }
+                Instruction read{Op::Read, 0.0, target.text,
+                                 keyword.line, keyword.column};
+                read.rank = rank;
+                read.ownerDefinition = currentDefinitionName_;
+                code_.push_back(std::move(read));
+
+                if (!match(Kind::Comma)) break;
+                if (commandArgumentTerminator())
+                    error(peek(), "expected READ target after ','");
+            }
+            if (!commandArgumentTerminator())
+                error(peek(), "expected end of statement after READ targets");
+            return;
+        }
+        if (match(Kind::Restore)) {
+            const Token keyword = previous();
+            Instruction restore{Op::Restore, 0.0, {}, keyword.line, keyword.column};
+            restore.ownerDefinition = currentDefinitionName_;
+            if (check(Kind::Number)) {
+                const Token line = advance();
+                if (!std::isfinite(line.number) || std::trunc(line.number) != line.number ||
+                    line.number < 0 || line.number > 32767)
+                    error(line, "RESTORE line number must be an integer in 0..32767");
+                restore.targetIsLineNumber = true;
+                restore.sourceLineTarget = static_cast<int>(line.number);
+            } else if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+                       commandArgumentTerminatorAt(current_ + 1)) {
+                restore.name = advance().text;
+            } else if (!commandArgumentTerminator()) {
+                error(peek(), "RESTORE expects a line number or label");
+            }
+            if (!commandArgumentTerminator())
+                error(peek(), "expected end of statement after RESTORE target");
+            code_.push_back(std::move(restore));
+            return;
+        }
+        if (match(Kind::Stop)) {
+            const Token keyword = previous();
+            if (!commandArgumentTerminator())
+                error(peek(), "STOP takes no arguments");
+            code_.push_back({Op::Stop, 0.0, {}, keyword.line, keyword.column});
+            return;
+        }
         if (match(Kind::At)) {
             const Token keyword = previous();
             Instruction instruction{Op::At, 0.0, {}, keyword.line, keyword.column};
@@ -2302,6 +2467,7 @@ void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
 void Interpreter::abortExecution() noexcept {
     if (ui_) ui_->cancelSession(session_id_);
     execution_.reset();
+    stoppedExecution_.reset();
     pendingRunSource_.clear();
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();
@@ -2827,6 +2993,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             else candidate[number] = std::move(body);
             validateProgramLines(candidate, storage_.get());
             program_.swap(candidate);
+            stoppedExecution_.reset();
             continue;
         }
 
@@ -2960,6 +3127,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 else candidate[number] = body;
             }
             program_.swap(candidate);
+            stoppedExecution_.reset();
             lastEditedLine_.reset();
             clear();
         } else if (word == "SAVE" || word.rfind("SAVE ", 0) == 0) {
@@ -3038,6 +3206,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 }
                 validateProgramLines(candidate, storage_.get());
                 program_.swap(candidate);
+                stoppedExecution_.reset();
             } else {
                 if (!storage_)
                     throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -3182,9 +3351,28 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;
             }
+        } else if (word == "CONTINUE") {
+            if (!stoppedExecution_)
+                throw std::runtime_error("no BASIC program stopped at STOP");
+            execution_ = std::move(stoppedExecution_);
+            const auto status = resumeSlice(output, instructionBudget, stop);
+            if (status != ExecutionStatus::Completed) {
+                preserveInteractiveTail();
+                return status;
+            }
         } else if (word == "DEBUG" || word.rfind("DEBUG ", 0) == 0) {
             if (!taskControl_) throw std::runtime_error("debugger service unavailable");
             const std::string argument = trim(normalizedLine.substr(5));
+            if (command(argument) == "CONTINUE") {
+                if (debugTaskId_ == 0)
+                    throw std::runtime_error("use DEBUG taskId first");
+                if (!taskControl_->debugResume(debugTaskId_,
+                                               runtime::DebugResumeMode::Continue))
+                    throw std::runtime_error("debug task is not paused");
+                writeChannelText(0, "DEBUG CONTINUE task " +
+                                 std::to_string(debugTaskId_) + "\n");
+                continue;
+            }
             std::uint64_t id = 0;
             const auto parsed = std::from_chars(argument.data(), argument.data() + argument.size(), id);
             if (argument.empty() || parsed.ec != std::errc{} ||
@@ -3213,11 +3401,11 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             writeChannelText(0, std::string(enable ? "Breakpoint set at " :
                                                    "Breakpoint cleared at ") +
                                  std::to_string(line) + "\n");
-        } else if (word == "STEP" || word == "NEXT" || word == "CONTINUE") {
+        } else if (word == "STEP" || word == "NEXT") {
             if (!taskControl_ || debugTaskId_ == 0)
                 throw std::runtime_error("use DEBUG taskId first");
             const runtime::DebugResumeMode mode = word == "STEP" ? runtime::DebugResumeMode::StepInto :
-                word == "NEXT" ? runtime::DebugResumeMode::StepOver : runtime::DebugResumeMode::Continue;
+                runtime::DebugResumeMode::StepOver;
             if (!taskControl_->debugResume(debugTaskId_, mode))
                 throw std::runtime_error("debug task is not paused");
             writeChannelText(0, word + " task " + std::to_string(debugTaskId_) + "\n");
@@ -3536,6 +3724,10 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
         try {
             ExecutionStatus status = executeInteractiveResumable(line + "\n", output);
             while (status != ExecutionStatus::Completed) {
+                if (status == ExecutionStatus::ProgramStopped) {
+                    status = ExecutionStatus::Completed;
+                    continue;
+                }
                 if (status == ExecutionStatus::InteractivePending) {
                     if (auto edit = takePendingLineEdit()) {
                         pendingEdit = std::move(edit);
@@ -3580,6 +3772,7 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
 void Interpreter::clear() {
     if (ui_) ui_->cancelSession(session_id_);
     execution_.reset();
+    stoppedExecution_.reset();
     pendingRunSource_.clear();
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();

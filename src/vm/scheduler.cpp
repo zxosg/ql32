@@ -817,6 +817,29 @@ bool SessionScheduler::tick() {
                                                         TaskStatus::WaitingInput;
             return true;
         }
+        if (result == ExecutionStatus::ProgramStopped) {
+            current.started = false;
+            removeFromSchedule(current);
+            if (current.interactive) {
+                current.releaseSource();
+                if (!current.pendingInteractiveTail.empty()) {
+                    current.source = std::move(current.pendingInteractiveTail);
+                    current.pendingInteractiveTail.clear();
+                    current.hasPendingSource = true;
+                    current.interactiveSubmission = true;
+                    current.status = TaskStatus::Runnable;
+                } else {
+                    current.status = TaskStatus::WaitingInput;
+                    current.releaseSource();
+                }
+            } else {
+                current.status = TaskStatus::Completed;
+                current.releaseSource();
+                current.interpreter.reset();
+                wakeParent(current);
+            }
+            return true;
+        }
         if (result == ExecutionStatus::Completed) {
             current.started = false;
             removeFromSchedule(current);

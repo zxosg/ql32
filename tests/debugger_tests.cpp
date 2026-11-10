@@ -124,9 +124,9 @@ void testStepIntoNextAndArrayReads() {
     std::ostringstream output;
     const std::string procedureSource =
         "10 Work\n"
-        "20 DIM data(2)\n"
-        "30 data(0)=7\n"
-        "40 PRINT data(0)\n"
+        "20 DIM items(2)\n"
+        "30 items(0)=7\n"
+        "40 PRINT items(0)\n"
         "100 DEFINE PROCEDURE Work\n"
         "110 LOCAL localValue\n"
         "120 localValue=5\n"
@@ -175,18 +175,18 @@ void testStepIntoNextAndArrayReads() {
     ql32::vm::SessionScheduler arrayScheduler({}, 1024);
     std::ostringstream arrayOutput;
     const auto arrayTask = arrayScheduler.launch(
-        "DIM data(2)\n"
-        "data(0)=7\n"
-        "PRINT data(0)\n", arrayOutput);
+        "DIM items(2)\n"
+        "items(0)=7\n"
+        "PRINT items(0)\n", arrayOutput);
     require(arrayScheduler.debugAttach(arrayTask), "array debugger attach failed");
     require(arrayScheduler.debugSetBreakpoint(arrayTask, 3), "physical source breakpoint failed");
     require(arrayScheduler.tick(), "array program did not reach its breakpoint");
     const auto arraySnapshot = arrayScheduler.debugInspect(arrayTask);
     require(arraySnapshot && arraySnapshot->arrays.size() == 1 &&
-                arraySnapshot->arrays.front().first == "DATA" &&
+                arraySnapshot->arrays.front().first == "ITEMS" &&
                 arraySnapshot->arrays.front().second == std::vector<std::size_t>{3},
             "global array dimensions were not included in inspection");
-    const auto arrayValue = arrayScheduler.debugEvaluate(arrayTask, "data(0)+1");
+    const auto arrayValue = arrayScheduler.debugEvaluate(arrayTask, "items(0)+1");
     require(arrayValue && std::get<double>(*arrayValue) == 8,
             "read-only EVAL did not support array reads");
     const auto breakpoints = arrayScheduler.debugBreakpoints(arrayTask);
@@ -221,6 +221,15 @@ void testSupervisorDebuggerCommands() {
     require(scheduler.tick(), "BREAKPOINTS command did not execute");
     require(supervisorOutput.str().find("enabled line 10") != std::string::npos,
             "supervisor did not list the active breakpoint");
+    require(scheduler.submit(supervisor, "DEBUG CONTINUE\n"),
+            "supervisor rejected DEBUG CONTINUE");
+    require(scheduler.tick(), "DEBUG CONTINUE did not execute");
+    for (int i = 0; i < 4 && scheduler.task(target)->status !=
+            ql32::vm::TaskStatus::Completed; ++i)
+        require(scheduler.tick(), "scheduler stopped before debug target completed");
+    require(scheduler.task(target)->status == ql32::vm::TaskStatus::Completed &&
+                targetOutput.str() == "42\n",
+            "DEBUG CONTINUE did not resume the attached debugger target");
 }
 
 void testDebuggerSupervisorDiagnosticsResetCommand() {

@@ -27,7 +27,11 @@ struct RuntimeFrame {
     std::string name;
     bool dynamicEvaluation = false;
     bool stringifyResult = false;
+    bool dataRead = false;
     std::size_t dynamicCodeStart = 0;
+    std::string dataReadTarget;
+    std::size_t dataReadRank = 0;
+    std::vector<double> dataReadIndices;
     std::unordered_map<std::string, Value> locals;
     std::unordered_map<std::string, std::string> arrayAliases;
 };
@@ -59,6 +63,7 @@ struct VMExecutionState {
     std::unordered_map<std::string, RuntimeArray> arrays;
     std::vector<SelectState> selectStates;
     std::size_t pc = 0;
+    std::size_t dataPointer = 0;
     std::optional<std::chrono::steady_clock::time_point> pauseUntil;
     std::uint64_t printChannel = 1;
     std::size_t printChannelColumn = 0;

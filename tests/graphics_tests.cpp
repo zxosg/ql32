@@ -398,12 +398,12 @@ void testDrawingArgumentValidation() {
     require(invalidColor, "invalid palette index was accepted");
     bool invalidCoordinates = false;
     try {
-        interpreter.execute("LINE 1,2,3.5,4\n", output);
+        interpreter.execute("LINE 1,2,2147483648,4\n", output);
     } catch (const std::runtime_error& error) {
         invalidCoordinates = std::string(error.what()).find("pixel coordinate") !=
                              std::string::npos;
     }
-    require(invalidCoordinates, "non-integer pixel coordinate was accepted");
+    require(invalidCoordinates, "out-of-range pixel coordinate was accepted");
     bool invalidFill = false;
     try {
         interpreter.execute("RECT 1,2,3,4,2\n", output);
@@ -419,6 +419,53 @@ void testDrawingArgumentValidation() {
     }
     require(missingArguments, "CIRCLE accepted too many arguments");
     require(graphics->events.empty(), "invalid drawing call reached the service");
+}
+
+void testFractionalDrawingGeometryFloorsToPixels() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "WINDOW -0.2,1.9,20.9,12.4\n"
+        "PLOT 0.9,-0.2\n"
+        "LINE 1.9,2.1,3.8,4.9\n"
+        "RECT 5.9,6.1,7.9,8.9\n"
+        "CIRCLE 9.9,10.1,2.9\n"
+        "TEXT 11.9,12.9,\"fractional\"\n", output);
+
+    require(graphics->events.size() == 6,
+            "fractional drawing geometry was not dispatched");
+    require(graphics->events[0].name == "WINDOW" &&
+                graphics->events[0].first.x == -1 && graphics->events[0].first.y == 1 &&
+                graphics->events[0].a == 20 && graphics->events[0].b == 12,
+            "WINDOW geometry did not floor to integer pixels");
+    require(graphics->events[1].name == "PLOT" &&
+                graphics->events[1].first.x == 0 && graphics->events[1].first.y == -1,
+            "PLOT coordinates did not floor to integer pixels");
+    require(graphics->events[2].first.x == 1 && graphics->events[2].first.y == 2 &&
+                graphics->events[2].second.x == 3 && graphics->events[2].second.y == 4,
+            "LINE coordinates did not floor to integer pixels");
+    require(graphics->events[3].name == "RECT" &&
+                graphics->events[3].first.x == 5 && graphics->events[3].first.y == 6 &&
+                graphics->events[3].a == 7 && graphics->events[3].b == 8,
+            "RECT geometry did not floor to integer pixels");
+    require(graphics->events[4].name == "CIRCLE" &&
+                graphics->events[4].first.x == 9 && graphics->events[4].first.y == 10 &&
+                graphics->events[4].a == 2,
+            "CIRCLE geometry did not floor to integer pixels");
+    require(graphics->events[5].name == "TEXT" &&
+                graphics->events[5].first.x == 11 && graphics->events[5].first.y == 12,
+            "TEXT coordinates did not floor to integer pixels");
+
+    bool zeroSizeRejected = false;
+    try {
+        interpreter.execute("RECT 0,0,0.9,2\n", output);
+    } catch (const std::runtime_error& error) {
+        zeroSizeRejected = std::string(error.what()).find("size must be positive") !=
+                           std::string::npos;
+    }
+    require(zeroSizeRejected && graphics->events.size() == 6,
+            "fractional RECT size flooring to zero was not rejected");
 }
 
 void testClsChannelAndColorSyntax() {
@@ -1420,6 +1467,7 @@ void testScreenPrintPositionsArePerChannelAndSeparateFromText() {
 
 int main() {
     testDrawingCallsAndSessionOwnership();
+    testFractionalDrawingGeometryFloorsToPixels();
     testFontSelectionChangesNativeTextCellSize();
     testTextAndGraphicsFontStateAndStyles();
     testLoadFontIsBoundedAndChannelScoped();

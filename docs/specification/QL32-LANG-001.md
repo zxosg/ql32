@@ -24,7 +24,9 @@ M1 is delivered in executable slices. The first slice is expressions, assignment
 - `REMark`, its minimum abbreviation `REM`, and an apostrophe outside a string start a comment that continues to the end of that source line. Apostrophe is a QL/32 alias.
 - Proposed M1 identifier subset: ASCII letter followed by ASCII letters, digits, or underscores, optionally ending in `%` or `$`. Wider Unicode identifiers are deferred.
 - Decimal integer and floating literals are in scope. Historical hex/binary notation awaits reference checks.
-- Lexical and syntax failures report line and column and never execute partial bytecode.
+- Diagnostics report the BASIC line number when source uses numbered lines, with
+  the source column. Unnumbered source reports its physical line number. Lexical,
+  syntax, and runtime failures never execute partial bytecode.
 
 ### 2.1 SuperBASIC keyword abbreviations
 
@@ -299,6 +301,48 @@ map to `?`; Czech glyphs are not included initially.
 Numbers print using locale-independent shortest round-trip decimal notation;
 zero, including negative zero, prints as `0`. Strings print as their contents.
 There is no implicit padding or number-to-string conversion outside PRINT.
+
+`DATA` declares a source-ordered stream of values for later `READ` statements;
+it does not execute as part of normal program flow. Each item is an expression,
+and the expression is evaluated when `READ` consumes it, so variables and
+functions use their values at that time. `READ` assigns consecutive items to
+one or more scalar or indexed-array targets. All procedures and the main
+program share one DATA cursor. Reading past the final item raises `End of
+DATA`.
+
+`RESTORE` resets the cursor to the first DATA item. `RESTORE lineNumber` moves
+to the first DATA item on or after that numbered line; `RESTORE label` moves
+to the first DATA item at or after the label. Line numbers are integer literals
+from 0 through 32767, and labels follow the normal case-insensitive label
+scope rules. If no matching DATA item follows the requested position, the
+cursor is at end of DATA. Starting a program with `RUN` resets the cursor.
+`EOF()` returns `1` when the DATA cursor is exhausted and `0` otherwise;
+`EOF(channel)` retains its separate meaning as the non-consuming file-channel
+EOF check.
+
+```basic
+DATA "red", "green", "blue"
+READ first$, second$
+RESTORE
+READ first$
+
+20 DATA 10, 20
+30 RESTORE 20
+40 READ x%, y%
+```
+
+The DATA cursor is QL/32-specific and does not claim SMSQ/E conformance yet.
+
+`STOP` ends the current run at its own statement and returns an interactive
+session to the command prompt. It retains the compiled run and its VM state.
+The direct command `CONTINUE` resumes immediately after that `STOP`, preserving
+variables, procedure locals, loop state, channels, and the DATA cursor. It is
+not a program statement. `CONTINUE` with no saved run is an error. Editing,
+loading, deleting, or clearing stored program lines invalidates the saved run;
+direct commands that only change variables do not. `RUN` discards any saved
+run and starts the stored program from its beginning. Reaching the end of a
+program completes it normally and discards the continuation. This behavior is
+QL/32-specific and does not change task suspension or cancellation commands.
 
 The implemented block set includes:
 
@@ -715,7 +759,9 @@ buffer then pressing Enter submits the line number alone, deleting that line.
 The host stream REPL displays the selected line and accepts a replacement
 numbered line; an empty response deletes it. Invalid numbers and line numbers
 that are not in the stored program are rejected without changing the program.
-The target shell's `STOP` and, later, `CONT`, remain future work.
+`STOP` in a stored BASIC program returns to the prompt with its run state
+retained; direct `CONTINUE` resumes after the `STOP`. The debugger's resume
+command is written `DEBUG CONTINUE` to keep it distinct from BASIC continuation.
 
 Channels are universal session-owned I/O handles. `#0` is reserved for the
 command/error console and keyboard input; `#1` is reserved for user/program
@@ -735,8 +781,14 @@ and graphics `TEXT`; it does not affect `PRINT`. Its state belongs to the
 selected graphics channel and defaults to `0`.
 `AT row,column` positions subsequent normal text output on the current output
 channel; `AT #channel,row,column` selects a screen channel explicitly. Text
-rows and columns are one-based, with `(1,1)` at the top-left cell. This is
-separate from graphics commands, whose pixel coordinates start at `(0,0)`.
+rows and columns are positive integers and one-based, with `(1,1)` at the
+top-left cell. For example, `AT 1,1` selects the first cell. This is separate
+from graphics commands, whose pixel coordinates start at `(0,0)`.
+Geometric numeric arguments to `WINDOW`, `PLOT`, `LINE`, `RECT`, `CIRCLE`, and
+`TEXT` are floored to whole pixels. Values must be finite and fit the
+32-bit pixel-coordinate range; window and shape dimensions must remain positive
+after conversion. Palette indices, fill flags, font handles, and other control
+values remain integer-only. This is pixel rounding, not subpixel rendering.
 graphics commands use the current graphics output default; channel-qualified
 graphics commands use a `#channel` selector. The clear command accepts
 `CLS`, `CLS #channel`, `CLS ink,paper`, or `CLS #channel,ink,paper`; the color
