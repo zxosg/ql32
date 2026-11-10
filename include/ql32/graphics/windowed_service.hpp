@@ -48,6 +48,11 @@ public:
     void text(SessionId session, Point topLeft, const std::string& value) override;
     void text(SessionId session, ChannelId channel, Point topLeft,
               const std::string& value) override;
+    void setTextFont(SessionId session, ChannelId channel,
+                     const BitmapFont* font, FontStyle style) override;
+    void setGraphicsFont(SessionId session, ChannelId channel,
+                         const BitmapFont* font, FontStyle style) override;
+    void clearFontSelections(SessionId session, ChannelId channel) override;
     void writeText(SessionId session, const std::string& value) override;
     void writeText(SessionId session, ChannelId channel,
                    const std::string& value) override;
@@ -125,6 +130,12 @@ private:
     };
     WindowId ensureWindow(SessionId session, ChannelId channel = 1);
     IndexedCanvas& canvas(SessionId session, ChannelId channel = 1);
+    struct FontState {
+        const BitmapFont* font = nullptr;
+        FontStyle style = FontStyle::Normal;
+    };
+    const FontState& textFont(SessionId session, ChannelId channel) const;
+    const FontState& graphicsFont(SessionId session, ChannelId channel) const;
     void discardFrozenWindows();
     Rect screenRegion(SessionId session, ChannelId channel, std::int64_t x,
                       std::int64_t y,
@@ -141,6 +152,8 @@ private:
     std::map<SurfaceKey, WindowId> sessionWindows_;
     std::vector<WindowId> frozenWindows_;
     std::map<SurfaceKey, Point> textCursors_;
+    std::map<SurfaceKey, FontState> textFonts_;
+    std::map<SurfaceKey, FontState> graphicsFonts_;
     std::unordered_map<ChannelId, Rect> defaultWindowBounds_;
     std::function<void(Rect)> consoleBoundsCallback_;
     std::function<void(ColorIndex, ColorIndex)> consoleColorsCallback_;

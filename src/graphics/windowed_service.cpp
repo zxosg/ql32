@@ -237,9 +237,44 @@ void WindowedService::text(SessionId session, Point topLeft, const std::string& 
 
 void WindowedService::text(SessionId session, ChannelId channel, Point topLeft,
                            const std::string& value) {
-    canvas(session, channel).text(topLeft, value);
-    presentRegion(screenRegion(session, channel, topLeft.x, topLeft.y,
-        static_cast<std::int64_t>(value.size()) * 6, 8));
+    const auto& selection = graphicsFont(session, channel);
+    const auto* selectedFont = selection.font;
+    auto& target = canvas(session, channel);
+    const Rect dirty = selectedFont ?
+        target.text(topLeft, value, *selectedFont, selection.style) :
+        target.text(topLeft, value);
+    if (dirty.width != 0 && dirty.height != 0)
+        presentRegion(screenRegion(session, channel, dirty.x, dirty.y,
+                                   dirty.width, dirty.height));
+}
+
+void WindowedService::setTextFont(SessionId session, ChannelId channel,
+                                  const BitmapFont* font, FontStyle style) {
+    textFonts_[{session, channel}] = {font, style};
+}
+
+void WindowedService::setGraphicsFont(SessionId session, ChannelId channel,
+                                      const BitmapFont* font, FontStyle style) {
+    graphicsFonts_[{session, channel}] = {font, style};
+}
+
+void WindowedService::clearFontSelections(SessionId session, ChannelId channel) {
+    textFonts_.erase({session, channel});
+    graphicsFonts_.erase({session, channel});
+}
+
+const WindowedService::FontState& WindowedService::textFont(
+        SessionId session, ChannelId channel) const {
+    static const FontState defaultState{};
+    const auto selected = textFonts_.find({session, channel});
+    return selected == textFonts_.end() ? defaultState : selected->second;
+}
+
+const WindowedService::FontState& WindowedService::graphicsFont(
+        SessionId session, ChannelId channel) const {
+    static const FontState defaultState{};
+    const auto selected = graphicsFonts_.find({session, channel});
+    return selected == graphicsFonts_.end() ? defaultState : selected->second;
 }
 
 void WindowedService::writeText(SessionId session, const std::string& value) {
@@ -254,13 +289,17 @@ bool WindowedService::setTextPosition(SessionId session, ChannelId channel,
         return true;
     }
     const auto info = windowInfo(session, channel);
-    const auto columns = std::max<std::uint32_t>(1, info.width / 6);
-    const auto rows = std::max<std::uint32_t>(1, info.height / 8);
+    const auto& selection = textFont(session, channel);
+    const auto* selectedFont = selection.font;
+    const std::uint32_t cellWidth = selectedFont ? selectedFont->metrics().maxAdvance : 6;
+    const std::uint32_t cellHeight = selectedFont ? selectedFont->metrics().lineHeight : 8;
+    const auto columns = std::max<std::uint32_t>(1, info.width / cellWidth);
+    const auto rows = std::max<std::uint32_t>(1, info.height / cellHeight);
     const auto boundedColumn = std::min(column, columns - 1);
     const auto boundedRow = std::min(row, rows - 1);
     textCursors_[{session, channel}] = {
-        static_cast<std::int32_t>(boundedColumn * 6),
-        static_cast<std::int32_t>(boundedRow * 8)};
+        static_cast<std::int32_t>(boundedColumn * cellWidth),
+        static_cast<std::int32_t>(boundedRow * cellHeight)};
     return true;
 }
 
@@ -270,34 +309,54 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
     const SurfaceKey key{session, channel};
     auto& cursor = textCursors_[key];
     const auto info = windowInfo(session, channel);
-    const auto columns = std::max<std::uint32_t>(1, info.width / 6);
-    const auto rows = std::max<std::uint32_t>(1, info.height / 8);
-    const auto maxX = static_cast<std::int32_t>(columns * 6);
-    const auto maxY = static_cast<std::int32_t>(rows * 8);
+    const auto& selection = textFont(session, channel);
+    const auto* selectedFont = selection.font;
+    const std::int32_t cellWidth = selectedFont ? selectedFont->metrics().maxAdvance : 6;
+    const std::int32_t cellHeight = selectedFont ? selectedFont->metrics().lineHeight : 8;
+    const auto columns = std::max<std::uint32_t>(1, info.width / cellWidth);
+    const auto rows = std::max<std::uint32_t>(1, info.height / cellHeight);
+    const auto maxX = static_cast<std::int32_t>(columns * cellWidth);
+    const auto maxY = static_cast<std::int32_t>(rows * cellHeight);
     const auto id = ensureWindow(session, channel);
     const auto& bounds = manager_.windowState(id).bounds;
     auto& target = manager_.canvas(id);
     Rect dirty{};
     bool scrolled = false;
-    cursor.x = std::clamp(cursor.x, 0, std::max(0, maxX - 6));
-    cursor.y = std::clamp(cursor.y, 0, std::max(0, maxY - 8));
-    for (const unsigned char ch : value) {
-        if (ch == '\r') continue;
-        if (ch == '\n') {
-            cursor.x = 0;
-            cursor.y += 8;
-        } else {
-            if (cursor.x + 5 > maxX) {
-                cursor.x = 0;
-                cursor.y += 8;
-            }
-            target.printText(cursor, std::string(1, ch < 128 ? static_cast<char>(ch) : '?'));
-            dirty = unite(dirty, {cursor.x, cursor.y, 6, 8});
-            cursor.x += 6;
+    cursor.x = std::clamp(cursor.x, 0, std::max(0, maxX - cellWidth));
+    cursor.y = std::clamp(cursor.y, 0, std::max(0, maxY - cellHeight));
+    for (std::size_t offset = 0; offset < value.size();) {
+        const auto raw = static_cast<std::uint8_t>(value[offset]);
+        if (raw == '\r') {
+            ++offset;
+            continue;
         }
-        if (cursor.y + 7 >= maxY) {
-            target.scrollUp(8);
-            cursor.y = std::max(0, cursor.y - 8);
+        if (raw == '\n') {
+            cursor.x = 0;
+            cursor.y += cellHeight;
+            ++offset;
+        } else {
+            const auto character = selectedFont ? nextAsciiCharacter(value, offset) :
+                static_cast<std::uint8_t>(raw < 128 ? value[offset++] : '?');
+            std::int32_t advance = cellWidth;
+            if (selectedFont) {
+                FontGlyph glyph{};
+                selectedFont->readGlyph(character, glyph);
+                advance = glyph.advance;
+            }
+            if (cursor.x + advance > maxX) {
+                cursor.x = 0;
+                cursor.y += cellHeight;
+            }
+            const Rect glyphDirty = selectedFont ?
+                target.printText(cursor, std::string(1, static_cast<char>(character)),
+                                 *selectedFont, selection.style) :
+                target.printText(cursor, std::string(1, static_cast<char>(character)));
+            dirty = unite(dirty, glyphDirty);
+            cursor.x += advance;
+        }
+        if (cursor.y + cellHeight - 1 >= maxY) {
+            target.scrollUp(cellHeight);
+            cursor.y = std::max(0, cursor.y - cellHeight);
             scrolled = true;
         }
     }
@@ -331,7 +390,10 @@ void WindowedService::closeWindow(SessionId session) {
 void WindowedService::closeWindow(SessionId session, ChannelId channel) {
     const SurfaceKey key{session, channel};
     const auto found = sessionWindows_.find(key);
-    if (found == sessionWindows_.end()) return;
+    if (found == sessionWindows_.end()) {
+        textCursors_.erase(key);
+        return;
+    }
     const auto oldBounds = manager_.windowState(found->second).screenClip;
     manager_.close(found->second);
     sessionWindows_.erase(found);
@@ -364,7 +426,17 @@ void WindowedService::closeSession(SessionId session) {
         }
         frozenWindows_.push_back(found->second);
         textCursors_.erase(found->first);
+        textFonts_.erase(found->first);
+        graphicsFonts_.erase(found->first);
         found = sessionWindows_.erase(found);
+    }
+    for (auto found = textFonts_.begin(); found != textFonts_.end();) {
+        if (found->first.session == session) found = textFonts_.erase(found);
+        else ++found;
+    }
+    for (auto found = graphicsFonts_.begin(); found != graphicsFonts_.end();) {
+        if (found->first.session == session) found = graphicsFonts_.erase(found);
+        else ++found;
     }
     manager_.releaseTaskViewportIfUnused(session);
 }
@@ -381,10 +453,20 @@ void WindowedService::discardSession(SessionId session) {
     for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
         if (found->first.session == session) {
             textCursors_.erase(found->first);
+            textFonts_.erase(found->first);
+            graphicsFonts_.erase(found->first);
             found = sessionWindows_.erase(found);
         } else {
             ++found;
         }
+    }
+    for (auto found = textFonts_.begin(); found != textFonts_.end();) {
+        if (found->first.session == session) found = textFonts_.erase(found);
+        else ++found;
+    }
+    for (auto found = graphicsFonts_.begin(); found != graphicsFonts_.end();) {
+        if (found->first.session == session) found = graphicsFonts_.erase(found);
+        else ++found;
     }
     frozenWindows_.erase(std::remove_if(frozenWindows_.begin(), frozenWindows_.end(),
         [this, session](WindowId id) {

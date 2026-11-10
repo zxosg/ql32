@@ -2,6 +2,23 @@
 CONST KChannelCount = 0
 CONST KChannelHandle = 1
 CONST KChannelType = 2
+' Built-in bitmap font handles
+CONST KFontSmall = 1
+CONST KFontNormal = 2
+CONST KFontLarge = 3
+CONST KFontTitle = 4
+' FONT/GFONT style flags; combine Bold and Underline with BOR()
+CONST KFontStyleNormal = 0
+CONST KFontStyleBold = 1
+CONST KFontStyleUnderline = 2
+' GETFONT metric selectors
+CONST KFontMetricWidth = 0
+CONST KFontMetricHeight = 1
+CONST KFontMetricAscent = 2
+CONST KFontMetricLineHeight = 3
+CONST KFontMetricFirstCharacter = 4
+CONST KFontMetricCharacterCount = 5
+CONST KFontMetricMaxAdvance = 6
 ' OPTION math precision values
 CONST KOptMathDouble = 0
 CONST KOptMathSingle = 1

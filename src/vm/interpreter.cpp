@@ -1992,6 +1992,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     instruction.name == "LINE" ||
                     instruction.name == "RECT" ||
                     instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
+                    instruction.name == "FONT" || instruction.name == "GFONT" ||
                     instruction.name == "CLS" || instruction.name == "WINDOW" ||
                     instruction.name == "CLOSEWINDOW") {
                     const auto channel = selectedChannel.value_or(
@@ -2036,7 +2037,34 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             runtimeError(instruction, "fill flag must be 0 or 1");
                         return fill == 1;
                     };
-                    if (instruction.name == "CLOSEWINDOW") {
+                    if (instruction.name == "FONT" || instruction.name == "GFONT") {
+                        const auto handle = integerArgument(0,
+                            "font handle must be a positive integer");
+                        const auto style = integerArgument(1,
+                            "font style must be a combination of style flags");
+                        if (handle <= 0 || static_cast<std::uint64_t>(handle) >
+                                std::numeric_limits<graphics::FontHandle>::max())
+                            runtimeError(instruction, "font handle is out of range");
+                        if (style < 0 || style > 3)
+                            runtimeError(instruction, "font style must be 0..3");
+                        try {
+                            const auto fontHandle = static_cast<graphics::FontHandle>(handle);
+                            const auto styleBits = static_cast<std::uint8_t>(style);
+                            if (instruction.name == "FONT") {
+                                const auto& selected = fontRegistry_.selectText(
+                                    channel, fontHandle, styleBits);
+                                graphics_->setTextFont(session_id_, channel, &selected,
+                                    static_cast<graphics::FontStyle>(styleBits));
+                            } else {
+                                const auto& selected = fontRegistry_.selectGraphics(
+                                    channel, fontHandle, styleBits);
+                                graphics_->setGraphicsFont(session_id_, channel, &selected,
+                                    static_cast<graphics::FontStyle>(styleBits));
+                            }
+                        } catch (const std::invalid_argument& error) {
+                            runtimeError(instruction, error.what());
+                        }
+                    } else if (instruction.name == "CLOSEWINDOW") {
                         graphics_->closeWindow(session_id_, channel);
                     } else if (instruction.name == "INK" || instruction.name == "PAPER") {
                         const auto color = integerArgument(0, "color index must be a nonnegative integer");
@@ -2146,7 +2174,37 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         runtimeError(instruction, label);
                     return static_cast<std::uint64_t>(*number);
                 };
-                if (instruction.name == "OPEN") {
+                if (instruction.name == "LOADFONT") {
+                    const auto* path = std::get_if<std::string>(&arguments[0]);
+                    if (!path) runtimeError(instruction, "font path must be a string");
+                    try {
+                        pushValue(static_cast<double>(fontRegistry_.load(*path)));
+                    } catch (const std::invalid_argument& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                } else if (instruction.name == "UNLOADFONT") {
+                    const auto handle = integerArgument(0,
+                        "font handle must be a positive integer", 1,
+                        std::numeric_limits<std::uint32_t>::max());
+                    try {
+                        fontRegistry_.unload(static_cast<graphics::FontHandle>(handle));
+                    } catch (const std::invalid_argument& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                } else if (instruction.name == "GETFONT") {
+                    const auto selector = integerArgument(0,
+                        "font metric selector must be an integer", 0, 6);
+                    const auto handle = integerArgument(1,
+                        "font handle must be a positive integer", 1,
+                        std::numeric_limits<std::uint32_t>::max());
+                    try {
+                        pushValue(static_cast<double>(fontRegistry_.metric(
+                            static_cast<graphics::FontMetric>(selector),
+                            static_cast<graphics::FontHandle>(handle))));
+                    } catch (const std::invalid_argument& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                } else if (instruction.name == "OPEN") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "channel service unavailable");

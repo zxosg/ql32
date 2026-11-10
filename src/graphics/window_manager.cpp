@@ -544,48 +544,137 @@ void IndexedCanvas::circle(Point center, std::int32_t radius, bool filled) {
     }
 }
 
-void IndexedCanvas::text(Point topLeft, const std::string& value) {
-    renderText(topLeft, value, true);
+Rect IndexedCanvas::text(Point topLeft, const std::string& value) {
+    return renderText(topLeft, value, false, true, nullptr, FontStyle::Normal);
 }
 
-void IndexedCanvas::printText(Point topLeft, const std::string& value) {
-    renderText(topLeft, value, false);
+Rect IndexedCanvas::text(Point topLeft, const std::string& value,
+                         const BitmapFont& font, FontStyle style) {
+    return renderText(topLeft, value, false, true, &font, style);
 }
 
-void IndexedCanvas::renderText(Point topLeft, const std::string& value,
-                               bool useOverMode) {
+Rect IndexedCanvas::printText(Point topLeft, const std::string& value) {
+    return renderText(topLeft, value, true, false, nullptr, FontStyle::Normal);
+}
+
+Rect IndexedCanvas::printText(Point topLeft, const std::string& value,
+                              const BitmapFont& font, FontStyle style) {
+    return renderText(topLeft, value, true, false, &font, style);
+}
+
+Rect IndexedCanvas::renderText(Point topLeft, const std::string& value,
+                               bool fillBackground, bool useOverMode,
+                               const BitmapFont* font, FontStyle style) {
     std::int64_t originX = topLeft.x;
     std::int64_t x = originX;
     std::int64_t y = topLeft.y;
-    for (const unsigned char raw : value) {
+    const auto cellWidth = font ? font->metrics().maxAdvance : 6;
+    const auto cellHeight = font ? font->metrics().lineHeight : 8;
+    const auto styleBits = fontStyleBits(style);
+    const bool bold = (styleBits & fontStyleBits(FontStyle::Bold)) != 0;
+    const bool underline = (styleBits & fontStyleBits(FontStyle::Underline)) != 0;
+    bool hasDirty = false;
+    std::int64_t dirtyLeft = 0;
+    std::int64_t dirtyTop = 0;
+    std::int64_t dirtyRight = 0;
+    std::int64_t dirtyBottom = 0;
+    const auto includePixel = [&](std::int64_t px, std::int64_t py) {
+        if (!hasDirty) {
+            dirtyLeft = px;
+            dirtyTop = py;
+            dirtyRight = px + 1;
+            dirtyBottom = py + 1;
+            hasDirty = true;
+        } else {
+            dirtyLeft = std::min(dirtyLeft, px);
+            dirtyTop = std::min(dirtyTop, py);
+            dirtyRight = std::max(dirtyRight, px + 1);
+            dirtyBottom = std::max(dirtyBottom, py + 1);
+        }
+    };
+    for (std::size_t offset = 0; offset < value.size();) {
+        const auto raw = static_cast<std::uint8_t>(value[offset]);
         if (raw == '\n') {
             x = originX;
-            y += 8;
+            y += cellHeight;
+            ++offset;
             continue;
         }
-        if (raw == '\r') continue;
-        const auto character = raw < 128 ? static_cast<char>(raw) : '?';
-        const auto pattern = glyph(character);
-        // Fill the complete 6x8 character cell first. The glyph occupies
-        // only 5x7 pixels; the remaining column and row must use paper too.
-        for (std::int64_t row = 0; row < 8; ++row) {
-            for (std::int64_t column = 0; column < 6; ++column) {
+        if (raw == '\r') {
+            ++offset;
+            continue;
+        }
+        const auto character = font ? nextAsciiCharacter(value, offset) :
+            static_cast<std::uint8_t>(raw < 128 ? value[offset++] : '?');
+        const auto pattern = font ? std::array<std::uint8_t, 5>{} : glyph(
+            static_cast<char>(character));
+        FontGlyph bitmapGlyph{};
+        if (font) font->readGlyph(character, bitmapGlyph);
+        const auto glyphLeft = font ? static_cast<std::int64_t>(bitmapGlyph.xOffset) : 0;
+        const auto glyphTop = font ? static_cast<std::int64_t>(font->metrics().ascent) -
+            (bitmapGlyph.yOffset + bitmapGlyph.height) : 0;
+        const auto glyphWidth = font ? bitmapGlyph.width : 5;
+        const auto glyphHeight = font ? bitmapGlyph.height : 7;
+        const auto advance = font ? bitmapGlyph.advance : 6;
+        const auto underlineY = font ? std::min<std::int64_t>(cellHeight - 1,
+            font->metrics().ascent + 1) : 6;
+        const auto left = std::min<std::int64_t>(fillBackground ? 0 : glyphLeft,
+                                                 glyphLeft);
+        const auto top = std::min<std::int64_t>(fillBackground ? 0 : glyphTop,
+                                                glyphTop);
+        auto right = std::max<std::int64_t>(fillBackground ? cellWidth : 0,
+            glyphLeft + glyphWidth + (bold ? 1 : 0));
+        auto bottom = std::max<std::int64_t>(fillBackground ? cellHeight : 0,
+            glyphTop + glyphHeight);
+        if (underline) {
+            right = std::max<std::int64_t>(right, advance);
+            bottom = std::max<std::int64_t>(bottom, underlineY + 1);
+        }
+        for (std::int64_t row = top; row < bottom; ++row) {
+            for (std::int64_t column = left; column < right; ++column) {
                 const auto px = x + column;
                 const auto py = y + row;
                 if (px < 0 || py < 0 || px >= width_ || py >= height_) continue;
-                const bool set = column < 5 && row < 7 &&
-                    (pattern[static_cast<std::size_t>(column)] & (1u << row)) != 0;
-                if (set && useOverMode) {
+                const auto glyphPixel = [&](std::int64_t pixelX) {
+                    if (font) {
+                        if (pixelX < glyphLeft || pixelX >= glyphLeft + bitmapGlyph.width ||
+                            row < glyphTop || row >= glyphTop + bitmapGlyph.height)
+                            return false;
+                        return bitmapGlyph.pixel(
+                            static_cast<std::uint8_t>(pixelX - glyphLeft),
+                            static_cast<std::uint8_t>(row - glyphTop));
+                    }
+                    return pixelX >= 0 && pixelX < 5 && row >= 0 && row < 7 &&
+                        (pattern[static_cast<std::size_t>(pixelX)] &
+                         (1u << static_cast<unsigned>(row))) != 0;
+                };
+                const bool glyphInk = glyphPixel(column) ||
+                    (bold && glyphPixel(column - 1));
+                const bool set = glyphInk || (underline && row == underlineY &&
+                                               column >= 0 && column < advance);
+                if (!set && fillBackground && column >= 0 && column < cellWidth &&
+                    row >= 0 && row < cellHeight) {
+                    writePixel(static_cast<std::size_t>(py) * width_ +
+                               static_cast<std::size_t>(px), paper_);
+                    includePixel(px, py);
+                } else if (set && useOverMode) {
                     plotPixel(static_cast<std::int32_t>(px),
                               static_cast<std::int32_t>(py));
-                } else {
+                    includePixel(px, py);
+                } else if (set) {
                     writePixel(static_cast<std::size_t>(py) * width_ +
-                               static_cast<std::size_t>(px), set ? ink_ : paper_);
+                               static_cast<std::size_t>(px), ink_);
+                    includePixel(px, py);
                 }
             }
         }
-        x += 6;
+        x += advance;
     }
+    if (!hasDirty) return {};
+    return {static_cast<std::int32_t>(dirtyLeft),
+            static_cast<std::int32_t>(dirtyTop),
+            static_cast<std::uint32_t>(dirtyRight - dirtyLeft),
+            static_cast<std::uint32_t>(dirtyBottom - dirtyTop)};
 }
 
 void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {

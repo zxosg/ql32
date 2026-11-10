@@ -11,6 +11,8 @@ public:
     explicit DirectoryStorage(std::filesystem::path root);
 
     std::string readText(const std::string& path) override;
+    std::unique_ptr<runtime::StorageReadHandle> openRead(
+        const std::string& path) override;
     void writeText(const std::string& path, const std::string& contents) override;
     void writeTextStream(const std::string& path,
                          const runtime::TextStreamSource& source) override;

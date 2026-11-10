@@ -15,6 +15,7 @@ endif()
 
 add_library(ql32_portable
   src/language/interpreter.cpp
+  src/graphics/font.cpp
   src/graphics/window_manager.cpp
   src/graphics/windowed_service.cpp
   src/runtime/channel_registry.cpp
@@ -51,6 +52,11 @@ target_link_libraries(ql32 PRIVATE ql32_host)
 
 if(QL32_BUILD_TESTS)
   enable_testing()
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME ql32_font_converter_tests
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/font_converter_tests.py)
+  endif()
   function(add_cli_conformance_test name)
     add_test(
       NAME ${name}

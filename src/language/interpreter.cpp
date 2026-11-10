@@ -101,6 +101,7 @@ constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "IPRINT", "BUSY", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
     "INK", "PAPER", "OVER", "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
+    "FONT", "GFONT", "UNLOADFONT",
     "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
     "DEALLOC", "XFER", "PAUSE"
@@ -115,7 +116,8 @@ constexpr std::string_view builtinFunctions[] = {
     "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
-    "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$"
+    "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$",
+    "LOADFONT", "GETFONT"
 };
 
 constexpr std::string_view shellHelpCommands[] = {
@@ -285,6 +287,10 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
     if (instruction.name == "CIRCLE") return {3, false};
     if (instruction.name == "TEXT") return {3, false};
+    if (instruction.name == "FONT" || instruction.name == "GFONT") return {2, false};
+    if (instruction.name == "UNLOADFONT") return {1, false};
+    if (instruction.name == "LOADFONT") return {1, true};
+    if (instruction.name == "GETFONT") return {2, true};
     if (instruction.name == "CLS") return {2, false};
     if (instruction.name == "ROTATE") return {1, false};
     if (instruction.name == "WINDOW") return {4, false};
@@ -1762,6 +1768,7 @@ private:
                 name.text == "PLOT" ||
                 name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
+                name.text == "FONT" || name.text == "GFONT" ||
                 name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW" ||
                 name.text == "XFER";
             const bool hasChannelArgument = supportsChannelSelector && match(Kind::Hash);
@@ -2264,7 +2271,8 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<runtime::SystemControlService> systemControl,
                          std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency)
     : uiSession_(std::make_unique<detail::UISessionState>()),
-      storage_(std::move(storage)), channels_(std::move(channels)), ui_(std::move(ui)),
+    storage_(std::move(storage)), fontRegistry_(storage_),
+    channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
       cpuFrequency_(std::move(cpuFrequency)),
@@ -2384,6 +2392,12 @@ void Interpreter::releaseGraphicsResources() noexcept {
     if (!graphics_) return;
     try {
         graphics_->closeSession(session_id_);
+        for (const auto& [channel, selection] : fontRegistry_.textSelections())
+            graphics_->setTextFont(session_id_, channel,
+                &fontRegistry_.get(selection.handle), selection.style);
+        for (const auto& [channel, selection] : fontRegistry_.graphicsSelections())
+            graphics_->setGraphicsFont(session_id_, channel,
+                &fontRegistry_.get(selection.handle), selection.style);
     } catch (...) {
         // Resource cleanup must not prevent an interactive session from
         // returning to its prompt.
@@ -2485,6 +2499,8 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
         [&](const runtime::ChannelInfo& item) { return item.handle == channel; });
     if (endpoint != opened.end() && endpoint->type == runtime::ChannelType::Window && graphics_)
         graphics_->closeWindow(session_id_, channel);
+    fontRegistry_.clearChannel(channel);
+    if (graphics_) graphics_->clearFontSelections(session_id_, channel);
     channels_->close(session_id_, channel);
     channel_bindings_.erase(channel);
     for (auto binding = channel_bindings_.begin(); binding != channel_bindings_.end();) {

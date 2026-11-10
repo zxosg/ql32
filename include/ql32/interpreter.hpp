@@ -138,6 +138,7 @@ private:
     std::optional<int> lastEditedLine_;
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;
+    graphics::FontRegistry fontRegistry_;
     std::shared_ptr<runtime::ChannelService> channels_;
     runtime::BufferManager buffers_;
     std::shared_ptr<ui::Service> ui_;

@@ -1,7 +1,10 @@
 #pragma once
 
 #include <atomic>
+#include <algorithm>
+#include <cstring>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -29,10 +32,42 @@ public:
     virtual void writeTo(TextStreamSink& sink) const = 0;
 };
 
+class StorageReadHandle {
+public:
+    virtual ~StorageReadHandle() = default;
+    virtual std::uint64_t size() const noexcept = 0;
+    virtual std::size_t readAt(std::uint64_t offset, std::uint8_t* destination,
+                               std::size_t capacity) = 0;
+};
+
+class MemoryStorageReadHandle final : public StorageReadHandle {
+public:
+    explicit MemoryStorageReadHandle(std::string contents)
+        : contents_(std::move(contents)) {}
+
+    std::uint64_t size() const noexcept override { return contents_.size(); }
+    std::size_t readAt(std::uint64_t offset, std::uint8_t* destination,
+                       std::size_t capacity) override {
+        if (offset >= contents_.size() || capacity == 0) return 0;
+        const auto count = std::min<std::size_t>(capacity,
+            contents_.size() - static_cast<std::size_t>(offset));
+        std::memcpy(destination, contents_.data() + offset, count);
+        return count;
+    }
+
+private:
+    std::string contents_;
+};
+
 class StorageService {
 public:
     virtual ~StorageService() = default;
     virtual std::string readText(const std::string& path) = 0;
+    virtual std::unique_ptr<StorageReadHandle> openRead(const std::string& path) {
+        (void)path;
+        throw ServiceError(ServiceErrorCode::Unavailable,
+                           "storage: bounded random-access reads are unavailable");
+    }
     virtual void writeText(const std::string& path, const std::string& contents) = 0;
     // Adapters override this to stream chunks without assembling the complete
     // file in heap memory. The fallback keeps simple host/test adapters usable.

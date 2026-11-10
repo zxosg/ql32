@@ -2,6 +2,7 @@
 #include "ql32/interpreter.hpp"
 
 #include <chrono>
+#include <array>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -33,6 +34,16 @@ void testDirectoryStorage() {
         storage.writeText("subdir/program.bas", "10 PRINT \"ready\"\n");
         require(storage.readText("subdir/program.bas") == "10 PRINT \"ready\"\n",
                 "stored text did not round-trip");
+        const std::string binary("a\0bcd", 5);
+        storage.writeText("subdir/font.bin", binary);
+        auto reader = storage.openRead("subdir/font.bin");
+        std::array<std::uint8_t, 3> range{};
+        require(reader->size() == binary.size() && reader->readAt(1, range.data(), range.size()) == 3 &&
+                range[0] == 0 && range[1] == 'b' && range[2] == 'c' &&
+                reader->readAt(binary.size(), range.data(), range.size()) == 0,
+            "bounded storage reads did not preserve bytes and absolute offsets");
+        reader.reset();
+        storage.remove("subdir/font.bin");
         storage.writeText("subdir/program.bas", "20 PRINT \"saved\"\n");
         require(storage.readText("subdir/program.bas") == "20 PRINT \"saved\"\n",
                 "atomic overwrite did not replace the previous file");

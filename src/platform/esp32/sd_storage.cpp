@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <limits>
 #include <utility>
 
 namespace ql32::platform::esp32 {
@@ -34,6 +35,32 @@ std::string entryPathRelativeTo(const std::string& directory,
     if (!path.empty() && path.front() != '/') return path;
     return fileName(path.c_str());
 }
+
+class SdReadHandle final : public runtime::StorageReadHandle {
+public:
+    explicit SdReadHandle(fs::File file) : file_(std::move(file)), size_(file_.size()) {}
+    ~SdReadHandle() override { file_.close(); }
+
+    std::uint64_t size() const noexcept override { return size_; }
+
+    std::size_t readAt(std::uint64_t offset, std::uint8_t* destination,
+                       std::size_t capacity) override {
+        if (offset >= size_ || capacity == 0) return 0;
+        if (offset > std::numeric_limits<std::uint32_t>::max() ||
+            !file_.seek(static_cast<std::uint32_t>(offset)))
+            throw ServiceError(ServiceErrorCode::IoError, "storage: bounded seek failed");
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
+            capacity, size_ - offset));
+        const auto read = file_.read(destination, count);
+        if (read == 0 && count != 0)
+            throw ServiceError(ServiceErrorCode::IoError, "storage: bounded read failed");
+        return read;
+    }
+
+private:
+    fs::File file_;
+    std::uint64_t size_ = 0;
+};
 
 } // namespace
 
@@ -118,6 +145,22 @@ std::string SdStorage::readText(const std::string& path) {
     }
     file.close();
     return contents;
+}
+
+std::unique_ptr<runtime::StorageReadHandle> SdStorage::openRead(
+        const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    fs::File file = filesystem_.open(resolved.c_str(), FILE_READ);
+    if (!file)
+        throw ServiceError(ServiceErrorCode::NotFound,
+                           "storage: file not found: " + path);
+    if (file.isDirectory()) {
+        file.close();
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path names a directory: " + path);
+    }
+    return std::make_unique<SdReadHandle>(std::move(file));
 }
 
 void SdStorage::writeText(const std::string& path, const std::string& contents) {

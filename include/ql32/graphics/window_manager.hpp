@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ql32/graphics/service.hpp"
+#include "ql32/graphics/font.hpp"
 
 #include <cstddef>
 #include <array>
@@ -99,15 +100,20 @@ public:
     void rectangle(Point topLeft, std::int32_t width, std::int32_t height,
                    bool filled = false);
     void circle(Point center, std::int32_t radius, bool filled = false);
-    void text(Point topLeft, const std::string& value);
-    void printText(Point topLeft, const std::string& value);
+    Rect text(Point topLeft, const std::string& value);
+    Rect text(Point topLeft, const std::string& value, const BitmapFont& font,
+              FontStyle style = FontStyle::Normal);
+    Rect printText(Point topLeft, const std::string& value);
+    Rect printText(Point topLeft, const std::string& value, const BitmapFont& font,
+                   FontStyle style = FontStyle::Normal);
     void resize(std::uint32_t width, std::uint32_t height);
 
 private:
     friend class WindowManager;
     ColorIndex readPixel(std::size_t index) const noexcept;
     void writePixel(std::size_t index, ColorIndex color) noexcept;
-    void renderText(Point topLeft, const std::string& value, bool useOverMode);
+    Rect renderText(Point topLeft, const std::string& value, bool fillBackground,
+                    bool useOverMode, const BitmapFont* font, FontStyle style);
     std::uint8_t* pixelData() noexcept;
     const std::uint8_t* pixelData() const noexcept;
     IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth,

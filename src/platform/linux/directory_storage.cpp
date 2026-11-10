@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <system_error>
 #include <utility>
 
@@ -30,6 +31,48 @@ bool isWithin(const std::filesystem::path& root, const std::filesystem::path& ca
     }
     return true;
 }
+
+class DirectoryReadHandle final : public runtime::StorageReadHandle {
+public:
+    explicit DirectoryReadHandle(const std::filesystem::path& path) : file_(path, std::ios::binary) {
+        if (!file_) {
+            std::error_code error(errno, std::generic_category());
+            fail(path, error);
+        }
+        file_.seekg(0, std::ios::end);
+        const auto end = file_.tellg();
+        if (end < 0) throw ServiceError(ServiceErrorCode::IoError,
+                                       "storage: failed to measure " + path.string());
+        size_ = static_cast<std::uint64_t>(end);
+        file_.seekg(0, std::ios::beg);
+    }
+
+    std::uint64_t size() const noexcept override { return size_; }
+
+    std::size_t readAt(std::uint64_t offset, std::uint8_t* destination,
+                       std::size_t capacity) override {
+        if (offset >= size_ || capacity == 0) return 0;
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
+            capacity, size_ - offset));
+        if (offset > static_cast<std::uint64_t>(
+                std::numeric_limits<std::streamoff>::max()) ||
+            count > static_cast<std::size_t>(
+                std::numeric_limits<std::streamsize>::max()))
+            throw ServiceError(ServiceErrorCode::InvalidPath,
+                               "storage: read range exceeds supported file offsets");
+        file_.clear();
+        file_.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+        file_.read(reinterpret_cast<char*>(destination),
+                   static_cast<std::streamsize>(count));
+        if (!file_ && !file_.eof())
+            throw ServiceError(ServiceErrorCode::IoError, "storage: bounded read failed");
+        return static_cast<std::size_t>(file_.gcount());
+    }
+
+private:
+    std::ifstream file_;
+    std::uint64_t size_ = 0;
+};
 
 } // namespace
 
@@ -76,6 +119,11 @@ std::string DirectoryStorage::readText(const std::string& path) {
         fail(resolved, error);
     }
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+std::unique_ptr<runtime::StorageReadHandle> DirectoryStorage::openRead(
+        const std::string& path) {
+    return std::make_unique<DirectoryReadHandle>(resolve(path, false));
 }
 
 void DirectoryStorage::writeText(const std::string& path, const std::string& contents) {

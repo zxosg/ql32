@@ -76,6 +76,40 @@ std::string normalizePath(const std::string& path, bool allowRoot,
     return result.empty() ? "/" : result;
 }
 
+class IdfSdReadHandle final : public runtime::StorageReadHandle {
+public:
+    IdfSdReadHandle(int descriptor, std::uint64_t size)
+        : descriptor_(descriptor), size_(size) {}
+    ~IdfSdReadHandle() override {
+        if (descriptor_ >= 0) ::close(descriptor_);
+    }
+
+    std::uint64_t size() const noexcept override { return size_; }
+
+    std::size_t readAt(std::uint64_t offset, std::uint8_t* destination,
+                       std::size_t capacity) override {
+        if (offset >= size_ || capacity == 0) return 0;
+        if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+            ::lseek(descriptor_, static_cast<off_t>(offset), SEEK_SET) < 0)
+            throw ServiceError(ServiceErrorCode::IoError, errorText("storage seek"));
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
+            capacity, size_ - offset));
+        std::size_t total = 0;
+        while (total < count) {
+            const auto result = ::read(descriptor_, destination + total, count - total);
+            if (result < 0)
+                throw ServiceError(ServiceErrorCode::IoError, errorText("storage read"));
+            if (result == 0) break;
+            total += static_cast<std::size_t>(result);
+        }
+        return total;
+    }
+
+private:
+    int descriptor_ = -1;
+    std::uint64_t size_ = 0;
+};
+
 } // namespace
 
 IdfSdCard::~IdfSdCard() {
@@ -171,6 +205,27 @@ std::string IdfSdStorage::readText(const std::string& path) {
     }
     ::close(descriptor);
     return contents;
+}
+
+std::unique_ptr<runtime::StorageReadHandle> IdfSdStorage::openRead(
+        const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    const int descriptor = ::open(fullPath.c_str(), O_RDONLY);
+    if (descriptor < 0) {
+        if (errno == ENOENT)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage open"));
+    }
+    struct stat status{};
+    if (::fstat(descriptor, &status) < 0 || !S_ISREG(status.st_mode) || status.st_size < 0) {
+        ::close(descriptor);
+        throw ServiceError(ServiceErrorCode::InvalidPath,
+                           "storage: path is not a regular file: " + path);
+    }
+    return std::make_unique<IdfSdReadHandle>(descriptor,
+        static_cast<std::uint64_t>(status.st_size));
 }
 
 void IdfSdStorage::writeText(const std::string& path, const std::string& contents) {

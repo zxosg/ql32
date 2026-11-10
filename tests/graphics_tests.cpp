@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 #include <sstream>
 #include <stdexcept>
@@ -194,6 +195,93 @@ public:
     std::uintmax_t size(const std::string&) override { return 0; }
     void rename(const std::string&, const std::string&) override {}
     void remove(const std::string&) override {}
+};
+
+std::string makeTestQfnt() {
+    constexpr std::size_t headerSize = 26;
+    constexpr std::size_t indexEntrySize = 13;
+    constexpr std::uint32_t indexOffset = headerSize;
+    constexpr std::uint32_t bitmapOffset = headerSize + 95 * indexEntrySize;
+    std::vector<std::uint8_t> bytes(headerSize, 0);
+    bytes[0] = 'Q'; bytes[1] = 'F'; bytes[2] = 'N'; bytes[3] = 'T';
+    bytes[4] = 2; bytes[5] = headerSize; bytes[6] = 5; bytes[7] = 8;
+    bytes[8] = 7; bytes[9] = 32; bytes[10] = 95;
+    const auto put32 = [&](std::size_t offset, std::uint32_t value) {
+        for (std::size_t index = 0; index < 4; ++index)
+            bytes[offset + index] = static_cast<std::uint8_t>(value >> (index * 8));
+    };
+    put32(14, indexOffset);
+    put32(18, bitmapOffset);
+    constexpr std::size_t glyphBytes = 7;
+    put32(22, bitmapOffset + 95 * glyphBytes);
+    for (std::uint8_t character = 32; character <= 126; ++character) {
+        const auto record = bytes.size();
+        bytes.resize(record + indexEntrySize, 0);
+        bytes[record] = character;
+        bytes[record + 1] = 5;
+        bytes[record + 2] = 7;
+        bytes[record + 3] = 5;
+        put32(record + 7, bitmapOffset + (character - 32) * glyphBytes);
+        bytes[record + 11] = glyphBytes;
+    }
+    for (std::uint8_t character = 32; character <= 126; ++character) {
+        for (std::size_t index = 0; index < glyphBytes; ++index)
+            bytes.push_back(index == 0 ? 0x80 : 0);
+    }
+    return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+}
+
+struct FontReadStats {
+    std::string contents;
+    std::size_t bytesRead = 0;
+};
+
+class CountingFontReadHandle final : public ql32::runtime::StorageReadHandle {
+public:
+    explicit CountingFontReadHandle(std::shared_ptr<FontReadStats> stats)
+        : stats_(std::move(stats)) {}
+    std::uint64_t size() const noexcept override { return stats_->contents.size(); }
+    std::size_t readAt(std::uint64_t offset, std::uint8_t* destination,
+                       std::size_t capacity) override {
+        if (offset >= stats_->contents.size() || capacity == 0) return 0;
+        const auto count = std::min<std::size_t>(capacity,
+            stats_->contents.size() - static_cast<std::size_t>(offset));
+        std::memcpy(destination, stats_->contents.data() + offset, count);
+        stats_->bytesRead += count;
+        return count;
+    }
+private:
+    std::shared_ptr<FontReadStats> stats_;
+};
+
+class BitmapFontStorage final : public ql32::runtime::StorageService {
+public:
+    explicit BitmapFontStorage(std::string contents)
+        : stats_(std::make_shared<FontReadStats>()) {
+        stats_->contents = std::move(contents);
+    }
+    std::string readText(const std::string&) override {
+        ++readTextCalls;
+        throw std::runtime_error("font loading must not use whole-file readText");
+    }
+    std::unique_ptr<ql32::runtime::StorageReadHandle> openRead(
+            const std::string&) override {
+        ++openReadCalls;
+        return std::make_unique<CountingFontReadHandle>(stats_);
+    }
+    void writeText(const std::string&, const std::string&) override {}
+    std::vector<ql32::runtime::FileEntry> list(const std::string&) override { return {}; }
+    bool exists(const std::string&) override { return true; }
+    std::uintmax_t size(const std::string&) override { return stats_->contents.size(); }
+    void rename(const std::string&, const std::string&) override {}
+    void remove(const std::string&) override {}
+private:
+    std::shared_ptr<FontReadStats> stats_;
+public:
+    std::size_t readTextCalls = 0;
+    std::size_t openReadCalls = 0;
+    std::size_t bytesRead() const noexcept { return stats_->bytesRead; }
+    std::size_t fileSize() const noexcept { return stats_->contents.size(); }
 };
 
 void testDrawingCallsAndSessionOwnership() {
@@ -404,6 +492,151 @@ void testPixelAndFilledShapesRenderOnRetainedCanvas() {
             "RECT outline and fill=0 behavior were incorrect");
     require(pixel(10, 5) == 2 && pixel(10, 12) == 0,
             "filled and outline CIRCLE behavior was incorrect");
+}
+
+void testFontSelectionChangesNativeTextCellSize() {
+    const std::array<std::pair<std::uint8_t, std::uint8_t>, 4> dimensions{{
+        {5, 8}, {6, 12}, {8, 16}, {12, 24}}};
+    for (std::size_t index = 0; index < dimensions.size(); ++index) {
+        const auto& font = BitmapFont::builtIn(static_cast<FontHandle>(index + 1));
+        require(font.metrics().maxAdvance == dimensions[index].first &&
+                    font.metrics().lineHeight == dimensions[index].second,
+                "bundled Spleen face has incorrect native dimensions");
+        for (std::uint8_t character = BitmapFont::FirstCharacter;
+             character < BitmapFont::FirstCharacter + BitmapFont::CharacterCount;
+             ++character) {
+            FontGlyph glyph{};
+            require(font.readGlyph(character, glyph) &&
+                        glyph.character == character &&
+                        glyph.advance == dimensions[index].first,
+                    "built-in QFNT glyph index or advance is incorrect");
+        }
+    }
+
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(32, 64, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute("GFONT #1,4,0\nTEXT 0,0,\"A\"\n", output);
+
+    bool inkBelowLegacyCell = false;
+    for (std::uint32_t y = 8; y < 24; ++y)
+        for (std::uint32_t x = 0; x < 12; ++x)
+            inkBelowLegacyCell |= presenter->lastFrame.pixels[
+                static_cast<std::size_t>(y) * presenter->lastFrame.width + x] != 0;
+    require(inkBelowLegacyCell,
+            "GFONT did not render text at the selected native height");
+
+    bool invalidHandle = false;
+    try {
+        interpreter.execute("FONT #1,9999,0\n", output);
+    } catch (const std::runtime_error& error) {
+        invalidHandle = std::string(error.what()).find("font handle") != std::string::npos;
+    }
+    require(invalidHandle, "unknown font handle was accepted");
+}
+
+void testTextAndGraphicsFontStateAndStyles() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(32, 32, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "INK 7\nPAPER 3\n"
+        "FONT #1,4,0\n"
+        "GFONT #1,4,3\n"
+        "TEXT #1,0,0,\"A\"\n", output);
+
+    const auto states = graphics->windowManager().compositionOrder();
+    require(states.size() == 1, "font styles created an unexpected graphics window");
+    const auto& canvas = graphics->windowManager().canvas(states.front().id);
+    const auto& title = BitmapFont::builtIn(4).metrics();
+    const auto underlineY = std::min<std::uint32_t>(title.lineHeight - 1,
+                                                    title.ascent + 1);
+    require(canvas.pixel(0, underlineY) == 7 && canvas.pixel(11, 0) != 3,
+            "GFONT bold+underline or glyph-only paper behavior was incorrect");
+
+    interpreter.execute("FONT #1,4,3\nCLS\nPRINT #1,\" \";\n", output);
+        require(canvas.pixel(11, 0) == 3,
+            "normal PRINT did not fill the complete font cell with paper");
+        require(canvas.pixel(0, underlineY) == 7,
+            "normal PRINT did not rasterize the underline style");
+}
+
+void testLoadFontIsBoundedAndChannelScoped() {
+    auto storage = std::make_shared<BitmapFontStorage>(makeTestQfnt());
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(24, 24, presenter);
+    ql32::Interpreter interpreter(storage, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute("fontId = LOADFONT(\"fonts/test.qfnt\")\n", output);
+    require(storage->bytesRead() == BitmapFont::HeaderSize +
+                BitmapFont::CharacterCount * BitmapFont::GlyphIndexEntrySize &&
+                storage->bytesRead() < storage->fileSize(),
+            "LOADFONT read bitmap payloads instead of only bounded metadata and index");
+    interpreter.execute(
+        "FONT #1,fontId,3\n"
+        "GFONT #0,fontId,1\n"
+        "PRINT #1,\"?\"\n"
+        "TEXT #0,0,10,\"?\"\n"
+        "PRINT #0,GETFONT(0,fontId)\n"
+        "PRINT #0,GETFONT(2,fontId)\n", output);
+
+    const auto windows = graphics->windowManager().compositionOrder();
+    require(windows.size() == 2, "shared font handle did not render on two channels");
+    const auto& printSurface = graphics->windowManager().canvas(
+        graphics->windowForSession(interpreter.graphicsSessionId()));
+    require(printSurface.pixel(0, 0) == 7 && output.str() == "5\n7\n",
+            "LOADFONT, GETFONT, or selected-font PRINT failed");
+    bool graphicsChannelRendered = false;
+    for (const auto& state : windows) {
+        if (state.id != graphics->windowForSession(interpreter.graphicsSessionId()))
+            graphicsChannelRendered = graphics->windowManager().canvas(state.id).pixel(0, 10) == 7;
+    }
+    require(graphicsChannelRendered,
+            "one loaded handle was not shared with graphical TEXT on a second channel");
+    require(storage->openReadCalls == 1 && storage->readTextCalls == 0,
+            "font loading copied data through whole-file readText");
+
+    bool unloadInUseRejected = false;
+    try {
+        interpreter.execute("UNLOADFONT fontId\n", output);
+    } catch (const std::runtime_error& error) {
+        unloadInUseRejected = std::string(error.what()).find("selected") !=
+                              std::string::npos;
+    }
+    require(unloadInUseRejected, "UNLOADFONT accepted a font used by a channel");
+    interpreter.execute("FONT #1,4,0\nGFONT #0,4,0\nUNLOADFONT fontId\n", output);
+
+    const std::string unsupported("\xc3\xa9", 2);
+    std::size_t offset = 0;
+    require(ql32::graphics::nextAsciiCharacter(unsupported, offset) == '?' &&
+                offset == unsupported.size(),
+            "unsupported UTF-8 text was not mapped to one replacement character");
+
+    bool builtInUnloadRejected = false;
+    try {
+        interpreter.execute("UNLOADFONT 1\n", output);
+    } catch (const std::runtime_error& error) {
+        builtInUnloadRejected = std::string(error.what()).find("built-in") !=
+                                std::string::npos;
+    }
+    require(builtInUnloadRejected, "UNLOADFONT accepted a built-in font handle");
+
+    for (std::string invalidFont : {std::string("QFNT"), makeTestQfnt()}) {
+        if (invalidFont.size() > BitmapFont::HeaderSize)
+            invalidFont[BitmapFont::HeaderSize] = 0;
+        auto invalidStorage = std::make_shared<BitmapFontStorage>(std::move(invalidFont));
+        FontRegistry registry(invalidStorage);
+        bool invalidRejected = false;
+        try {
+            (void)registry.load("invalid.qfnt");
+        } catch (const std::invalid_argument&) {
+            invalidRejected = true;
+        }
+        require(invalidRejected && invalidStorage->readTextCalls == 0,
+                "malformed QFNT header or index was accepted");
+    }
 }
 
 void testDisplayCommands() {
@@ -1153,6 +1386,9 @@ void testScreenPrintPositionsArePerChannelAndSeparateFromText() {
 
 int main() {
     testDrawingCallsAndSessionOwnership();
+    testFontSelectionChangesNativeTextCellSize();
+    testTextAndGraphicsFontStateAndStyles();
+    testLoadFontIsBoundedAndChannelScoped();
     testGraphicsUpdateCommandDispatch();
     testWindowedGraphicsUpdateBatching();
     testDrawingArgumentValidation();

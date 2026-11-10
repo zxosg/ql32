@@ -44,8 +44,13 @@ The latest implementation includes:
   remains console output. CYD and FabGL console overlays follow `#0` bounds.
   `CLS` accepts no arguments, `#channel`, `ink,paper`, or
   `#channel,ink,paper`; color arguments persist on that graphics surface.
-  Linux and all maintained ESP32 profiles build. The classic glyph set covers
-  printable ASCII `0x20`–`0x7E`, verified by VGA capture. CYD users have
+  Linux and all maintained ESP32 profiles build. Graphics channels support
+  Spleen 5×8, 6×12, 8×16, and 12×24 via shared session font handles, separate
+  `FONT`/`GFONT` styles, `UNLOADFONT`, and `GETFONT`; QFNT v2 reads glyphs from
+  storage on demand. The CYD received and visually rendered all four files over
+  YMODEM on 2026-11-10; cross-board visual checks and heap measurements remain
+  open. Classic console text remains unchanged. The classic glyph set covers printable
+  ASCII `0x20`–`0x7E`, verified by VGA capture. CYD users have
   confirmed compositor movement, resizing/clipping and rotations; the four
   `CLS` forms ran without syntax or VM errors, though overlapping windows
   prevented visual isolation of clear colors. The attractor's `PLOT` output was
@@ -196,8 +201,7 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    duration comes from BASIC math, interpreter execution, or display transfer.
    Keep the debug bar available for heap/task observation. QMI8658C, BMP280,
    and RGB LED support remain deferred by user decision.
-4. **Other backlog:** specify bounded bitmap-font assets and `FONT`/`LOAD FONT`;
-   later scope palette changes, task-window management, BASIC
+4. **Other backlog:** scope palette changes, task-window management, BASIC
    system/build/platform and capability introspection,
    enhanced `DIR` output with optional file sizes and `<subdir>` directory
    labels, `DATA`/`READ`/`RESTORE` statements, string splitting, indirect

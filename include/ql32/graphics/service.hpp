@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ql32/graphics/font.hpp"
+
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
@@ -166,6 +168,9 @@ public:
         (void)channel;
         text(session, topLeft, value);
     }
+    virtual void setTextFont(SessionId, ChannelId, const BitmapFont*, FontStyle) {}
+    virtual void setGraphicsFont(SessionId, ChannelId, const BitmapFont*, FontStyle) {}
+    virtual void clearFontSelections(SessionId, ChannelId) {}
     virtual void writeText(SessionId session, const std::string& value) {
         text(session, {0, 0}, value);
     }

@@ -257,8 +257,19 @@ device-specific wrapping are deferred to display/output integration. On
 graphical output, leading `INK color` and `PAPER color` options set the current
 window colors before the first expression, for example
 `PRINT INK 3, PAPER 6, "hello"`. Commas after the first expression retain their
-normal tab-stop meaning. Graphical text uses 5×7 glyphs in 6×8 cells; the
-active paper color fills the gap column and other unlit pixels in each cell.
+normal tab-stop meaning. Graphical text defaults to 5×7 glyphs in 6×8 cells.
+`LOADFONT(path$)` returns a session-owned font handle; built-in handles are
+`KFontSmall`, `KFontNormal`, `KFontLarge`, and `KFontTitle`. `FONT handle,style`
+selects normal text output, while `GFONT handle,style` independently selects
+graphical `TEXT`; both accept an optional `#channel` selector. Styles are
+combinable flags: normal `0`, bold `1`, underline `2`. `UNLOADFONT handle`
+releases a loaded handle but not its file, and fails while a channel uses it.
+Channels may share a handle without reloading the font. `GETFONT(selector,
+handle)` returns metrics using the `KFontMetric*` selectors in `ql32.inc`.
+Normal output fills paper cells; graphical text draws only glyph pixels.
+QFNT v2 preserves each BDF glyph’s bitmap bounds, signed offsets, and advance;
+it is limited to 8,192 bytes. Printable ASCII is supported and other characters
+map to `?`; Czech glyphs are not included initially.
 
 Numbers print using locale-independent shortest round-trip decimal notation;
 zero, including negative zero, prints as `0`. Strings print as their contents.
