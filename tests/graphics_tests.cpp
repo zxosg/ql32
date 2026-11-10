@@ -1322,12 +1322,12 @@ void testAtPositionsDefaultAndOpenedScreenChannels() {
     ql32::Interpreter interpreter({}, channels, {}, graphics);
     std::ostringstream output;
     interpreter.execute(
-        "AT 5,10\n"
+        "AT 6,11\n"
         "PRINT \"default\"\n"
         "wchan=OPEN(4)\n"
-        "AT #wchan,2,7\n"
+        "AT #wchan,3,8\n"
         "PRINT #wchan,\"window\"\n"
-        "AT #0,3,4\n"
+        "AT #0,4,5\n"
         "PRINT #0,\"console\"\n", output);
     const auto atEvents = std::count_if(graphics->events.begin(), graphics->events.end(),
         [](const Event& event) { return event.name == "AT"; });
@@ -1355,6 +1355,40 @@ void testAtPositionsDefaultAndOpenedScreenChannels() {
                 windowAt != graphics->events.end() && consoleAt != graphics->events.end() &&
                 windowPrint != graphics->events.end(),
             "AT did not preserve row/column order and route each screen channel");
+}
+
+void testAtWorksOnNumberedBasicLineWithVariableCoordinates() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "10 a%=1\n"
+        "15 b%=2\n"
+        "20 AT a%,b%\n"
+        "30 PRINT \"positioned\"\n", output);
+
+    const auto positioned = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) {
+            return event.name == "AT" && event.channel == 1 &&
+                   event.first.x == 0 && event.first.y == 1;
+        });
+    require(positioned != graphics->events.end(),
+            "numbered AT statement with variable coordinates was not parsed");
+}
+
+void testAtRejectsZeroRowOrColumn() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        interpreter.execute("AT 0,1\n", output);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("positive integers") !=
+                   std::string::npos;
+    }
+    require(rejected, "AT accepted a zero-based row coordinate");
+    require(graphics->events.empty(), "invalid AT reached the graphics service");
 }
 
 void testScreenPrintPositionsArePerChannelAndSeparateFromText() {
@@ -1417,5 +1451,7 @@ int main() {
     testTextCellsFillCharacterGapsWithPaper();
     testCloseWindowCommandDispatch();
     testAtPositionsDefaultAndOpenedScreenChannels();
+    testAtWorksOnNumberedBasicLineWithVariableCoordinates();
+    testAtRejectsZeroRowOrColumn();
     testScreenPrintPositionsArePerChannelAndSeparateFromText();
 }

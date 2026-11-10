@@ -104,7 +104,7 @@ constexpr std::string_view builtinCommands[] = {
     "FONT", "GFONT", "UNLOADFONT",
     "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
-    "DEALLOC", "XFER", "PAUSE"
+    "DEALLOC", "XFER", "PAUSE", "RANDOMIZE"
 };
 
 constexpr std::string_view builtinFunctions[] = {
@@ -117,7 +117,7 @@ constexpr std::string_view builtinFunctions[] = {
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
     "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$",
-    "LOADFONT", "GETFONT"
+    "LOADFONT", "GETFONT", "RND"
 };
 
 constexpr std::string_view shellHelpCommands[] = {
@@ -252,6 +252,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
         instruction.name == "BIN$") return {1, true};
     if (instruction.name == "SIN" || instruction.name == "COS" ||
         instruction.name == "INT") return {1, true};
+    if (instruction.name == "RND") return {0, true};
+    if (instruction.name == "RANDOMIZE") return {1, false};
     if (instruction.name == "FREE") return {0, true};
     if (instruction.name == "GETCHANNEL") return {1, true};
     if (instruction.name == "GETTASK") return {1, true};
@@ -723,6 +725,7 @@ private:
     bool isLineNumber() const {
         return current_ + 1 < tokens_.size() &&
                (tokens_[current_ + 1].kind == Kind::Print ||
+                tokens_[current_ + 1].kind == Kind::At ||
                 tokens_[current_ + 1].kind == Kind::If ||
                 tokens_[current_ + 1].kind == Kind::Else ||
                 tokens_[current_ + 1].kind == Kind::EndKeyword ||
@@ -773,6 +776,9 @@ private:
                 if (instruction.name == "FREE") {
                     if (passedArguments > 1)
                         error(instruction, "FREE accepts zero or one selector (0, 1, or 2)");
+                } else if (instruction.name == "RND") {
+                    if (passedArguments > 2)
+                        error(instruction, "RND expects zero, one, or two arguments");
                 } else if (instruction.name == "GETCHANNEL") {
                     if (passedArguments < 1 || passedArguments > 2)
                         error(instruction, "GETCHANNEL expects one or two arguments");
@@ -2282,6 +2288,10 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
       task_id_(taskId) {
     if (session_id_ == 0)
         session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
+    randomState_ = (static_cast<std::uint64_t>(session_id_) *
+                    0x9e3779b97f4a7c15ULL) ^
+                   static_cast<std::uint64_t>(
+                       std::chrono::steady_clock::now().time_since_epoch().count());
 }
 
 void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {

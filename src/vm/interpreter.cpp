@@ -42,6 +42,15 @@ using detail::SelectState;
 using detail::DialogBuilder;
 using detail::MenuBuilder;
 
+double nextRandomUnit(std::uint64_t& state) {
+    state += 0x9e3779b97f4a7c15ULL;
+    std::uint64_t value = state;
+    value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+    value ^= value >> 31;
+    return static_cast<double>(value >> 11) * (1.0 / 9007199254740992.0);
+}
+
 bool mayContainInclude(std::string_view source) {
     constexpr std::string_view directive = "INCLUDE";
     for (std::size_t start = 0; start + directive.size() <= source.size(); ++start) {
@@ -915,6 +924,54 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     }
                     if ((flags & runtime::TaskStartWait) != 0)
                         return ExecutionStatus::WaitingTask;
+                    break;
+                }
+                if (instruction.name == "RANDOMIZE") {
+                    const auto* seed = std::get_if<double>(&arguments[0]);
+                    if (!seed || !std::isfinite(*seed) || std::trunc(*seed) != *seed ||
+                        *seed < 0 || *seed > 4294967295.0)
+                        runtimeError(instruction,
+                            "RANDOMIZE seed must be an integer from 0 through 4294967295");
+                    randomState_ = static_cast<std::uint64_t>(*seed);
+                    break;
+                }
+                if (instruction.name == "RND") {
+                    double low = 0;
+                    double high = 1;
+                    if (arguments.size() == 1) {
+                        const auto* bound = std::get_if<double>(&arguments[0]);
+                        if (!bound) runtimeError(instruction, "numeric value required");
+                        high = *bound;
+                    } else if (arguments.size() == 2) {
+                        const auto* lower = std::get_if<double>(&arguments[0]);
+                        const auto* upper = std::get_if<double>(&arguments[1]);
+                        if (!lower || !upper)
+                            runtimeError(instruction, "numeric bounds required");
+                        low = *lower;
+                        high = *upper;
+                    }
+                    if (!std::isfinite(low) || !std::isfinite(high))
+                        runtimeError(instruction, "RND bounds must be finite");
+                    if (high < low)
+                        runtimeError(instruction,
+                            "RND upper bound must not be less than lower bound");
+
+                    double result = low;
+                    if (low < high) {
+                        const double unit = nextRandomUnit(randomState_);
+                        result = (low < 0 && high > 0) ?
+                            low * (1.0 - unit) + high * unit :
+                            low + (high - low) * unit;
+                        result = quantizeNumeric(result, &instruction);
+                        if (result < low) result = low;
+                        if (result >= high) {
+                            result = singlePrecision ?
+                                static_cast<double>(std::nextafter(
+                                    static_cast<float>(high), static_cast<float>(low))) :
+                                std::nextafter(high, low);
+                        }
+                    }
+                    pushValue(result);
                     break;
                 }
                 if (instruction.name == "TASKRESULT") {
@@ -2888,11 +2945,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             double channelValue = static_cast<double>(resolveChannel(default_output_channel_));
             if (instruction.channelArgument) channelValue = numeric(pop(), instruction);
             const auto validCoordinate = [](double value) {
-                return std::isfinite(value) && std::trunc(value) == value && value >= 0 &&
+                return std::isfinite(value) && std::trunc(value) == value && value >= 1 &&
                     value <= static_cast<double>(std::numeric_limits<std::uint32_t>::max());
             };
             if (!validCoordinate(rowValue) || !validCoordinate(columnValue))
-                runtimeError(instruction, "AT row and column must be nonnegative integers");
+                runtimeError(instruction, "AT row and column must be positive integers");
             if (!std::isfinite(channelValue) || std::trunc(channelValue) != channelValue ||
                 channelValue < 0 || channelValue > 9007199254740991.0)
                 runtimeError(instruction, "AT channel must be a nonnegative integer");
@@ -2907,18 +2964,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             if (!screenChannel)
                 runtimeError(instruction, "AT supports only console and screen channels");
+            const auto row = static_cast<std::uint32_t>(rowValue - 1);
+            const auto column = static_cast<std::uint32_t>(columnValue - 1);
             const bool positioned = graphics_ && graphics_->setTextPosition(session_id_,
-                channel, static_cast<std::uint32_t>(rowValue),
-                static_cast<std::uint32_t>(columnValue));
+                channel, row, column);
             if (!positioned && channel == 0) {
-                output << "\x1b[" << (static_cast<std::uint32_t>(rowValue) + 1)
-                       << ';' << (static_cast<std::uint32_t>(columnValue) + 1) << 'H';
-                output_column_ = static_cast<std::size_t>(columnValue);
+                output << "\x1b[" << (row + 1) << ';' << (column + 1) << 'H';
+                output_column_ = column;
             } else if (!positioned) {
                 runtimeError(instruction, "screen positioning is unavailable");
             }
-            if (channel == 0) output_column_ = static_cast<std::size_t>(columnValue);
-            else state.printChannelColumn = static_cast<std::size_t>(columnValue);
+            if (channel == 0) output_column_ = column;
+            else state.printChannelColumn = column;
             break;
         }
         case Op::PrintChannel: {

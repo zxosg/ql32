@@ -72,7 +72,8 @@ The latest implementation includes:
 - Recent language helpers: UTF-8 `LEFT$`, `RIGHT$`, `MID$`; `SIN`,
   `COS`, `INT`; unsigned 32-bit `BAND`, `BOR`, `BXOR`, `BNOT`,
   `ROL`, `ROR`, `SRA`, `SRL`, `SLA`, `SLL`; `&H`/`&B` literals and
-  `HEX$`/`BIN$`. Graphics refresh batching uses `GUPDATE`.
+  `HEX$`/`BIN$`; session-owned `RND()` overloads and `RANDOMIZE seed`.
+  Graphics refresh batching uses `GUPDATE`.
 On 2026-11-08 the native Linux CMake build and full CTest suite passed (65/65).
 The scheduler pager assertion was stale: its expected text used lowercase
 `Enter=page`, while the current prompt is `Enter=Page, L=Line, Q=Quit`. The test
@@ -201,9 +202,7 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    duration comes from BASIC math, interpreter execution, or display transfer.
    Keep the debug bar available for heap/task observation. QMI8658C, BMP280,
    and RGB LED support remain deferred by user decision.
-4. **Other backlog:** scope palette changes, task-window management, BASIC
-   random-number support (`RND()`, `RND(value)`, `RND(low,high)`, and
-   `RANDOMIZE seed`),
+4. **Other backlog:** scope palette changes, task-window management,
    system/build/platform and capability introspection,
    enhanced `DIR` output with optional file sizes and `<subdir>` directory
    labels, `DATA`/`READ`/`RESTORE` statements, string splitting, indirect
@@ -214,6 +213,13 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    SPI, I2C, and serial), and how support differs from runtime availability.
 
 ## Recently completed
+
+- **BASIC random numbers (2026-11-10):** Implemented per-session `RND()`,
+  `RND(value)`, `RND(low,high)`, and `RANDOMIZE seed`. Seeds are finite
+  nonnegative 32-bit integers; unequal bounds form a half-open range, while
+  equal bounds return that value. Added runtime coverage for range validation,
+  repeatable reseeding, and session isolation. Linux runtime and language
+  conformance tests pass; see [QL32-LANG-001](docs/specification/QL32-LANG-001.md).
 
 - **REPL program editing and line deletion (2026-11-08):** The numbered-line
   REPL editor has been implemented and fixed. `DELETE lineNumber1,...` is also

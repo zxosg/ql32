@@ -2,6 +2,7 @@
 
 #include <iosfwd>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -151,6 +152,7 @@ private:
     runtime::SessionId session_id_ = 0;
     runtime::TaskId task_id_ = 0;
     std::uint32_t requestedPauseDurationMs_ = 0;
+    std::uint64_t randomState_ = 0;
     runtime::ErrorCode errorCode_ = runtime::ErrorCode::None;
     std::string errorDetail_;
     std::unique_ptr<detail::VMExecutionState> execution_;

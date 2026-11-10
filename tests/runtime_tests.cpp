@@ -785,6 +785,51 @@ void testTrigonometricFunctionsUseRadians() {
     require(!(values >> extra), "SIN or COS produced extra values");
 }
 
+void testRandomNumberFunctions() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "RANDOMIZE 1234\n"
+        "unit=RND()\n"
+        "scaled=RND(10)\n"
+        "ranged=RND(-2,3)\n"
+        "PRINT unit>=0 AND unit<1\n"
+        "PRINT scaled>=0 AND scaled<10\n"
+        "PRINT ranged>=-2 AND ranged<3\n"
+        "PRINT RND(0)\n"
+        "PRINT RND(5,5)\n"
+        "RANDOMIZE 1234\n"
+        "PRINT RND()=unit\n", output);
+    require(output.str() == "1\n1\n1\n0\n5\n1\n",
+            "RND bounds, endpoint handling, or RANDOMIZE reproducibility failed");
+
+    ql32::Interpreter first;
+    ql32::Interpreter second;
+    std::ostringstream firstOutput;
+    std::ostringstream secondOutput;
+    first.execute("RANDOMIZE 42\nfirst=RND()\n", firstOutput);
+    second.execute("RANDOMIZE 42\nsecond=RND()\nsecondNext=RND()\n", secondOutput);
+    first.execute("firstNext=RND()\nPRINT first;firstNext\n", firstOutput);
+    second.execute("PRINT second;secondNext\n", secondOutput);
+    require(firstOutput.str() == secondOutput.str(),
+            "random generator state was shared between BASIC sessions");
+
+    for (const std::string& source : {
+             "PRINT RND(1,2,3)\n", "RANDOMIZE 1.5\n",
+             "RANDOMIZE 4294967296\n", "PRINT RND(-1)\n",
+             "PRINT RND(2,1)\n"}) {
+        bool rejected = false;
+        try {
+            ql32::Interpreter invalid;
+            std::ostringstream ignored;
+            invalid.execute(source, ignored);
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        require(rejected, "random-number function accepted invalid arguments");
+    }
+}
+
 void testPauseDurationRoundsUpAndResumes() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -1139,6 +1184,7 @@ int main() {
         testStringExtractionFunctions();
         testUnsignedBitFunctionsAndRadixLiterals();
         testTrigonometricFunctionsUseRadians();
+        testRandomNumberFunctions();
         testPauseDurationRoundsUpAndResumes();
         testFreeReturnsAllMetricsWithoutSelector();
         testFreeLeavesUnavailableMetricsAsEmptyCsvFields();

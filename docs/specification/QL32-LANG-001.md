@@ -184,9 +184,9 @@ which is useful when converting drawing positions to pixel coordinates. These
 functions are available for later language slices and are not part of the M1
 compatibility claim.
 
-### Planned random-number functions (not implemented)
+### Random-number functions
 
-The planned QL/32 random-number interface is:
+QL/32 provides the following random-number interface:
 
 ```basic
 RND()                 REM real value in [0, 1)
@@ -195,17 +195,19 @@ RND(low, high)        REM real value in [low, high)
 RANDOMIZE seed        REM seed the current session's generator
 ```
 
-The lower endpoint is included and the upper endpoint is excluded. Thus
-`RND(2, 5)` may return `2`, but never `5`. `RND(low, high)` is the comma-form
-equivalent of the Minerva/SMSQ-style `RND(low TO high)` range; the `TO` spelling
-is not part of the planned QL/32 syntax, so the existing comma-separated
-function-call parser can be retained. `RND()` accepts an empty argument list.
-`RANDOMIZE` is a statement command without parentheses and takes a seed.
+For unequal bounds, the lower endpoint is included and the upper endpoint is
+excluded. Thus `RND(2, 5)` may return `2`, but never `5`. Equal bounds return
+that bound. `RND(low, high)` uses comma separation; the Minerva/SMSQ-style
+`RND(low TO high)` spelling is not supported. `RND()` accepts an empty argument
+list. `RANDOMIZE` is a statement command without parentheses and takes a finite,
+nonnegative integer seed from 0 through 4294967295. RND bounds must be finite;
+a one-argument bound cannot be negative, and a two-argument upper bound cannot
+be less than the lower bound. A zero one-argument bound returns zero.
 
-The generator state is per BASIC session; `RANDOMIZE seed` resets that
-session's sequence. Exact seed type/range and behavior for zero, negative, or
-equal bounds remain to be specified during implementation. This feature is
-planned and does not yet make a compatibility claim for Minerva or SMSQ/E.
+The generator state is per BASIC session, and `RANDOMIZE seed` resets only that
+session's sequence. The generator is deterministic and intended for ordinary
+BASIC programs, not cryptographic use. These semantics are QL/32-specific and
+make no compatibility claim for Minerva or SMSQ/E.
 
 `VAL(string$)` converts a complete decimal numeric value, including exponent
 notation, to the selected numeric precision. Leading and trailing whitespace
@@ -731,6 +733,10 @@ example `PRINT #out, text$`, `LIST #out`, `PLOT #window, x, y`, or
 palette index with `INK`. `OVER` applies to `PLOT`, `LINE`, `RECT`, `CIRCLE`,
 and graphics `TEXT`; it does not affect `PRINT`. Its state belongs to the
 selected graphics channel and defaults to `0`.
+`AT row,column` positions subsequent normal text output on the current output
+channel; `AT #channel,row,column` selects a screen channel explicitly. Text
+rows and columns are one-based, with `(1,1)` at the top-left cell. This is
+separate from graphics commands, whose pixel coordinates start at `(0,0)`.
 graphics commands use the current graphics output default; channel-qualified
 graphics commands use a `#channel` selector. The clear command accepts
 `CLS`, `CLS #channel`, `CLS ink,paper`, or `CLS #channel,ink,paper`; the color
@@ -816,21 +822,19 @@ EOF. Configured serial hardware channels support asynchronous line reads as
 specified in [QL32-HW-001](QL32-HW-001.md); the legacy zero-argument serial
 output endpoint and null channels do not support input.
 
-Exact binary I/O and random access use channel-context forms:
+Exact binary transfers use channel-context forms:
 
 ```basic
-#channel AT byteOffset
 #channel IN byteCount, buffer$
 #channel OUT byteCount, buffer$
 ```
 
-`AT` seeks to a zero-based absolute file offset. `IN` reads exactly the
-requested count from the current position; `OUT` writes that many bytes from
-the start of the string buffer. Counts are limited to 8192 bytes per
-operation. Linux directory and ESP32 SD file adapters support these
-operations. Strings preserve NUL and arbitrary byte sequences for binary I/O,
-but text operations such as slicing and printing assume UTF-8. `APPEND`
-channels are sequential and cannot be repositioned.
+`IN` reads exactly the requested count from the current position; `OUT` writes
+that many bytes from the start of the string buffer. Counts are limited to
+8192 bytes per operation. Linux directory and ESP32 SD file adapters support
+these operations. Strings preserve NUL and arbitrary byte sequences for binary
+I/O, but text operations such as slicing and printing assume UTF-8. The BASIC
+syntax for seeking within a channel is not specified here.
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
 
@@ -949,4 +953,3 @@ compiled by `RUN`. Multiple-range evaluation is tested once in source order.
 Nested inline loops are outside the explicit M1 grammar, and board allocation
 limits are a later hardware qualification item. Broader SMSQ/E compatibility
 claims remain limited to behavior with both source references and tests.
-
