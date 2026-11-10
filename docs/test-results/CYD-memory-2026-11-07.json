@@ -1,0 +1,1338 @@
+{
+  "schema": "ql32-memory-test-v2",
+  "board_profile": "esp32_2432s028",
+  "firmware_revision": "connected-image-unverified",
+  "started_at": "2026-11-07T06:36:27.086367+00:00",
+  "cycles": 5,
+  "metrics": [
+    "FREE(0): total",
+    "FREE(1): largest block",
+    "FREE(2): free block count"
+  ],
+  "cases": [
+    {
+      "name": "array",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 2,
+          "before": {
+            "total": 222448,
+            "largest": 110580,
+            "blocks": 18
+          },
+          "active_report": {
+            "total": 201588,
+            "largest": 110580,
+            "blocks": 17
+          },
+          "released_report": null,
+          "during": {
+            "total": 197364,
+            "largest": 110580,
+            "blocks": 18
+          },
+          "after_cancel": {
+            "total": 221140,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "after_reap": {
+            "total": 221268,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "after": {
+            "total": 221272,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "task_record_recovery_bytes": 128,
+          "active_total_drop": 20860,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1224,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 3,
+          "before": {
+            "total": 221268,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "active_report": {
+            "total": 200640,
+            "largest": 110580,
+            "blocks": 16
+          },
+          "released_report": null,
+          "during": {
+            "total": 196420,
+            "largest": 110580,
+            "blocks": 19
+          },
+          "after_cancel": {
+            "total": 220728,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after_reap": {
+            "total": 220956,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "after": {
+            "total": 220960,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "task_record_recovery_bytes": 228,
+          "active_total_drop": 20628,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1536,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 4,
+          "before": {
+            "total": 220956,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "active_report": {
+            "total": 200312,
+            "largest": 110580,
+            "blocks": 16
+          },
+          "released_report": null,
+          "during": {
+            "total": 196080,
+            "largest": 110580,
+            "blocks": 18
+          },
+          "after_cancel": {
+            "total": 220732,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after_reap": {
+            "total": 220428,
+            "largest": 110580,
+            "blocks": 19
+          },
+          "after": {
+            "total": 220432,
+            "largest": 110580,
+            "blocks": 19
+          },
+          "task_record_recovery_bytes": -304,
+          "active_total_drop": 20644,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2064,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 5,
+          "before": {
+            "total": 220428,
+            "largest": 110580,
+            "blocks": 19
+          },
+          "active_report": {
+            "total": 199796,
+            "largest": 110580,
+            "blocks": 17
+          },
+          "released_report": null,
+          "during": {
+            "total": 195576,
+            "largest": 110580,
+            "blocks": 19
+          },
+          "after_cancel": {
+            "total": 220204,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "after_reap": {
+            "total": 220940,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after": {
+            "total": 220948,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "task_record_recovery_bytes": 736,
+          "active_total_drop": 20632,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1548,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 6,
+          "before": {
+            "total": 220940,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "active_report": {
+            "total": 200276,
+            "largest": 110580,
+            "blocks": 16
+          },
+          "released_report": null,
+          "during": {
+            "total": 196056,
+            "largest": 110580,
+            "blocks": 18
+          },
+          "after_cancel": {
+            "total": 220716,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_reap": {
+            "total": 220948,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after": {
+            "total": 220948,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "task_record_recovery_bytes": 232,
+          "active_total_drop": 20664,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1548,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": -324
+    },
+    {
+      "name": "channel",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 7,
+          "before": {
+            "total": 220932,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "active_report": {
+            "total": 209364,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "released_report": {
+            "total": 213864,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "during": {
+            "total": 209536,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_cancel": {
+            "total": 220668,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_reap": {
+            "total": 220372,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after": {
+            "total": 220372,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": -296,
+          "active_total_drop": 11568,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2124,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 8,
+          "before": {
+            "total": 220372,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "active_report": {
+            "total": 208848,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "released_report": {
+            "total": 213344,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "during": {
+            "total": 209024,
+            "largest": 110580,
+            "blocks": 25
+          },
+          "after_cancel": {
+            "total": 220140,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_reap": {
+            "total": 220884,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after": {
+            "total": 220900,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "task_record_recovery_bytes": 744,
+          "active_total_drop": 11524,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1596,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 9,
+          "before": {
+            "total": 220884,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "active_report": {
+            "total": 213344,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "released_report": {
+            "total": 213872,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "during": {
+            "total": 209548,
+            "largest": 110580,
+            "blocks": 27
+          },
+          "after_cancel": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 25
+          },
+          "after_reap": {
+            "total": 220884,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after": {
+            "total": 220900,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 212,
+          "active_total_drop": 7540,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1596,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 10,
+          "before": {
+            "total": 220884,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 213344,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "released_report": {
+            "total": 213876,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "during": {
+            "total": 209532,
+            "largest": 110580,
+            "blocks": 25
+          },
+          "after_cancel": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 25
+          },
+          "after_reap": {
+            "total": 220372,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after": {
+            "total": 220376,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": -300,
+          "active_total_drop": 7540,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2120,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 11,
+          "before": {
+            "total": 220372,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "active_report": {
+            "total": 208868,
+            "largest": 110580,
+            "blocks": 28
+          },
+          "released_report": {
+            "total": 213364,
+            "largest": 110580,
+            "blocks": 27
+          },
+          "during": {
+            "total": 209028,
+            "largest": 110580,
+            "blocks": 28
+          },
+          "after_cancel": {
+            "total": 220148,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after_reap": {
+            "total": 220900,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after": {
+            "total": 220904,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "task_record_recovery_bytes": 752,
+          "active_total_drop": 11504,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1592,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": 532
+    },
+    {
+      "name": "graphics",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 12,
+          "before": {
+            "total": 220900,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "active_report": {
+            "total": 202668,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "released_report": {
+            "total": 212380,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "during": {
+            "total": 208060,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 220456,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 220684,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after": {
+            "total": 220688,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 228,
+          "active_total_drop": 18232,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1808,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 13,
+          "before": {
+            "total": 220684,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 202664,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "released_report": {
+            "total": 212376,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "during": {
+            "total": 208056,
+            "largest": 110580,
+            "blocks": 27
+          },
+          "after_cancel": {
+            "total": 220452,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_reap": {
+            "total": 220152,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after": {
+            "total": 220152,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "task_record_recovery_bytes": -300,
+          "active_total_drop": 18020,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2344,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 14,
+          "before": {
+            "total": 220152,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "active_report": {
+            "total": 202148,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "released_report": {
+            "total": 211860,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "during": {
+            "total": 207532,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 219936,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after": {
+            "total": 220676,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "task_record_recovery_bytes": 736,
+          "active_total_drop": 18004,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1820,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 15,
+          "before": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "active_report": {
+            "total": 202684,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "released_report": {
+            "total": 212396,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "during": {
+            "total": 208084,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_cancel": {
+            "total": 220444,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after_reap": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after": {
+            "total": 220676,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "task_record_recovery_bytes": 228,
+          "active_total_drop": 17988,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1820,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 16,
+          "before": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "active_report": {
+            "total": 202676,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "released_report": {
+            "total": 212392,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "during": {
+            "total": 208076,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_cancel": {
+            "total": 220448,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_reap": {
+            "total": 220164,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after": {
+            "total": 220164,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": -284,
+          "active_total_drop": 17996,
+          "release_recovered": true,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2332,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": -524
+    },
+    {
+      "name": "debugger",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 17,
+          "before": {
+            "total": 220164,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 207856,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "released_report": null,
+          "during": {
+            "total": 204184,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_cancel": {
+            "total": 220464,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 220692,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after": {
+            "total": 220692,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 228,
+          "active_total_drop": 12308,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1804,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 17\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 2,
+          "task_id": 18,
+          "before": {
+            "total": 220692,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 208380,
+            "largest": 110580,
+            "blocks": 19
+          },
+          "released_report": null,
+          "during": {
+            "total": 203668,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 220448,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_reap": {
+            "total": 220700,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after": {
+            "total": 220700,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 252,
+          "active_total_drop": 12312,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1796,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 18\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 3,
+          "task_id": 19,
+          "before": {
+            "total": 220700,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 208376,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "released_report": null,
+          "during": {
+            "total": 203672,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "after_cancel": {
+            "total": 219944,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "after_reap": {
+            "total": 220692,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "after": {
+            "total": 220696,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "task_record_recovery_bytes": 748,
+          "active_total_drop": 12324,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1800,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 19\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 4,
+          "task_id": 20,
+          "before": {
+            "total": 220692,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "active_report": {
+            "total": 208380,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "released_report": null,
+          "during": {
+            "total": 204188,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_cancel": {
+            "total": 219928,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "after_reap": {
+            "total": 220172,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "after": {
+            "total": 220176,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "task_record_recovery_bytes": 244,
+          "active_total_drop": 12312,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2320,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 20\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        },
+        {
+          "repetition": 5,
+          "task_id": 21,
+          "before": {
+            "total": 220172,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "active_report": {
+            "total": 207844,
+            "largest": 110580,
+            "blocks": 20
+          },
+          "released_report": null,
+          "during": {
+            "total": 204180,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 220444,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_reap": {
+            "total": 220172,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after": {
+            "total": 220176,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "task_record_recovery_bytes": -272,
+          "active_total_drop": 12328,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2320,
+            "largest": 0
+          },
+          "debugger_output": "DEBUG 21\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+        }
+      ],
+      "post_run_total_drift": -516
+    },
+    {
+      "name": "combined",
+      "repetitions": [
+        {
+          "repetition": 1,
+          "task_id": 22,
+          "before": {
+            "total": 220172,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "active_report": {
+            "total": 181480,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "released_report": {
+            "total": 191724,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "during": {
+            "total": 187488,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 219944,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_reap": {
+            "total": 220692,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after": {
+            "total": 220696,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "task_record_recovery_bytes": 748,
+          "active_total_drop": 38692,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1800,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 2,
+          "task_id": 23,
+          "before": {
+            "total": 220692,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "active_report": {
+            "total": 182020,
+            "largest": 110580,
+            "blocks": 25
+          },
+          "released_report": {
+            "total": 192272,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "during": {
+            "total": 188024,
+            "largest": 110580,
+            "blocks": 26
+          },
+          "after_cancel": {
+            "total": 220440,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 232,
+          "active_total_drop": 38672,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1824,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 3,
+          "task_id": 24,
+          "before": {
+            "total": 220672,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 182012,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "released_report": {
+            "total": 192264,
+            "largest": 110580,
+            "blocks": 25
+          },
+          "during": {
+            "total": 188016,
+            "largest": 110580,
+            "blocks": 25
+          },
+          "after_cancel": {
+            "total": 220444,
+            "largest": 110580,
+            "blocks": 24
+          },
+          "after_reap": {
+            "total": 220148,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "after": {
+            "total": 220152,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": -296,
+          "active_total_drop": 38660,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -2344,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 4,
+          "task_id": 25,
+          "before": {
+            "total": 220148,
+            "largest": 110580,
+            "blocks": 23
+          },
+          "active_report": {
+            "total": 181504,
+            "largest": 110580,
+            "blocks": 27
+          },
+          "released_report": {
+            "total": 191744,
+            "largest": 110580,
+            "blocks": 27
+          },
+          "during": {
+            "total": 187500,
+            "largest": 110580,
+            "blocks": 28
+          },
+          "after_cancel": {
+            "total": 219932,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_reap": {
+            "total": 220680,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "after": {
+            "total": 220684,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "task_record_recovery_bytes": 748,
+          "active_total_drop": 38644,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1812,
+            "largest": 0
+          },
+          "debugger_output": null
+        },
+        {
+          "repetition": 5,
+          "task_id": 26,
+          "before": {
+            "total": 220680,
+            "largest": 110580,
+            "blocks": 21
+          },
+          "active_report": {
+            "total": 178028,
+            "largest": 110580,
+            "blocks": 17
+          },
+          "released_report": {
+            "total": 192248,
+            "largest": 110580,
+            "blocks": 18
+          },
+          "during": {
+            "total": 188008,
+            "largest": 110580,
+            "blocks": 18
+          },
+          "after_cancel": {
+            "total": 220448,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after_reap": {
+            "total": 220676,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "after": {
+            "total": 220680,
+            "largest": 110580,
+            "blocks": 22
+          },
+          "task_record_recovery_bytes": 228,
+          "active_total_drop": 42652,
+          "release_recovered": null,
+          "recovered_total": true,
+          "recovered_largest_block": true,
+          "idle_baseline_delta": {
+            "total": -1816,
+            "largest": 0
+          },
+          "debugger_output": null
+        }
+      ],
+      "post_run_total_drift": -16
+    }
+  ],
+  "warnings": [],
+  "passed": true,
+  "baseline": {
+    "warmup": [
+      {
+        "total": 222760,
+        "largest": 110580,
+        "blocks": 14
+      },
+      {
+        "total": 222496,
+        "largest": 110580,
+        "blocks": 16
+      },
+      {
+        "total": 222496,
+        "largest": 110580,
+        "blocks": 16
+      }
+    ],
+    "samples": [
+      {
+        "total": 222496,
+        "largest": 110580,
+        "blocks": 16
+      },
+      {
+        "total": 222496,
+        "largest": 110580,
+        "blocks": 16
+      },
+      {
+        "total": 222496,
+        "largest": 110580,
+        "blocks": 16
+      },
+      {
+        "total": 222496,
+        "largest": 110580,
+        "blocks": 16
+      },
+      {
+        "total": 222496,
+        "largest": 110580,
+        "blocks": 16
+      }
+    ],
+    "median": {
+      "total": 222496,
+      "largest": 110580,
+      "blocks": 16
+    },
+    "idle_spread_bytes": 0,
+    "recovery_tolerance_bytes": 2048
+  },
+  "restart_check": {
+    "warmup": [
+      {
+        "total": 222712,
+        "largest": 110580,
+        "blocks": 13
+      },
+      {
+        "total": 222444,
+        "largest": 110580,
+        "blocks": 17
+      },
+      {
+        "total": 222444,
+        "largest": 110580,
+        "blocks": 17
+      }
+    ],
+    "samples": [
+      {
+        "total": 222436,
+        "largest": 110580,
+        "blocks": 17
+      },
+      {
+        "total": 222436,
+        "largest": 110580,
+        "blocks": 17
+      },
+      {
+        "total": 222436,
+        "largest": 110580,
+        "blocks": 17
+      },
+      {
+        "total": 222436,
+        "largest": 110580,
+        "blocks": 17
+      },
+      {
+        "total": 222436,
+        "largest": 110580,
+        "blocks": 17
+      }
+    ],
+    "median": {
+      "total": 222436,
+      "largest": 110580,
+      "blocks": 17
+    },
+    "recovered_total": true,
+    "recovered_largest_block": true
+  },
+  "finished_at": "2026-11-07T06:36:54.070716+00:00"
+}

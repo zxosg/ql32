@@ -84,9 +84,11 @@ Boards sold under the same family name can differ. Check that the module is the
 and alternate revisions are not used by this target.
 
 Graphics use retained indexed canvases and a compositor. New windows default
-to 4-bit pixels, and the CYD allows two full-screen canvases within its configured
-canvas budget. The composed frame occupies one byte per screen pixel in addition
-to canvas storage.
+to 4-bit pixels. Window count is limited by actual memory allocation rather
+than a fixed per-board count. A 320x240 full-screen canvas uses 38,400 bytes;
+six 64x64 task canvases use another 12,288 bytes. The composed frame occupies
+one byte per screen pixel in addition to canvas storage. The 3x2 grid test uses
+these task canvases; the number of simultaneous tasks remains memory-dependent.
 
 The ESP32 image builds with PlatformIO `espressif32@6.12.0`
 (Arduino-ESP32 2.0.17), Adafruit ILI9341, and Adafruit GFX. It uses the shared

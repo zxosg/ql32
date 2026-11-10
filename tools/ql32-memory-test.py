@@ -267,11 +267,12 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
             )
             after_cancel, _ = sample(console, name, f"cancelled{repetition}")
             reap_log, task_count_after_reap = reap_worker(console, task_id)
+            after_reap, _ = sample(console, name, f"reaped{repetition}")
             task_id = None
-            after, _ = sample(console, name, f"after{repetition}")
             if name in {"channel", "combined"}:
                 delete_output = console.command('DELETE "FFS:/ql32_memory_probe.tmp"')
                 console.check_output(delete_output, "remove channel test file")
+            after, _ = sample(console, name, f"after{repetition}")
 
             dropped = before.total - active_report.total
             if minimum_drop and dropped < minimum_drop:
@@ -296,7 +297,9 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
                                     if released_report is not None else None),
                 "during": serial_metric_dict(after_active),
                 "after_cancel": serial_metric_dict(after_cancel),
+                "after_reap": serial_metric_dict(after_reap),
                 "after": serial_metric_dict(after),
+                "task_record_recovery_bytes": after_reap.total - after_cancel.total,
                 "cancelled_result_status": cancelled_status,
                 "task_count_after_cancel": task_count_after_cancel,
                 "task_count_after_reap": task_count_after_reap,
@@ -336,9 +339,8 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
 
 def run_graphics_case(console: SerialConsole, cycles: int, tolerance: int,
                       baseline: HeapSample, report_cases: list[dict]) -> dict:
-    # CanvasArena reserves its backing storage at service startup. Graphics
-    # allocation is therefore observable as a workload, but need not reduce
-    # free heap after startup; cleanup is still checked against the heap baseline.
+    # CanvasArena allocates canvas buffers independently. CLOSEWINDOW releases
+    # pixel storage; task reaping releases the remaining session allocations.
     return run_worker_case(console, "graphics", "ql32_mem_graphics.bas",
                            cycles, tolerance, baseline, minimum_drop=2 * 1024,
                            report_cases=report_cases)
@@ -362,7 +364,7 @@ def main() -> int:
     parser.add_argument("--firmware-revision",
                         help="revision of the image on the board; defaults to local git revision")
     parser.add_argument("--skip-upload", action="store_true",
-                        help="use BASIC fixtures already deployed to the SD card")
+                        help="use BASIC fixtures already deployed to FFS")
     args = parser.parse_args()
     if args.cycles < 5:
         parser.error("--cycles must be at least 5 to preserve the planned recovery checks")
@@ -386,7 +388,7 @@ def main() -> int:
     port.dtr = False
     port.rts = False
     report = {
-        "schema": "ql32-memory-test-v1",
+        "schema": "ql32-memory-test-v2",
         "board_profile": PROFILE,
         "firmware_revision": args.firmware_revision or git_revision(),
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -474,7 +476,7 @@ def main() -> int:
                 if total_declines >= max(3, len(totals) - 2) and total_drift < -tolerance:
                     report["warnings"].append(
                         f"{case['name']}: post-run total heap declined by {-total_drift} bytes; "
-                        "review retained task results and allocator behavior"
+                        "task records were removed; review persistent allocations and allocator behavior"
                     )
 
             # A fresh firmware boot verifies that the post-stress state is not the only

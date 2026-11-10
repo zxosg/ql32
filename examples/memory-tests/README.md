@@ -29,13 +29,18 @@ image. Use `--skip-upload` only when the matching fixtures are already on the
 FFS.
 
 Recovery is checked against each case's pre-run sample, using a tolerance of
-`max(2048 bytes, 2 × idle sample spread)`. Since task-result records are retained
-by the scheduler, per-run drift from the initial idle baseline is reported and
-consistent declines raise a warning. Array
+`max(2048 bytes, 2 × idle sample spread)`. The v2 report samples heap after
+cancelling the worker (`after_cancel`), after a second `KILL` removes its
+terminal task record (`after_reap`), and after temporary-file cleanup (`after`).
+`task_record_recovery_bytes` is the net total-heap recovery between the first
+two checkpoints, including any telemetry/allocator effects. Recovery checks
+and cumulative drift use the final sample, with no worker result retained.
+Consistent declines raise a warning. Array
 and combined workers must show at least an 8 KiB active heap decrease; channel,
 graphics, and debugger workers must show at least 2 KiB for their active task
 state. Graphics results are diagnostic for additional canvas heap deltas
-because the CYD graphics service reserves its arena at startup; the graphics
+because canvas and session state have separate lifetimes. The canvas arena
+allocates pixel buffers per canvas and releases them on close; the graphics
 worker explicitly calls `CLOSEWINDOW` and records the post-close sample.
 Free-block-count trends are reported as warnings, since the allocator may split
 or coalesce blocks independently of total free heap.
@@ -54,3 +59,19 @@ largest free block stayed at 51,188 bytes. Reboot returned total free heap to
 pre-reboot drift is reported for review but is not currently a suite failure;
 the run does not isolate retained task-result allocations from other small
 persistent allocations.
+
+That historical report uses the v1 procedure, which retained cancelled task
+records. Do not directly compare its cumulative drift with a v2 run. A v2
+hardware result is recorded in
+[the 2026-11-07 report](../../docs/test-results/CYD-memory-2026-11-07.md):
+25 worker runs passed, final pre-reboot drift was 1,816 bytes (within the
+2,048-byte tolerance), and the largest block stayed at 110,580 bytes. The
+flashed image revision was unverified. The separate
+[100-cycle resize soak](../../docs/test-results/CYD-canvas-resize-2026-11-06.md)
+showed stable post-cycle readings, but does not establish worker cleanup.
+
+Host checks for runner checkpoint order and residual-drift detection:
+
+```sh
+python3 tests/memory_runner_tests.py
+```

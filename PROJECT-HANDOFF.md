@@ -164,6 +164,11 @@ passed 64/64 on 2026-11-06.
   workers active, so that combination is outside the interactive envelope.
   Root cause of the variable post-saturation fragmentation/high-water cost is
   not isolated. See [CYD test results](docs/test-results/CYD-open-points-2026-11-07.md).
+  A separate v2 cleanup suite passed 25 worker runs: pre-reboot total-free drift
+  was 1,816 B within the 2,048 B tolerance, the largest block stayed at
+  110,580 B, and rebooted baseline was within 60 B. The flashed image revision
+  was unverified, and task-record checkpoint deltas do not establish an exact
+  retained-record cost; see [the v2 report](docs/test-results/CYD-memory-2026-11-07.md).
 
 See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 [QL32-PLAT-001](docs/specification/QL32-PLAT-001.md), and
