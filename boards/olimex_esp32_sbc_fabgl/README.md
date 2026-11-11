@@ -16,6 +16,21 @@ pio run -e olimex_esp32_sbc_fabgl -t uploadfs
 pio device monitor -b 115200
 ```
 
+For the ESP32-WROVER-E module with PSRAM enabled, use the separate
+`olimex_esp32_sbc_fabgl_psram` profile:
+
+```sh
+tools/build-target.sh olimex-psram
+pio run -e olimex_esp32_sbc_fabgl_psram -t upload
+pio device monitor -b 115200
+```
+
+This profile selects PlatformIO's `esp-wrover-kit` target, enables PSRAM
+initialization and the ESP32 cache workaround, and reports PSRAM and internal
+free memory at boot. It also uses a 16 KiB Arduino loop stack to accommodate
+the compiler's nested BASIC block parsing. The original `olimex` profile stays
+available for the non-PSRAM build.
+
 The board's SD SPI pins are MOSI GPIO 12, MISO GPIO 35, clock GPIO 14, and
 chip select GPIO 13. PS/2 keyboard port 0 uses data GPIO 32 and clock GPIO 33; mouse port 1
 uses data GPIO 27 and clock GPIO 26. The selected VGA color pins are red GPIO
@@ -53,3 +68,19 @@ The Mandelbrot demo draws on the default graphics surface. On this board its
 `WINDOW` resize statement raised `bad_alloc`, even with an 80x64 surface; the
 demo avoids that resize. Physical PS/2 key interaction and shortcuts, clock,
 and Wi-Fi still need board-level checks.
+
+## WROVER PSRAM profile check (2026-11-11)
+
+The `olimex_esp32_sbc_fabgl_psram` image built and flashed successfully on the
+Olimex board. Boot reported 4,192,123 bytes of PSRAM available to the normal
+heap and 230,376 bytes of internal free memory before application setup. After
+startup, `FREE()` reported 4,223,359 total free bytes and a 4,063,220-byte
+largest block. The 8 MiB WROVER-E PSRAM chip exposes about 4 MiB through this
+profile's ordinary address-mapped allocator; the remaining chip capacity is
+not included in those heap metrics.
+
+The existing `mandelbrot.bas` task started as task 2, printed `Mandelbrot
+complete`, and returned without a reset. This profile uses a 16 KiB Arduino
+loop stack. PSRAM enablement and the stack-size increase were tested together,
+so this run does not isolate their individual effects. The original
+non-PSRAM `olimex_esp32_sbc_fabgl` image remains available.

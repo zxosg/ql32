@@ -29,6 +29,10 @@ private:
     fabgl::Canvas& canvas_;
     std::function<void(graphics::Rect)> restoreOverlay_;
     std::vector<graphics::ColorIndex> indexedRow_;
+    std::vector<fabgl::RGBA8888> rgbaBand_;
+    std::array<graphics::RgbColor, 256> cachedPalette_{};
+    std::array<fabgl::RGBA8888, 256> rgbaPalette_{};
+    bool paletteCacheValid_ = false;
 };
 
 } // namespace ql32::platform::fabgl_vga

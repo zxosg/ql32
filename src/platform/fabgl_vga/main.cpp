@@ -5,6 +5,7 @@
 #endif
 #include <SPI.h>
 #include <driver/gpio.h>
+#include <esp_heap_caps.h>
 #include <fabgl.h>
 #include <algorithm>
 #include <array>
@@ -41,6 +42,7 @@
 #include "ql32/platform/esp32/monitor_transfer.hpp"
 #include "ql32/platform/esp32/remote_debug_protocol.hpp"
 #include "ql32/platform/esp32/serial_key_decoder.hpp"
+#include "ql32/ui/line_editor.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/platform/fabgl_vga/graphics.hpp"
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
@@ -117,6 +119,56 @@ public:
         while (lines_.size() <= cursorRow_) lines_.emplace_back();
     }
 
+    void beginInputLine(std::string_view prompt) {
+        if (inputLineActive_) {
+            updateInputLine({}, 0, true);
+            return;
+        }
+        write(prompt.data(), prompt.size());
+        inputLineActive_ = true;
+        inputRow_ = cursorRow_;
+        inputColumn_ = cursorColumn_;
+        updateInputLine({}, 0, true);
+    }
+
+    void updateInputLine(std::string_view text, std::size_t cursor,
+                         bool caretVisible = true) {
+        if (!inputLineActive_ || inputRow_ >= lines_.size()) return;
+        auto& line = lines_[inputRow_];
+        line.resize(std::min(inputColumn_, line.size()));
+
+        const auto available = columns_ - std::min(inputColumn_, columns_ - 1);
+        const auto maxCursorOffset = available - 1;
+        const auto viewOffset = cursor > maxCursorOffset ? cursor - maxCursorOffset : 0;
+        const auto visibleCount = std::min(available, text.size() - viewOffset);
+        if (visibleCount != 0)
+            line.append(text.data() + viewOffset, visibleCount);
+
+        caretRow_ = inputRow_;
+        caretColumn_ = inputColumn_ + std::min(cursor - viewOffset, maxCursorOffset);
+        caretVisible_ = caretVisible;
+        invalidateInputRow();
+    }
+
+    void setInputCaretVisible(bool visible) {
+        if (!inputLineActive_ || caretVisible_ == visible) return;
+        caretVisible_ = visible;
+        invalidateCaretCell();
+    }
+
+    bool inputLineActive() const noexcept { return inputLineActive_; }
+
+    void finishInputLine(std::string_view text) {
+        if (!inputLineActive_) return;
+        caretVisible_ = false;
+        if (inputRow_ < lines_.size())
+            lines_[inputRow_].resize(std::min(inputColumn_, lines_[inputRow_].size()));
+        cursorRow_ = inputRow_;
+        cursorColumn_ = inputColumn_;
+        inputLineActive_ = false;
+        write(text.data(), text.size());
+    }
+
     void restoreOverlay(ql32::graphics::Rect region) {
         if (invalidate_) return;
         redraw(false, region);
@@ -146,7 +198,10 @@ public:
                 const auto glyph = ql32::graphics::classicGlyphColumns((*line)[column]);
                 foreground = (glyph[glyphColumn] & (1u << glyphRow)) != 0;
             }
-            pixels[i] = foreground ? ink_ : paper_;
+            const bool caretCell = inputLineActive_ && caretVisible_ &&
+                textRow == caretRow_ && column == caretColumn_;
+            pixels[i] = caretCell ? (foreground ? paper_ : ink_)
+                                  : (foreground ? ink_ : paper_);
         }
     }
 
@@ -194,6 +249,27 @@ public:
     }
 
 private:
+    void invalidateInputRow() {
+        if (inputRow_ >= rows_ || inputColumn_ >= columns_) return;
+        const ql32::graphics::Rect region{
+            bounds_.x + static_cast<std::int32_t>(inputColumn_ * consoleCharacterWidth),
+            bounds_.y + static_cast<std::int32_t>(inputRow_ * consoleCharacterHeight),
+            static_cast<std::uint32_t>((columns_ - inputColumn_) * consoleCharacterWidth),
+            consoleCharacterHeight};
+        if (invalidate_) invalidate_(region);
+        else redraw(false, region);
+    }
+
+    void invalidateCaretCell() {
+        if (caretRow_ >= rows_ || caretColumn_ >= columns_) return;
+        const ql32::graphics::Rect region{
+            bounds_.x + static_cast<std::int32_t>(caretColumn_ * consoleCharacterWidth),
+            bounds_.y + static_cast<std::int32_t>(caretRow_ * consoleCharacterHeight),
+            consoleCharacterWidth, consoleCharacterHeight};
+        if (invalidate_) invalidate_(region);
+        else redraw(false, region);
+    }
+
     void updateGeometry() {
         columns_ = static_cast<std::size_t>(std::max<std::uint32_t>(1,
             bounds_.width / consoleCharacterWidth));
@@ -245,6 +321,12 @@ private:
     std::size_t rows_ = consoleRows;
     std::size_t cursorRow_ = 0;
     std::size_t cursorColumn_ = 0;
+    std::size_t inputRow_ = 0;
+    std::size_t inputColumn_ = 0;
+    std::size_t caretRow_ = 0;
+    std::size_t caretColumn_ = 0;
+    bool inputLineActive_ = false;
+    bool caretVisible_ = false;
     int firstRowY_ = 0;
     ql32::graphics::Rect bounds_{};
     std::uint8_t ink_ = consoleInk;
@@ -323,16 +405,16 @@ std::shared_ptr<ql32::ui::QueuedService> uiService =
     std::make_shared<ql32::ui::QueuedService>();
 std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
 std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
-std::string inputLine;
-std::string lastSubmittedLine;
+ql32::ui::LineEditor lineEditor;
 std::string inputPrompt;
-std::size_t inputCursor = 0;
 ql32::platform::esp32::SerialKeyDecoder serialKeyDecoder;
 int editingLineNumber = 0;
 bool protocolInputLine = false;
 bool serialSawCarriageReturn = false;
 bool replReadyMessageShown = false;
 bool replPromptShown = false;
+bool inputCaretVisible = true;
+std::uint32_t lastInputCaretToggle = 0;
 std::uint32_t lastDebugOverlayRefresh = 0;
 
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
@@ -393,75 +475,140 @@ ql32::runtime::YModemSource screenCaptureSource() {
 }
 #endif
 
-void appendInputCharacter(char character) {
-    if (inputLine.size() >= 1024) return;
-    if (inputLine.empty() && character == '@') protocolInputLine = true;
-    const bool atEnd = inputCursor == inputLine.size();
-    inputLine.insert(inputCursor, 1, character);
-    ++inputCursor;
-    if (!protocolInputLine) {
-        if (atEnd) Serial.write(static_cast<std::uint8_t>(character));
-        else {
-            Serial.print("\r");
-            Serial.print(inputPrompt.c_str());
-            Serial.print(inputLine.c_str());
-            const auto suffix = inputLine.size() - inputCursor;
-            for (std::size_t i = 0; i < suffix; ++i) Serial.write('\b');
-        }
+void submitInputLine();
+
+void redrawInputLine() {
+    if (protocolInputLine) {
+        screenConsole.updateInputLine({}, 0, false);
+        return;
     }
+    screenConsole.updateInputLine(lineEditor.text(), lineEditor.cursor(), true);
+    inputCaretVisible = true;
+    lastInputCaretToggle = millis();
 }
 
-void eraseInputCharacter() {
-    if (inputCursor == 0) return;
-    const bool atEnd = inputCursor == inputLine.size();
-    const auto oldLength = inputLine.size();
-    inputLine.erase(inputCursor - 1, 1);
-    --inputCursor;
-    if (!protocolInputLine) {
-        if (atEnd) Serial.print("\b \b");
-        else {
-            Serial.print("\r");
-            Serial.print(inputPrompt.c_str());
-            Serial.print(inputLine.c_str());
-            const auto erased = oldLength - inputLine.size();
-            for (std::size_t i = 0; i < erased; ++i) Serial.write(' ');
-            const auto backspaces = inputLine.size() - inputCursor + erased;
-            for (std::size_t i = 0; i < backspaces; ++i) Serial.write('\b');
-        }
-    }
-}
-
-void deleteInputCharacter() {
-    if (inputCursor >= inputLine.size()) return;
-    const auto oldLength = inputLine.size();
-    inputLine.erase(inputCursor, 1);
-    Serial.print("\r");
-    Serial.print(inputPrompt.c_str());
-    Serial.print(inputLine.c_str());
-    const auto erased = oldLength - inputLine.size();
-    for (std::size_t i = 0; i < erased; ++i) Serial.write(' ');
-    const auto backspaces = inputLine.size() - inputCursor + erased;
-    for (std::size_t i = 0; i < backspaces; ++i) Serial.write('\b');
-}
-
-void redrawInputCursor() {
+void echoTerminalEditorKey(const ql32::input::KeyEvent& event,
+                           std::size_t oldSize, std::size_t oldCursor) {
     if (protocolInputLine) return;
-    Serial.print("\r");
-    Serial.print(inputPrompt.c_str());
-    Serial.print(inputLine.c_str());
-    const auto suffix = inputLine.size() - inputCursor;
-    for (std::size_t i = 0; i < suffix; ++i) Serial.write('\b');
+    switch (event.key) {
+    case ql32::input::Key::Character:
+        if (oldCursor == oldSize) Serial.write(static_cast<std::uint8_t>(event.character));
+        else {
+            Serial.print("\x1b[@");
+            Serial.write(static_cast<std::uint8_t>(event.character));
+        }
+        break;
+    case ql32::input::Key::Backspace:
+        if (oldCursor == oldSize) Serial.print("\b \b");
+        else {
+            Serial.write('\b');
+            Serial.print("\x1b[P");
+        }
+        break;
+    case ql32::input::Key::Delete:
+        Serial.print("\x1b[P");
+        break;
+    case ql32::input::Key::Left:
+        Serial.print("\x1b[D");
+        break;
+    case ql32::input::Key::Right:
+        Serial.print("\x1b[C");
+        break;
+    case ql32::input::Key::Home: {
+        Serial.print("\r");
+        Serial.print(inputPrompt.c_str());
+        Serial.print(lineEditor.text().c_str());
+        const auto suffix = lineEditor.text().size() - lineEditor.cursor();
+        if (suffix != 0) {
+            char movement[24];
+            std::snprintf(movement, sizeof(movement), "\x1b[%uD",
+                          static_cast<unsigned>(suffix));
+            Serial.print(movement);
+        }
+        break;
+    }
+    case ql32::input::Key::End: {
+        const auto movement = lineEditor.text().size() - oldCursor;
+        if (movement != 0) {
+            char sequence[24];
+            std::snprintf(sequence, sizeof(sequence), "\x1b[%uC",
+                          static_cast<unsigned>(movement));
+            Serial.print(sequence);
+        }
+        break;
+    }
+    case ql32::input::Key::Up:
+        if (oldSize == 0) Serial.print(lineEditor.text().c_str());
+        break;
+    default:
+        break;
+    }
+}
+
+void handleEditorKey(const ql32::input::KeyEvent& event) {
+    if (event.key == ql32::input::Key::Character && lineEditor.text().empty() &&
+        event.character == '@')
+        protocolInputLine = true;
+
+    const auto oldSize = lineEditor.text().size();
+    const auto oldCursor = lineEditor.cursor();
+    const auto action = lineEditor.handleKey(event);
+    if (action == ql32::ui::LineEditorAction::Submit) {
+        submitInputLine();
+    } else if (action == ql32::ui::LineEditorAction::Changed) {
+        echoTerminalEditorKey(event, oldSize, oldCursor);
+        redrawInputLine();
+    }
+}
+
+void refreshInputCaretBlink() {
+    if (!screenConsole.inputLineActive() || protocolInputLine) return;
+    const auto now = millis();
+    if (static_cast<std::uint32_t>(now - lastInputCaretToggle) < 500) return;
+    lastInputCaretToggle = now;
+    inputCaretVisible = !inputCaretVisible;
+    screenConsole.setInputCaretVisible(inputCaretVisible);
+}
+
+ql32::input::KeyEvent toInputKey(
+    const ql32::platform::esp32::SerialKeyEvent& serialKey) {
+    ql32::input::KeyEvent event;
+    switch (serialKey.key) {
+    case ql32::platform::esp32::SerialKey::Character:
+        event.key = ql32::input::Key::Character;
+        event.character = static_cast<unsigned char>(serialKey.character);
+        break;
+    case ql32::platform::esp32::SerialKey::Enter: event.key = ql32::input::Key::Enter; break;
+    case ql32::platform::esp32::SerialKey::Backspace: event.key = ql32::input::Key::Backspace; break;
+    case ql32::platform::esp32::SerialKey::Delete: event.key = ql32::input::Key::Delete; break;
+    case ql32::platform::esp32::SerialKey::Up: event.key = ql32::input::Key::Up; break;
+    case ql32::platform::esp32::SerialKey::Left: event.key = ql32::input::Key::Left; break;
+    case ql32::platform::esp32::SerialKey::Right: event.key = ql32::input::Key::Right; break;
+    case ql32::platform::esp32::SerialKey::Home: event.key = ql32::input::Key::Home; break;
+    case ql32::platform::esp32::SerialKey::End: event.key = ql32::input::Key::End; break;
+    }
+    return event;
 }
 
 void submitInputLine() {
-    if (inputLine.empty() && editingLineNumber > 0)
-        inputLine = std::to_string(editingLineNumber);
-    if (!protocolInputLine && !inputLine.empty() &&
+    if (lineEditor.text().empty() && editingLineNumber > 0)
+        lineEditor.setText(std::to_string(editingLineNumber));
+    const std::string submittedLine = lineEditor.text();
+    if (!protocolInputLine && !submittedLine.empty() &&
         (!uiPresenter || !uiPresenter->active()))
-        lastSubmittedLine = inputLine;
-    Serial.println();
-    if (!protocolInputLine) screenConsole.write("\n", 1);
-    if (remoteDebugger && remoteDebugger->handles(inputLine)) {
+        lineEditor.rememberCurrentLine();
+    if (!protocolInputLine) {
+        Serial.print("\r");
+        Serial.print(inputPrompt.c_str());
+        Serial.print(submittedLine.c_str());
+        Serial.println();
+        screenConsole.finishInputLine(submittedLine);
+        screenConsole.write("\n", 1);
+    } else {
+        Serial.println();
+        screenConsole.updateInputLine({}, 0, false);
+    }
+    if (remoteDebugger && remoteDebugger->handles(submittedLine)) {
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
         auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(driveStorage);
 #elif defined(QL32_OLIMEX_USE_SPIFFS)
@@ -471,35 +618,34 @@ void submitInputLine() {
 #else
         auto& protocolStorage = static_cast<ql32::runtime::StorageService&>(sdStorage);
 #endif
-        remoteDebugger->handle(inputLine, *scheduler, protocolStorage, serialOutput,
+        remoteDebugger->handle(submittedLine, *scheduler, protocolStorage, serialOutput,
             [](std::string_view bytes) {
                 Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
                 Serial.flush();
             });
     } else if (uiPresenter && uiPresenter->active()) {
-        (void)uiPresenter->consumeLine(inputLine);
+        (void)uiPresenter->consumeLine(submittedLine);
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
-                   inputLine, driveStorage, driveChannels, Serial,
+                   submittedLine, driveStorage, driveChannels, Serial,
                    [] { return screenCaptureSource(); })) {
 #elif defined(QL32_OLIMEX_USE_SPIFFS)
-                   inputLine, flashStorage, flashChannels, Serial
+                   submittedLine, flashStorage, flashChannels, Serial
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
                    , [] { return screenCaptureSource(); }
 #endif
                    )) {
 #elif defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
-                   inputLine, idfSdStorage, idfSdChannels, Serial,
+                   submittedLine, idfSdStorage, idfSdChannels, Serial,
                    [] { return screenCaptureSource(); })) {
 #else
-                   inputLine, sdStorage, sdChannels, Serial)) {
+                   submittedLine, sdStorage, sdChannels, Serial)) {
 #endif
-    } else if (scheduler && !inputLine.empty() &&
-               !scheduler->submit(scheduler->focusedTask(), inputLine + "\n")) {
+    } else if (scheduler && !submittedLine.empty() &&
+               !scheduler->submit(scheduler->focusedTask(), submittedLine + "\n")) {
         Serial.println("BASIC session is busy");
     }
-    inputLine.clear();
-    inputCursor = 0;
+    lineEditor.clear();
     inputPrompt.clear();
     serialKeyDecoder.reset();
     editingLineNumber = 0;
@@ -513,9 +659,9 @@ void receiveSerialCharacter(char character) {
         return;
     }
     if (uiPresenter && uiPresenter->graphicActive() && !protocolInputLine) {
-        if (character == '@' && inputLine.empty()) {
+        if (character == '@' && lineEditor.text().empty()) {
             protocolInputLine = true;
-            appendInputCharacter(character);
+            lineEditor.insertRawCharacter(character);
             return;
         }
         serialSawCarriageReturn = character == '\r';
@@ -529,50 +675,16 @@ void receiveSerialCharacter(char character) {
     }
     serialSawCarriageReturn = false;
     if (protocolInputLine) {
-        if (character == '\b' || character == 127) eraseInputCharacter();
-        else if ((character >= 32 && character <= 126) || character == '\t')
-            appendInputCharacter(character);
+        if (character == '\b' || character == 127) {
+            lineEditor.handleKey({ql32::input::Key::Backspace});
+        } else if ((character >= 32 && character <= 126) || character == '\t') {
+            lineEditor.insertRawCharacter(character, true);
+        }
         return;
     }
     const auto key = serialKeyDecoder.feed(character);
     if (!key) return;
-    switch (key->key) {
-    case ql32::platform::esp32::SerialKey::Character:
-        appendInputCharacter(key->character);
-        break;
-    case ql32::platform::esp32::SerialKey::Backspace:
-        eraseInputCharacter();
-        break;
-    case ql32::platform::esp32::SerialKey::Delete:
-        deleteInputCharacter();
-        break;
-    case ql32::platform::esp32::SerialKey::Up:
-        if (inputLine.empty() && !lastSubmittedLine.empty()) {
-            inputLine = lastSubmittedLine;
-            inputCursor = inputLine.size();
-            Serial.print(inputLine.c_str());
-        }
-        break;
-    case ql32::platform::esp32::SerialKey::Left:
-        if (inputCursor > 0) { --inputCursor; Serial.write('\b'); }
-        break;
-    case ql32::platform::esp32::SerialKey::Right:
-        if (inputCursor < inputLine.size()) {
-            Serial.write(static_cast<std::uint8_t>(inputLine[inputCursor++]));
-        }
-        break;
-    case ql32::platform::esp32::SerialKey::Home:
-        inputCursor = 0;
-        redrawInputCursor();
-        break;
-    case ql32::platform::esp32::SerialKey::End:
-        inputCursor = inputLine.size();
-        redrawInputCursor();
-        break;
-    case ql32::platform::esp32::SerialKey::Enter:
-        submitInputLine();
-        break;
-    }
+    handleEditorKey(toInputKey(*key));
 }
 
 bool acceptsInput() {
@@ -645,8 +757,7 @@ void advanceScheduler() {
         if (!replPromptShown) {
             const auto edit = scheduler->takePendingLineEdit(focused);
             if (edit) {
-                inputLine = std::move(edit->text);
-                inputCursor = inputLine.size();
+                lineEditor.setText(std::move(edit->text));
                 editingLineNumber = edit->lineNumber;
             }
             if (focused == replTask) inputPrompt = "> ";
@@ -657,11 +768,9 @@ void advanceScheduler() {
                 inputPrompt = prompt;
             }
             Serial.print(inputPrompt.c_str());
-            screenConsole.write(inputPrompt.data(), inputPrompt.size());
-            if (edit) {
-                Serial.print(inputLine.c_str());
-                screenConsole.write(inputLine.data(), inputLine.size());
-            }
+            if (edit) Serial.print(lineEditor.text().c_str());
+            screenConsole.beginInputLine(inputPrompt);
+            redrawInputLine();
             replPromptShown = true;
         }
     } else {
@@ -706,6 +815,16 @@ bool handleKeyboardShortcut(const ql32::input::KeyEvent& event) {
 
 void setup() {
     Serial.begin(115200);
+#if defined(QL32_OLIMEX_PSRAM)
+    if (!psramFound()) {
+        Serial.println("Fatal: Olimex WROVER PSRAM was not initialized");
+        return;
+    }
+    Serial.printf("PSRAM total: %u\n", static_cast<unsigned>(ESP.getPsramSize()));
+    Serial.printf("PSRAM free: %u\n", static_cast<unsigned>(ESP.getFreePsram()));
+    Serial.printf("Internal free: %u\n", static_cast<unsigned>(
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+#endif
     if (!boardMemory.initializeEmergencyReserve(
             ql32::platform::esp32::defaultEmergencyReserveBytes)) {
         Serial.println("Fatal: unable to reserve memory for recovery operations");
@@ -967,16 +1086,10 @@ void loop() {
             (void)uiPresenter->handleKey(*event);
         } else if (event && !shortcut && event->pressed && scheduler &&
             !scheduler->executionPaused() && acceptsInput()) {
-            if (event->key == ql32::input::Key::Character &&
-                event->character >= 32 && event->character <= 126) {
-                appendInputCharacter(static_cast<char>(event->character));
-            } else if (event->key == ql32::input::Key::Backspace && !inputLine.empty()) {
-                eraseInputCharacter();
-            } else if (event->key == ql32::input::Key::Enter) {
-                submitInputLine();
-            }
+            handleEditorKey(*event);
         }
     }
     advanceScheduler();
+    refreshInputCaretBlink();
     delay(1);
 }

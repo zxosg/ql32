@@ -1,8 +1,16 @@
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
 
+#include <algorithm>
+#include <limits>
 #include <stdexcept>
 
 namespace ql32::platform::fabgl_vga {
+
+namespace {
+
+constexpr std::uint32_t kRowsPerBitmap = 8;
+
+} // namespace
 
 void FabglFramePresenter::present(const graphics::Frame& frame) {
     if (frame.width != static_cast<std::uint32_t>(canvas_.getWidth()) ||
@@ -11,19 +19,13 @@ void FabglFramePresenter::present(const graphics::Frame& frame) {
         frame.pixels.size() != static_cast<std::size_t>(frame.width) * frame.height)
         throw std::invalid_argument("composed frame does not match VGA canvas geometry");
 
-    canvas_.beginUpdate();
-    for (std::uint32_t y = 0; y < frame.height; ++y) {
-        const auto offset = static_cast<std::size_t>(y) * frame.width;
-        for (std::uint32_t x = 0; x < frame.width; ++x) {
-            const auto& color = frame.palette[frame.pixels[offset + x]];
-            canvas_.setPixel(static_cast<int>(x), static_cast<int>(y),
-                             fabgl::RGB888(color.red, color.green, color.blue));
-        }
-        canvas_.waitCompletion(false);
-    }
-    canvas_.endUpdate();
-    canvas_.waitCompletion(true);
-    if (restoreOverlay_) restoreOverlay_({0, 0, frame.width, frame.height});
+    presentRowsRegion(frame.width, frame.height, frame.palette,
+        {0, 0, frame.width, frame.height},
+        [&frame](std::uint32_t y, std::vector<graphics::ColorIndex>& row) {
+            row.resize(frame.width);
+            const auto offset = static_cast<std::size_t>(y) * frame.width;
+            std::copy_n(frame.pixels.data() + offset, frame.width, row.data());
+        });
 }
 
 bool FabglFramePresenter::presentRows(
@@ -46,22 +48,56 @@ bool FabglFramePresenter::presentRowsRegion(
         throw std::invalid_argument("composed region exceeds VGA canvas geometry");
     if (region.width == 0 || region.height == 0) return true;
 
+    if (region.width > static_cast<std::uint32_t>(std::numeric_limits<std::int16_t>::max()) ||
+        region.height > static_cast<std::uint32_t>(std::numeric_limits<std::int16_t>::max()))
+        throw std::invalid_argument("composed VGA bitmap exceeds FabGL dimensions");
+
     if (indexedRow_.size() < region.width) indexedRow_.resize(region.width);
+    bool paletteChanged = !paletteCacheValid_;
+    for (std::size_t index = 0; !paletteChanged && index < palette.size(); ++index) {
+        const auto& incoming = palette[index];
+        const auto& cached = cachedPalette_[index];
+        paletteChanged = incoming.red != cached.red || incoming.green != cached.green ||
+                         incoming.blue != cached.blue;
+    }
+    if (paletteChanged) {
+        for (std::size_t index = 0; index < palette.size(); ++index) {
+            const auto& color = palette[index];
+            rgbaPalette_[index] = fabgl::RGBA8888(
+                color.red, color.green, color.blue, 255);
+        }
+        cachedPalette_ = palette;
+        paletteCacheValid_ = true;
+    }
     canvas_.beginUpdate();
-    for (std::uint32_t y = static_cast<std::uint32_t>(region.y);
-         y < static_cast<std::uint32_t>(region.y) + region.height; ++y) {
-        rowProvider(y, indexedRow_);
-        if (indexedRow_.size() != region.width) {
-            canvas_.endUpdate();
-            throw std::invalid_argument("composed row does not match VGA region width");
+    try {
+        const auto regionBottom = static_cast<std::uint32_t>(region.y) + region.height;
+        for (std::uint32_t bandTop = static_cast<std::uint32_t>(region.y);
+             bandTop < regionBottom;) {
+            const auto bandHeight = std::min(kRowsPerBitmap, regionBottom - bandTop);
+            rgbaBand_.resize(static_cast<std::size_t>(region.width) * bandHeight);
+            for (std::uint32_t bandRow = 0; bandRow < bandHeight; ++bandRow) {
+                rowProvider(bandTop + bandRow, indexedRow_);
+                if (indexedRow_.size() != region.width)
+                    throw std::invalid_argument("composed row does not match VGA region width");
+                auto* destination = rgbaBand_.data() +
+                    static_cast<std::size_t>(bandRow) * region.width;
+                for (std::uint32_t x = 0; x < region.width; ++x)
+                    destination[x] = rgbaPalette_[indexedRow_[x]];
+            }
+
+            // One FabGL bitmap command updates the band; drain it before the
+            // scratch pixels or Bitmap wrapper are reused or destroyed.
+            fabgl::Bitmap bitmap(static_cast<int>(region.width),
+                                 static_cast<int>(bandHeight),
+                                 rgbaBand_.data(), fabgl::PixelFormat::RGBA8888);
+            canvas_.drawBitmap(region.x, static_cast<int>(bandTop), &bitmap);
+            canvas_.waitCompletion(false);
+            bandTop += bandHeight;
         }
-        for (std::uint32_t x = 0; x < region.width; ++x) {
-            const auto& color = palette[indexedRow_[x]];
-            canvas_.setPixel(region.x + static_cast<std::int32_t>(x),
-                             static_cast<std::int32_t>(y),
-                             fabgl::RGB888(color.red, color.green, color.blue));
-        }
-        canvas_.waitCompletion(false);
+    } catch (...) {
+        canvas_.endUpdate();
+        throw;
     }
     canvas_.endUpdate();
     canvas_.waitCompletion(true);

@@ -22,6 +22,7 @@ add_library(ql32_portable
   src/runtime/buffer.cpp
   src/runtime/ui_service.cpp
   src/ui/graphic_presenter.cpp
+  src/ui/line_editor.cpp
   src/runtime/ymodem.cpp
   src/vm/interpreter.cpp
   src/vm/scheduler.cpp
@@ -149,6 +150,9 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_ui_service_tests tests/ui_service_tests.cpp)
   target_link_libraries(ql32_ui_service_tests PRIVATE ql32_host)
   add_test(NAME ql32_ui_service_tests COMMAND ql32_ui_service_tests)
+  add_executable(ql32_line_editor_tests tests/line_editor_tests.cpp)
+  target_link_libraries(ql32_line_editor_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_line_editor_tests COMMAND ql32_line_editor_tests)
   add_executable(ql32_graphic_ui_tests tests/graphic_ui_tests.cpp)
   target_link_libraries(ql32_graphic_ui_tests PRIVATE ql32_host)
   add_test(NAME ql32_graphic_ui_tests COMMAND ql32_graphic_ui_tests)
