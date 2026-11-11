@@ -1490,6 +1490,33 @@ void testScreenPrintPositionsArePerChannelAndSeparateFromText() {
     require(!hasInk(24, 0), "TEXT changed the independent PRINT position");
 }
 
+void testDisplayGeometryChangeResizesDefaultWindowsAndPresents() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(320, 200, presenter);
+    graphics->setDefaultWindowBounds(0, {0, 176, 320, 24});
+    graphics->setDefaultWindowBounds(1, {0, 0, 320, 176});
+    Rect consoleBounds{};
+    graphics->setConsoleBoundsCallback([&](Rect bounds) { consoleBounds = bounds; });
+    graphics->writeText(1, 0, "console");
+    graphics->writeText(1, 1, "graphics");
+
+    require(graphics->setDisplaySize(640, 480),
+            "windowed graphics refused supported display geometry change");
+    require(graphics->displaySize() == std::pair<std::uint32_t, std::uint32_t>{640, 480},
+            "windowed graphics did not expose its updated display dimensions");
+    const auto console = graphics->windowInfo(1, 0);
+    const auto screen = graphics->windowInfo(1, 1);
+    require(console.width == 640 && console.height == 24,
+            "bottom console window did not stretch with display width");
+    require(screen.width == 640 && screen.height == 456,
+            "main graphics window did not grow to the new display geometry");
+    require(consoleBounds.x == 0 && consoleBounds.y == 456 &&
+                consoleBounds.width == 640 && consoleBounds.height == 24,
+            "console overlay did not receive its updated screen bounds");
+    require(presenter->lastFrame.width == 640 && presenter->lastFrame.height == 480,
+            "display geometry change did not present a full resized frame");
+}
+
 } // namespace
 
 int main() {
@@ -1531,4 +1558,5 @@ int main() {
     testAtWorksOnNumberedBasicLineWithVariableCoordinates();
     testAtRejectsZeroRowOrColumn();
     testScreenPrintPositionsArePerChannelAndSeparateFromText();
+    testDisplayGeometryChangeResizesDefaultWindowsAndPresents();
 }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -107,6 +108,93 @@ void WindowedService::setDefaultWindowBounds(ChannelId channel, Rect bounds) {
     if (bounds.width == 0 || bounds.height == 0)
         throw std::invalid_argument("window size must be positive");
     defaultWindowBounds_[channel] = bounds;
+}
+
+bool WindowedService::setDisplaySize(std::uint32_t width, std::uint32_t height) {
+    if (width == 0 || height == 0 ||
+        width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
+        height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()))
+        return false;
+    const auto oldWidth = manager_.screenWidth();
+    const auto oldHeight = manager_.screenHeight();
+    if (oldWidth == width && oldHeight == height) return true;
+
+    auto resizedDefaults = defaultWindowBounds_;
+    for (auto& [channel, bounds] : resizedDefaults) {
+        (void)channel;
+        const auto old = bounds;
+        if (old.x == 0 && old.width == oldWidth) bounds.width = width;
+        if (old.y == 0 && old.height == oldHeight) bounds.height = height;
+        else if (old.y == 0 && old.x == 0 && old.width == oldWidth &&
+                 static_cast<std::uint64_t>(old.height) < oldHeight) {
+            const auto bottomMargin = oldHeight - old.height;
+            bounds.height = height > bottomMargin ? height - bottomMargin : height;
+        }
+        if (old.y != 0 &&
+            static_cast<std::uint64_t>(old.y) + old.height == oldHeight) {
+            bounds.y = static_cast<std::int32_t>(height > old.height ? height - old.height : 0);
+            bounds.height = std::min(bounds.height, height);
+        }
+        if (bounds.height == 0) bounds.height = 1;
+    }
+
+    struct WindowResize { WindowId id; Rect oldBounds; Rect newBounds; };
+    std::vector<WindowResize> windowsToResize;
+    std::map<SessionId, TaskViewport> oldViewports;
+    for (const auto& [key, id] : sessionWindows_) {
+        oldViewports.emplace(key.session, manager_.taskViewport(key.session));
+        const auto oldDefault = defaultWindowBounds_.find(key.channel);
+        const auto nextDefault = resizedDefaults.find(key.channel);
+        if (oldDefault == defaultWindowBounds_.end() || nextDefault == resizedDefaults.end())
+            continue;
+        const auto viewport = manager_.taskViewport(key.session);
+        const auto state = manager_.windowState(id);
+        const auto expectedX = static_cast<std::int64_t>(viewport.originX) +
+                               viewport.offsetX + oldDefault->second.x;
+        const auto expectedY = static_cast<std::int64_t>(viewport.originY) +
+                               viewport.offsetY + oldDefault->second.y;
+        if (state.bounds.x == expectedX && state.bounds.y == expectedY &&
+            state.bounds.width == oldDefault->second.width &&
+            state.bounds.height == oldDefault->second.height)
+            windowsToResize.push_back({id, oldDefault->second, nextDefault->second});
+    }
+
+    manager_.setScreenSize(width, height);
+    try {
+        std::map<SessionId, TaskViewport> viewports;
+        for (const auto& [session, originalViewport] : oldViewports) {
+            auto viewport = originalViewport;
+            if (viewport.originX == 0 && viewport.originY == 0 &&
+                viewport.offsetX == 0 && viewport.offsetY == 0 &&
+                viewport.canvasWidth == oldWidth && viewport.canvasHeight == oldHeight) {
+                viewport.canvasWidth = width;
+                viewport.canvasHeight = height;
+                viewports[session] = viewport;
+            }
+        }
+        for (const auto& [session, viewport] : viewports)
+            manager_.setTaskViewport(session, viewport);
+        for (const auto& window : windowsToResize)
+            manager_.setBounds(window.id, window.newBounds);
+    } catch (...) {
+        for (auto window = windowsToResize.rbegin(); window != windowsToResize.rend(); ++window) {
+            try { manager_.setBounds(window->id, window->oldBounds); } catch (...) {}
+        }
+        for (const auto& [session, viewport] : oldViewports) {
+            try { manager_.setTaskViewport(session, viewport); } catch (...) {}
+        }
+        manager_.setScreenSize(oldWidth, oldHeight);
+        throw;
+    }
+
+    defaultWindowBounds_ = std::move(resizedDefaults);
+    if (consoleBoundsCallback_) {
+        const auto console = defaultWindowBounds_.find(0);
+        if (console != defaultWindowBounds_.end()) consoleBoundsCallback_(console->second);
+    }
+    discardPresentationBuffer();
+    present();
+    return true;
 }
 
 IndexedCanvas& WindowedService::canvas(SessionId session, ChannelId channel) {

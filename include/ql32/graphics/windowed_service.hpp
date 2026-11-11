@@ -79,6 +79,7 @@ public:
     std::pair<std::uint32_t, std::uint32_t> displaySize() const noexcept override {
         return {manager_.screenWidth(), manager_.screenHeight()};
     }
+    bool setDisplaySize(std::uint32_t width, std::uint32_t height) override;
     std::uint16_t rotationDegrees() const noexcept { return rotationDegrees_; }
     void setRotation(SessionId session, std::uint16_t degrees) override;
     void setDebugOverlayEnabled(bool enabled) override;

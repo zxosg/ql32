@@ -125,7 +125,7 @@ constexpr std::string_view builtinFunctions[] = {
 
 constexpr std::string_view shellHelpCommands[] = {
     "HELP", "RUN", "LIST", "EDIT", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
-    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "TASKRESULT", "LOGON",
+    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "MODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
     "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
@@ -2445,13 +2445,15 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<runtime::TaskControlService> taskControl,
                          runtime::TaskId taskId,
                          std::shared_ptr<runtime::SystemControlService> systemControl,
-                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency)
+                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency,
+                         std::shared_ptr<runtime::DisplayModeService> displayModes)
     : uiSession_(std::make_unique<detail::UISessionState>()),
     storage_(std::move(storage)), fontRegistry_(storage_),
     channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
       cpuFrequency_(std::move(cpuFrequency)),
+      displayModes_(std::move(displayModes)),
       taskControl_(std::move(taskControl)),
       systemControl_(std::move(systemControl)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)),
@@ -2969,6 +2971,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "CD" || word.rfind("CD ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
             word == "WINDOWMODE" || word.rfind("WINDOWMODE ", 0) == 0 ||
+            word == "MODE" || word.rfind("MODE ", 0) == 0 ||
             word == "DEBUGBAR" || word.rfind("DEBUGBAR ", 0) == 0 ||
             word == "DEBUG" || word.rfind("DEBUG ", 0) == 0 ||
             word == "BREAK" || word.rfind("BREAK ", 0) == 0 ||
@@ -3326,6 +3329,57 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!taskControl_->setWindowMode(mode))
                 throw std::runtime_error("unable to apply window mode");
             writeChannelText(0, std::string("Window mode set to ") + argument + "\n");
+        } else if (word == "MODE" || word.rfind("MODE ", 0) == 0) {
+            if (!displayModes_ || !graphics_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "display mode service unavailable");
+            const auto tasks = taskControl_ ? taskControl_->listTasks() :
+                std::vector<runtime::ManagedTaskInfo>{};
+            const auto self = std::find_if(tasks.begin(), tasks.end(), [this](const auto& task) {
+                return task.id == task_id_;
+            });
+            if (self == tasks.end() || !self->supervisor)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "MODE is supervisor-only");
+            for (const auto& task : tasks) {
+                if (!task.supervisor && task.state != runtime::TaskState::Completed &&
+                    task.state != runtime::TaskState::Failed &&
+                    task.state != runtime::TaskState::Cancelled)
+                    throw std::runtime_error("MODE unavailable while worker tasks are active");
+            }
+
+            const auto argument = command(trim(normalizedLine.substr(4)));
+            if (argument.empty() || argument == "LIST") {
+                std::ostringstream listing;
+                const auto current = displayModes_->currentMode();
+                const auto viewport = graphics_->displaySize();
+                listing << "Display mode: " << current << " (viewport "
+                        << viewport.first << 'x' << viewport.second << ")\n";
+                for (const auto& mode : displayModes_->availableModes()) {
+                    listing << mode.name << "  " << mode.width << 'x' << mode.height;
+                    if (mode.refreshHz) listing << " @" << mode.refreshHz << "Hz";
+                    if (mode.name == current) listing << " *";
+                    listing << '\n';
+                }
+                writeChannelText(default_output_channel_, listing.str());
+                continue;
+            }
+
+            const auto previousMode = displayModes_->currentMode();
+            const auto previousSize = graphics_->displaySize();
+            const auto applied = displayModes_->setMode(argument);
+            try {
+                if (!graphics_->setDisplaySize(applied.width, applied.height))
+                    throw std::runtime_error("graphics service cannot change display geometry");
+            } catch (...) {
+                try { (void)displayModes_->setMode(previousMode); } catch (...) {}
+                try {
+                    (void)graphics_->setDisplaySize(previousSize.first, previousSize.second);
+                } catch (...) {}
+                throw;
+            }
+            writeChannelText(0, "Display mode set to " + applied.name + " (" +
+                std::to_string(applied.width) + "x" + std::to_string(applied.height) + ").\n");
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(5));
             const std::uint64_t outputChannel = argument.empty() ?

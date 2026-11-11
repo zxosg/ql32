@@ -192,7 +192,7 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes);
     const TaskId id = task->id;
     tasks_.push_back(std::move(task));
     if (windowMode_ == runtime::WindowMode::Isolated)
@@ -209,7 +209,7 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes);
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
@@ -251,7 +251,7 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes);
     task->interactive = true;
     task->supervisor = true;
     task->hasPendingSource = !task->source.empty();

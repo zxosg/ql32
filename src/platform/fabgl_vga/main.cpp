@@ -46,6 +46,7 @@
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/platform/fabgl_vga/graphics.hpp"
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
+#include "ql32/platform/fabgl_vga/display_modes.hpp"
 #include "ql32/platform/fabgl_vga/keyboard.hpp"
 
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
@@ -357,6 +358,7 @@ protected:
 
 fabgl::VGAController display;
 fabgl::Canvas canvas(&display);
+ql32::platform::fabgl_vga::DisplayModes displayModes(display, canvas);
 VgaConsole screenConsole(canvas);
 fabgl::PS2Controller ps2;
 std::shared_ptr<ql32::graphics::WindowedService> graphics;
@@ -1043,6 +1045,8 @@ void setup() {
         &boardMemory, [](ql32::runtime::MemoryService*) {});
     services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
         &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
+    services.displayModes = std::shared_ptr<ql32::runtime::DisplayModeService>(
+        &displayModes, [](ql32::runtime::DisplayModeService*) {});
     graphics->setConsoleLayer([](std::uint32_t y, std::uint32_t x,
                                  std::vector<ql32::graphics::ColorIndex>& row) {
         screenConsole.composePaletteRegionRow(y, x, row);

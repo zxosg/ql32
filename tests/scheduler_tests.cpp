@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -116,6 +117,41 @@ public:
 
     std::string writtenText;
     ql32::graphics::WindowInfo info{120, 32, 4, 16, 0, 0, 0};
+};
+
+class TestDisplayModes final : public ql32::runtime::DisplayModeService {
+public:
+    std::vector<ql32::runtime::DisplayMode> availableModes() const override {
+        return {{"320x200", 320, 200, 70}, {"640x480", 640, 480, 60}};
+    }
+    std::string currentMode() const override { return current; }
+    ql32::runtime::DisplayMode setMode(std::string_view name) override {
+        std::string key(name);
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::toupper(ch));
+        });
+        for (const auto& mode : availableModes()) {
+            std::string candidate = mode.name;
+            std::transform(candidate.begin(), candidate.end(), candidate.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+            if (candidate == key) {
+                current = mode.name;
+                return mode;
+            }
+        }
+        throw std::invalid_argument("unknown test display mode");
+    }
+    std::string current = "320x200";
+};
+
+class ModeFramePresenter final : public ql32::graphics::FramePresenter {
+public:
+    void present(const ql32::graphics::Frame& frame) override {
+        lastFrame = frame;
+        ++presentCount;
+    }
+    ql32::graphics::Frame lastFrame;
+    std::size_t presentCount = 0;
 };
 
 class CountingSystemControl final : public ql32::runtime::SystemControlService {
@@ -1313,6 +1349,33 @@ void testRebootInteractiveCommandCallsSystemService() {
             "REBOOT did not notify and invoke the system-control service");
 }
 
+void testSupervisorCanListAndChangeDisplayMode() {
+    auto presenter = std::make_shared<ModeFramePresenter>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
+    auto displayModes = std::make_shared<TestDisplayModes>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    services.displayModes = displayModes;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+
+    require(scheduler.submit(supervisor, "MODE LIST\n"),
+            "supervisor did not accept MODE LIST");
+    require(scheduler.tick(), "scheduler did not dispatch MODE LIST");
+    require(presenter->presentCount > 0 && presenter->lastFrame.width == 320 &&
+                output.str().empty(),
+            "MODE LIST did not use the default graphics output channel");
+
+    require(scheduler.submit(supervisor, "MODE 640x480\n"),
+            "supervisor did not accept MODE selection");
+    require(scheduler.tick(), "scheduler did not dispatch MODE selection");
+    require(displayModes->current == "640x480" &&
+                graphics->displaySize() == std::pair<std::uint32_t, std::uint32_t>{640, 480} &&
+                output.str().find("Display mode set to 640x480 (640x480)") != std::string::npos,
+            "MODE selection did not update hardware and graphics geometry");
+}
+
 } // namespace
 
 int main() {
@@ -1353,5 +1416,6 @@ int main() {
     testPauseWaitIsCooperativeAndUsesMilliseconds();
     testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor();
     testRebootInteractiveCommandCallsSystemService();
+    testSupervisorCanListAndChangeDisplayMode();
     return 0;
 }
