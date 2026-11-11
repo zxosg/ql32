@@ -146,6 +146,7 @@ class DebuggerWindow(QMainWindow):
         self.worker.repl_output.connect(self._append_repl_output)
         self.worker.request_finished.connect(self._on_response)
         self.worker.transfer_progress.connect(self._on_transfer_progress)
+        self.worker.transfer_status.connect(self._on_transfer_status)
         self.worker.transfer_finished.connect(self._on_transfer_finished)
         self.pending: dict[int, tuple] = {}
         self.transfer_jobs: dict[str, tuple] = {}
@@ -715,6 +716,9 @@ class DebuggerWindow(QMainWindow):
     def _on_transfer_progress(self, key, done, total):
         self.transfer_progress.setValue(0 if not total else int(done * 1000 / total))
         self.status_label.setText(f"Transfer {done}/{total} bytes")
+
+    def _on_transfer_status(self, key, status):
+        self.status_label.setText(status)
 
     def _on_transfer_finished(self, key, kind, path, error):
         job = self.transfer_jobs.pop(key, None)

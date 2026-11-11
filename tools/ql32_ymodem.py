@@ -118,10 +118,12 @@ def make_header(name, size):
 
 
 def request_transfer(port, command, path, issue_command=False, wait_for_prompt=True,
-                    cancelled=None):
+                    cancelled=None, status=None):
     if path is None and not issue_command:
         return
     if wait_for_prompt:
+        if status:
+            status("Waiting for the QL/32 prompt")
         port.write(b"\r\n")
         deadline = time.monotonic() + 30
         prompt = bytearray()
@@ -142,6 +144,8 @@ def request_transfer(port, command, path, issue_command=False, wait_for_prompt=T
     else:
         escaped = path.replace('"', '""')
         port.write(f'{command} "{escaped}"\r'.encode("ascii"))
+    if status:
+        status("Waiting for QL/32 to prepare the destination")
     marker = f"YMODEM READY {command}".encode("ascii")
     deadline = time.monotonic() + 30
     seen = bytearray()
@@ -161,15 +165,23 @@ def request_transfer(port, command, path, issue_command=False, wait_for_prompt=T
 
 
 def _send_file(port, source, device_path=None, *, wait_for_prompt=True,
-               progress=None, cancelled=None):
+               progress=None, cancelled=None, status=None):
     source = Path(source)
     size = source.stat().st_size
     request_transfer(port, "RECV", device_path, wait_for_prompt=wait_for_prompt,
-                     cancelled=cancelled)
+                     cancelled=cancelled, status=status)
+    if status:
+        status("Waiting for YMODEM receive request")
     wait_for(port, CRC_REQUEST, "device did not start YMODEM receive", cancelled)
+    if status:
+        status("Sending file header")
     packet(port, SOH, 0, make_header(source.name, size))
     wait_for(port, ACK, "device did not acknowledge the file header", cancelled)
+    if status:
+        status("Waiting for YMODEM data request")
     wait_for(port, CRC_REQUEST, "device did not request file data", cancelled)
+    if status:
+        status("Sending file data")
     sequence = 1
     remaining = size
     with source.open("rb") as stream:
@@ -210,11 +222,11 @@ def _send_file(port, source, device_path=None, *, wait_for_prompt=True,
 
 
 def send_file(port, source, device_path=None, *, wait_for_prompt=True,
-              progress=None, cancelled=None):
+              progress=None, cancelled=None, status=None):
     try:
         return _send_file(port, source, device_path,
                           wait_for_prompt=wait_for_prompt,
-                          progress=progress, cancelled=cancelled)
+                          progress=progress, cancelled=cancelled, status=status)
     except Exception as error:
         if isinstance(error, RuntimeError) and str(error) == "transfer cancelled by device":
             detail = _read_device_failure(port)
@@ -230,11 +242,12 @@ def send_file(port, source, device_path=None, *, wait_for_prompt=True,
 
 def receive_file(port, destination, device_path=None, request_command="SEND",
                  issue_command=False, *, wait_for_prompt=True,
-                 progress=None, cancelled=None):
+                 progress=None, cancelled=None, status=None):
     destination = Path(destination)
     temporary = destination.with_name(destination.name + ".part")
     request_transfer(port, request_command, device_path, issue_command,
-                     wait_for_prompt=wait_for_prompt, cancelled=cancelled)
+                     wait_for_prompt=wait_for_prompt, cancelled=cancelled,
+                     status=status)
     for _ in range(RETRIES * 3):
         port.write(bytes((CRC_REQUEST,)))
         check_cancelled(cancelled)

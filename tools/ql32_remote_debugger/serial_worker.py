@@ -21,6 +21,7 @@ class SerialWorker(QThread):
     repl_output = Signal(str)
     request_finished = Signal(int, bool, object)
     transfer_progress = Signal(str, int, int)
+    transfer_status = Signal(str, str)
     transfer_finished = Signal(str, str, str, str)
 
     def __init__(self):
@@ -244,28 +245,33 @@ class SerialWorker(QThread):
         if not self._supported:
             self.transfer_finished.emit(key, kind, "", "unsupported board")
             return
-        self._cancel_transfer.clear()
+        if self._cancel_transfer.is_set():
+            self.transfer_finished.emit(key, kind, "", "transfer cancelled")
+            self._cancel_transfer.clear()
+            return
         self._line_buffer.clear()
         try:
             progress = lambda done, total: self.transfer_progress.emit(key, done, total)
+            status = lambda message: self.transfer_status.emit(key, message)
             cancelled = self._cancel_transfer.is_set
             if kind == "upload":
                 _, _, source, device_path = command
                 ql32_ymodem.send_file(self._serial, source, device_path,
                                       wait_for_prompt=False, progress=progress,
-                                      cancelled=cancelled)
+                                      cancelled=cancelled, status=status)
                 result_path = device_path
             elif kind == "download":
                 _, _, device_path, destination = command
                 ql32_ymodem.receive_file(self._serial, destination, device_path,
                                          wait_for_prompt=False, progress=progress,
-                                         cancelled=cancelled)
+                                         cancelled=cancelled, status=status)
                 result_path = destination
             else:
                 _, _, destination = command
                 ql32_ymodem.receive_file(self._serial, destination,
                     request_command="SCREEN", issue_command=True,
-                    wait_for_prompt=False, progress=progress, cancelled=cancelled)
+                    wait_for_prompt=False, progress=progress, cancelled=cancelled,
+                    status=status)
                 result_path = destination
             self.transfer_finished.emit(key, kind, result_path, "")
         except Exception as error:
