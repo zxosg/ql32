@@ -5,7 +5,8 @@ ESP32-WROOM-32, ILI9341 320x240 TFT, and serial terminal input. The display
 implements the same QL/32 graphics service as the VGA32 target. The USB serial
 terminal at 115200 baud acts as the BASIC keyboard. BASIC `PRINT` output goes
 to a scrolling console strip at the bottom of the TFT; graphics commands draw
-on the same panel using their own coordinates. Touch input is not enabled.
+on the same panel using their own coordinates. The XPT2046 resistive touch
+panel is exposed to BASIC through `OPEN(KDeviceTouch)` and `INPUT` events.
 
 Build and flash from the repository root:
 
@@ -53,6 +54,39 @@ which configures the ILI9341 as 320x240 at rotation 0. Rotation 0 and its
 320x240 window query have been confirmed on hardware. The CYD adapter clears
 the ILI9341 BGR-order flag; the user confirmed the red palette entry now
 renders red on this panel.
+
+## Touch input
+
+Touch events use the XPT2046 coordinates transformed into the current display
+orientation. On the tested CYD at rotation 0, the raw horizontal axis maps to
+screen X left-to-right; the raw vertical axis is inverted and is flipped by the
+adapter. Rotation transforms are applied after this board mapping. The driver
+uses nominal raw bounds (250–3850), so alternate panels may need calibration.
+There is no BASIC calibration command.
+
+Use `examples/touch/touch-demo.bas` to check touch coordinates and drawing. Its
+window covers the full 320×240 display so taps in all four screen corners hit
+the test window. Copy it to the board over the serial connection, then run it
+from the REPL. For the SPIFFS profile:
+
+```sh
+python3 tools/ql32-ymodem.py send /dev/ttyUSB0 115200 \
+  examples/touch/touch-demo.bas --device-path FFS:/touch-demo.bas
+```
+
+For the SD profile, use `SDC:/touch-demo.bas` as the device path. Then enter:
+
+```text
+LOAD "FFS:/touch-demo.bas"
+RUN
+```
+
+On the SD profile, load `SDC:/touch-demo.bas` instead.
+
+At rotation 0, screen coordinates are clipped to the active window and reported
+window-local in `x%` and `y%`. A touch-down captures its window through touch-up
+or cancellation, so dragging outside the window still reports coordinates
+relative to the captured window.
 
 Alerts, confirmations, dialogs, and menus appear as graphical panels on the
 TFT. Panel text matches the console's 6×8 bitmap font. Titles are bold white

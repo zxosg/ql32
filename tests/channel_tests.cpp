@@ -117,6 +117,92 @@ void testBasicChannelCalls() {
     std::filesystem::remove_all(root);
 }
 
+void testTouchChannelAndRunCleanup() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-touch-channel-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        auto files = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(
+            files, ql32::runtime::ChannelRegistry::SerialWriter{}, nullptr, true);
+        ql32::Interpreter interpreter({}, channels);
+        std::ostringstream output;
+        const auto status = interpreter.executeResumable(
+            "touch=OPEN(13)\n"
+            "INPUT #touch, type%, x%, y%, window%\n", output);
+        require(status == ql32::ExecutionStatus::WaitingChannel,
+                "touch INPUT did not suspend while waiting for a screen event");
+        require(interpreter.openChannelCount() == 1,
+                "opening a touch channel did not allocate an owned handle");
+        channels->publishTouch(interpreter.graphicsSessionId(),
+            {ql32::runtime::TouchEventType::Down, 17, 29, 41});
+        require(interpreter.resume(output) == ql32::ExecutionStatus::Completed,
+                "touch INPUT did not resume after an event arrived");
+        require(interpreter.openChannelCount() == 0,
+                "program completion did not release its touch channel");
+        interpreter.execute("PRINT type%\nPRINT x%\nPRINT y%\nPRINT window%\n", output);
+        require(output.str() == "1\n17\n29\n41\n",
+                "touch event fields were not assigned to INPUT destinations");
+
+        {
+            auto repeatChannels = std::make_shared<ql32::runtime::ChannelRegistry>(
+                nullptr, ql32::runtime::ChannelRegistry::SerialWriter{}, nullptr, true);
+            ql32::Interpreter repeatInterpreter({}, repeatChannels);
+            require(repeatInterpreter.executeResumable(
+                        "touch=OPEN(13)\n"
+                        "REPEAT forever\n"
+                        "INPUT #touch, type%, x%, y%, window%\n"
+                        "IF type% = 1 THEN\n"
+                        "  x% = x% + 1\n"
+                        "END IF\n"
+                        "END REPEAT forever\n", output) ==
+                        ql32::ExecutionStatus::WaitingChannel,
+                    "repeating touch INPUT did not wait for an event");
+            repeatChannels->publishTouch(repeatInterpreter.graphicsSessionId(),
+                {ql32::runtime::TouchEventType::Down, 17, 29, 41});
+            require(repeatInterpreter.resume(output) == ql32::ExecutionStatus::WaitingChannel,
+                    "repeating touch INPUT underflowed its operand stack after an event");
+        }
+
+        require(interpreter.executeResumable(
+                    "touch=OPEN(13)\nSTOP\n", output) ==
+                    ql32::ExecutionStatus::ProgramStopped &&
+                interpreter.openChannelCount() == 1,
+                "STOP did not retain a program's touch channel for CONTINUE");
+        require(interpreter.executeInteractiveSlice("CONTINUE\n", output, 128) ==
+                    ql32::ExecutionStatus::Completed &&
+                interpreter.openChannelCount() == 0,
+                "CONTINUE completion did not close the stopped program's channel");
+
+        bool failed = false;
+        try {
+            (void)interpreter.executeResumable(
+                "touch=OPEN(13)\nPRINT 1/0\n", output);
+        } catch (const std::runtime_error&) {
+            failed = true;
+        }
+        require(failed && interpreter.openChannelCount() == 0,
+                "runtime error did not release program-owned channels");
+
+        const auto handle = channels->openTypedDevice(99,
+            ql32::runtime::ChannelDevice::Touch, {});
+        require(channels->listOpen(99).size() == 1 &&
+                channels->listOpen(99)[0].type == ql32::runtime::ChannelType::Touch,
+                "touch endpoint was not listed as a touch channel");
+        channels->publishTouch(99,
+            {ql32::runtime::TouchEventType::Up, 3, 5, 7});
+        require(channels->readLine(99, handle) == "3,3,5,7",
+                "touch event record was not serialized for channel INPUT");
+        channels->closeSession(99);
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testWindowDeviceChannel() {
     ql32::runtime::ChannelRegistry channels(nullptr);
     const auto window = channels.openDevice(17, ql32::runtime::ChannelDevice::Window, {});
@@ -340,6 +426,7 @@ int main() {
         testDefaultAndRoutedOutputChannels();
         testChannelBindingSnapshotsEndpoint();
         testGetChannelInspection();
+        testTouchChannelAndRunCleanup();
     } catch (const std::exception& error) {
         std::cerr << "channel test failed: " << error.what() << '\n';
         return 1;

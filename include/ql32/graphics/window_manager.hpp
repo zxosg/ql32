@@ -9,6 +9,7 @@
 #include <functional>
 #include <list>
 #include <map>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,12 @@ struct WindowState {
     Rect screenClip{};
     PixelDepth pixelDepth = PixelDepth::Four;
     bool visible = true;
+};
+
+struct HitTarget {
+    WindowId window = 0;
+    SessionId owner = 0;
+    Point local{};
 };
 
 enum class CanvasResizePhase : std::uint8_t {
@@ -143,6 +150,7 @@ public:
     void close(WindowId id);
     void closeSession(SessionId owner);
     WindowState windowState(WindowId id) const;
+    std::optional<HitTarget> hitTest(Point screenPoint) const;
     void setTaskViewport(SessionId owner, TaskViewport viewport);
     TaskViewport taskViewport(SessionId owner) const;
     void releaseTaskViewportIfUnused(SessionId owner);

@@ -28,9 +28,10 @@ ChannelMode parseMode(std::string mode) {
 
 ChannelRegistry::ChannelRegistry(std::shared_ptr<ChannelService> files,
                                  SerialWriter serialWriter,
-                                 std::shared_ptr<HardwareChannelService> hardware)
+                                 std::shared_ptr<HardwareChannelService> hardware,
+                                 bool touchAvailable)
     : files_(std::move(files)), serialWriter_(std::move(serialWriter)),
-      hardware_(std::move(hardware)) {}
+      hardware_(std::move(hardware)), touchAvailable_(touchAvailable) {}
 
 ChannelRegistry::~ChannelRegistry() {
     std::vector<SessionId> sessions;
@@ -106,6 +107,19 @@ ChannelId ChannelRegistry::openDevice(SessionId session, ChannelDevice device,
             throw ServiceError(ServiceErrorCode::InvalidPath,
                                "OPEN window takes no parameters");
         return allocate(session, ChannelType::Window);
+    case ChannelDevice::Touch:
+        if (!touchAvailable_)
+            throw ServiceError(ServiceErrorCode::Unavailable,
+                               "screen touch input is unavailable");
+        if (!parameters.empty())
+            throw ServiceError(ServiceErrorCode::InvalidPath,
+                               "OPEN touch takes no parameters");
+        {
+            const ChannelId handle = allocate(session, ChannelType::Touch);
+            std::lock_guard lock(mutex_);
+            touchEvents_.try_emplace(handle);
+            return handle;
+        }
     default:
         std::vector<DeviceArgument> typed;
         typed.reserve(parameters.size());
@@ -117,6 +131,8 @@ ChannelId ChannelRegistry::openDevice(SessionId session, ChannelDevice device,
 
 ChannelId ChannelRegistry::openTypedDevice(SessionId session, ChannelDevice device,
                                            const std::vector<DeviceArgument>& parameters) {
+    if (device == ChannelDevice::Touch)
+        return openDevice(session, device, {});
     if (device == ChannelDevice::File || device == ChannelDevice::Null ||
         device == ChannelDevice::Window ||
         (device == ChannelDevice::Serial && parameters.empty())) {
@@ -186,17 +202,33 @@ std::optional<std::string> ChannelRegistry::readLine(SessionId session,
     if (opened.type == ChannelType::File) return files_->readLine(session, opened.backend);
     if (opened.type == ChannelType::Hardware && hardware_)
         return hardware_->readLine(session, opened.backend);
+    if (opened.type == ChannelType::Touch) {
+        std::lock_guard lock(mutex_);
+        auto found = touchEvents_.find(channel);
+        if (found == touchEvents_.end() || found->second.empty()) return std::nullopt;
+        const TouchEvent event = found->second.front();
+        found->second.pop_front();
+        return std::to_string(static_cast<unsigned>(event.type)) + "," +
+            std::to_string(event.x) + "," + std::to_string(event.y) + "," +
+            std::to_string(event.window);
+    }
     unsupported("line input");
 }
 
 bool ChannelRegistry::lineAvailable(SessionId session, ChannelId channel) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.type == ChannelType::Touch) {
+        std::lock_guard lock(mutex_);
+        const auto found = touchEvents_.find(channel);
+        return found != touchEvents_.end() && !found->second.empty();
+    }
     return opened.type == ChannelType::Hardware && hardware_ &&
            hardware_->lineAvailable(session, opened.backend);
 }
 
 bool ChannelRegistry::isHardwareChannel(SessionId session, ChannelId channel) const {
-    return endpoint(session, channel).type == ChannelType::Hardware;
+    const auto type = endpoint(session, channel).type;
+    return type == ChannelType::Hardware || type == ChannelType::Touch;
 }
 
 std::string ChannelRegistry::readBytes(SessionId session, ChannelId channel,
@@ -273,6 +305,7 @@ void ChannelRegistry::close(SessionId session, ChannelId channel) {
         hardware_->close(session, opened.backend);
     std::lock_guard lock(mutex_);
     endpoints_.erase(channel);
+    touchEvents_.erase(channel);
 }
 
 void ChannelRegistry::closeSession(SessionId session) {
@@ -283,6 +316,11 @@ void ChannelRegistry::closeSession(SessionId session) {
         if (endpoint->second.session == session) endpoint = endpoints_.erase(endpoint);
         else ++endpoint;
     }
+    for (auto eventQueue = touchEvents_.begin(); eventQueue != touchEvents_.end();) {
+        if (endpoints_.find(eventQueue->first) == endpoints_.end())
+            eventQueue = touchEvents_.erase(eventQueue);
+        else ++eventQueue;
+    }
 }
 
 std::vector<ChannelInfo> ChannelRegistry::listOpen(SessionId session) {
@@ -291,6 +329,37 @@ std::vector<ChannelInfo> ChannelRegistry::listOpen(SessionId session) {
     for (const auto& [handle, endpoint] : endpoints_)
         if (endpoint.session == session) result.push_back({handle, endpoint.type});
     return result;
+}
+
+void ChannelRegistry::publishTouch(SessionId session, const TouchEvent& event) {
+    std::lock_guard lock(mutex_);
+    for (auto& [handle, endpoint] : endpoints_) {
+        if (endpoint.session != session || endpoint.type != ChannelType::Touch) continue;
+        auto& events = touchEvents_[handle];
+        // Bound per-channel memory. Pointer motion is lossy by nature; retain
+        // the newest position while preserving edge events whenever possible.
+        constexpr std::size_t maximumQueuedEvents = 32;
+        if (events.size() >= maximumQueuedEvents) {
+            if (event.type == TouchEventType::Move) {
+                const auto lastMove = std::find_if(events.rbegin(), events.rend(),
+                    [](const TouchEvent& queued) {
+                        return queued.type == TouchEventType::Move;
+                    });
+                if (lastMove != events.rend()) {
+                    *lastMove = event;
+                    continue;
+                }
+            }
+            const auto move = std::find_if(events.begin(), events.end(),
+                [](const TouchEvent& queued) {
+                    return queued.type == TouchEventType::Move;
+                });
+            if (move != events.end()) events.erase(move);
+            else if (event.type == TouchEventType::Move) continue;
+            else events.pop_front();
+        }
+        events.push_back(event);
+    }
 }
 
 } // namespace ql32::runtime

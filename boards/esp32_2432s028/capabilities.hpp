@@ -24,7 +24,8 @@ constexpr platform::Capabilities capabilities() {
             platform::capabilityBit(platform::ServiceKind::Parallel) |
             platform::capabilityBit(platform::ServiceKind::CapTouch) |
             platform::capabilityBit(platform::ServiceKind::Timer),
-        platform::inputBit(platform::InputKind::Serial)
+        platform::inputBit(platform::InputKind::Serial) |
+            platform::inputBit(platform::InputKind::Touch)
     };
 }
 

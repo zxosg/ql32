@@ -118,6 +118,7 @@ private:
     void setDefaultOutputChannel(runtime::ChannelId channel);
     void bindChannel(runtime::ChannelId source, runtime::ChannelId destination);
     void closeChannel(runtime::ChannelId channel);
+    void closeExecutionChannels() noexcept;
     bool channelIsOpen(runtime::ChannelId channel) const;
     std::unordered_map<std::string, Value> variables_;
     std::size_t output_column_ = 0;
@@ -135,6 +136,8 @@ private:
     // Logical channels point directly at the endpoint handle they currently
     // represent. No channel-to-channel route chains are retained.
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;
+    std::vector<runtime::ChannelId> executionChannels_;
+    bool interactiveCommandExecution_ = false;
     std::map<int, std::string> program_;
     std::optional<int> lastEditedLine_;
     std::unique_ptr<detail::UISessionState> uiSession_;

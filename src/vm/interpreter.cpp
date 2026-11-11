@@ -540,6 +540,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
     if (execution_) throw std::runtime_error("interpreter already has a suspended execution");
     if (instructionBudget == 0)
         throw std::invalid_argument("instruction budget must be positive");
+    if (!interactiveCommandExecution_) closeExecutionChannels();
     bool preparingProgram = true;
     try {
         execution_ = std::make_unique<detail::VMExecutionState>();
@@ -579,6 +580,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         if (status == ExecutionStatus::Completed) {
             if (ui_) ui_->clearBusy(session_id_);
             execution_.reset();
+            if (!interactiveCommandExecution_) closeExecutionChannels();
     } else if (status == ExecutionStatus::ProgramStopped) {
         stoppedExecution_ = std::move(execution_);
         }
@@ -587,6 +589,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         if (memory_) (void)memory_->releaseEmergencyReserve();
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        if (!interactiveCommandExecution_) closeExecutionChannels();
         const char* detail = preparingProgram ? "out of memory preparing BASIC program" :
                                                 "out of memory executing BASIC program";
         setErrorContext(runtime::ErrorCode::OutOfMemory, {});
@@ -594,21 +597,25 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        if (!interactiveCommandExecution_) closeExecutionChannels();
         setErrorContext(error.code(), error.detail());
         throw;
     } catch (const runtime::ServiceError& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        if (!interactiveCommandExecution_) closeExecutionChannels();
         setErrorContext(error.languageCode(), error.detail());
         throw;
     } catch (const std::exception& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        if (!interactiveCommandExecution_) closeExecutionChannels();
         setErrorContext(runtime::errorCodeFor(error), runtime::extendedErrorText(error));
         throw;
     } catch (...) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        if (!interactiveCommandExecution_) closeExecutionChannels();
         setErrorContext(runtime::ErrorCode::GeneralFailure, "unknown BASIC execution failure");
         throw;
     }
@@ -630,6 +637,7 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
         if (status == ExecutionStatus::Completed) {
             if (ui_) ui_->clearBusy(session_id_);
             execution_.reset();
+            closeExecutionChannels();
         } else if (status == ExecutionStatus::ProgramStopped) {
             stoppedExecution_ = std::move(execution_);
         }
@@ -637,27 +645,32 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        closeExecutionChannels();
         setErrorContext(error.code(), error.detail());
         throw;
     } catch (const runtime::ServiceError& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        closeExecutionChannels();
         setErrorContext(error.languageCode(), error.detail());
         throw;
     } catch (const std::bad_alloc&) {
         if (memory_) (void)memory_->releaseEmergencyReserve();
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        closeExecutionChannels();
         setErrorContext(runtime::ErrorCode::OutOfMemory, {});
         throw std::runtime_error("out of memory resuming BASIC program");
     } catch (const std::exception& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        closeExecutionChannels();
         setErrorContext(runtime::errorCodeFor(error), runtime::extendedErrorText(error));
         throw;
     } catch (...) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
+        closeExecutionChannels();
         setErrorContext(runtime::ErrorCode::GeneralFailure, "unknown BASIC execution failure");
         throw;
     }
@@ -740,6 +753,29 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (!callFrames.empty() && callFrames.back().locals.count(name))
             callFrames.back().locals[name] = std::move(value);
         else variables_[name] = std::move(value);
+    };
+    const auto splitInputRecord = [](const std::string& text) {
+        std::vector<std::string> fields;
+        std::string field;
+        bool quoted = false;
+        for (std::size_t index = 0; index < text.size(); ++index) {
+            const char character = text[index];
+            if (character == '"') {
+                if (quoted && index + 1 < text.size() && text[index + 1] == '"') {
+                    field.push_back('"');
+                    ++index;
+                } else {
+                    quoted = !quoted;
+                }
+            } else if (character == ',' && !quoted) {
+                fields.push_back(std::move(field));
+                field.clear();
+            } else {
+                field.push_back(character);
+            }
+        }
+        fields.push_back(std::move(field));
+        return fields;
     };
     auto storeDataReadValue = [&](const Instruction& at, const std::string& target,
                                   std::size_t rank, const std::vector<double>& indices,
@@ -2371,7 +2407,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         if (!std::isfinite(*deviceNumber) ||
                             std::trunc(*deviceNumber) != *deviceNumber ||
                             *deviceNumber < static_cast<double>(runtime::ChannelDevice::File) ||
-                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Timer))
+                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Touch))
                             runtimeError(instruction, "invalid OPEN device kind");
                         device = static_cast<runtime::ChannelDevice>(
                             static_cast<std::uint64_t>(*deviceNumber));
@@ -2387,6 +2423,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         parameters.emplace_back(textArgument(1));
                     }
                     const auto id = channels_->openTypedDevice(session_id_, device, parameters);
+                    if (!interactiveCommandExecution_)
+                        executionChannels_.push_back(id);
                     pushValue(static_cast<double>(id));
                 } else if (instruction.name == "IN") {
                     if (!channels_) throw runtime::ServiceError(
@@ -3218,8 +3256,12 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             runtime::ChannelId promptChannel = instruction.expectsValue ?
                 static_cast<runtime::ChannelId>(instruction.target) : 1;
             runtime::ChannelId inputChannel = 0;
+            std::optional<double> inputChannelExpression;
+            std::optional<Value> promptExpression;
+            std::optional<double> promptChannelExpression;
             if (instruction.channelArgument) {
                 const double channel = numeric(pop(), instruction);
+                inputChannelExpression = channel;
                 if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
                     channel > 9007199254740991.0)
                     runtimeError(instruction, "invalid INPUT channel");
@@ -3227,12 +3269,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             if (instruction.expectsValue) {
                 const Value value = pop();
+                promptExpression = value;
                 const auto* text = std::get_if<std::string>(&value);
                 if (!text) runtimeError(instruction, "INPUT prompt must be a string");
                 prompt = *text;
             }
             if (instruction.clearTarget) {
                 const double channel = numeric(pop(), instruction);
+                promptChannelExpression = channel;
                 if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
                     channel > 9007199254740991.0)
                     runtimeError(instruction, "invalid prompt channel");
@@ -3257,8 +3301,38 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "channel service unavailable");
             const auto line = channels_->readLine(session_id_, inputChannel);
+            if (!line && channels_->isHardwareChannel(session_id_, inputChannel)) {
+                state.pendingChannelRead = inputChannel;
+                // The next scheduler slice retries this instruction. Restore
+                // its already-evaluated operands because the program counter
+                // only rewinds past the instruction, not its expressions.
+                if (instruction.clearTarget)
+                    stack.emplace_back(*promptChannelExpression);
+                if (instruction.expectsValue) {
+                    const Value& value = *promptExpression;
+                    if (const auto* number = std::get_if<double>(&value))
+                        stack.emplace_back(*number);
+                    else
+                        stack.emplace_back(std::get<std::string>(value));
+                }
+                if (instruction.channelArgument)
+                    stack.emplace_back(*inputChannelExpression);
+                --pc;
+                return ExecutionStatus::WaitingChannel;
+            }
+            state.pendingChannelRead.reset();
             if (!line) runtimeError(instruction, "end of file during INPUT");
-            storeInputValue(instruction.name, *line, instruction);
+            if (instruction.inputVariables.size() <= 1) {
+                const std::string& target = instruction.inputVariables.empty() ?
+                    instruction.name : instruction.inputVariables[0];
+                storeInputValue(target, *line, instruction);
+            } else {
+                const auto fields = splitInputRecord(*line);
+                if (fields.size() != instruction.inputVariables.size())
+                    runtimeError(instruction, "INPUT field count does not match destinations");
+                for (std::size_t index = 0; index < fields.size(); ++index)
+                    storeInputValue(instruction.inputVariables[index], fields[index], instruction);
+            }
             break;
         }
         }

@@ -822,6 +822,24 @@ WindowState WindowManager::windowState(WindowId id) const {
             entry.canvas.depth(), entry.visible};
 }
 
+std::optional<HitTarget> WindowManager::hitTest(Point point) const {
+    for (auto entry = windows_.rbegin(); entry != windows_.rend(); ++entry) {
+        if (!entry->visible) continue;
+        const Rect bounds = screenBounds(*entry);
+        const Rect clip = clipToTask(*entry, bounds);
+        const auto right = static_cast<std::int64_t>(clip.x) + clip.width;
+        const auto bottom = static_cast<std::int64_t>(clip.y) + clip.height;
+        if (clip.width == 0 || clip.height == 0 || point.x < clip.x || point.y < clip.y ||
+            static_cast<std::int64_t>(point.x) >= right ||
+            static_cast<std::int64_t>(point.y) >= bottom)
+            continue;
+        return HitTarget{entry->id, entry->owner,
+            {static_cast<std::int32_t>(point.x - bounds.x),
+             static_cast<std::int32_t>(point.y - bounds.y)}};
+    }
+    return std::nullopt;
+}
+
 void WindowManager::setTaskViewport(SessionId owner, TaskViewport viewport) {
     if (owner == 0) throw std::invalid_argument("task viewport owner must be valid");
     validate(viewport);

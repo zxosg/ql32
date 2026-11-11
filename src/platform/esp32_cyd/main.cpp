@@ -14,6 +14,7 @@
 #include <ctime>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
@@ -39,18 +40,31 @@
 #include "ql32/platform/esp32_cyd/graphics.hpp"
 #include "ql32/platform/esp32_cyd/frame_presenter.hpp"
 #include "ql32/platform/esp32_cyd/text_console.hpp"
+#include "ql32/platform/esp32_cyd/touch_input.hpp"
 
 namespace {
 
 SPIClass tftBus(HSPI);
 SPIClass sdBus(VSPI);
+ql32::platform::esp32_cyd::Xpt2046Touch touchPanel(
+    ql32::boards::esp32_2432s028::touchSck,
+    ql32::boards::esp32_2432s028::touchMiso,
+    ql32::boards::esp32_2432s028::touchMosi,
+    ql32::boards::esp32_2432s028::touchChipSelect,
+    ql32::boards::esp32_2432s028::touchInterrupt);
 ql32::platform::esp32_cyd::CydIli9341Display display(&tftBus,
     ql32::boards::esp32_2432s028::tftDataCommand,
     ql32::boards::esp32_2432s028::tftChipSelect, -1);
 std::shared_ptr<ql32::graphics::WindowedService> graphics;
+std::shared_ptr<ql32::runtime::ChannelRegistry> channelRegistry;
 ql32::platform::esp32::ArduinoHardware hardwareAdapter(
     &tftBus, &sdBus, &Wire, 22, 27, 17, 16, 26, 25,
-    {14, 12, 13, 15, 2, 21, 18, 19, 23, 5, 22, 27});
+    {14, 12, 13, 15, 2, 21, 18, 19, 23, 5, 22, 27,
+     ql32::boards::esp32_2432s028::touchSck,
+     ql32::boards::esp32_2432s028::touchMiso,
+     ql32::boards::esp32_2432s028::touchMosi,
+     ql32::boards::esp32_2432s028::touchChipSelect,
+     ql32::boards::esp32_2432s028::touchInterrupt});
 ql32::platform::esp32::Clock boardClock;
 ql32::platform::esp32::CpuFrequency boardCpuFrequency;
 ql32::platform::esp32::MemoryService boardMemory;
@@ -82,6 +96,82 @@ bool serialSawCarriageReturn = false;
 bool replReadyMessageShown = false;
 bool replPromptShown = false;
 std::uint32_t lastDebugOverlayRefresh = 0;
+std::optional<ql32::graphics::HitTarget> capturedTouchTarget;
+std::optional<ql32::graphics::ChannelId> capturedTouchChannel;
+bool touchWasDown = false;
+std::uint32_t lastTouchMoveMs = 0;
+ql32::graphics::Point lastTouchPoint{};
+ql32::graphics::Point lastTouchLocalPoint{};
+
+void pollTouch() {
+    if (!graphics || !channelRegistry) return;
+    const auto [width, height] = graphics->displaySize();
+    ql32::graphics::Point point{};
+    const bool down = touchPanel.readPoint(point, width, height,
+                                           graphics->rotationDegrees());
+    const std::uint32_t now = millis();
+    if (down) {
+        ql32::runtime::TouchEvent event;
+        if (!touchWasDown) {
+            capturedTouchTarget = graphics->windowManager().hitTest(point);
+            touchWasDown = true;
+            if (capturedTouchTarget)
+                capturedTouchChannel = graphics->channelForWindow(
+                    capturedTouchTarget->owner, capturedTouchTarget->window);
+            if (!capturedTouchTarget || !capturedTouchChannel) {
+                capturedTouchTarget.reset();
+                capturedTouchChannel.reset();
+                return;
+            }
+            event.type = ql32::runtime::TouchEventType::Down;
+        } else {
+            if (!capturedTouchTarget || point.x == lastTouchPoint.x &&
+                point.y == lastTouchPoint.y ||
+                static_cast<std::uint32_t>(now - lastTouchMoveMs) < 20) {
+                lastTouchPoint = point;
+                return;
+            }
+            event.type = ql32::runtime::TouchEventType::Move;
+        }
+        try {
+            const auto window = graphics->windowManager().windowState(
+                capturedTouchTarget->window);
+            event.x = point.x - window.bounds.x;
+            event.y = point.y - window.bounds.y;
+            lastTouchLocalPoint = {event.x, event.y};
+            event.window = *capturedTouchChannel;
+            channelRegistry->publishTouch(capturedTouchTarget->owner, event);
+            lastTouchMoveMs = now;
+            lastTouchPoint = point;
+        } catch (const std::out_of_range&) {
+            if (capturedTouchTarget && capturedTouchChannel)
+                channelRegistry->publishTouch(capturedTouchTarget->owner,
+                    {ql32::runtime::TouchEventType::Cancel,
+                     lastTouchLocalPoint.x, lastTouchLocalPoint.y,
+                     *capturedTouchChannel});
+            capturedTouchTarget.reset();
+            capturedTouchChannel.reset();
+        }
+        return;
+    }
+
+    if (touchWasDown && capturedTouchTarget) {
+        try {
+            const auto window = graphics->windowManager().windowState(
+                capturedTouchTarget->window);
+            channelRegistry->publishTouch(capturedTouchTarget->owner,
+                {ql32::runtime::TouchEventType::Up,
+                 lastTouchPoint.x - window.bounds.x,
+                 lastTouchPoint.y - window.bounds.y,
+                 *capturedTouchChannel});
+        } catch (const std::out_of_range&) {
+            // The owning window may have been closed while the finger was down.
+        }
+    }
+    touchWasDown = false;
+    capturedTouchTarget.reset();
+    capturedTouchChannel.reset();
+}
 
 void refreshDebugOverlay() {
     if (!graphics || !graphics->debugOverlayEnabled()) return;
@@ -434,6 +524,7 @@ void setup() {
     display.begin(40000000);
     display.setRotationDegrees(0);
     display.fillScreen(ILI9341_BLACK);
+    touchPanel.begin();
     tftConsole = std::make_unique<ql32::platform::esp32_cyd::TftTextConsole>(display);
     basicOutput = std::make_unique<std::ostream>(tftConsole.get());
     auto framePresenter = std::make_shared<ql32::platform::esp32_cyd::Ili9341FramePresenter>(
@@ -550,11 +641,12 @@ void setup() {
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
-    services.channels = std::make_shared<ql32::runtime::ChannelRegistry>(
+    channelRegistry = std::make_shared<ql32::runtime::ChannelRegistry>(
         std::move(fileChannels), [](std::string_view bytes) {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
         }, std::shared_ptr<ql32::runtime::HardwareChannelService>(
-            &hardwareAdapter, [](ql32::runtime::HardwareChannelService*) {}));
+            &hardwareAdapter, [](ql32::runtime::HardwareChannelService*) {}), true);
+    services.channels = channelRegistry;
     services.ui = uiService;
     services.graphics = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(
@@ -594,6 +686,7 @@ void loop() {
         if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
         receiveSerialCharacter(static_cast<char>(Serial.read()));
     }
+    pollTouch();
     if (uiPresenter) uiPresenter->flushSerialEscape(millis());
     advanceScheduler();
     delay(1);

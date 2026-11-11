@@ -160,6 +160,7 @@ struct Instruction {
     bool builtin = false;
     bool channelArgument = false;
     OptionalVector<std::string> parameters;
+    OptionalVector<std::string> inputVariables;
     OptionalVector<std::string> localNames;
     OptionalVector<ArrayArgumentCandidate> arrayArgumentCandidates;
     OptionalString ownerDefinition;

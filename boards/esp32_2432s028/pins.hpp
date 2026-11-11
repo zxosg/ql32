@@ -9,6 +9,12 @@ constexpr int tftMosi = 13;
 constexpr int tftChipSelect = 15;
 constexpr int tftDataCommand = 2;
 constexpr int tftBacklight = 21;
+// Resistive XPT2046 touch controller on the common 2.8-inch CYD revision.
+constexpr int touchSck = 25;
+constexpr int touchMiso = 39;
+constexpr int touchMosi = 32;
+constexpr int touchChipSelect = 33;
+constexpr int touchInterrupt = 36;
 
 constexpr int sdSck = 18;
 constexpr int sdMiso = 19;

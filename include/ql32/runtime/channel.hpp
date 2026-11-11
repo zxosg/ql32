@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -25,11 +26,21 @@ using ChannelId = std::uint64_t;
 
 enum class ChannelMode { Read, Write, Append };
 
-enum class ChannelType { Console, Window, File, Serial, Network, Null, Hardware };
+enum class ChannelType { Console, Window, File, Serial, Network, Null, Hardware, Touch };
 
 enum class ChannelDevice : std::uint64_t {
     File = 1, Serial = 2, Null = 3, Window = 4, Gpio = 5, Adc = 6,
-    Spi = 7, I2c = 8, Parallel = 9, Infrared = 10, CapTouch = 11, Timer = 12
+    Spi = 7, I2c = 8, Parallel = 9, Infrared = 10, CapTouch = 11, Timer = 12,
+    Touch = 13
+};
+
+enum class TouchEventType : std::uint8_t { Down = 1, Move = 2, Up = 3, Cancel = 4 };
+
+struct TouchEvent {
+    TouchEventType type = TouchEventType::Down;
+    std::int32_t x = 0; // coordinates local to window
+    std::int32_t y = 0;
+    std::uint64_t window = 0; // BASIC graphics channel handle
 };
 
 using DeviceArgument = std::variant<double, std::string>;
@@ -48,6 +59,7 @@ inline const char* channelTypeName(ChannelType type) noexcept {
     case ChannelType::Network: return "NETWORK";
     case ChannelType::Null: return "NULL";
     case ChannelType::Hardware: return "HARDWARE";
+    case ChannelType::Touch: return "TOUCH";
     }
     return "UNKNOWN";
 }
@@ -128,6 +140,9 @@ public:
     // Lists open endpoints owned by this session. Adapters that do not expose
     // endpoint enumeration may keep the default empty implementation.
     virtual std::vector<ChannelInfo> listOpen(SessionId) { return {}; }
+    // The display adapter publishes a routed event to every touch channel
+    // owned by the task that owns the hit window.
+    virtual void publishTouch(SessionId, const TouchEvent&) {}
 };
 
 // Hardware implementations are injected by platform startup. The BASIC VM
@@ -161,7 +176,8 @@ public:
 
     explicit ChannelRegistry(std::shared_ptr<ChannelService> files,
                              SerialWriter serialWriter = {},
-                             std::shared_ptr<HardwareChannelService> hardware = {});
+                             std::shared_ptr<HardwareChannelService> hardware = {},
+                             bool touchAvailable = false);
     ~ChannelRegistry() override;
 
     ChannelId open(SessionId session, const std::string& path,
@@ -197,6 +213,7 @@ public:
     void close(SessionId session, ChannelId channel) override;
     void closeSession(SessionId session) override;
     std::vector<ChannelInfo> listOpen(SessionId session) override;
+    void publishTouch(SessionId session, const TouchEvent& event) override;
 
 private:
     struct Endpoint {
@@ -207,7 +224,9 @@ private:
     std::shared_ptr<ChannelService> files_;
     SerialWriter serialWriter_;
     std::shared_ptr<HardwareChannelService> hardware_;
+    bool touchAvailable_ = false;
     std::unordered_map<ChannelId, Endpoint> endpoints_;
+    std::unordered_map<ChannelId, std::deque<TouchEvent>> touchEvents_;
     ChannelId nextId_ = 2;
     mutable std::mutex mutex_;
 

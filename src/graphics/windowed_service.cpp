@@ -96,6 +96,13 @@ WindowId WindowedService::windowForSession(SessionId session) {
     return ensureWindow(session);
 }
 
+std::optional<ChannelId> WindowedService::channelForWindow(SessionId session,
+                                                            WindowId window) const {
+    for (const auto& [key, id] : sessionWindows_)
+        if (key.session == session && id == window) return key.channel;
+    return std::nullopt;
+}
+
 void WindowedService::setDefaultWindowBounds(ChannelId channel, Rect bounds) {
     if (bounds.width == 0 || bounds.height == 0)
         throw std::invalid_argument("window size must be positive");

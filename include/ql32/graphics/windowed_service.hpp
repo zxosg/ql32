@@ -5,6 +5,7 @@
 #include "ql32/graphics/window_manager.hpp"
 
 #include <memory>
+#include <optional>
 #include <cstdint>
 #include <cstddef>
 #include <functional>
@@ -78,12 +79,15 @@ public:
     std::pair<std::uint32_t, std::uint32_t> displaySize() const noexcept override {
         return {manager_.screenWidth(), manager_.screenHeight()};
     }
+    std::uint16_t rotationDegrees() const noexcept { return rotationDegrees_; }
     void setRotation(SessionId session, std::uint16_t degrees) override;
     void setDebugOverlayEnabled(bool enabled) override;
     bool debugOverlayEnabled() const noexcept override { return debugOverlayEnabled_; }
     void setDebugOverlayText(const std::string& text) override;
 
     WindowId windowForSession(SessionId session);
+    std::optional<ChannelId> channelForWindow(SessionId session,
+                                               WindowId window) const;
     void setDefaultWindowBounds(ChannelId channel, Rect bounds);
     void setConsoleBoundsCallback(std::function<void(Rect)> callback) {
         consoleBoundsCallback_ = std::move(callback);

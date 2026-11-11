@@ -1872,8 +1872,13 @@ private:
                     }
                 }
                 if (!check(Kind::Identifier)) error(peek(), "expected INPUT destination variable");
-                const Token target = advance();
-                input.name = target.text;
+                do {
+                    if (!check(Kind::Identifier))
+                        error(peek(), "expected INPUT destination variable");
+                    const Token target = advance();
+                    input.inputVariables.push_back(target.text);
+                } while (match(Kind::Comma));
+                input.name = input.inputVariables[0];
                 if (input.expectsValue && !hasPromptChannel) {
                     // The prompt channel is the standard output channel #1.
                     input.target = 1;
@@ -2472,6 +2477,7 @@ void Interpreter::abortExecution() noexcept {
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();
     clearPager();
+    closeExecutionChannels();
     requestedPauseDurationMs_ = 0;
 }
 
@@ -2678,10 +2684,28 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
     fontRegistry_.clearChannel(channel);
     if (graphics_) graphics_->clearFontSelections(session_id_, channel);
     channels_->close(session_id_, channel);
+    executionChannels_.erase(std::remove(executionChannels_.begin(),
+        executionChannels_.end(), channel), executionChannels_.end());
     channel_bindings_.erase(channel);
     for (auto binding = channel_bindings_.begin(); binding != channel_bindings_.end();) {
         if (binding->second == channel) binding = channel_bindings_.erase(binding);
         else ++binding;
+    }
+}
+
+void Interpreter::closeExecutionChannels() noexcept {
+    if (!channels_) {
+        executionChannels_.clear();
+        return;
+    }
+    const auto channels = std::move(executionChannels_);
+    executionChannels_.clear();
+    for (auto channel = channels.rbegin(); channel != channels.rend(); ++channel) {
+        try {
+            if (channelIsOpen(*channel)) closeChannel(*channel);
+        } catch (...) {
+            // Cleanup must not replace the program's original result or error.
+        }
     }
 }
 
@@ -2972,7 +2996,15 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         }
     }
     if (!commandMode) {
-        return executeSlice(source, output, instructionBudget, stop);
+        interactiveCommandExecution_ = true;
+        try {
+            const auto status = executeSlice(source, output, instructionBudget, stop);
+            interactiveCommandExecution_ = false;
+            return status;
+        } catch (...) {
+            interactiveCommandExecution_ = false;
+            throw;
+        }
     }
 
     std::istringstream input(source);
@@ -3698,8 +3730,15 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             writeChannelText(0, "Session " + std::to_string(id) +
                 " priority set to " + std::to_string(priority) + "\n");
         } else {
-            const auto status = executeSlice(line + "\n", output,
-                                             instructionBudget, stop);
+            interactiveCommandExecution_ = true;
+            ExecutionStatus status;
+            try {
+                status = executeSlice(line + "\n", output, instructionBudget, stop);
+            } catch (...) {
+                interactiveCommandExecution_ = false;
+                throw;
+            }
+            interactiveCommandExecution_ = false;
             if (status != ExecutionStatus::Completed) return status;
         }
     }
@@ -3777,6 +3816,7 @@ void Interpreter::clear() {
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();
     clearPager();
+    closeExecutionChannels();
     *uiSession_ = detail::UISessionState{};
     variables_.clear();
     buffers_.clear();

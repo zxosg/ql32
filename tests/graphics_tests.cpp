@@ -1193,6 +1193,33 @@ void testTaskViewportTranslatesAndClipsOwnedWindows() {
             "expanding/moving the task viewport did not reveal retained pixels or preserve other tasks");
 }
 
+void testTouchHitTestingUsesTopmostVisibleClippedWindow() {
+    WindowManager manager(100, 80);
+    const auto background = manager.create(11, {0, 0, 60, 60});
+    const auto foreground = manager.create(22, {0, 0, 30, 30});
+    manager.setTaskViewport(22, {20, 20, 5, 5});
+
+    const auto inside = manager.hitTest({24, 24});
+    require(inside && inside->window == foreground && inside->owner == 22 &&
+            inside->local.x == 4 && inside->local.y == 4,
+            "touch hit test did not select the top clipped window and local coordinates");
+    const auto outsideViewport = manager.hitTest({27, 24});
+    require(outsideViewport && outsideViewport->window == background &&
+            outsideViewport->owner == 11,
+            "touch hit test selected content outside the task viewport");
+}
+
+void testTouchWindowResolvesToItsBASICChannel() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(40, 30, presenter);
+    graphics.line(19, 27, {0, 0}, {1, 1});
+    const auto state = graphics.windowManager().compositionOrder();
+    require(state.size() == 1, "graphics channel did not create a retained window");
+    const auto channel = graphics.channelForWindow(19, state[0].id);
+    require(channel && *channel == 27,
+            "touch target window did not resolve to its BASIC channel handle");
+}
+
 void testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
@@ -1492,6 +1519,8 @@ int main() {
     testDebugOverlayComposesAboveGraphics();
     testCanvasStorageReleasesAndReusesAllocations();
     testTaskViewportTranslatesAndClipsOwnedWindows();
+    testTouchHitTestingUsesTopmostVisibleClippedWindow();
+    testTouchWindowResolvesToItsBASICChannel();
     testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin();
     testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
     testFailedCanvasResizePreservesAllWindows();

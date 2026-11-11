@@ -820,8 +820,13 @@ returns the endpoint type. These selector constants are provided by
 the legacy `OPEN(path, mode)` file form remains supported. The null endpoint
 discards text, byte, and graphics output. Serial and null input are not
 implemented. `OPEN(KDeviceWindow)` allocates a graphics window channel with no
-arguments; use `WINDOW #channel,x,y,w,h` to position and size it. Reserved
-channels `#0` and `#1` are still managed outside the opened-endpoint registry.
+arguments; use `WINDOW #channel,x,y,w,h` to position and size it.
+`OPEN(KDeviceTouch)` opens a touch event channel on a capable display profile.
+`INPUT #touch, type%, x%, y%, window%` reads the next event record and suspends
+only the current session while it waits. Coordinates are local to the hit
+window; `window%` is its BASIC channel handle. Event constants are `KTouchDown`, `KTouchMove`, `KTouchUp`, and
+`KTouchCancel`. Reserved channels `#0` and `#1` are still managed outside the
+opened-endpoint registry.
 
 For text output, `WRITE channel, text$` is a one-string, newline-terminated
 write. `PRINT #channel` supports multiple expressions and separators. A

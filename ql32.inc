@@ -47,6 +47,12 @@ CONST KDeviceParallel = 9
 CONST KDeviceIrDA = 10
 CONST KDeviceCapTouch = 11
 CONST KDeviceTimer = 12
+CONST KDeviceTouch = 13
+' Touch channel event types
+CONST KTouchDown = 1
+CONST KTouchMove = 2
+CONST KTouchUp = 3
+CONST KTouchCancel = 4
 ' GPIO modes and pulls
 CONST KPinInput = 0
 CONST KPinOutput = 1
