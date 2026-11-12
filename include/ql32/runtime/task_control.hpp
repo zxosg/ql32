@@ -147,6 +147,7 @@ public:
                                  std::int32_t = 0, std::int32_t = 0) { return false; }
     virtual WindowMode windowMode() const noexcept { return WindowMode::Shared; }
     virtual bool setWindowMode(WindowMode) { return false; }
+    virtual bool displayGeometryChanged() { return true; }
     virtual bool debugAttach(TaskId) { return false; }
     virtual bool debugSetBreakpoint(TaskId, int, bool) { return false; }
     virtual bool debugResume(TaskId, DebugResumeMode) { return false; }

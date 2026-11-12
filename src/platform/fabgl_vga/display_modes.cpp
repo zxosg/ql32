@@ -40,8 +40,11 @@ DisplayModes::DisplayModes(fabgl::VGAController& display, fabgl::Canvas& canvas)
 std::vector<runtime::DisplayMode> DisplayModes::availableModes() const {
     std::vector<runtime::DisplayMode> result;
     result.reserve(presets.size());
-    for (const auto& preset : presets)
-        result.push_back({preset.name, preset.width, preset.height, preset.refreshHz});
+    for (std::size_t index = 0; index < presets.size(); ++index) {
+        const auto& preset = presets[index];
+        result.push_back({preset.name, preset.width, preset.height,
+                          preset.refreshHz, static_cast<std::uint32_t>(index), 0});
+    }
     return result;
 }
 
@@ -81,7 +84,7 @@ runtime::DisplayMode DisplayModes::setMode(std::string_view name) {
     return {selected->name,
             static_cast<std::uint32_t>(std::max(0, canvas_.getWidth())),
             static_cast<std::uint32_t>(std::max(0, canvas_.getHeight())),
-            selected->refreshHz};
+            selected->refreshHz, static_cast<std::uint32_t>(next), 0};
 }
 
 } // namespace ql32::platform::fabgl_vga

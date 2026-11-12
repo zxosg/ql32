@@ -1517,6 +1517,34 @@ void testDisplayGeometryChangeResizesDefaultWindowsAndPresents() {
             "display geometry change did not present a full resized frame");
 }
 
+void testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure() {
+    using namespace ql32::graphics;
+    auto graphics = std::make_shared<WindowedService>(16, 8, nullptr);
+    graphics->setDefaultWindowBounds(1, {0, 0, 16, 8});
+    graphics->pixel(77, {2, 3});
+    require(graphics->windowManager().size() == 1,
+            "initial display window was not created");
+
+    // Allow the resize bookkeeping allocations, then fail allocating the
+    // replacement canvas so the service must use its clear-and-rebuild path.
+    failAllocationAfter.store(4, std::memory_order_relaxed);
+    require(graphics->setDisplaySize(32, 16),
+            "display change did not recover from a canvas resize allocation failure");
+    failAllocationAfter.store(-1, std::memory_order_relaxed);
+    require(graphics->lastDisplayResizeDiscardedWindows() &&
+                graphics->windowManager().size() == 0 &&
+                graphics->displaySize() == std::pair<std::uint32_t, std::uint32_t>{32, 16},
+            "fallback did not discard old canvases and apply the new geometry");
+
+    graphics->pixel(77, {1, 1});
+    const auto window = graphics->windowInfo(77);
+    require(window.width == 32 && window.height == 16 &&
+                graphics->windowManager().size() == 1 &&
+                graphics->windowManager().canvas(
+                    graphics->windowManager().compositionOrder().front().id).pixel(1, 1) == 7,
+            "active session did not recreate its window at the new display size");
+}
+
 } // namespace
 
 int main() {
@@ -1559,4 +1587,5 @@ int main() {
     testAtRejectsZeroRowOrColumn();
     testScreenPrintPositionsArePerChannelAndSeparateFromText();
     testDisplayGeometryChangeResizesDefaultWindowsAndPresents();
+    testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure();
 }

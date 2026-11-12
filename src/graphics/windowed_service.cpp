@@ -111,6 +111,7 @@ void WindowedService::setDefaultWindowBounds(ChannelId channel, Rect bounds) {
 }
 
 bool WindowedService::setDisplaySize(std::uint32_t width, std::uint32_t height) {
+    lastDisplayResizeDiscardedWindows_ = false;
     if (width == 0 || height == 0 ||
         width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
         height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()))
@@ -184,7 +185,37 @@ bool WindowedService::setDisplaySize(std::uint32_t width, std::uint32_t height) 
             try { manager_.setTaskViewport(session, viewport); } catch (...) {}
         }
         manager_.setScreenSize(oldWidth, oldHeight);
-        throw;
+
+        // A canvas resize can fail while allocating its replacement buffer.
+        // Retry the screen change with a clean set of canvases so active tasks
+        // survive the mode change and recreate windows on their next draw.
+        for (const auto& [key, id] : sessionWindows_) {
+            (void)key;
+            try { manager_.close(id); } catch (...) {}
+        }
+        sessionWindows_.clear();
+        for (const auto id : frozenWindows_) {
+            try {
+                const auto owner = manager_.windowState(id).owner;
+                manager_.close(id);
+                manager_.releaseTaskViewportIfUnused(owner);
+            } catch (...) {}
+        }
+        frozenWindows_.clear();
+        manager_.clearWindows();
+        textCursors_.clear();
+        manager_.setScreenSize(width, height);
+        defaultWindowBounds_ = std::move(resizedDefaults);
+        lastDisplayResizeDiscardedWindows_ = true;
+        if (consoleClearCallback_) consoleClearCallback_();
+        if (consoleTextPositionCallback_) consoleTextPositionCallback_(0, 0);
+        if (consoleBoundsCallback_) {
+            const auto console = defaultWindowBounds_.find(0);
+            if (console != defaultWindowBounds_.end()) consoleBoundsCallback_(console->second);
+        }
+        discardPresentationBuffer();
+        present();
+        return true;
     }
 
     defaultWindowBounds_ = std::move(resizedDefaults);

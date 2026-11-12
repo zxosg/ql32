@@ -106,7 +106,7 @@ constexpr std::string_view builtinCommands[] = {
     "INK", "PAPER", "OVER", "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
     "FONT", "GFONT", "UNLOADFONT",
     "CLS", "ROTATE", "WINDOW",
-    "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
+    "CLOSEWINDOW", "GUPDATE", "MODE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
     "DEALLOC", "XFER", "PAUSE", "RANDOMIZE"
 };
 
@@ -120,7 +120,7 @@ constexpr std::string_view builtinFunctions[] = {
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
     "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$",
-    "LOADFONT", "GETFONT", "RND"
+    "LOADFONT", "GETFONT", "RND", "MODE", "CPUFREQ"
 };
 
 constexpr std::string_view shellHelpCommands[] = {
@@ -234,6 +234,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "TASKVIEW") return {5, false};
     if (instruction.name == "TASK") return {1, instruction.expectsValue};
     if (instruction.name == "TASKRESULT") return {2, true};
+    if (instruction.name == "MODE") return {1, instruction.expectsValue};
     if (instruction.name == "IPRINT") return {1, false};
     if (instruction.name == "BUSY") return {1, false};
     if (instruction.name == "ERR") return {0, true};
@@ -258,6 +259,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "SIN" || instruction.name == "COS" ||
         instruction.name == "INT") return {1, true};
     if (instruction.name == "RND") return {0, true};
+    if (instruction.name == "CPUFREQ") return {0, true};
     if (instruction.name == "RANDOMIZE") return {1, false};
     if (instruction.name == "FREE") return {0, true};
     if (instruction.name == "GETCHANNEL") return {1, true};
@@ -498,6 +500,8 @@ private:
         std::string text(source_.substr(start, offset_ - start));
         std::string upper = text;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (upper == "MODE" && peek() == '(')
+            return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
         if (upper == "TASK" || upper == "ERR" || upper == "ERR$" || upper == "ERRX$" ||
             (upper == "LOC" && peek() == '('))
             return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
@@ -887,6 +891,13 @@ private:
                 } else if (instruction.name == "GUPDATE") {
                     if (passedArguments > 1)
                         error(instruction, "GUPDATE accepts one numeric mode or no argument");
+                } else if (instruction.name == "MODE") {
+                    if ((instruction.expectsValue && passedArguments != 1) ||
+                        (!instruction.expectsValue &&
+                         (passedArguments < 1 || passedArguments > 2)))
+                        error(instruction, instruction.expectsValue ?
+                            "MODE query expects one selector" :
+                            "MODE expects a mode ID and optional options");
                 } else if (instruction.name == "RECT") {
                     if (passedArguments < 4 || passedArguments > 5)
                         error(instruction, "RECT expects x, y, width, height, and optional fill flag");
@@ -902,6 +913,7 @@ private:
                            instruction.name != "EOF" &&
                            instruction.name != "TASKVIEW" && instruction.name != "DINIT" &&
                            instruction.name != "IPRINT" && instruction.name != "BUSY" &&
+                           instruction.name != "MODE" &&
                            passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
@@ -3341,13 +3353,6 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (self == tasks.end() || !self->supervisor)
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "MODE is supervisor-only");
-            for (const auto& task : tasks) {
-                if (!task.supervisor && task.state != runtime::TaskState::Completed &&
-                    task.state != runtime::TaskState::Failed &&
-                    task.state != runtime::TaskState::Cancelled)
-                    throw std::runtime_error("MODE unavailable while worker tasks are active");
-            }
-
             const auto argument = command(trim(normalizedLine.substr(4)));
             if (argument.empty() || argument == "LIST") {
                 std::ostringstream listing;
@@ -3356,8 +3361,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 listing << "Display mode: " << current << " (viewport "
                         << viewport.first << 'x' << viewport.second << ")\n";
                 for (const auto& mode : displayModes_->availableModes()) {
-                    listing << mode.name << "  " << mode.width << 'x' << mode.height;
+                    listing << mode.id << ": " << mode.name << "  "
+                            << mode.width << 'x' << mode.height;
                     if (mode.refreshHz) listing << " @" << mode.refreshHz << "Hz";
+                    listing << " options=" << mode.options;
                     if (mode.name == current) listing << " *";
                     listing << '\n';
                 }
@@ -3367,10 +3374,45 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
 
             const auto previousMode = displayModes_->currentMode();
             const auto previousSize = graphics_->displaySize();
-            const auto applied = displayModes_->setMode(argument);
+            std::optional<runtime::DisplayMode> appliedMode;
+            const auto comma = argument.find(',');
+            const bool numericId = !argument.empty() &&
+                std::all_of(argument.begin(), comma == std::string::npos ?
+                    argument.end() : argument.begin() + comma,
+                    [](unsigned char ch) { return std::isdigit(ch); });
+            if (numericId) {
+                const auto parseModeNumber = [](std::string_view value) {
+                    while (!value.empty() && std::isspace(
+                               static_cast<unsigned char>(value.front())))
+                        value.remove_prefix(1);
+                    while (!value.empty() && std::isspace(
+                               static_cast<unsigned char>(value.back())))
+                        value.remove_suffix(1);
+                    std::uint32_t parsed = 0;
+                    const auto [end, error] = std::from_chars(
+                        value.data(), value.data() + value.size(), parsed);
+                    if (value.empty() || error != std::errc{} ||
+                        end != value.data() + value.size())
+                        throw std::invalid_argument(
+                            "MODE expects a numeric mode ID and optional options");
+                    return parsed;
+                };
+                const auto modeId = parseModeNumber(std::string_view(argument).substr(
+                    0, comma == std::string::npos ? argument.size() : comma));
+                const auto options = comma == std::string::npos ?
+                    displayModes_->currentDisplayMode().options :
+                    parseModeNumber(std::string_view(argument).substr(comma + 1));
+                appliedMode = displayModes_->setMode(modeId, options);
+            } else {
+                appliedMode = displayModes_->setMode(argument);
+            }
+            const auto applied = *appliedMode;
+            bool viewportsRetiled = true;
             try {
                 if (!graphics_->setDisplaySize(applied.width, applied.height))
                     throw std::runtime_error("graphics service cannot change display geometry");
+                if (taskControl_)
+                    viewportsRetiled = taskControl_->displayGeometryChanged();
             } catch (...) {
                 try { (void)displayModes_->setMode(previousMode); } catch (...) {}
                 try {
@@ -3379,7 +3421,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 throw;
             }
             writeChannelText(0, "Display mode set to " + applied.name + " (" +
-                std::to_string(applied.width) + "x" + std::to_string(applied.height) + ").\n");
+                std::to_string(applied.width) + "x" + std::to_string(applied.height) +"); " +
+                (graphics_->lastDisplayResizeDiscardedWindows() ?
+                    "window contents cleared.\n" :
+                    "window contents preserved where possible.") +
+                (viewportsRetiled ? "\n" :
+                    " Task viewports could not be retiled.\n"));
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(5));
             const std::uint64_t outputChannel = argument.empty() ?

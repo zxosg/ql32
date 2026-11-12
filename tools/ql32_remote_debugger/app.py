@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -43,6 +44,7 @@ class SourceEditor(QPlainTextEdit):
     def __init__(self):
         super().__init__()
         self.breakpoints: set[int] = set()
+        self.execution_line: int | None = None
         self.line_area = LineNumberArea(self)
         self.blockCountChanged.connect(self._update_margin)
         self.updateRequest.connect(self._update_area)
@@ -114,12 +116,31 @@ class SourceEditor(QPlainTextEdit):
         self.breakpoint_changed.emit(line, enabled)
 
     def highlight_current_line(self):
-        selection = QTextEdit.ExtraSelection()
-        selection.format.setBackground(QColor("#313a46"))
-        selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
-        selection.cursor = self.textCursor()
-        selection.cursor.clearSelection()
-        self.setExtraSelections([selection])
+        selections = []
+        if self.textCursor().blockNumber() + 1 != self.execution_line:
+            selection = QTextEdit.ExtraSelection()
+            selection.format.setBackground(QColor("#dcecff"))
+            selection.format.setForeground(QColor("#20242b"))
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            selections.append(selection)
+        if self.execution_line is not None:
+            block = self.document().findBlockByNumber(self.execution_line - 1)
+            if block.isValid():
+                selection = QTextEdit.ExtraSelection()
+                selection.format.setBackground(QColor("#ffe082"))
+                selection.format.setForeground(QColor("#20242b"))
+                selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+                selection.cursor = self.textCursor()
+                selection.cursor.setPosition(block.position())
+                selection.cursor.clearSelection()
+                selections.append(selection)
+        self.setExtraSelections(selections)
+
+    def set_execution_line(self, line):
+        self.execution_line = int(line) if line and int(line) > 0 else None
+        self.highlight_current_line()
 
     def goto_source_line(self, line):
         if line < 1:
@@ -158,6 +179,7 @@ class DebuggerWindow(QMainWindow):
         self.screen_capture = False
         self._is_connected = False
         self._inspect_inflight = False
+        self._connected_port: str | None = None
 
         root = QWidget()
         outer = QVBoxLayout(root)
@@ -173,7 +195,7 @@ class DebuggerWindow(QMainWindow):
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._poll_debug_state)
-        self.poll_timer.start(600)
+        self.poll_timer.start(1200)
 
     def _connection_bar(self):
         row = QHBoxLayout()
@@ -200,9 +222,13 @@ class DebuggerWindow(QMainWindow):
         self.task_box = QComboBox()
         self.task_refresh = QPushButton("Refresh tasks")
         self.task_refresh.clicked.connect(lambda: self._request("tasks.list", callback="tasks"))
-        self.attach_button = QPushButton("Attach")
+        self.attach_button = QPushButton("Attach to task")
+        self.attach_button.setToolTip(
+            "Attach to an existing task. Select its source file in Files first.")
         self.attach_button.clicked.connect(self._attach_selected)
-        self.start_button = QPushButton("Start selected file")
+        self.start_button = QPushButton("Start file paused")
+        self.start_button.setToolTip(
+            "Start the selected BASIC file with the debugger attached and paused at its first statement.")
         self.start_button.clicked.connect(self._start_selected)
         bar.addWidget(QLabel("Task"))
         bar.addWidget(self.task_box, 1)
@@ -382,15 +408,25 @@ class DebuggerWindow(QMainWindow):
         return page
 
     def _refresh_ports(self):
-        current = self.port_box.currentText()
+        current = self.port_box.currentData()
         self.port_box.clear()
         try:
             from serial.tools import list_ports
             for port in list_ports.comports():
+                # list_ports reports enumerated ports, but stale or permission-
+                # blocked device nodes can still appear on Unix. Do not open a
+                # port to probe it: opening an ESP32 USB-UART may reset the board.
+                if os.name != "nt" and (
+                    not os.path.exists(port.device) or
+                    not os.access(port.device, os.R_OK | os.W_OK)
+                ):
+                    continue
                 self.port_box.addItem(f"{port.device} — {port.description}", port.device)
+            if self.port_box.count() == 0:
+                self.port_box.addItem("No available serial ports")
         except ImportError:
             self.port_box.addItem("Install pyserial to list ports")
-        index = self.port_box.findText(current)
+        index = self.port_box.findData(current)
         if index >= 0:
             self.port_box.setCurrentIndex(index)
 
@@ -407,6 +443,7 @@ class DebuggerWindow(QMainWindow):
 
     def _on_connected(self, port, info):
         self._is_connected = True
+        self._connected_port = port
         self.board_label.setText(info.get("board", ""))
         if not info.get("supported"):
             self.status_label.setText("Unsupported board")
@@ -425,6 +462,7 @@ class DebuggerWindow(QMainWindow):
 
     def _on_disconnected(self):
         self._is_connected = False
+        self._connected_port = None
         self.status_label.setText("Disconnected")
         self.board_label.clear()
         self.current_task = None
@@ -454,6 +492,7 @@ class DebuggerWindow(QMainWindow):
             self._populate_files(payload)
         elif callback == "start":
             self.current_task = int(payload["task_id"])
+            self._log(f"Started task {self.current_task}; debugger attached and paused at the start.")
             self._request("tasks.list", callback="tasks")
         elif callback == "viewport":
             self._log(f"Task {payload['task_id']} canvas set to "
@@ -461,11 +500,10 @@ class DebuggerWindow(QMainWindow):
                       f"{payload['canvas_width']}×{payload['canvas_height']} "
                       f"offset ({payload.get('canvas_offset_x', 0)}, "
                       f"{payload.get('canvas_offset_y', 0)})")
-            self._log(f"Started and attached task {self.current_task}")
             self._inspect()
         elif callback == "attach":
             self.current_task = int(payload["task_id"])
-            self._log(f"Attached to task {self.current_task}")
+            self._log(f"Source loaded; attached to task {self.current_task}.")
             self._inspect()
         elif callback == "inspect":
             self._inspect_inflight = False
@@ -645,13 +683,14 @@ class DebuggerWindow(QMainWindow):
             self._request("debug.inspect", self.current_task, callback="inspect")
 
     def _poll_debug_state(self):
-        if self._is_connected:
-            self._request("tasks.list", callback="tasks")
+        if self._is_connected and not self.transfer_jobs:
+            tasks_pending = any(callback == "tasks" for callback in self.pending.values())
+            if not tasks_pending:
+                self._request("tasks.list", callback="tasks")
             self._inspect()
 
     def _show_snapshot(self, snapshot):
         location = snapshot["location"]
-        line = location.get("basic_line") or location.get("source_line")
         state = "PAUSED" if snapshot.get("paused") else "RUNNING"
         self.where_label.setText(
             f"{state} — BASIC {location.get('basic_line') or '—'}, "
@@ -660,6 +699,9 @@ class DebuggerWindow(QMainWindow):
         )
         if snapshot.get("paused") and location.get("source_line"):
             self.editor.goto_source_line(location["source_line"])
+            self.editor.set_execution_line(location["source_line"])
+        else:
+            self.editor.set_execution_line(None)
         variables = {"locals": snapshot["frames"][-1]["locals"] if snapshot["frames"] else {},
                      "local_arrays": snapshot["frames"][-1]["arrays"] if snapshot["frames"] else [],
                      "globals": snapshot["globals"], "arrays": snapshot["arrays"]}
@@ -723,6 +765,8 @@ class DebuggerWindow(QMainWindow):
     def _on_transfer_finished(self, key, kind, path, error):
         job = self.transfer_jobs.pop(key, None)
         self.transfer_progress.setValue(0)
+        if self._is_connected and self._connected_port:
+            self.status_label.setText(f"Connected: {self._connected_port}")
         if error:
             self._log(f"{kind}: {error}")
             if "cancel" not in error.lower():
@@ -753,7 +797,9 @@ class DebuggerWindow(QMainWindow):
             self._list_files()
 
     def _log(self, message):
-        self.log_view.appendPlainText(str(message))
+        text = str(message).strip()
+        if text and text != ">":
+            self.log_view.appendPlainText(text)
 
     def _append_repl_output(self, message):
         text = str(message)

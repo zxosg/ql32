@@ -114,6 +114,7 @@ public:
     bool setTaskViewport(TaskId id, graphics::TaskViewport viewport);
     runtime::WindowMode windowMode() const noexcept { return windowMode_; }
     bool setWindowMode(runtime::WindowMode mode);
+    bool displayGeometryChanged();
     std::string takeError(TaskId id);
     bool tick();
     bool cancel(TaskId id);

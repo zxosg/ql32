@@ -72,6 +72,9 @@ public:
     bool setWindowMode(runtime::WindowMode mode) override {
         return scheduler_.setWindowMode(mode);
     }
+    bool displayGeometryChanged() override {
+        return scheduler_.displayGeometryChanged();
+    }
 
     std::vector<runtime::ChannelInfo> listChannels(runtime::TaskId id) const override {
         return scheduler_.taskChannels(id);
@@ -640,6 +643,11 @@ bool SessionScheduler::setWindowMode(runtime::WindowMode mode) {
     for (auto& current : tasks_) current->manualViewport = false;
     windowMode_ = mode;
     return true;
+}
+
+bool SessionScheduler::displayGeometryChanged() {
+    if (windowMode_ == runtime::WindowMode::Shared) return true;
+    return reflowIsolatedViewports(false);
 }
 
 std::string SessionScheduler::takeError(TaskId id) {

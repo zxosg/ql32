@@ -159,6 +159,8 @@ public:
     void setBounds(WindowId id, Rect bounds);
     void setPixelDepth(WindowId id, PixelDepth depth);
     void setScreenSize(std::uint32_t width, std::uint32_t height);
+    // Drops all canvas data while retaining per-task viewport assignments.
+    void clearWindows() noexcept;
     void setVisible(WindowId id, bool visible);
     void raise(WindowId id);
     void tile();

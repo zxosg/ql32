@@ -115,8 +115,10 @@ supported ESP32 firmware. CPU frequency is a device-wide setting, not a
 per-task property. The request is applied when the module starts and remains
 active until another module requests a different frequency or the board
 restarts; among running tasks, the most recently started module containing
-this option wins. Linux and macOS accept these declarations and ignore them.
-This option is QL/32-specific and platform-dependent.
+this option wins. `CPUFREQ()` reports the current measured clock in MHz, or
+zero when the platform cannot report it. Linux and macOS accept the frequency
+declarations and ignore them, and `CPUFREQ()` returns zero there. These
+features are QL/32-specific and platform-dependent.
 
 The first slice accepts this grammar (later sections extend it):
 

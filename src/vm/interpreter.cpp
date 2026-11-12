@@ -1014,6 +1014,84 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 arguments.erase(arguments.begin());
             }
             if (instruction.builtin) {
+                if (instruction.name == "MODE") {
+                    if (!displayModes_ || !graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "display mode service unavailable");
+                    const auto integerArgument = [&](std::size_t index) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number || !std::isfinite(*number) ||
+                            std::trunc(*number) != *number || *number < 0 ||
+                            *number > static_cast<double>(
+                                std::numeric_limits<std::uint32_t>::max()))
+                            runtimeError(instruction,
+                                "MODE arguments must be nonnegative 32-bit integers");
+                        return static_cast<std::uint32_t>(*number);
+                    };
+
+                    if (instruction.expectsValue) {
+                        if (arguments.size() != 1)
+                            runtimeError(instruction, "MODE query expects one selector");
+                        const auto selector = integerArgument(0);
+                        const auto current = displayModes_->currentDisplayMode();
+                        if (selector == 0)
+                            pushValue(static_cast<double>(current.id));
+                        else if (selector == 1)
+                            pushValue(static_cast<double>(current.options));
+                        else
+                            runtimeError(instruction,
+                                "MODE selector must be KModeCurrent or KModeOptions");
+                        break;
+                    }
+
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "session supervisor unavailable");
+                    const auto tasks = taskControl_->listTasks();
+                    const auto self = std::find_if(tasks.begin(), tasks.end(),
+                        [this](const runtime::ManagedTaskInfo& task) {
+                            return task.id == task_id_;
+                        });
+                    if (self == tasks.end() || !self->supervisor)
+                        runtimeError(instruction, "MODE is supervisor-only");
+
+                    if (arguments.empty() || arguments.size() > 2)
+                        runtimeError(instruction,
+                            "MODE statement expects mode id and optional options");
+                    const auto modeId = integerArgument(0);
+                    const auto previousMode = displayModes_->currentDisplayMode();
+                    const auto options = arguments.size() > 1 ? integerArgument(1) :
+                        previousMode.options;
+                    const auto previousSize = graphics_->displaySize();
+                    const auto applied = displayModes_->setMode(modeId, options);
+                    bool viewportsRetiled = true;
+                    try {
+                        if (!graphics_->setDisplaySize(applied.width, applied.height))
+                            throw std::runtime_error(
+                                "graphics service cannot change display geometry");
+                        viewportsRetiled = taskControl_->displayGeometryChanged();
+                    } catch (...) {
+                        try {
+                            (void)displayModes_->setMode(previousMode.id,
+                                                         previousMode.options);
+                        } catch (...) {}
+                        try {
+                            (void)graphics_->setDisplaySize(previousSize.first,
+                                                            previousSize.second);
+                        } catch (...) {}
+                        throw;
+                    }
+                    const bool discarded = graphics_->lastDisplayResizeDiscardedWindows();
+                    writePrintText("Display mode set to " + applied.name + " (" +
+                        std::to_string(applied.width) + "x" +
+                        std::to_string(applied.height) + "); " +
+                        (discarded ? "window contents cleared.\n" :
+                                     "window contents preserved where possible.") +
+                        (viewportsRetiled ? "\n" :
+                            " Task viewports could not be retiled.\n"),
+                        instruction);
+                    break;
+                }
                 if (instruction.name == "TASK") {
                     if (!storage_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -1637,6 +1715,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                                                            info->freeBlockCount;
                         pushValue(static_cast<double>(value));
                     }
+                    break;
+                }
+                if (instruction.name == "CPUFREQ") {
+                    pushValue(static_cast<double>(cpuFrequency_ ?
+                        cpuFrequency_->currentFrequencyMHz() : 0));
                     break;
                 }
                 if (instruction.name == "GETCHANNEL") {

@@ -182,18 +182,17 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. **Performance characterization:** complete the SINGLE/DOUBLE × 80/160/240
-   MHz timing matrix on each ESP32 board. A bounded benchmark source is at
-   `examples/attractor-benchmark.bas`; the attractor has one 26.681-second
-   sample at requested 80 MHz/SINGLE, but no actual-frequency readback or
-   median. The separate Mandelbrot workload completed once in 33.929 seconds
-   and later timed out. CPU readback diagnostics were removed after the
-   attempt. The YMODEM root cause is now identified and
-   fixed on Tenstar: its USB CDC queue was 256 bytes for a 1,029-byte data
-   frame. Firmware with a 2,048-byte queue passed an unpaced 1,027-byte upload.
-   A first attractor timing is 26.681 s at requested 80 MHz/SINGLE. Repeat
-   with actual-frequency readback and three samples per configuration; also
-   repeat transfer with a larger file and consecutive batches.
+1. **Attractor performance tuning:** Olimex has a complete 80/160/240 MHz ×
+   SINGLE/DOUBLE matrix with three runs per setting and actual `CPUFREQ()`
+   readback. 240 MHz is 2.12× faster than 80 MHz for the full bounded render;
+   precision mode has no consistent measurable winner. CPU-only companion
+   samples indicate a substantial display-side cost. `attractor.bas` now
+   hoists the row-invariant multiplication, but this edit still needs a board
+   A/B timing. The draw-only isolation transfer failed after temporary FFS
+   storage filled; the device is currently disconnected. Results:
+   `docs/test-results/attractor-performance-2026-11-12.md`. A bounded
+   Mandelbrot workload completed once in 33.929 seconds and later timed out,
+   so its performance still needs repeatable isolation.
 2. **Board acceptance left open by user choice:** Tenstar Wi-Fi was skipped;
    Olimex physical PS/2 shortcuts, clock, Wi-Fi and related checks were skipped;
    LILYGO physical acceptance was skipped. Current results and profiles are in

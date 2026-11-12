@@ -231,6 +231,7 @@ public:
         return {0, 0};
     }
     virtual bool setDisplaySize(std::uint32_t, std::uint32_t) { return false; }
+    virtual bool lastDisplayResizeDiscardedWindows() const noexcept { return false; }
     virtual void setRotation(SessionId, std::uint16_t degrees) {
         throw std::runtime_error("display rotation unsupported");
     }

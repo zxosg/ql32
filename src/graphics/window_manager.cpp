@@ -902,8 +902,23 @@ void WindowManager::setPixelDepth(WindowId id, PixelDepth depth) {
 
 void WindowManager::setScreenSize(std::uint32_t width, std::uint32_t height) {
     (void)checkedPixelCount(width, height);
+    const auto oldWidth = screenWidth_;
+    const auto oldHeight = screenHeight_;
     screenWidth_ = width;
     screenHeight_ = height;
+    for (auto& [owner, viewport] : taskViewports_) {
+        (void)owner;
+        if (viewport.originX == 0 && viewport.originY == 0 &&
+            viewport.offsetX == 0 && viewport.offsetY == 0 &&
+            viewport.canvasWidth == oldWidth && viewport.canvasHeight == oldHeight) {
+            viewport.canvasWidth = width;
+            viewport.canvasHeight = height;
+        }
+    }
+}
+
+void WindowManager::clearWindows() noexcept {
+    windows_.clear();
 }
 
 void WindowManager::setVisible(WindowId id, bool visible) {

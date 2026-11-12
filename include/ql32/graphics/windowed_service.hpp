@@ -80,6 +80,9 @@ public:
         return {manager_.screenWidth(), manager_.screenHeight()};
     }
     bool setDisplaySize(std::uint32_t width, std::uint32_t height) override;
+    bool lastDisplayResizeDiscardedWindows() const noexcept override {
+        return lastDisplayResizeDiscardedWindows_;
+    }
     std::uint16_t rotationDegrees() const noexcept { return rotationDegrees_; }
     void setRotation(SessionId session, std::uint16_t degrees) override;
     void setDebugOverlayEnabled(bool enabled) override;
@@ -165,6 +168,7 @@ private:
     std::function<void()> consoleClearCallback_;
     std::function<void(std::uint32_t, std::uint32_t)> consoleTextPositionCallback_;
     Frame frame_;
+    bool lastDisplayResizeDiscardedWindows_ = false;
     std::uint16_t rotationDegrees_ = 0;
     UpdateMode updateMode_ = UpdateMode::Auto;
     RowLayer consoleLayer_;

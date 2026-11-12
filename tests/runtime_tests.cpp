@@ -35,6 +35,7 @@ public:
         ++calls;
         return succeeds;
     }
+    std::uint16_t currentFrequencyMHz() const override { return lastFrequency; }
 
     std::uint16_t lastFrequency = 0;
     int calls = 0;
@@ -1104,12 +1105,13 @@ void testCpuFrequencyOption() {
             "CONST KOptMathSingle = 1\n"
             "OPTION KOptMathSingle\n") +
             "OPTION KEspCpuFreq" + std::to_string(mhz) + "\n"
-            "PRINT 16777216 + 1 - 16777216\n";
+            "PRINT 16777216 + 1 - 16777216\n"
+            "PRINT CPUFREQ()\n";
         interpreter.execute(source, output);
         require(service->calls == 1 && service->lastFrequency == mhz,
                 "CPU frequency option did not call the platform service");
-        require(output.str() == "0\n",
-                "CPU frequency option did not coexist with math precision OPTION");
+        require(output.str() == "0\n" + std::to_string(mhz) + "\n",
+                "CPU frequency option did not coexist with math precision or readback");
     }
 
     ql32::Interpreter host;
@@ -1117,8 +1119,9 @@ void testCpuFrequencyOption() {
     host.execute(
         "CONST KEspCpuFreq160 = 160\n"
         "OPTION KEspCpuFreq160\n"
-        "PRINT 42\n", ignoredOutput);
-    require(ignoredOutput.str() == "42\n",
+        "PRINT 42\n"
+        "PRINT CPUFREQ()\n", ignoredOutput);
+    require(ignoredOutput.str() == "42\n0\n",
             "CPU frequency option was not harmless without a platform adapter");
 
     for (const std::string& source : {
