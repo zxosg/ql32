@@ -12,6 +12,58 @@ constexpr std::uint32_t kRowsPerBitmap = 8;
 
 } // namespace
 
+bool FabglFramePresenter::doubleBuffered() const noexcept {
+    return display_.isDoubleBufferedEnabled();
+}
+
+bool FabglFramePresenter::presentDirect(
+    std::uint32_t width, std::uint32_t height,
+    const std::array<graphics::RgbColor, 256>& palette,
+    const RowProvider& rowProvider) {
+    if (width != static_cast<std::uint32_t>(canvas_.getWidth()) ||
+        height == 0 || height > static_cast<std::uint32_t>(canvas_.getHeight()))
+        throw std::invalid_argument("composed rows do not match VGA framebuffer geometry");
+    if ((width & 3u) != 0)
+        throw std::invalid_argument("FabGL VGA viewport width must be four-pixel aligned");
+
+    bool paletteChanged = !rawPaletteCacheValid_;
+    for (std::size_t index = 0; !paletteChanged && index < palette.size(); ++index) {
+        const auto& oldColor = cachedPalette_[index];
+        const auto& newColor = palette[index];
+        paletteChanged = oldColor.red != newColor.red ||
+                         oldColor.green != newColor.green ||
+                         oldColor.blue != newColor.blue;
+    }
+    if (paletteChanged) {
+        for (std::size_t index = 0; index < palette.size(); ++index) {
+            const auto& color = palette[index];
+            const fabgl::RGB888 rgb(color.red, color.green, color.blue);
+            rawPalette_[index] = display_.createRawPixel(fabgl::RGB222(rgb));
+        }
+        cachedPalette_ = palette;
+        rawPaletteCacheValid_ = true;
+    }
+
+    if (indexedRow_.size() < width) indexedRow_.resize(width);
+    for (std::uint32_t y = 0; y < height; ++y) {
+        rowProvider(y, indexedRow_);
+        if (indexedRow_.size() != width)
+            throw std::invalid_argument("composed row does not match VGA framebuffer width");
+        auto* destination = display_.getScanline(static_cast<int>(y));
+        if (!destination)
+            throw std::runtime_error("FabGL VGA drawing framebuffer is unavailable");
+        for (std::uint32_t x = 0; x < width; x += 4) {
+            destination[x] = rawPalette_[indexedRow_[x + 2]];
+            destination[x + 1] = rawPalette_[indexedRow_[x + 3]];
+            destination[x + 2] = rawPalette_[indexedRow_[x]];
+            destination[x + 3] = rawPalette_[indexedRow_[x + 1]];
+        }
+    }
+    if (restoreOverlay_) restoreOverlay_({0, 0, width, height});
+    canvas_.swapBuffers();
+    return true;
+}
+
 void FabglFramePresenter::present(const graphics::Frame& frame) {
     if (frame.width != static_cast<std::uint32_t>(canvas_.getWidth()) ||
         frame.height == 0 ||
@@ -19,8 +71,7 @@ void FabglFramePresenter::present(const graphics::Frame& frame) {
         frame.pixels.size() != static_cast<std::size_t>(frame.width) * frame.height)
         throw std::invalid_argument("composed frame does not match VGA canvas geometry");
 
-    presentRowsRegion(frame.width, frame.height, frame.palette,
-        {0, 0, frame.width, frame.height},
+    (void)presentRows(frame.width, frame.height, frame.palette,
         [&frame](std::uint32_t y, std::vector<graphics::ColorIndex>& row) {
             row.resize(frame.width);
             const auto offset = static_cast<std::size_t>(y) * frame.width;
@@ -32,6 +83,15 @@ bool FabglFramePresenter::presentRows(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette,
     const RowProvider& rowProvider) {
+    if (doubleBuffered()) {
+        if (width <= 400)
+            return presentDirect(width, height, palette, rowProvider);
+        if (!presentRowsRegion(width, height, palette, {0, 0, width, height},
+                               rowProvider))
+            return false;
+        canvas_.swapBuffers();
+        return true;
+    }
     return presentRowsRegion(width, height, palette, {0, 0, width, height}, rowProvider);
 }
 
@@ -39,6 +99,10 @@ bool FabglFramePresenter::presentRowsRegion(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette, graphics::Rect region,
     const RowProvider& rowProvider) {
+    if (doubleBuffered() &&
+        (region.x != 0 || region.y != 0 || region.width != width ||
+         region.height != height))
+        return false;
     if (width != static_cast<std::uint32_t>(canvas_.getWidth()) || height == 0 ||
         height > static_cast<std::uint32_t>(canvas_.getHeight()))
         throw std::invalid_argument("composed rows do not match VGA canvas geometry");

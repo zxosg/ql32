@@ -1,6 +1,8 @@
 # Attractor performance results — 2026-11-12
 
-## Olimex ESP32-SBC-FabGL with WROVER PSRAM
+## Earlier Olimex baseline
+
+These results predate the row-loop refactor and framebuffer presenter changes.
 
 The bounded workload in [`examples/attractor-benchmark.bas`](../../examples/attractor-benchmark.bas)
 runs 100 frames at the point density used by `attractor.bas`. Each timing is
@@ -28,21 +30,32 @@ account for a large part of the total time. This subtraction is indicative,
 not a standalone measurement of drawing cost: the CPU-only and full variants
 were not run as a tightly interleaved pair.
 
-## Tuning in progress
+## Current framebuffer benchmark
 
 `attractor.bas` and the benchmark now calculate `r * i` once per row and
 reuse named `angleV` and `angleX` values for the sine/cosine pairs. This
 removes one multiplication per plotted point while preserving the recurrence
-update order and the SINGLE/DOUBLE arithmetic option. The demo now uses
-DOUBLE at 240 MHz: measured DOUBLE was 21.764 s and SINGLE was 21.919 s, so
-DOUBLE provided the full available precision without a measured speed penalty
-for this workload. The loop refactor has not yet been run on the board. It
-should be compared with the prior results using the same clock, precision,
-and three-run procedure before claiming a speedup.
+update order and the SINGLE/DOUBLE arithmetic option. This refactored source
+was transferred to FFS over YMODEM and measured at 240 MHz/DOUBLE on a 320×200
+viewport. Timing starts at the program's serial start marker and ends at its
+completion marker; task launch and mode selection are excluded.
 
-The attempted draw-only diagnostic could not be transferred to SDC after the
-FFS became unable to create additional temporary files. The board is currently
-not present at `/dev/ttyUSB0`. CMake is unavailable in the current host
-environment, and PlatformIO could not build because its shared package lock is
-read-only in this session, so host execution and an optimized-source board
-retest remain open.
+| Workload | Single-buffer runs (s) | Median (s) | Double-buffer runs (s) | Median (s) |
+|:---|:---|---:|:---|---:|
+| Full attractor | 24.633, 24.433, 24.235 | 24.433 | 23.834, 23.838, 24.033 | 23.838 |
+| Draw-only | 14.622, 14.622, 14.620 | 14.622 | 14.221, 14.021, 14.019 | 14.021 |
+
+The CPU-only companion took 11.617, 11.217, and 11.215 s (median 11.217 s).
+At this workload and resolution, double buffering improved the draw-only
+median by 4.1% and the full benchmark median by 2.4%. This is a modest overall
+gain. The current single-buffered median is 12.3% slower than the earlier
+21.764 s 240 MHz/DOUBLE result above. Since the source and presenter changed
+between those runs, this comparison does not isolate which change caused the
+difference.
+
+FabGL's partial DMA allocation for 640×480 double buffering corrupts the heap
+during a later mode change on this Olimex target. QL/32 rejects that
+mode-option combination; 640×480 single-buffered mode remains usable. The
+draw-only benchmark's single-line `IF` was changed to the supported block form
+before testing. All benchmark files remain on the board's FFS and in the
+working directory.

@@ -849,7 +849,8 @@ void setup() {
 
     screenConsole.begin();
     auto framePresenter = std::make_shared<ql32::platform::fabgl_vga::FabglFramePresenter>(
-        canvas, [](ql32::graphics::Rect region) { screenConsole.restoreOverlay(region); });
+        display, canvas,
+        [](ql32::graphics::Rect region) { screenConsole.restoreOverlay(region); });
     const auto screenWidth = static_cast<std::uint32_t>(canvas.getWidth());
     const auto screenHeight = static_cast<std::uint32_t>(canvas.getHeight());
     graphics = std::make_shared<ql32::graphics::WindowedService>(

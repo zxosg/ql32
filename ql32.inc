@@ -110,3 +110,4 @@ CONST KVgaMode400x300 = 2
 CONST KVgaMode640x400 = 3
 CONST KVgaMode640x480 = 4
 CONST KVgaDisplayOptionsDefault = 0
+CONST KVgaDisplayOptionDoubleBuffered = 1

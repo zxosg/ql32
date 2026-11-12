@@ -1069,6 +1069,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         if (!graphics_->setDisplaySize(applied.width, applied.height))
                             throw std::runtime_error(
                                 "graphics service cannot change display geometry");
+                        if (previousSize.first == applied.width &&
+                            previousSize.second == applied.height &&
+                            (previousMode.id != applied.id ||
+                             previousMode.options != applied.options))
+                            graphics_->update(session_id_);
                         viewportsRetiled = taskControl_->displayGeometryChanged();
                     } catch (...) {
                         try {

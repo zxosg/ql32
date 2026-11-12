@@ -30,7 +30,9 @@ FOR frame = 1 TO 100
       PLOT px, py
     END FOR j
     c = c + 1
-    IF c > 15 THEN c = 1
+    IF c > 15 THEN
+      c = 1
+    END IF
   END FOR i
   GUPDATE
 END FOR frame

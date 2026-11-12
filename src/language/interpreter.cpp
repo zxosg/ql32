@@ -3360,11 +3360,14 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 const auto viewport = graphics_->displaySize();
                 listing << "Display mode: " << current << " (viewport "
                         << viewport.first << 'x' << viewport.second << ")\n";
+                const auto currentSettings = displayModes_->currentDisplayMode();
                 for (const auto& mode : displayModes_->availableModes()) {
                     listing << mode.id << ": " << mode.name << "  "
                             << mode.width << 'x' << mode.height;
                     if (mode.refreshHz) listing << " @" << mode.refreshHz << "Hz";
-                    listing << " options=" << mode.options;
+                    listing << " options="
+                            << (mode.id == currentSettings.id ? currentSettings.options :
+                                mode.options);
                     if (mode.name == current) listing << " *";
                     listing << '\n';
                 }
@@ -3372,7 +3375,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 continue;
             }
 
-            const auto previousMode = displayModes_->currentMode();
+            const auto previousMode = displayModes_->currentDisplayMode();
             const auto previousSize = graphics_->displaySize();
             std::optional<runtime::DisplayMode> appliedMode;
             const auto comma = argument.find(',');
@@ -3411,10 +3414,18 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             try {
                 if (!graphics_->setDisplaySize(applied.width, applied.height))
                     throw std::runtime_error("graphics service cannot change display geometry");
+                if (previousSize.first == applied.width &&
+                    previousSize.second == applied.height &&
+                    (previousMode.id != applied.id ||
+                     previousMode.options != applied.options))
+                    graphics_->update(task_id_);
                 if (taskControl_)
                     viewportsRetiled = taskControl_->displayGeometryChanged();
             } catch (...) {
-                try { (void)displayModes_->setMode(previousMode); } catch (...) {}
+                try {
+                    (void)displayModes_->setMode(previousMode.id,
+                                                 previousMode.options);
+                } catch (...) {}
                 try {
                     (void)graphics_->setDisplaySize(previousSize.first, previousSize.second);
                 } catch (...) {}

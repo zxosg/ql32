@@ -136,13 +136,35 @@ public:
             std::transform(candidate.begin(), candidate.end(), candidate.begin(),
                 [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
             if (candidate == key) {
+                return setMode(mode.id, currentOptions);
+            }
+        }
+        throw std::invalid_argument("unknown test display mode");
+    }
+    ql32::runtime::DisplayMode currentDisplayMode() const override {
+        for (auto mode : availableModes()) {
+            if (mode.name == current) {
+                mode.options = currentOptions;
+                return mode;
+            }
+        }
+        throw std::invalid_argument("unknown test display mode");
+    }
+    ql32::runtime::DisplayMode setMode(std::uint32_t id,
+                                       std::uint32_t options) override {
+        if (options > 1) throw std::invalid_argument("unsupported options");
+        for (auto mode : availableModes()) {
+            if (mode.id == id) {
                 current = mode.name;
+                currentOptions = options;
+                mode.options = options;
                 return mode;
             }
         }
         throw std::invalid_argument("unknown test display mode");
     }
     std::string current = "320x200";
+    std::uint32_t currentOptions = 0;
 };
 
 class ModeFramePresenter final : public ql32::graphics::FramePresenter {
@@ -1384,6 +1406,15 @@ void testSupervisorCanListAndChangeDisplayMode() {
                 output.str().find("Display mode set to 320x200 (320x200)") !=
                     std::string::npos,
             "numeric MODE ID/options did not update the display mode");
+
+    require(scheduler.submit(supervisor, "MODE 0,1\n"),
+            "supervisor did not accept double-buffered MODE");
+    require(scheduler.tick(), "scheduler did not dispatch double-buffered MODE");
+    require(displayModes->current == "320x200" &&
+                displayModes->currentOptions == 1 &&
+                output.str().find("Display mode set to 320x200 (320x200)") !=
+                    std::string::npos,
+            "MODE did not retain the requested display option");
 }
 
 void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
@@ -1397,12 +1428,12 @@ void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
     std::ostringstream output;
     std::ostringstream workerOutput;
     const auto supervisor = scheduler.launchInteractive(output,
-        "MODE 1,0\nPRINT #0,MODE(0);\",\";MODE(1)\n");
+        "MODE 1,1\nPRINT #0,MODE(0);\",\";MODE(1)\n");
     require(scheduler.setWindowMode(ql32::runtime::WindowMode::Isolated),
             "could not enable isolated task viewports for the mode-change test");
     const auto worker = scheduler.launchWorker(
         "REPeat forever\n  PAUSE 1\nEND REPeat forever\n", workerOutput);
-    for (int tick = 0; tick < 200 && output.str().find("1,0") == std::string::npos; ++tick)
+    for (int tick = 0; tick < 200 && output.str().find("1,1") == std::string::npos; ++tick)
         (void)scheduler.tick();
 
     require(scheduler.task(supervisor) &&
@@ -1410,11 +1441,12 @@ void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
                 scheduler.task(worker) &&
                 scheduler.task(worker)->status != ql32::vm::TaskStatus::Completed &&
                 displayModes->current == "640x480" &&
+                displayModes->currentOptions == 1 &&
                 graphics->displaySize() ==
                     std::pair<std::uint32_t, std::uint32_t>{640, 480} &&
                 scheduler.task(worker)->viewport.canvasWidth == 320 &&
                 scheduler.task(worker)->viewport.canvasHeight == 480 &&
-                output.str().find("1,0") != std::string::npos,
+                output.str().find("1,1") != std::string::npos,
             "compiled MODE did not switch/query display mode with an active worker");
 }
 
