@@ -571,6 +571,38 @@ std::string canonicalizeKeywords(const std::string& source) {
     return result;
 }
 
+std::string expandCompactEnd(const std::string& source) {
+    const auto first = source.find_first_not_of(" \t\r");
+    if (first == std::string::npos) return source;
+    std::size_t end = first;
+    while (end < source.size() &&
+           (std::isalnum(static_cast<unsigned char>(source[end])) || source[end] == '$'))
+        ++end;
+    if (end < source.size() && source[end] != ' ' && source[end] != '\t' &&
+        source[end] != '\r' && source[end] != ':')
+        return source;
+
+    std::string word = source.substr(first, end - first);
+    std::transform(word.begin(), word.end(), word.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    const char* secondWord = nullptr;
+    if (word == "ENDIF") secondWord = "IF";
+    else if (word == "ENDSEL") secondWord = "SEL";
+    else if (word == "ENDREP") secondWord = "REP";
+    else if (word == "ENDFOR") secondWord = "FOR";
+    else if (word == "ENDDEF") secondWord = "DEF";
+    if (!secondWord) return source;
+
+    std::string expanded;
+    expanded.reserve(source.size() + 4);
+    expanded.append(source, 0, first);
+    expanded += "END ";
+    expanded += secondWord;
+    expanded.append(source, end, std::string::npos);
+    return expanded;
+}
+
 struct DefinitionInfo {
     std::size_t address = 0;
     bool function = false;
@@ -3034,7 +3066,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const auto parsed = std::from_chars(line.data(), line.data() + numberEnd, number);
             if (parsed.ec != std::errc{} || number < 1 || number > 32767)
                 throw std::runtime_error("program line number must be in 1..32767");
-            std::string body = canonicalizeKeywords(trim(line.substr(numberEnd)));
+            std::string body = canonicalizeKeywords(
+                expandCompactEnd(trim(line.substr(numberEnd))));
             std::map<int, std::string> candidate = program_;
             if (body.empty()) candidate.erase(number);
             else candidate[number] = std::move(body);

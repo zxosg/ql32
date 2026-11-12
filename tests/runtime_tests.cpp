@@ -598,6 +598,45 @@ void testKeywordAbbreviationCoverage() {
     }
 }
 
+void testCompactBlockTerminatorsFromCommandLine() {
+    ql32::Interpreter interpreter;
+    std::istringstream input(
+        "10 IF 1 THEN\n"
+        "20 PRINT \"if\"\n"
+        "30 ENDIF\n"
+        "40 FOR i=1 TO 1\n"
+        "50 PRINT \"for\"\n"
+        "60 ENDFOR i\n"
+        "70 REPEAT loop\n"
+        "80 PRINT \"rep\"\n"
+        "90 EXIT loop\n"
+        "100 ENDREP loop\n"
+        "110 SELECT ON 1\n"
+        "120 = 1\n"
+        "130 PRINT \"sel\"\n"
+        "140 ENDSEL\n"
+        "150 DEF PROC work()\n"
+        "160 PRINT \"def\"\n"
+        "170 ENDDEF\n"
+        "180 work\n"
+        "LIST\n"
+        "RUN\n");
+    std::ostringstream output;
+    std::ostringstream diagnostics;
+    interpreter.runRepl(input, output, diagnostics);
+    const std::string result = output.str();
+    require(diagnostics.str().empty(),
+            ("compact block terminators produced a REPL error: " +
+             diagnostics.str()).c_str());
+    for (const std::string& line : {
+             "30 END IF", "60 END FOR i", "100 END REPeat loop",
+             "140 END SELect", "170 END DEFine"})
+        require(result.find(line) != std::string::npos,
+                ("compact block terminator did not expand to " + line).c_str());
+    require(result.find("if\nfor\nrep\nsel\ndef\n") != std::string::npos,
+            "program with compact block terminators did not execute correctly");
+}
+
 void testForwardCallsAndKnownSemanticErrors() {
     ql32::Interpreter interpreter;
     std::istringstream input(
@@ -1335,6 +1374,7 @@ int main() {
         testSerialKeyDecoder();
         testStoredProgramDiagnosticsAndArrayTypes();
         testKeywordAbbreviationCoverage();
+        testCompactBlockTerminatorsFromCommandLine();
         testForwardCallsAndKnownSemanticErrors();
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();

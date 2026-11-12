@@ -48,6 +48,9 @@
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
 #include "ql32/platform/fabgl_vga/display_modes.hpp"
 #include "ql32/platform/fabgl_vga/keyboard.hpp"
+#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
+#include "ql32/platform/olimex_vga/psram_dma_scanout.hpp"
+#endif
 
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
 namespace ql32_board = ql32::boards::olimex_esp32_sbc_fabgl;
@@ -357,6 +360,9 @@ protected:
 };
 
 fabgl::VGAController display;
+#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
+ql32::platform::olimex_vga::PsramDmaScanout psramDmaScanout;
+#endif
 fabgl::Canvas canvas(&display);
 ql32::platform::fabgl_vga::DisplayModes displayModes(display, canvas);
 VgaConsole screenConsole(canvas);
@@ -817,6 +823,17 @@ bool handleKeyboardShortcut(const ql32::input::KeyEvent& event) {
 
 void setup() {
     Serial.begin(115200);
+#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
+    if (!psramFound()) {
+        Serial.println("Fatal: PSRAM VGA scanout requires initialized PSRAM");
+        return;
+    }
+    if (!psramDmaScanout.begin(VGA_320x200_70Hz,
+            ql32_board::vgaRed, ql32_board::vgaGreen, ql32_board::vgaBlue,
+            ql32_board::vgaHSync, ql32_board::vgaVSync))
+        Serial.println("Fatal: PSRAM VGA scanout initialization failed");
+    return;
+#endif
 #if defined(QL32_OLIMEX_PSRAM)
     if (!psramFound()) {
         Serial.println("Fatal: Olimex WROVER PSRAM was not initialized");
@@ -1077,6 +1094,9 @@ void setup() {
 }
 
 void loop() {
+#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
+    delay(1000);
+#else
     while (Serial.available() > 0) {
         if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
         receiveSerialCharacter(static_cast<char>(Serial.read()));
@@ -1097,4 +1117,5 @@ void loop() {
     advanceScheduler();
     refreshInputCaretBlink();
     delay(1);
+#endif
 }

@@ -25,6 +25,28 @@ pio run -e olimex_esp32_sbc_fabgl_psram -t upload
 pio device monitor -b 115200
 ```
 
+For the target-local PSRAM-to-DMA color-bar scanout experiment, build the
+separate test image:
+
+```sh
+pio run -e olimex_esp32_sbc_fabgl_psram_dma_test
+pio run -e olimex_esp32_sbc_fabgl_psram_dma_test -t upload
+pio device monitor -b 115200
+```
+
+This build option replaces normal QL/32/FabGL startup with a static 320x200
+test frame. The source frame is 8-bit indexed in PSRAM (64,000 bytes). DMA
+descriptors, horizontal/vertical blank lines, and a ring of three 320-byte lines
+are allocated with `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL`; for the configured
+timing the scanout class accounts for 18,800 bytes of internal DMA payload,
+plus allocator metadata and the small controller object. It checks the
+returned pointer capabilities before starting `GPIOStream`. This is an early
+vertical slice: each source row is the same eight vertical color bars, so the
+three ring slots can remain unchanged while active-row descriptors reuse
+them. Dynamic palette updates and QL/32 rendering are not connected in this
+test profile. The normal `olimex` and `olimex-psram` profiles continue to use
+FabGL. Physical VGA stability and timing checks are pending an Olimex board.
+
 This profile selects PlatformIO's `esp-wrover-kit` target, enables PSRAM
 initialization and the ESP32 cache workaround, and reports PSRAM and internal
 free memory at boot. It also uses a 16 KiB Arduino loop stack to accommodate
