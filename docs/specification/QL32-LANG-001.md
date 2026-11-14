@@ -865,14 +865,30 @@ INPUT #1, "Serial line?", #3, response$
 ```
 
 `GUPDATE 0` suppresses automatic presentation while drawing commands still
-modify their retained canvases. Bare `GUPDATE` forces the current composed
-screen to display without changing the selected mode. `GUPDATE 1` restores
-automatic presentation. `ql32.inc` defines `KGupdateOff = 0`, and both
+modify their retained canvases. This also defers system-layer redraws, so they
+cannot expose pending canvas changes through a full-frame fallback. Bare
+`GUPDATE` forces the current composed screen to display without changing the
+selected mode. `GUPDATE 1` restores automatic presentation. `ql32.inc` defines
+`KGupdateOff = 0`, and both
 `KGupdateOn` and `KGupdateAuto` as `1`; they name the automatic mode, which is
 immediate on current presenters. Other numeric modes are reserved. Update
 suppression controls the shared physical display, so it affects drawing from
 all sessions until a later `GUPDATE 1`. Use it around a drawing batch, then
 call bare `GUPDATE` once to present the batch.
+
+`GUPDATE SKIP,n` configures presentation skipping without changing the
+automatic/off mode. After a frame is presented, the next `n` automatic or
+explicit presentation requests are skipped; `n=0` presents every request.
+Drawing still updates retained canvases during skipped requests, and the next
+presented frame includes those changes. The skip count is shared by all
+sessions because they share one display. Bare `GUPDATE` requests are subject
+to the active skip count.
+
+When a BASIC program returns control to its console, or reaches an interactive
+UI request such as a dialog, menu, pager prompt, or keyboard `INPUT`, QL/32
+restores automatic updates, clears the frame-skip count, and presents the
+current composed screen. This graphics state remains active after the UI
+request completes until BASIC changes it again.
 
 Prompt expressions must evaluate to strings. Keyboard input
 suspends only its BASIC session and resumes when the UI presenter submits a
