@@ -179,6 +179,14 @@ public:
         (void)channel;
         writeText(session, value);
     }
+    // Group the graphics changes caused by one BASIC PRINT statement into a
+    // single presentation. Adapters that present immediately may ignore this.
+    virtual void beginTextOutputBatch(SessionId, ChannelId) {}
+    virtual void endTextOutputBatch(SessionId, ChannelId) {}
+    virtual void flushTextOutputBatches(SessionId) {}
+    // Coalesce a related graphics/UI transition into one composed frame.
+    virtual void beginPresentationBatch(SessionId) {}
+    virtual void endPresentationBatch(SessionId) {}
     virtual bool setTextPosition(SessionId, ChannelId, std::uint32_t,
                                  std::uint32_t) { return false; }
     virtual void clear(SessionId session) = 0;
@@ -202,8 +210,18 @@ public:
     // Update suppression controls the shared physical display. Drawing still
     // updates retained canvases while automatic presentation is disabled.
     virtual void setUpdateMode(SessionId, UpdateMode) {}
+    // Skip automatic frame presentations while continuing to update retained
+    // drawing state. A value of N presents one request, then skips N requests.
+    virtual void setFrameSkip(SessionId, std::uint32_t) {}
     // Force the current composed screen to be presented without changing mode.
     virtual void update(SessionId) {}
+    // Restore normal automatic updates, disable frame skipping, and present the
+    // current composed screen. This state remains active until changed again.
+    virtual void resetUpdateState(SessionId session) {
+        setFrameSkip(session, 0);
+        setUpdateMode(session, UpdateMode::Auto);
+        update(session);
+    }
 
     virtual WindowInfo windowInfo(SessionId session) = 0;
     virtual WindowInfo windowInfo(SessionId session, ChannelId channel) {

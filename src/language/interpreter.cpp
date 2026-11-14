@@ -824,6 +824,8 @@ private:
                 tokens_[current_ + 1].kind == Kind::Stop ||
                 tokens_[current_ + 1].kind == Kind::If ||
                 tokens_[current_ + 1].kind == Kind::Else ||
+                tokens_[current_ + 1].kind == Kind::Const ||
+                tokens_[current_ + 1].kind == Kind::Option ||
                 tokens_[current_ + 1].kind == Kind::EndKeyword ||
                 tokens_[current_ + 1].kind == Kind::For ||
                 tokens_[current_ + 1].kind == Kind::Next ||
@@ -921,8 +923,8 @@ private:
                     if (passedArguments < 2 || passedArguments > 3)
                         error(instruction, "MID$ expects a string, start, and optional length");
                 } else if (instruction.name == "GUPDATE") {
-                    if (passedArguments > 1)
-                        error(instruction, "GUPDATE accepts one numeric mode or no argument");
+                    if (passedArguments > 2)
+                        error(instruction, "GUPDATE accepts a mode or SKIP and a frame count");
                 } else if (instruction.name == "MODE") {
                     if ((instruction.expectsValue && passedArguments != 1) ||
                         (!instruction.expectsValue &&
@@ -1931,6 +1933,17 @@ private:
                 return;
             }
             if (name.text == "GUPDATE") {
+                if (check(Kind::Identifier) && uppercaseAscii(peek().text) == "SKIP") {
+                    const Token skip = advance();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' after GUPDATE SKIP");
+                    emit(Op::Push, skip, std::string("SKIP"));
+                    expression();
+                    if (!commandArgumentTerminator())
+                        error(peek(), "expected end of line after GUPDATE SKIP count");
+                    emitCall(name, 2, false);
+                    return;
+                }
                 const bool hasMode = !commandArgumentTerminator();
                 if (hasMode) expression();
                 if (!commandArgumentTerminator())
@@ -2060,6 +2073,7 @@ private:
                 preceding = separatorKind(separator.kind);
                 if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End)) {
                     emit(Op::PrintSeparator, separator, 0.0, {}, preceding);
+                    emit(Op::PrintCommit, keyword);
                     return;
                 }
             }
@@ -2511,6 +2525,10 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
 }
 
 void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
+    if (graphics_) {
+        try { graphics_->flushTextOutputBatches(session_id_); }
+        catch (...) { /* Preserve the original runtime error. */ }
+    }
     errorCode_ = code;
     errorDetail_ = std::move(detail);
 }
@@ -2740,6 +2758,10 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
 }
 
 void Interpreter::closeExecutionChannels() noexcept {
+    if (graphics_) {
+        try { graphics_->flushTextOutputBatches(session_id_); }
+        catch (...) { /* Cleanup must not replace the program's result or error. */ }
+    }
     if (!channels_) {
         executionChannels_.clear();
         return;
@@ -2991,7 +3013,15 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         pendingPagerOffset_ = 0;
         pendingPagerPageRows_ = pageRows;
         pendingPagerChannel_ = channel;
-        writePagerPage(output, pageRows);
+        if (graphics_) graphics_->beginPresentationBatch(session_id_);
+        try {
+            if (graphics_) graphics_->resetUpdateState(session_id_);
+            writePagerPage(output, pageRows);
+        } catch (...) {
+            if (graphics_) graphics_->endPresentationBatch(session_id_);
+            throw;
+        }
+        if (graphics_) graphics_->endPresentationBatch(session_id_);
         pendingPagerRequest_ = ui_->beginInput(session_id_,
             "Enter=Page, L=Line, Q=Quit", pagerInputOptions());
         return true;

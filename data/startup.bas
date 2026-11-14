@@ -1,9 +1,9 @@
 ' OPEN(4) allocates the right pane as the first opened window channel, #2.
 
-' Two top graphics panes with a console across the bottom.
+' Two top graphics panes with a two-line console across the bottom.
 screenWidth = INT(GWIDTH())
 screenHeight = INT(GHEIGHT())
-consoleHeight = INT(screenHeight / 5)
+consoleHeight = 16
 panelHeight = screenHeight - consoleHeight
 leftWidth = INT(screenWidth / 2)
 rightWidth = screenWidth - leftWidth
@@ -25,7 +25,7 @@ INK #2,6
 CHANNEL #2
 CLS
 
-' Console: green text on black, occupying the bottom fifth of the display.
+' Console: green text on black, occupying the bottom two text rows.
 PAPER #0,0
 INK #0,4
 WINDOW #0,0,panelHeight,screenWidth,consoleHeight

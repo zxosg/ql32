@@ -1,8 +1,13 @@
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
+#include <new>
 #include <stdexcept>
+#if defined(QL32_GRAPHICS_PROFILE)
+#include <Arduino.h>
+#endif
 
 namespace ql32::platform::fabgl_vga {
 
@@ -20,13 +25,36 @@ bool FabglFramePresenter::presentDirect(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette,
     const RowProvider& rowProvider) {
+    return presentDirectRegion(width, height, palette,
+                               {0, 0, width, height}, rowProvider);
+}
+
+bool FabglFramePresenter::presentDirectRegion(
+    std::uint32_t width, std::uint32_t height,
+    const std::array<graphics::RgbColor, 256>& palette,
+    graphics::Rect region, const RowProvider& rowProvider) {
     if (width != static_cast<std::uint32_t>(canvas_.getWidth()) ||
         height == 0 || height > static_cast<std::uint32_t>(canvas_.getHeight()))
         throw std::invalid_argument("composed rows do not match VGA framebuffer geometry");
     if ((width & 3u) != 0)
         throw std::invalid_argument("FabGL VGA viewport width must be four-pixel aligned");
+    if (region.x < 0 || region.y < 0 ||
+        static_cast<std::uint64_t>(region.x) + region.width > width ||
+        static_cast<std::uint64_t>(region.y) + region.height > height)
+        throw std::invalid_argument("composed region exceeds VGA framebuffer geometry");
+    if (region.width == 0 || region.height == 0) return true;
+    const bool useDoubleBuffer = doubleBuffered();
+    const bool fullRegion = region.x == 0 && region.y == 0 &&
+        region.width == width && region.height == height;
+    if (useDoubleBuffer && !fullRegion && !doubleBuffersSynchronized_) {
+        synchronizeOnNextFullPresentation_ = true;
+        return false;
+    }
 
     bool paletteChanged = !rawPaletteCacheValid_;
+#if defined(QL32_GRAPHICS_PROFILE)
+    const auto paletteStart = micros();
+#endif
     for (std::size_t index = 0; !paletteChanged && index < palette.size(); ++index) {
         const auto& oldColor = cachedPalette_[index];
         const auto& newColor = palette[index];
@@ -43,24 +71,143 @@ bool FabglFramePresenter::presentDirect(
         cachedPalette_ = palette;
         rawPaletteCacheValid_ = true;
     }
+#if defined(QL32_GRAPHICS_PROFILE)
+    profile_.convertMicros += static_cast<std::uint32_t>(micros() - paletteStart);
+#endif
 
-    if (indexedRow_.size() < width) indexedRow_.resize(width);
-    for (std::uint32_t y = 0; y < height; ++y) {
-        rowProvider(y, indexedRow_);
-        if (indexedRow_.size() != width)
-            throw std::invalid_argument("composed row does not match VGA framebuffer width");
-        auto* destination = display_.getScanline(static_cast<int>(y));
-        if (!destination)
-            throw std::runtime_error("FabGL VGA drawing framebuffer is unavailable");
-        for (std::uint32_t x = 0; x < width; x += 4) {
-            destination[x] = rawPalette_[indexedRow_[x + 2]];
-            destination[x + 1] = rawPalette_[indexedRow_[x + 3]];
-            destination[x + 2] = rawPalette_[indexedRow_[x]];
-            destination[x + 3] = rawPalette_[indexedRow_[x + 1]];
+    if (indexedRow_.size() < region.width) indexedRow_.resize(region.width);
+    constexpr std::size_t kMaxStagedRegionBytes = 16 * 1024;
+    const auto stagedBytes = static_cast<std::uint64_t>(region.width) * region.height;
+    bool stageRegion = useDoubleBuffer && !fullRegion &&
+        stagedBytes <= kMaxStagedRegionBytes;
+    const bool stageContiguousRegion = stageRegion &&
+        (region.x & 3) == 0 && (region.width & 3u) == 0;
+    if (stageRegion) {
+        try {
+            rawRegion_.resize(static_cast<std::size_t>(stagedBytes));
+        } catch (const std::bad_alloc&) {
+            stageRegion = false;
         }
     }
-    if (restoreOverlay_) restoreOverlay_({0, 0, width, height});
-    canvas_.swapBuffers();
+    const auto composeRow = [&](std::uint32_t y) {
+#if defined(QL32_GRAPHICS_PROFILE)
+        const auto start = micros();
+#endif
+        rowProvider(y, indexedRow_);
+#if defined(QL32_GRAPHICS_PROFILE)
+        profile_.composeMicros += static_cast<std::uint32_t>(micros() - start);
+        ++profile_.rowsComposed;
+        profile_.pixelsComposed += indexedRow_.size();
+#endif
+    };
+    const auto prepareStagedRegion = [&]() {
+        const auto bottom = static_cast<std::uint32_t>(region.y) + region.height;
+        for (auto y = static_cast<std::uint32_t>(region.y); y < bottom; ++y) {
+            composeRow(y);
+            if (indexedRow_.size() != region.width)
+                throw std::invalid_argument("composed row does not match VGA region width");
+            const auto rowOffset = static_cast<std::size_t>(y - region.y) * region.width;
+#if defined(QL32_GRAPHICS_PROFILE)
+            const auto convertStart = micros();
+#endif
+            for (std::uint32_t x = 0; x < region.width; ++x) {
+                if (stageContiguousRegion) {
+                    const auto screenX = static_cast<std::uint32_t>(region.x) + x;
+                    const auto scanlineOffset = (screenX & ~3u) | ((screenX + 2u) & 3u);
+                    rawRegion_[rowOffset + scanlineOffset - region.x] =
+                        rawPalette_[indexedRow_[x]];
+                } else {
+                    rawRegion_[rowOffset + x] = rawPalette_[indexedRow_[x]];
+                }
+            }
+#if defined(QL32_GRAPHICS_PROFILE)
+            profile_.convertMicros += static_cast<std::uint32_t>(micros() - convertStart);
+#endif
+        }
+    };
+    const auto writeRegion = [&]() {
+        const auto bottom = static_cast<std::uint32_t>(region.y) + region.height;
+        for (auto y = static_cast<std::uint32_t>(region.y); y < bottom; ++y) {
+            auto* destination = display_.getScanline(static_cast<int>(y));
+            if (!destination)
+                throw std::runtime_error("FabGL VGA drawing framebuffer is unavailable");
+            if (!stageRegion) {
+                composeRow(y);
+                if (indexedRow_.size() != region.width)
+                    throw std::invalid_argument("composed row does not match VGA region width");
+            }
+            const auto rowOffset = static_cast<std::size_t>(y - region.y) * region.width;
+#if defined(QL32_GRAPHICS_PROFILE)
+            const auto writeStart = micros();
+#endif
+            if (stageContiguousRegion) {
+                std::memcpy(destination + region.x, rawRegion_.data() + rowOffset,
+                            region.width);
+#if defined(QL32_GRAPHICS_PROFILE)
+                profile_.writeMicros += static_cast<std::uint32_t>(micros() - writeStart);
+                profile_.pixelsWritten += region.width;
+#endif
+                continue;
+            }
+            for (std::uint32_t x = 0; x < region.width; ++x) {
+                const auto screenX = static_cast<std::uint32_t>(region.x) + x;
+                const auto scanlineOffset = (screenX & ~3u) | ((screenX + 2u) & 3u);
+                destination[scanlineOffset] = stageRegion
+                    ? rawRegion_[rowOffset + x]
+                    : rawPalette_[indexedRow_[x]];
+            }
+#if defined(QL32_GRAPHICS_PROFILE)
+            profile_.writeMicros += static_cast<std::uint32_t>(micros() - writeStart);
+            profile_.pixelsWritten += region.width;
+#endif
+        }
+    };
+
+    try {
+        if (stageRegion) prepareStagedRegion();
+        writeRegion();
+        if (restoreOverlay_) restoreOverlay_(region);
+        if (useDoubleBuffer) {
+#if defined(QL32_GRAPHICS_PROFILE)
+            const auto swapStart = micros();
+#endif
+            canvas_.swapBuffers();
+#if defined(QL32_GRAPHICS_PROFILE)
+            const auto swapDuration =
+                static_cast<std::uint32_t>(micros() - swapStart);
+            profile_.swapMicros += swapDuration;
+            if (profile_.swapCalls == 0 || swapDuration < profile_.swapMinMicros)
+                profile_.swapMinMicros = swapDuration;
+            if (swapDuration > profile_.swapMaxMicros)
+                profile_.swapMaxMicros = swapDuration;
+            ++profile_.swapCalls;
+#endif
+            const bool syncBuffers = fullRegion
+                ? synchronizeOnNextFullPresentation_
+                : doubleBuffersSynchronized_;
+            if (syncBuffers) {
+                // Apply the region to the newly hidden buffer as well. For a
+                // full frame this synchronizes both buffers after a partial
+                // update requested recovery; for a partial frame it keeps the
+                // buffers synchronized for subsequent partial updates.
+                writeRegion();
+                if (restoreOverlay_) restoreOverlay_(region);
+                doubleBuffersSynchronized_ = true;
+                synchronizeOnNextFullPresentation_ = false;
+            } else {
+                // A full frame is already the next complete image. Avoid a
+                // second full pass until a later partial update needs sync.
+                doubleBuffersSynchronized_ = false;
+            }
+        }
+#if defined(QL32_GRAPHICS_PROFILE)
+        if (fullRegion) ++profile_.fullFrames;
+        else ++profile_.partialFrames;
+#endif
+    } catch (...) {
+        if (useDoubleBuffer) doubleBuffersSynchronized_ = false;
+        throw;
+    }
     return true;
 }
 
@@ -83,6 +230,9 @@ bool FabglFramePresenter::presentRows(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette,
     const RowProvider& rowProvider) {
+#if defined(QL32_GRAPHICS_PROFILE)
+    ++profile_.regionRequests;
+#endif
     if (doubleBuffered()) {
         if (width <= 400)
             return presentDirect(width, height, palette, rowProvider);
@@ -99,10 +249,41 @@ bool FabglFramePresenter::presentRowsRegion(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette, graphics::Rect region,
     const RowProvider& rowProvider) {
+#if defined(QL32_GRAPHICS_PROFILE)
+    ++profile_.regionRequests;
+#endif
+    if (doubleBuffered() && width <= 400) {
+        if (region.x < 0 || region.y < 0 ||
+            static_cast<std::uint64_t>(region.x) + region.width > width ||
+            static_cast<std::uint64_t>(region.y) + region.height > height)
+            throw std::invalid_argument("composed region exceeds VGA canvas geometry");
+        const auto regionPixels = static_cast<std::uint64_t>(region.width) *
+                                  region.height;
+        const auto framePixels = static_cast<std::uint64_t>(width) * height;
+        // A synchronized partial update writes the region to both buffers.
+        // For large dirty areas, a single full-frame present does less pixel
+        // traffic; the next partial request will resynchronize as needed.
+        if (regionPixels * 2 > framePixels) {
+#if defined(QL32_GRAPHICS_PROFILE)
+            ++profile_.fullFallbacks;
+#endif
+            return false;
+        }
+        const auto accepted = presentDirectRegion(width, height, palette,
+                                                  region, rowProvider);
+#if defined(QL32_GRAPHICS_PROFILE)
+        if (!accepted) ++profile_.fullFallbacks;
+#endif
+        return accepted;
+    }
     if (doubleBuffered() &&
         (region.x != 0 || region.y != 0 || region.width != width ||
-         region.height != height))
+         region.height != height)) {
+#if defined(QL32_GRAPHICS_PROFILE)
+        ++profile_.fullFallbacks;
+#endif
         return false;
+    }
     if (width != static_cast<std::uint32_t>(canvas_.getWidth()) || height == 0 ||
         height > static_cast<std::uint32_t>(canvas_.getHeight()))
         throw std::invalid_argument("composed rows do not match VGA canvas geometry");

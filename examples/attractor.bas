@@ -2,10 +2,12 @@ REM Animated attractor ported from the supplied p5.js sketch.
 REM Uses the target's full graphics window and its QL eight-color palette.
 REM PLOT draws one pixel in the current ink color.
 REM Set rowStep=2 and sampleStep=1 for the source sketch's full point density.
+REM SINGLE is the faster measured default; see attractor-double.bas for DOUBLE.
 
 CONST KOptMathDouble = 0
+CONST KOptMathSingle = 1
 CONST KEspCpuFreq240 = 240
-OPTION KOptMathDouble
+OPTION KOptMathSingle
 OPTION KEspCpuFreq240
 
 x = 0

@@ -20,7 +20,8 @@ namespace ql32::graphics {
 class WindowedService final : public Service {
 public:
     WindowedService(std::uint32_t screenWidth, std::uint32_t screenHeight,
-                    std::shared_ptr<FramePresenter> presenter);
+                    std::shared_ptr<FramePresenter> presenter,
+                    std::shared_ptr<const CanvasRasterOps> rasterOps = {});
 
     void setInk(SessionId session, ColorIndex color) override;
     void setInk(SessionId session, ChannelId channel, ColorIndex color) override;
@@ -57,6 +58,11 @@ public:
     void writeText(SessionId session, const std::string& value) override;
     void writeText(SessionId session, ChannelId channel,
                    const std::string& value) override;
+    void beginTextOutputBatch(SessionId session, ChannelId channel) override;
+    void endTextOutputBatch(SessionId session, ChannelId channel) override;
+    void flushTextOutputBatches(SessionId session) override;
+    void beginPresentationBatch(SessionId session) override;
+    void endPresentationBatch(SessionId session) override;
     bool setTextPosition(SessionId session, ChannelId channel,
                          std::uint32_t row, std::uint32_t column) override;
     void clear(SessionId session) override;
@@ -66,7 +72,9 @@ public:
     void closeSession(SessionId session) override;
     void discardSession(SessionId session) override;
     void setUpdateMode(SessionId session, UpdateMode mode) override;
+    void setFrameSkip(SessionId session, std::uint32_t frames) override;
     void update(SessionId session) override;
+    void resetUpdateState(SessionId session) override;
     WindowInfo windowInfo(SessionId session) override;
     WindowInfo windowInfo(SessionId session, ChannelId channel) override;
     RgbColor paletteColor(SessionId session, std::uint16_t index) override;
@@ -106,6 +114,11 @@ public:
     void setConsoleTextPositionCallback(
         std::function<void(std::uint32_t, std::uint32_t)> callback) {
         consoleTextPositionCallback_ = std::move(callback);
+    }
+    void setConsoleOutputBatchCallbacks(std::function<void()> begin,
+                                        std::function<void()> end) {
+        consoleOutputBatchBeginCallback_ = std::move(begin);
+        consoleOutputBatchEndCallback_ = std::move(end);
     }
     void setWindowPixelDepth(SessionId session, PixelDepth depth);
     void setWindowVisible(SessionId session, bool visible);
@@ -150,6 +163,7 @@ private:
                       std::int64_t width, std::int64_t height);
     void discardPresentationBuffer();
     void presentRegion(Rect region);
+    bool skipPresentationRequest();
     void composeDisplayRegionRow(std::uint32_t y, std::uint32_t x,
                                  std::uint32_t width,
                                  std::vector<ColorIndex>& row) const;
@@ -160,6 +174,11 @@ private:
     std::map<SurfaceKey, WindowId> sessionWindows_;
     std::vector<WindowId> frozenWindows_;
     std::map<SurfaceKey, Point> textCursors_;
+    struct TextOutputBatch { std::size_t depth = 0; Rect dirty{}; };
+    std::map<SurfaceKey, TextOutputBatch> textOutputBatches_;
+    std::size_t presentationBatchDepth_ = 0;
+    bool presentationBatchNeedsFullFrame_ = false;
+    Rect presentationBatchDirty_{};
     std::map<SurfaceKey, FontState> textFonts_;
     std::map<SurfaceKey, FontState> graphicsFonts_;
     std::unordered_map<ChannelId, Rect> defaultWindowBounds_;
@@ -167,10 +186,14 @@ private:
     std::function<void(ColorIndex, ColorIndex)> consoleColorsCallback_;
     std::function<void()> consoleClearCallback_;
     std::function<void(std::uint32_t, std::uint32_t)> consoleTextPositionCallback_;
+    std::function<void()> consoleOutputBatchBeginCallback_;
+    std::function<void()> consoleOutputBatchEndCallback_;
     Frame frame_;
     bool lastDisplayResizeDiscardedWindows_ = false;
     std::uint16_t rotationDegrees_ = 0;
     UpdateMode updateMode_ = UpdateMode::Auto;
+    std::uint32_t frameSkip_ = 0;
+    std::uint32_t frameSkipRemaining_ = 0;
     RowLayer consoleLayer_;
     RowLayer uiLayer_;
     bool debugOverlayEnabled_ = false;

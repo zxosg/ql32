@@ -48,7 +48,19 @@
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
 #include "ql32/platform/fabgl_vga/display_modes.hpp"
 #include "ql32/platform/fabgl_vga/keyboard.hpp"
-#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+#include "ql32/platform/olimex_vga/canvas_raster_ops.hpp"
+#endif
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+#include "ql32/platform/olimex_vga/fixed_display_modes.hpp"
+#include "ql32/platform/olimex_vga/frame_presenter.hpp"
+#endif
+#if defined(QL32_OLIMEX_RENDER_BENCHMARK) || \
+    defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK)
+#include "ql32/platform/olimex_vga/framebuffer.hpp"
+#include "ql32/platform/olimex_vga/palette.hpp"
+#endif
+#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT) || defined(QL32_OLIMEX_DMA_DISPLAY)
 #include "ql32/platform/olimex_vga/psram_dma_scanout.hpp"
 #endif
 
@@ -79,26 +91,27 @@ constexpr std::array<std::array<std::uint8_t, 3>, 16> consolePalette{{
 
 class VgaConsole {
 public:
-    explicit VgaConsole(fabgl::Canvas& canvas) : canvas_(canvas) {
+    VgaConsole() {
         lines_.emplace_back();
     }
 
-    void begin() {
-        bounds_ = {0, std::max(0, canvas_.getHeight() - static_cast<int>(consoleHeight)),
-                   static_cast<std::uint32_t>(canvas_.getWidth()), consoleHeight};
+    void begin(std::uint32_t width, std::uint32_t height) {
+        screenWidth_ = width;
+        screenHeight_ = height;
+        bounds_ = {0, std::max(0, static_cast<int>(height) -
+                   static_cast<int>(consoleHeight)), width, consoleHeight};
         updateGeometry();
-        canvas_.selectFont(&fabgl::FONT_6x8);
         redraw(true);
     }
 
     void setBounds(ql32::graphics::Rect bounds) {
         if (bounds.width == 0 || bounds.height == 0) return;
-        bounds.x = std::clamp<std::int32_t>(bounds.x, 0, canvas_.getWidth());
-        bounds.y = std::clamp<std::int32_t>(bounds.y, 0, canvas_.getHeight());
+        bounds.x = std::clamp<std::int32_t>(bounds.x, 0, screenWidth_);
+        bounds.y = std::clamp<std::int32_t>(bounds.y, 0, screenHeight_);
         bounds.width = std::min<std::uint32_t>(bounds.width,
-            static_cast<std::uint32_t>(canvas_.getWidth() - bounds.x));
+            static_cast<std::uint32_t>(screenWidth_ - bounds.x));
         bounds.height = std::min<std::uint32_t>(bounds.height,
-            static_cast<std::uint32_t>(canvas_.getHeight() - bounds.y));
+            static_cast<std::uint32_t>(screenHeight_ - bounds.y));
         bounds_ = bounds;
         updateGeometry();
         redraw(true);
@@ -173,13 +186,18 @@ public:
         write(text.data(), text.size());
     }
 
-    void restoreOverlay(ql32::graphics::Rect region) {
-        if (invalidate_) return;
-        redraw(false, region);
-    }
-
     void setInvalidateCallback(std::function<void(ql32::graphics::Rect)> callback) {
         invalidate_ = std::move(callback);
+        if (invalidate_ && bounds_.width && bounds_.height) invalidate_(bounds_);
+    }
+
+    void beginOutputBatch() { ++outputBatchDepth_; }
+
+    void endOutputBatch() {
+        if (outputBatchDepth_ == 0 || --outputBatchDepth_ != 0) return;
+        const auto dirty = outputBatchDirty_;
+        outputBatchDirty_ = {};
+        if (dirty.width && dirty.height && invalidate_) invalidate_(dirty);
     }
 
     void composePaletteRegionRow(std::uint32_t y, std::uint32_t xOrigin,
@@ -253,6 +271,28 @@ public:
     }
 
 private:
+    void invalidateRegion(ql32::graphics::Rect region) {
+        if (!invalidate_ || region.width == 0 || region.height == 0) return;
+        if (outputBatchDepth_ == 0) {
+            invalidate_(region);
+            return;
+        }
+        if (outputBatchDirty_.width == 0 || outputBatchDirty_.height == 0) {
+            outputBatchDirty_ = region;
+            return;
+        }
+        const auto left = std::min(outputBatchDirty_.x, region.x);
+        const auto top = std::min(outputBatchDirty_.y, region.y);
+        const auto right = std::max<std::int64_t>(
+            static_cast<std::int64_t>(outputBatchDirty_.x) + outputBatchDirty_.width,
+            static_cast<std::int64_t>(region.x) + region.width);
+        const auto bottom = std::max<std::int64_t>(
+            static_cast<std::int64_t>(outputBatchDirty_.y) + outputBatchDirty_.height,
+            static_cast<std::int64_t>(region.y) + region.height);
+        outputBatchDirty_ = {left, top, static_cast<std::uint32_t>(right - left),
+                             static_cast<std::uint32_t>(bottom - top)};
+    }
+
     void invalidateInputRow() {
         if (inputRow_ >= rows_ || inputColumn_ >= columns_) return;
         const ql32::graphics::Rect region{
@@ -260,7 +300,7 @@ private:
             bounds_.y + static_cast<std::int32_t>(inputRow_ * consoleCharacterHeight),
             static_cast<std::uint32_t>((columns_ - inputColumn_) * consoleCharacterWidth),
             consoleCharacterHeight};
-        if (invalidate_) invalidate_(region);
+        if (invalidate_) invalidateRegion(region);
         else redraw(false, region);
     }
 
@@ -270,7 +310,7 @@ private:
             bounds_.x + static_cast<std::int32_t>(caretColumn_ * consoleCharacterWidth),
             bounds_.y + static_cast<std::int32_t>(caretRow_ * consoleCharacterHeight),
             consoleCharacterWidth, consoleCharacterHeight};
-        if (invalidate_) invalidate_(region);
+        if (invalidate_) invalidateRegion(region);
         else redraw(false, region);
     }
 
@@ -284,42 +324,13 @@ private:
     }
 
     void redraw(bool clearBackground, ql32::graphics::Rect region = {}) {
+        (void)clearBackground;
         if (invalidate_) {
-            invalidate_(region.width ? region : bounds_);
+            invalidateRegion(region.width ? region : bounds_);
             return;
         }
-        if (bounds_.width == 0 || bounds_.height == 0) return;
-        const auto left = std::max<std::int32_t>(bounds_.x, region.width ? region.x : bounds_.x);
-        const auto top = std::max<std::int32_t>(bounds_.y, region.height ? region.y : bounds_.y);
-        const auto right = std::min<std::int32_t>(bounds_.x + bounds_.width,
-            region.width ? region.x + static_cast<std::int32_t>(region.width) :
-                           bounds_.x + bounds_.width);
-        const auto bottom = std::min<std::int32_t>(bounds_.y + bounds_.height,
-            region.height ? region.y + static_cast<std::int32_t>(region.height) :
-                            bounds_.y + bounds_.height);
-        if (left >= right || top >= bottom) return;
-        canvas_.beginUpdate();
-        canvas_.setClippingRect(fabgl::Rect(left, top, right - 1, bottom - 1));
-        if (clearBackground) {
-            const auto& paper = consolePalette[paper_];
-            canvas_.setBrushColor(paper[0], paper[1], paper[2]);
-            canvas_.fillRectangle(left, top, right - 1, bottom - 1);
-        }
-        canvas_.selectFont(&fabgl::FONT_6x8);
-        const auto& ink = consolePalette[ink_];
-        canvas_.setPenColor(ink[0], ink[1], ink[2]);
-        canvas_.setGlyphOptions(fabgl::GlyphOptions().FillBackground(false));
-        for (std::size_t row = 0; row < lines_.size(); ++row)
-            canvas_.drawText(bounds_.x,
-                             firstRowY_ + static_cast<int>(row * consoleCharacterHeight),
-                             lines_[row].c_str());
-        canvas_.setClippingRect(fabgl::Rect(0, 0, canvas_.getWidth() - 1,
-                                           canvas_.getHeight() - 1));
-        canvas_.endUpdate();
-        canvas_.waitCompletion(true);
     }
 
-    fabgl::Canvas& canvas_;
     std::deque<std::string> lines_;
     std::size_t columns_ = 1;
     std::size_t rows_ = consoleRows;
@@ -332,7 +343,11 @@ private:
     bool inputLineActive_ = false;
     bool caretVisible_ = false;
     int firstRowY_ = 0;
+    std::uint32_t screenWidth_ = 320;
+    std::uint32_t screenHeight_ = 200;
     ql32::graphics::Rect bounds_{};
+    ql32::graphics::Rect outputBatchDirty_{};
+    std::size_t outputBatchDepth_ = 0;
     std::uint8_t ink_ = consoleInk;
     std::uint8_t paper_ = 0;
     std::function<void(ql32::graphics::Rect)> invalidate_;
@@ -360,14 +375,22 @@ protected:
 };
 
 fabgl::VGAController display;
-#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
+#if defined(QL32_OLIMEX_DMA_TEST_SCANOUT) || defined(QL32_OLIMEX_DMA_DISPLAY)
 ql32::platform::olimex_vga::PsramDmaScanout psramDmaScanout;
 #endif
 fabgl::Canvas canvas(&display);
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+ql32::platform::olimex_vga::FixedDisplayModes displayModes;
+#else
 ql32::platform::fabgl_vga::DisplayModes displayModes(display, canvas);
-VgaConsole screenConsole(canvas);
+#endif
+VgaConsole screenConsole;
 fabgl::PS2Controller ps2;
 std::shared_ptr<ql32::graphics::WindowedService> graphics;
+#if defined(QL32_GRAPHICS_PROFILE)
+std::shared_ptr<ql32::platform::fabgl_vga::FabglFramePresenter> profilePresenter;
+bool profilePromptPrimed = false;
+#endif
 std::optional<ql32::platform::fabgl_vga::FabglKeyboard> keyboardInput;
 ql32::platform::esp32::Clock boardClock;
 ql32::platform::esp32::CpuFrequency boardCpuFrequency;
@@ -763,6 +786,36 @@ void advanceScheduler() {
             replReadyMessageShown = true;
         }
         if (!replPromptShown) {
+#if defined(QL32_GRAPHICS_PROFILE)
+            if (focused == replTask && profilePresenter) {
+                if (!profilePromptPrimed) {
+                    profilePromptPrimed = true;
+                } else {
+                    const auto stats = profilePresenter->presentationProfile();
+                    if (stats.regionRequests != 0) {
+                        Serial.printf(
+                            "GFXPROFILE requests=%llu full=%llu partial=%llu fallback=%llu rows=%llu composed_px=%llu written_px=%llu compose_us=%llu convert_us=%llu write_us=%llu swap_us=%llu swap_calls=%llu swap_avg_us=%llu swap_min_us=%llu swap_max_us=%llu\n",
+                            static_cast<unsigned long long>(stats.regionRequests),
+                            static_cast<unsigned long long>(stats.fullFrames),
+                            static_cast<unsigned long long>(stats.partialFrames),
+                            static_cast<unsigned long long>(stats.fullFallbacks),
+                            static_cast<unsigned long long>(stats.rowsComposed),
+                            static_cast<unsigned long long>(stats.pixelsComposed),
+                            static_cast<unsigned long long>(stats.pixelsWritten),
+                            static_cast<unsigned long long>(stats.composeMicros),
+                            static_cast<unsigned long long>(stats.convertMicros),
+                            static_cast<unsigned long long>(stats.writeMicros),
+                            static_cast<unsigned long long>(stats.swapMicros),
+                            static_cast<unsigned long long>(stats.swapCalls),
+                            static_cast<unsigned long long>(stats.swapCalls
+                                ? stats.swapMicros / stats.swapCalls : 0),
+                            static_cast<unsigned long long>(stats.swapMinMicros),
+                            static_cast<unsigned long long>(stats.swapMaxMicros));
+                    }
+                }
+                profilePresenter->resetPresentationProfile();
+            }
+#endif
             const auto edit = scheduler->takePendingLineEdit(focused);
             if (edit) {
                 lineEditor.setText(std::move(edit->text));
@@ -779,6 +832,10 @@ void advanceScheduler() {
             if (edit) Serial.print(lineEditor.text().c_str());
             screenConsole.beginInputLine(inputPrompt);
             redrawInputLine();
+#if defined(QL32_GRAPHICS_PROFILE)
+            if (focused == replTask && profilePresenter)
+                profilePresenter->resetPresentationProfile();
+#endif
             replPromptShown = true;
         }
     } else {
@@ -819,6 +876,496 @@ bool handleKeyboardShortcut(const ql32::input::KeyEvent& event) {
     return true;
 }
 
+#if defined(QL32_OLIMEX_RENDER_BENCHMARK) || \
+    defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK)
+void clearRgb222Words(std::uint8_t* pixels, std::size_t bytes,
+                      std::uint8_t value) {
+    const auto pattern = static_cast<std::uint32_t>(value & 0x3Fu) * 0x01010101u;
+    auto* words = reinterpret_cast<volatile std::uint32_t*>(pixels);
+    const auto wordCount = bytes / sizeof(std::uint32_t);
+    for (std::size_t i = 0; i < wordCount; ++i) words[i] = pattern;
+    for (std::size_t i = wordCount * sizeof(std::uint32_t); i < bytes; ++i)
+        pixels[i] = value & 0x3Fu;
+}
+
+void runOlimexRenderBenchmark() {
+    using namespace ql32::platform::olimex_vga;
+    constexpr std::uint32_t width = 320;
+    constexpr std::uint32_t height = 200;
+    constexpr std::uint32_t clearIterations = 50;
+    constexpr std::uint32_t fillIterations = 1000;
+    constexpr std::uint32_t pixelIterations = 100000;
+    constexpr std::uint32_t lineIterations = 10000;
+    constexpr std::uint32_t circleIterations = 500;
+    constexpr std::uint32_t scrollIterations = 100;
+    constexpr std::uint32_t translationIterations = 1000;
+    constexpr std::uint32_t blitIterations = 1000;
+    constexpr std::uint32_t bitmapSize = 64;
+    constexpr std::uint32_t paletteIterations = 1000;
+
+    auto* memory = static_cast<std::uint8_t*>(heap_caps_malloc(
+        static_cast<std::size_t>(width) * height,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    auto* packedMemory = static_cast<std::uint8_t*>(heap_caps_malloc(
+        (static_cast<std::size_t>(width) + 1) / 2 * height,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    auto* bitmapRgbMemory = static_cast<std::uint8_t*>(heap_caps_malloc(
+        static_cast<std::size_t>(bitmapSize) * bitmapSize,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    auto* bitmapIndexedMemory = static_cast<std::uint8_t*>(heap_caps_malloc(
+        static_cast<std::size_t>(bitmapSize) * bitmapSize / 2,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    auto* bitmapFabglOpaqueMemory = static_cast<std::uint8_t*>(heap_caps_malloc(
+        static_cast<std::size_t>(bitmapSize) * bitmapSize,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    auto* bitmapFabglTransparentMemory = static_cast<std::uint8_t*>(heap_caps_malloc(
+        static_cast<std::size_t>(bitmapSize) * bitmapSize,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!memory || !packedMemory || !bitmapRgbMemory || !bitmapIndexedMemory ||
+        !bitmapFabglOpaqueMemory || !bitmapFabglTransparentMemory) {
+        Serial.println("Render benchmark: unable to allocate RGB222 PSRAM framebuffer");
+        heap_caps_free(memory);
+        heap_caps_free(packedMemory);
+        heap_caps_free(bitmapRgbMemory);
+        heap_caps_free(bitmapIndexedMemory);
+        heap_caps_free(bitmapFabglOpaqueMemory);
+        heap_caps_free(bitmapFabglTransparentMemory);
+        return;
+    }
+    FramebufferView framebuffer{memory, width, height, width,
+                                ql32::platform::olimex_vga::PixelFormat::Rgb222};
+    FramebufferView packedFramebuffer{packedMemory, width, height, width / 2,
+                                      ql32::platform::olimex_vga::PixelFormat::Indexed4};
+    FramebufferView bitmapIndexedView{bitmapIndexedMemory, bitmapSize, bitmapSize,
+        bitmapSize / 2, ql32::platform::olimex_vga::PixelFormat::Indexed4};
+    for (std::uint32_t y = 0; y < bitmapSize; ++y) {
+        for (std::uint32_t x = 0; x < bitmapSize; ++x) {
+            const auto value = static_cast<std::uint8_t>((x + y) & 0x3Fu);
+            const bool transparent = ((x + y) & 3u) == 0;
+            bitmapRgbMemory[static_cast<std::size_t>(y) * bitmapSize + x] =
+                transparent ? 0 : value;
+            (void)writePixel(bitmapIndexedView, x, y,
+                transparent ? 0 : static_cast<std::uint8_t>(value & 0x0Fu));
+            bitmapFabglOpaqueMemory[static_cast<std::size_t>(y) * bitmapSize + x] =
+                static_cast<std::uint8_t>(0xC0u | value);
+            bitmapFabglTransparentMemory[static_cast<std::size_t>(y) * bitmapSize + x] =
+                transparent ? value : static_cast<std::uint8_t>(0xC0u | value);
+        }
+    }
+    BitmapView bitmapRgb{bitmapRgbMemory, bitmapSize, bitmapSize, bitmapSize,
+        ql32::platform::olimex_vga::PixelFormat::Rgb222};
+    BitmapView bitmapIndexed{bitmapIndexedMemory, bitmapSize, bitmapSize,
+        bitmapSize / 2, ql32::platform::olimex_vga::PixelFormat::Indexed4};
+    fabgl::Bitmap fabglOpaque(bitmapSize, bitmapSize, bitmapFabglOpaqueMemory,
+                              fabgl::PixelFormat::RGBA2222);
+    fabgl::Bitmap fabglTransparent(bitmapSize, bitmapSize,
+                                   bitmapFabglTransparentMemory,
+                                   fabgl::PixelFormat::RGBA2222);
+    volatile std::uint8_t sink = 0;
+
+    canvas.clear();
+    canvas.waitCompletion(false);
+    clear(framebuffer, 0);
+    clear(packedFramebuffer, 0);
+    auto start = micros();
+    for (std::uint32_t i = 0; i < clearIterations; ++i) canvas.clear();
+    canvas.waitCompletion(false);
+    const auto canvasClearUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < clearIterations; ++i) clear(framebuffer, i & 0x3Fu);
+    const auto directClearUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < clearIterations; ++i)
+        clearRgb222Words(memory, framebuffer.storageBytes(), i & 0x3Fu);
+    const auto wordClearUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < clearIterations; ++i)
+        clear(packedFramebuffer, i & 0x0Fu);
+    const auto packedClearUs = static_cast<std::uint32_t>(micros() - start);
+
+    canvas.setBrushColor(255, 255, 255);
+    start = micros();
+    for (std::uint32_t i = 0; i < fillIterations; ++i)
+        canvas.fillRectangle(17, 23, 96, 62);
+    canvas.waitCompletion(false);
+    const auto canvasFillUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < fillIterations; ++i)
+        fillRect(framebuffer, 17, 23, 80, 40, i & 0x3Fu);
+    const auto directFillUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < fillIterations; ++i)
+        fillRect(packedFramebuffer, 17, 23, 80, 40, i & 0x0Fu);
+    const auto packedFillUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < fillIterations; ++i)
+        fillRect(packedFramebuffer, 16, 23, 80, 40, i & 0x0Fu);
+    const auto packedAlignedFillUs = static_cast<std::uint32_t>(micros() - start);
+
+    canvas.setPenColor(255, 255, 255);
+    start = micros();
+    for (std::uint32_t i = 0; i < pixelIterations; ++i)
+        canvas.setPixel((i * 73u) % width, (i * 29u) % height);
+    canvas.waitCompletion(false);
+    const auto canvasPixelUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < pixelIterations; ++i)
+        (void)writePixel(framebuffer, (i * 73u) % width, (i * 29u) % height,
+                         static_cast<std::uint8_t>(i & 0x3Fu));
+    const auto directPixelUs = static_cast<std::uint32_t>(micros() - start);
+
+    canvas.setPenColor(255, 255, 255);
+    start = micros();
+    for (std::uint32_t i = 0; i < lineIterations; ++i) {
+        const auto x = (i * 37u) % width;
+        const auto y = (i * 19u) % height;
+        canvas.drawLine(x, y, (x + 53u) % width, (y + 31u) % height);
+    }
+    canvas.waitCompletion(false);
+    const auto canvasLineUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < lineIterations; ++i) {
+        const auto x = (i * 37u) % width;
+        const auto y = (i * 19u) % height;
+        drawLine(framebuffer, x, y, (x + 53u) % width,
+                 (y + 31u) % height, i & 0x3Fu);
+    }
+    const auto directLineUs = static_cast<std::uint32_t>(micros() - start);
+
+    canvas.setBrushColor(255, 255, 255);
+    start = micros();
+    for (std::uint32_t i = 0; i < circleIterations; ++i) {
+        const auto x = (i * 41u) % width;
+        const auto y = (i * 23u) % height;
+        canvas.fillEllipse(x, y, 24, 24);
+    }
+    canvas.waitCompletion(false);
+    const auto canvasCircleUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < circleIterations; ++i) {
+        const auto x = static_cast<std::int32_t>((i * 41u) % width + 12u);
+        const auto y = static_cast<std::int32_t>((i * 23u) % height + 12u);
+        drawCircle(framebuffer, x, y, 12, i & 0x3Fu, true);
+    }
+    const auto directCircleUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < circleIterations; ++i) {
+        const auto x = static_cast<std::int32_t>((i * 41u) % width + 12u);
+        const auto y = static_cast<std::int32_t>((i * 23u) % height + 12u);
+        drawCircle(packedFramebuffer, x, y, 12, i & 0x0Fu, true);
+    }
+    const auto packedCircleUs = static_cast<std::uint32_t>(micros() - start);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < scrollIterations; ++i) {
+        scrollVertical(framebuffer, 1, i & 0x3Fu);
+        scrollVertical(framebuffer, -1, (i + 1) & 0x3Fu);
+    }
+    const auto scrollUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < scrollIterations; ++i) {
+        scrollVertical(packedFramebuffer, 1, i & 0x0Fu);
+        scrollVertical(packedFramebuffer, -1, (i + 1) & 0x0Fu);
+    }
+    const auto packedScrollUs = static_cast<std::uint32_t>(micros() - start);
+    std::array<std::uint8_t, 16> translation{};
+    for (std::uint8_t i = 0; i < translation.size(); ++i)
+        translation[i] = static_cast<std::uint8_t>(15 - i);
+    start = micros();
+    for (std::uint32_t i = 0; i < translationIterations; ++i)
+        translateIndexed4(packedFramebuffer, translation);
+    const auto translationUs = static_cast<std::uint32_t>(micros() - start);
+
+    canvas.setPenColor(255, 255, 255);
+    start = micros();
+    for (std::uint32_t i = 0; i < blitIterations; ++i) {
+        const auto x = ((i * 17u) % ((width - bitmapSize) / 2 + 1)) * 2;
+        const auto y = (i * 31u) % (height - bitmapSize + 1);
+        canvas.drawBitmap(x, y, &fabglOpaque);
+    }
+    canvas.waitCompletion(false);
+    const auto canvasOpaqueBlitUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < blitIterations; ++i) {
+        const auto x = static_cast<std::int32_t>(
+            ((i * 17u) % ((width - bitmapSize) / 2 + 1)) * 2);
+        const auto y = static_cast<std::int32_t>((i * 31u) % (height - bitmapSize + 1));
+        copyBitmapOpaque(framebuffer, x, y, bitmapRgb, 0, 0,
+                         bitmapSize, bitmapSize);
+    }
+    const auto rgbOpaqueBlitUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < blitIterations; ++i) {
+        const auto x = static_cast<std::int32_t>(
+            ((i * 17u) % ((width - bitmapSize) / 2 + 1)) * 2);
+        const auto y = static_cast<std::int32_t>((i * 31u) % (height - bitmapSize + 1));
+        copyBitmapOpaque(packedFramebuffer, x, y, bitmapIndexed, 0, 0,
+                         bitmapSize, bitmapSize);
+    }
+    const auto indexedOpaqueBlitUs = static_cast<std::uint32_t>(micros() - start);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < blitIterations; ++i) {
+        const auto x = ((i * 17u) % ((width - bitmapSize) / 2 + 1)) * 2;
+        const auto y = (i * 31u) % (height - bitmapSize + 1);
+        canvas.drawBitmap(x, y, &fabglTransparent);
+    }
+    canvas.waitCompletion(false);
+    const auto canvasTransparentBlitUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < blitIterations; ++i) {
+        const auto x = static_cast<std::int32_t>(
+            ((i * 17u) % ((width - bitmapSize) / 2 + 1)) * 2);
+        const auto y = static_cast<std::int32_t>((i * 31u) % (height - bitmapSize + 1));
+        copyBitmapTransparent(framebuffer, x, y, bitmapRgb, 0, 0,
+                              bitmapSize, bitmapSize, 0);
+    }
+    const auto rgbTransparentBlitUs = static_cast<std::uint32_t>(micros() - start);
+    start = micros();
+    for (std::uint32_t i = 0; i < blitIterations; ++i) {
+        const auto x = static_cast<std::int32_t>((i * 17u) % (width - bitmapSize + 1));
+        const auto y = static_cast<std::int32_t>((i * 31u) % (height - bitmapSize + 1));
+        copyBitmapTransparent(packedFramebuffer, x, y, bitmapIndexed, 0, 0,
+                              bitmapSize, bitmapSize, 0);
+    }
+    const auto indexedTransparentBlitUs = static_cast<std::uint32_t>(micros() - start);
+
+    ql32::platform::olimex_vga::PaletteExchange paletteExchange;
+    start = micros();
+    for (std::uint32_t i = 0; i < paletteIterations; ++i) {
+        auto* edit = paletteExchange.beginEdit();
+        if (!edit) continue;
+        edit->rotate(1);
+        (void)paletteExchange.publish();
+        (void)paletteExchange.applyAtFrameBoundary();
+    }
+    const auto paletteUpdateUs = static_cast<std::uint32_t>(micros() - start);
+    sink = memory[0] ^ memory[static_cast<std::size_t>(width) * height - 1];
+    Serial.printf("Render benchmark (320x200): clear x%u canvas RGB=%u us, PSRAM RGB memset=%u us, PSRAM RGB word=%u us, PSRAM indexed4=%u us; fill 80x40 x%u canvas=%u us direct RGB=%u us indexed4 odd=%u us even=%u us; pixel x%u canvas=%u us direct RGB=%u us; line x%u canvas=%u us direct=%u us; filled circle x%u canvas=%u us direct RGB=%u us indexed4=%u us; scroll up/down x%u direct RGB=%u us indexed4=%u us; indexed translation x%u direct=%u us; opaque 64x64 x-aligned blit x%u canvas=%u us RGB=%u us indexed4=%u us; transparent 64x64 x-aligned blit x%u canvas=%u us RGB=%u us indexed4=%u us; palette exchange x%u=%u us; sink=%u\n",
+                  static_cast<unsigned>(clearIterations),
+                  static_cast<unsigned>(canvasClearUs),
+                  static_cast<unsigned>(directClearUs),
+                  static_cast<unsigned>(wordClearUs),
+                  static_cast<unsigned>(packedClearUs),
+                  static_cast<unsigned>(fillIterations),
+                  static_cast<unsigned>(canvasFillUs),
+                  static_cast<unsigned>(directFillUs),
+                  static_cast<unsigned>(packedFillUs),
+                  static_cast<unsigned>(packedAlignedFillUs),
+                  static_cast<unsigned>(pixelIterations),
+                  static_cast<unsigned>(canvasPixelUs),
+                  static_cast<unsigned>(directPixelUs),
+                  static_cast<unsigned>(lineIterations),
+                  static_cast<unsigned>(canvasLineUs),
+                  static_cast<unsigned>(directLineUs),
+                  static_cast<unsigned>(circleIterations),
+                  static_cast<unsigned>(canvasCircleUs),
+                  static_cast<unsigned>(directCircleUs),
+                  static_cast<unsigned>(packedCircleUs),
+                  static_cast<unsigned>(scrollIterations),
+                  static_cast<unsigned>(scrollUs),
+                  static_cast<unsigned>(packedScrollUs),
+                  static_cast<unsigned>(translationIterations),
+                  static_cast<unsigned>(translationUs),
+                  static_cast<unsigned>(blitIterations),
+                  static_cast<unsigned>(canvasOpaqueBlitUs),
+                  static_cast<unsigned>(rgbOpaqueBlitUs),
+                  static_cast<unsigned>(indexedOpaqueBlitUs),
+                  static_cast<unsigned>(blitIterations),
+                  static_cast<unsigned>(canvasTransparentBlitUs),
+                  static_cast<unsigned>(rgbTransparentBlitUs),
+                  static_cast<unsigned>(indexedTransparentBlitUs),
+                  static_cast<unsigned>(paletteIterations),
+                  static_cast<unsigned>(paletteUpdateUs),
+                  static_cast<unsigned>(sink));
+    heap_caps_free(memory);
+    heap_caps_free(packedMemory);
+    heap_caps_free(bitmapRgbMemory);
+    heap_caps_free(bitmapIndexedMemory);
+    heap_caps_free(bitmapFabglOpaqueMemory);
+    heap_caps_free(bitmapFabglTransparentMemory);
+}
+
+#if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK)
+void runDmaFramebufferBenchmark() {
+    using namespace ql32::platform::olimex_vga;
+    constexpr std::uint32_t width = 320;
+    constexpr std::uint32_t height = 200;
+    constexpr std::uint32_t bitmapSize = 64;
+    constexpr std::uint32_t bitmapIterations = 100;
+    constexpr std::uint32_t clearIterations = 10;
+    constexpr std::uint32_t fillIterations = 200;
+    constexpr std::uint32_t pixelIterations = 10000;
+    constexpr std::uint32_t lineIterations = 1000;
+    constexpr std::uint32_t circleIterations = 100;
+    constexpr std::uint32_t scrollIterations = 20;
+
+    auto* framebuffer = psramDmaScanout.beginFrameUpdate();
+    if (!framebuffer || !framebuffer->valid()) {
+        Serial.println("PSRAM active-scanout benchmark: no spare scanout frame");
+        return;
+    }
+    const auto bitmapStride = framebuffer->format ==
+            ql32::platform::olimex_vga::PixelFormat::Rgb222
+        ? static_cast<std::size_t>(bitmapSize)
+        : static_cast<std::size_t>(bitmapSize / 2);
+    auto* bitmapPixels = static_cast<std::uint8_t*>(heap_caps_malloc(
+        bitmapStride * bitmapSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!bitmapPixels) {
+        Serial.println("PSRAM active-scanout benchmark: bitmap allocation failed");
+        psramDmaScanout.cancelFrameUpdate(framebuffer);
+        return;
+    }
+    Serial.printf("PSRAM_ACTIVE_SCANOUT_BENCH_BEGIN format=%s\n",
+        framebuffer->format == ql32::platform::olimex_vga::PixelFormat::Rgb222
+            ? "RGB222" : "indexed4");
+    FramebufferView bitmapStorage{bitmapPixels, bitmapSize, bitmapSize,
+                                  bitmapStride, framebuffer->format};
+    for (std::uint32_t y = 0; y < bitmapSize; ++y) {
+        for (std::uint32_t x = 0; x < bitmapSize; ++x) {
+            const bool transparent = ((x + y) & 3u) == 0;
+            (void)writePixel(bitmapStorage, x, y,
+                transparent ? 0 : static_cast<std::uint8_t>((x + y) &
+                    (framebuffer->format ==
+                        ql32::platform::olimex_vga::PixelFormat::Rgb222
+                            ? 0x3Fu : 0x0Fu)));
+        }
+    }
+    const BitmapView bitmap{bitmapPixels, bitmapSize, bitmapSize, bitmapStride,
+                            framebuffer->format};
+
+    std::uint32_t start = micros();
+    for (std::uint32_t i = 0; i < clearIterations; ++i)
+        clear(*framebuffer, static_cast<std::uint8_t>(i & 0x3Fu));
+    const auto clearUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < fillIterations; ++i)
+        fillRect(*framebuffer, 17, 23, 80, 40, static_cast<std::uint8_t>(i & 0x3Fu));
+    const auto fillUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < pixelIterations; ++i)
+        (void)writePixel(*framebuffer, (i * 73u) % width, (i * 29u) % height,
+                         static_cast<std::uint8_t>(i & 0x3Fu));
+    const auto pixelUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < lineIterations; ++i) {
+        const auto x = (i * 37u) % width;
+        const auto y = (i * 19u) % height;
+        drawLine(*framebuffer, x, y, (x + 53u) % width,
+                 (y + 31u) % height, static_cast<std::uint8_t>(i & 0x3Fu));
+    }
+    const auto lineUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < circleIterations; ++i) {
+        const auto x = static_cast<std::int32_t>((i * 41u) % width + 12u);
+        const auto y = static_cast<std::int32_t>((i * 23u) % height + 12u);
+        drawCircle(*framebuffer, x, y, 12,
+                   static_cast<std::uint8_t>(i & 0x3Fu), true);
+    }
+    const auto circleUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < scrollIterations; ++i) {
+        scrollVertical(*framebuffer, 1, static_cast<std::uint8_t>(i & 0x3Fu));
+        scrollVertical(*framebuffer, -1, static_cast<std::uint8_t>((i + 1) & 0x3Fu));
+    }
+    const auto scrollUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < bitmapIterations; ++i) {
+        const auto x = static_cast<std::int32_t>(
+            ((i * 17u) % ((width - bitmapSize) / 2 + 1)) * 2);
+        const auto y = static_cast<std::int32_t>(
+            (i * 31u) % (height - bitmapSize + 1));
+        copyBitmapOpaque(*framebuffer, x, y, bitmap, 0, 0,
+                         bitmapSize, bitmapSize);
+    }
+    const auto opaqueBlitUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    start = micros();
+    for (std::uint32_t i = 0; i < bitmapIterations; ++i) {
+        const auto x = static_cast<std::int32_t>(
+            ((i * 17u) % ((width - bitmapSize) / 2 + 1)) * 2);
+        const auto y = static_cast<std::int32_t>(
+            (i * 31u) % (height - bitmapSize + 1));
+        copyBitmapTransparent(*framebuffer, x, y, bitmap, 0, 0,
+                              bitmapSize, bitmapSize, 0);
+    }
+    const auto transparentBlitUs = static_cast<std::uint32_t>(micros() - start);
+    vTaskDelay(1);
+
+    std::uint32_t translateUs = 0;
+    if (framebuffer->format ==
+        ql32::platform::olimex_vga::PixelFormat::Indexed4) {
+        std::array<std::uint8_t, 16> translation{};
+        for (std::uint8_t i = 0; i < translation.size(); ++i)
+            translation[i] = static_cast<std::uint8_t>(15 - i);
+        start = micros();
+        for (std::uint32_t i = 0; i < 100; ++i)
+            translateIndexed4(*framebuffer, translation);
+        translateUs = static_cast<std::uint32_t>(micros() - start);
+        vTaskDelay(1);
+    }
+
+    const auto format = framebuffer->format ==
+            ql32::platform::olimex_vga::PixelFormat::Rgb222
+        ? "RGB222" : "indexed4";
+    Serial.printf("PSRAM_ACTIVE_SCANOUT_BENCH format=%s clear10_us=%u fill200_us=%u pixel10000_us=%u line1000_us=%u filled_circle100_us=%u scroll20_pairs_us=%u opaque_blit100_us=%u transparent_blit100_us=%u translate100_us=%u\n",
+        format, static_cast<unsigned>(clearUs), static_cast<unsigned>(fillUs),
+        static_cast<unsigned>(pixelUs), static_cast<unsigned>(lineUs),
+        static_cast<unsigned>(circleUs), static_cast<unsigned>(scrollUs),
+        static_cast<unsigned>(opaqueBlitUs),
+        static_cast<unsigned>(transparentBlitUs),
+        static_cast<unsigned>(translateUs));
+    heap_caps_free(bitmapPixels);
+
+    // Exercise the full publish path after concurrent CPU writes to the spare
+    // PSRAM frame. Each pattern is prepared off-screen and becomes active only
+    // when the refill worker reaches the next frame boundary.
+    for (std::uint32_t phase = 0; phase < 3; ++phase) {
+        auto* published = phase == 0
+            ? framebuffer : psramDmaScanout.beginFrameUpdate();
+        if (!published || !published->valid()) {
+            Serial.printf("PSRAM_ACTIVE_SCANOUT_PUBLISH_ERROR phase=%u acquire\n",
+                          static_cast<unsigned>(phase));
+            if (published) psramDmaScanout.cancelFrameUpdate(published);
+            break;
+        }
+        clear(*published, 0);
+        for (std::uint32_t band = 0; band < 8; ++band) {
+            const auto x = (band * 40u + phase * 13u) % width;
+            fillRect(*published, static_cast<std::int32_t>(x), 0, 24, height,
+                     static_cast<std::uint8_t>((band + phase) & 0x0Fu));
+        }
+        drawLine(*published, 0, phase * 31u, width - 1,
+                 (phase * 31u + 73u) % height,
+                 static_cast<std::uint8_t>(15u - phase));
+        if (!psramDmaScanout.publishFrameUpdate(published)) {
+            Serial.printf("PSRAM_ACTIVE_SCANOUT_PUBLISH_ERROR phase=%u publish\n",
+                          static_cast<unsigned>(phase));
+            psramDmaScanout.cancelFrameUpdate(published);
+            break;
+        }
+        Serial.printf("PSRAM_ACTIVE_SCANOUT_PUBLISHED phase=%u\n",
+                      static_cast<unsigned>(phase));
+        delay(500);
+    }
+    psramDmaScanout.reportStatus();
+}
+#endif
+#endif
+
 } // namespace
 
 void setup() {
@@ -830,9 +1377,25 @@ void setup() {
     }
     if (!psramDmaScanout.begin(VGA_320x200_70Hz,
             ql32_board::vgaRed, ql32_board::vgaGreen, ql32_board::vgaBlue,
-            ql32_board::vgaHSync, ql32_board::vgaVSync))
+            ql32_board::vgaHSync, ql32_board::vgaVSync)) {
         Serial.println("Fatal: PSRAM VGA scanout initialization failed");
+        return;
+    }
+#if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK)
+    runDmaFramebufferBenchmark();
+#endif
     return;
+#endif
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+#if defined(QL32_OLIMEX_DMA_DISPLAY_DIAGNOSTIC)
+    constexpr bool dmaDisplayDiagnostic = true;
+#else
+    constexpr bool dmaDisplayDiagnostic = false;
+#endif
+    if (!psramFound()) {
+        Serial.println("Fatal: Olimex DMA display requires initialized PSRAM");
+        return;
+    }
 #endif
 #if defined(QL32_OLIMEX_PSRAM)
     if (!psramFound()) {
@@ -856,22 +1419,55 @@ void setup() {
         return;
     }
 
+#if !defined(QL32_OLIMEX_DMA_DISPLAY)
     display.begin(
         static_cast<gpio_num_t>(ql32_board::vgaRed),
         static_cast<gpio_num_t>(ql32_board::vgaGreen),
         static_cast<gpio_num_t>(ql32_board::vgaBlue),
         static_cast<gpio_num_t>(ql32_board::vgaHSync),
         static_cast<gpio_num_t>(ql32_board::vgaVSync));
+#if defined(QL32_OLIMEX_FABGL_DOUBLE_BUFFER_TEST)
+    // Experimental fallback: keep FabGL's validated scanout and render each
+    // complete 320x200 frame into its hidden DMA-capable viewport before swap.
+    display.setResolution(VGA_320x200_70Hz, -1, -1, true);
+    constexpr auto internalCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    Serial.printf("FabGL double-buffer internal free: %u, largest block: %u\n",
+        static_cast<unsigned>(heap_caps_get_free_size(internalCaps)),
+        static_cast<unsigned>(heap_caps_get_largest_free_block(internalCaps)));
+#else
     display.setResolution(VGA_320x200_70Hz);
+#endif
+#endif
+#if defined(QL32_OLIMEX_RENDER_BENCHMARK)
+    runOlimexRenderBenchmark();
+#endif
 
-    screenConsole.begin();
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+    constexpr std::uint32_t screenWidth = 320;
+    constexpr std::uint32_t screenHeight = 200;
+    screenConsole.begin(screenWidth, screenHeight);
+    auto framePresenter = std::make_shared<ql32::platform::olimex_vga::PsramFramePresenter>(
+        psramDmaScanout);
+#else
+    screenConsole.begin(static_cast<std::uint32_t>(canvas.getWidth()),
+                        static_cast<std::uint32_t>(canvas.getHeight()));
     auto framePresenter = std::make_shared<ql32::platform::fabgl_vga::FabglFramePresenter>(
-        display, canvas,
-        [](ql32::graphics::Rect region) { screenConsole.restoreOverlay(region); });
+        display, canvas);
+#if defined(QL32_GRAPHICS_PROFILE)
+    profilePresenter = framePresenter;
+#endif
     const auto screenWidth = static_cast<std::uint32_t>(canvas.getWidth());
     const auto screenHeight = static_cast<std::uint32_t>(canvas.getHeight());
+#endif
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    auto canvasRasterOps = std::make_shared<
+        ql32::platform::olimex_vga::CanvasRasterOps>();
+    graphics = std::make_shared<ql32::graphics::WindowedService>(
+        screenWidth, screenHeight, framePresenter, std::move(canvasRasterOps));
+#else
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         screenWidth, screenHeight, framePresenter);
+#endif
     graphics->setDefaultWindowBounds(0,
         {0, static_cast<std::int32_t>(screenHeight - consoleHeight), screenWidth, consoleHeight});
     graphics->setDefaultWindowBounds(1,
@@ -888,6 +1484,9 @@ void setup() {
                                                  std::uint32_t column) {
         screenConsole.setTextPosition(row, column);
     });
+    graphics->setConsoleOutputBatchCallbacks(
+        [] { screenConsole.beginOutputBatch(); },
+        [] { screenConsole.endOutputBatch(); });
 
     ps2.begin(fabgl::PS2Preset::KeyboardPort0);
     if (auto* keyboard = fabgl::PS2Controller::keyboard()) {
@@ -1065,13 +1664,6 @@ void setup() {
         &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
     services.displayModes = std::shared_ptr<ql32::runtime::DisplayModeService>(
         &displayModes, [](ql32::runtime::DisplayModeService*) {});
-    graphics->setConsoleLayer([](std::uint32_t y, std::uint32_t x,
-                                 std::vector<ql32::graphics::ColorIndex>& row) {
-        screenConsole.composePaletteRegionRow(y, x, row);
-    });
-    screenConsole.setInvalidateCallback([](ql32::graphics::Rect region) {
-        graphics->invalidateSystemRegion(region);
-    });
     uiPresenter = std::make_unique<ql32::ui::GraphicPresenter>(uiService, graphics);
     scheduler = std::make_unique<ql32::vm::SessionScheduler>(std::move(services), 128);
     ql32::platform::esp32::RemoteDebugCapabilities remoteCapabilities;
@@ -1090,13 +1682,54 @@ void setup() {
 #endif
     remoteDebugger = std::make_unique<ql32::platform::esp32::RemoteDebugProtocol>(
         std::move(remoteCapabilities));
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+    // PS/2 and storage setup use platform peripheral initialization paths that
+    // may briefly occupy the CPU or reconfigure shared ESP32 resources. Start
+    // continuous VGA scanout after those services and immediately before the
+    // first console invalidation queues a frame.
+    if (!psramDmaScanout.begin(VGA_320x200_70Hz,
+            ql32_board::vgaRed, ql32_board::vgaGreen, ql32_board::vgaBlue,
+            ql32_board::vgaHSync, ql32_board::vgaVSync,
+            dmaDisplayDiagnostic)) {
+        Serial.println("Fatal: Olimex DMA display initialization failed");
+        return;
+    }
+#endif
+    graphics->setConsoleLayer([](std::uint32_t y, std::uint32_t x,
+                                 std::vector<ql32::graphics::ColorIndex>& row) {
+        screenConsole.composePaletteRegionRow(y, x, row);
+    });
+    screenConsole.setInvalidateCallback([](ql32::graphics::Rect region) {
+        graphics->invalidateSystemRegion(region);
+    });
     replTask = scheduler->launchInteractive(serialOutput, std::move(startupProgram));
 }
 
 void loop() {
 #if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
-    delay(1000);
+    static std::uint32_t lastStatus = millis();
+#if defined(QL32_OLIMEX_DMA_TEST_PACKED4) && \
+    !defined(QL32_OLIMEX_DMA_TEST_PIXEL_EDGES) && \
+    !defined(QL32_OLIMEX_DMA_TEST_TRIANGLE)
+    static std::uint32_t lastPaletteRotation = millis();
+    if (millis() - lastPaletteRotation >= 500) {
+        lastPaletteRotation = millis();
+        (void)psramDmaScanout.stagePaletteRotation(1);
+    }
+#endif
+    if (millis() - lastStatus >= 1000) {
+        lastStatus = millis();
+        psramDmaScanout.reportStatus();
+    }
+    delay(1);
 #else
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+    static std::uint32_t lastDmaStatus = millis();
+    if (millis() - lastDmaStatus >= 1000) {
+        lastDmaStatus = millis();
+        psramDmaScanout.reportStatus();
+    }
+#endif
     while (Serial.available() > 0) {
         if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
         receiveSerialCharacter(static_cast<char>(Serial.read()));

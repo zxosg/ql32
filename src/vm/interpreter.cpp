@@ -133,6 +133,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::PrintChannel:
         case Op::PrintStyle:
         case Op::PrintSeparator:
+        case Op::PrintCommit:
         case Op::PrintEnd:
         case Op::PrintBegin:
         case Op::At:
@@ -298,6 +299,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::ExitLoop:
         case Op::FunctionEnd:
         case Op::PrintSeparator:
+        case Op::PrintCommit:
         case Op::PrintEnd:
         case Op::PrintBegin:
         case Op::SelectEnd:
@@ -494,6 +496,7 @@ const char* opcodeName(Op op) {
     case Op::PrintChannel: return "PRINT_CHANNEL"; case Op::PrintStyle: return "PRINT_STYLE";
     case Op::Print: return "PRINT";
     case Op::PrintSeparator: return "PRINT_SEPARATOR"; case Op::PrintEnd: return "PRINT_END";
+    case Op::PrintCommit: return "PRINT_COMMIT";
     case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
     case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
     case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Read: return "READ";
@@ -868,6 +871,23 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 channels_->write(session_id_, state.printChannel, text);
             }
         }
+    };
+    auto selectPrintBatch = [&](runtime::ChannelId channel) {
+        if (!graphics_) return;
+        if (state.printBatchChannel) {
+            graphics_->endTextOutputBatch(session_id_, *state.printBatchChannel);
+            state.printBatchChannel.reset();
+        }
+        // Channel 0 also batches its screen-console invalidations through the
+        // graphics service, while preserving immediate writes to the serial
+        // stream. Other adapters may treat this as a no-op.
+        graphics_->beginTextOutputBatch(session_id_, channel);
+        state.printBatchChannel = channel;
+    };
+    auto finishPrintBatch = [&]() {
+        if (!graphics_ || !state.printBatchChannel) return;
+        graphics_->endTextOutputBatch(session_id_, *state.printBatchChannel);
+        state.printBatchChannel.reset();
     };
     auto printColumn = [&]() -> std::size_t& {
         return state.printChannel == 0 ? output_column_ : state.printChannelColumn;
@@ -2037,6 +2057,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     };
                     const std::string title = textArgument(0);
                     const std::string message = textArgument(1);
+                    if (graphics_) graphics_->resetUpdateState(session_id_);
                     state.pendingUiKind = instruction.name == "ALERT" ?
                         ui::RequestKind::Alert : ui::RequestKind::Confirm;
                     state.pendingUiRequest = instruction.name == "ALERT" ?
@@ -2198,6 +2219,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         } else {
                             if (!ui_) throw runtime::ServiceError(
                                 runtime::ServiceErrorCode::Unavailable, "UI service unavailable");
+                            if (graphics_) graphics_->resetUpdateState(session_id_);
                             dialog.hasResults = false;
                             state.pendingUiKind = ui::RequestKind::Dialog;
                             state.pendingUiBuilderHandle = handle;
@@ -2229,6 +2251,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             runtimeError(instruction, "unknown menu handle");
                         found->second.hasResult = false;
                         found->second.selectedCommand = 0;
+                        if (graphics_) graphics_->resetUpdateState(session_id_);
                         state.pendingUiKind = ui::RequestKind::Menu;
                         state.pendingUiBuilderHandle = handle;
                         state.pendingUiRequest = ui_->beginMenu(
@@ -2243,6 +2266,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                                                     "graphics service unavailable");
                     if (arguments.empty()) {
                         graphics_->update(session_id_);
+                    } else if (arguments.size() == 2) {
+                        const auto* option = std::get_if<std::string>(&arguments[0]);
+                        const auto* frames = std::get_if<double>(&arguments[1]);
+                        if (!option || *option != "SKIP")
+                            runtimeError(instruction, "GUPDATE option must be SKIP");
+                        if (!frames || !std::isfinite(*frames) ||
+                            std::trunc(*frames) != *frames || *frames < 0 ||
+                            *frames > std::numeric_limits<std::uint32_t>::max())
+                            runtimeError(instruction,
+                                "GUPDATE SKIP count must be a nonnegative 32-bit integer");
+                        graphics_->setFrameSkip(session_id_,
+                            static_cast<std::uint32_t>(*frames));
                     } else {
                         const auto* mode = std::get_if<double>(&arguments[0]);
                         if (!mode || !std::isfinite(*mode) || std::trunc(*mode) != *mode)
@@ -3176,10 +3211,17 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             writePrintText("\n", instruction);
             if (state.printChannel == 0) output_column_ = 0;
             else if (state.printChannel == 1) state.printChannelColumn = 0;
+            finishPrintBatch();
+            state.printChannel = 1;
+            break;
+        case Op::PrintCommit:
+            finishPrintBatch();
             state.printChannel = 1;
             break;
         case Op::PrintBegin:
+            finishPrintBatch();
             state.printChannel = resolveChannel(default_output_channel_);
+            selectPrintBatch(state.printChannel);
             break;
         case Op::At: {
             const double columnValue = numeric(pop(), instruction);
@@ -3255,6 +3297,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 channel > static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
                 runtimeError(instruction, "channel handle must be a nonnegative integer");
             state.printChannel = resolveChannel(static_cast<std::uint64_t>(channel));
+            selectPrintBatch(state.printChannel);
             break;
         }
         case Op::ChannelDefault: {
@@ -3371,6 +3414,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 promptChannel = static_cast<runtime::ChannelId>(channel);
             }
             inputChannel = resolveChannel(inputChannel);
+            if (inputChannel == 0 && graphics_)
+                graphics_->resetUpdateState(session_id_);
             if (instruction.expectsValue) {
                 state.printChannel = resolveChannel(promptChannel);
                 writePrintText(prompt, instruction);

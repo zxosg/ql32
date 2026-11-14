@@ -18,7 +18,7 @@ enum class NumericPrecision { Double, Single };
 enum class Op {
     Push, Load, Store, Add, Subtract, Multiply, Divide, IntegerDivide, Modulo,
     Power, Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
-    And, Or, Xor, Negate, Not, PrintBegin, PrintChannel, PrintStyle, Print, PrintSeparator, PrintEnd,
+    And, Or, Xor, Negate, Not, PrintBegin, PrintChannel, PrintStyle, Print, PrintSeparator, PrintEnd, PrintCommit,
     ChannelDefault, ChannelRoute, ChannelSeek, ChannelRead, ChannelWrite, At, Read, Restore, Stop,
     Input, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,

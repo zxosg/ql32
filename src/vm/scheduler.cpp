@@ -147,6 +147,7 @@ struct SessionScheduler::Task {
     TaskId waitingChildId = 0;
     TaskId waitingParentId = 0;
     bool started = false;
+    bool programExecutionActive = false;
     bool interactive = false;
     bool supervisor = false;
     bool interactiveSubmission = false;
@@ -191,6 +192,7 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
+    task->programExecutionActive = true;
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
@@ -208,6 +210,7 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
+    task->programExecutionActive = true;
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
@@ -250,6 +253,7 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(initialProgram);
+    task->programExecutionActive = !task->source.empty();
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
@@ -745,8 +749,20 @@ bool SessionScheduler::tick() {
     Task& current = *selectedTask;
     const bool submittedInteractiveCommand =
         current.interactive && current.interactiveSubmission;
+    const auto resetGraphicsUpdateState = [&] {
+        if (!current.programExecutionActive) return;
+        current.programExecutionActive = false;
+        if (!services_.graphics || !current.interpreter) return;
+        try {
+            services_.graphics->resetUpdateState(
+                current.interpreter->graphicsSessionId());
+        } catch (...) {
+            // Returning control to the console must survive display failures.
+        }
+    };
     const auto handleFailure = [&](std::string message, runtime::ErrorCode code,
                                    std::string detail) {
+        resetGraphicsUpdateState();
         const bool outOfMemory = code == runtime::ErrorCode::OutOfMemory;
         if (outOfMemory) {
             if (services_.memory) (void)services_.memory->releaseEmergencyReserve();
@@ -820,12 +836,14 @@ bool SessionScheduler::tick() {
             current.pendingInteractiveTail =
                 current.interpreter->takePendingInteractiveTail();
             current.hasPendingSource = !current.source.empty();
+            current.programExecutionActive = true;
             current.started = false;
             current.status = current.hasPendingSource ? TaskStatus::Runnable :
                                                         TaskStatus::WaitingInput;
             return true;
         }
         if (result == ExecutionStatus::ProgramStopped) {
+            resetGraphicsUpdateState();
             current.started = false;
             removeFromSchedule(current);
             if (current.interactive) {
@@ -849,6 +867,7 @@ bool SessionScheduler::tick() {
             return true;
         }
         if (result == ExecutionStatus::Completed) {
+            resetGraphicsUpdateState();
             current.started = false;
             removeFromSchedule(current);
             if (current.interactive) {
@@ -925,6 +944,15 @@ bool SessionScheduler::cancel(TaskId id) {
         if (task->id != id || task->status == TaskStatus::Completed ||
             task->status == TaskStatus::Failed || task->status == TaskStatus::Cancelled)
             continue;
+        if (task->programExecutionActive && services_.graphics && task->interpreter) {
+            try {
+                services_.graphics->resetUpdateState(
+                    task->interpreter->graphicsSessionId());
+            } catch (...) {
+                // Cancellation must still release the session if presentation fails.
+            }
+            task->programExecutionActive = false;
+        }
         if (task->interpreter) task->interpreter->discardGraphicsResources();
         task->interpreter.reset();
         removeFromSchedule(*task);

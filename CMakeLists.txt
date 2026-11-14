@@ -159,6 +159,15 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_graphics_tests tests/graphics_tests.cpp)
   target_link_libraries(ql32_graphics_tests PRIVATE ql32_host)
   add_test(NAME ql32_graphics_tests COMMAND ql32_graphics_tests)
+  add_executable(ql32_olimex_framebuffer_tests tests/olimex_framebuffer_tests.cpp)
+  target_link_libraries(ql32_olimex_framebuffer_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_olimex_framebuffer_tests COMMAND ql32_olimex_framebuffer_tests)
+  add_executable(ql32_olimex_canvas_raster_tests
+    tests/olimex_canvas_raster_tests.cpp
+    src/platform/olimex_vga/canvas_raster_ops.cpp
+  )
+  target_link_libraries(ql32_olimex_canvas_raster_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_olimex_canvas_raster_tests COMMAND ql32_olimex_canvas_raster_tests)
   add_executable(ql32_capabilities_tests tests/capabilities_tests.cpp)
   target_link_libraries(ql32_capabilities_tests PRIVATE ql32_host)
   add_test(NAME ql32_capabilities_tests COMMAND ql32_capabilities_tests)
@@ -291,6 +300,13 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_fabgl_graphics_tests PRIVATE tests/fakes include)
   target_compile_features(ql32_fabgl_graphics_tests PRIVATE cxx_std_20)
   add_test(NAME ql32_fabgl_graphics_tests COMMAND ql32_fabgl_graphics_tests)
+  add_executable(ql32_fabgl_presenter_tests
+    tests/fabgl_presenter_tests.cpp
+    src/platform/fabgl_vga/frame_presenter.cpp
+  )
+  target_include_directories(ql32_fabgl_presenter_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_fabgl_presenter_tests PRIVATE cxx_std_20)
+  add_test(NAME ql32_fabgl_presenter_tests COMMAND ql32_fabgl_presenter_tests)
   add_executable(ql32_fabgl_keyboard_tests
     tests/fabgl_keyboard_tests.cpp
     src/platform/fabgl_vga/keyboard.cpp

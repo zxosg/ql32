@@ -5,12 +5,16 @@ stateful `x`, `v`, and `t` updates and centers/scales the pattern to the active
 graphics window. `rowStep=4` and `sampleStep=8` reduce draw calls on ESP32; set
 them to `2` and `1` for the source sketch's full point density. `SIN()` and
 `COS()` use radians; `INT()` maps positions to pixel coordinates.
-The demo selects `OPTION KOptMathDouble` and `OPTION KEspCpuFreq240` in its
-module preamble. On the tested Olimex WROVER, DOUBLE and SINGLE had nearly
-identical render times at 240 MHz, so the demo keeps DOUBLE precision. The
-clock option changes the ESP32's device-wide CPU frequency; it is ignored by
-Linux and macOS builds. `CPUFREQ()` reports the current clock in MHz on ESP32
-and returns zero on host builds. See the
+The demo selects `OPTION KOptMathSingle` and `OPTION KEspCpuFreq240` in its
+module preamble. On the tested Olimex WROVER, the 240 MHz CPU-only benchmark
+measured a 9.430 s SINGLE median versus 10.789 s DOUBLE, a 12.6% improvement.
+Full rendered timings varied more, so the end-to-end gain is less certain.
+SINGLE and DOUBLE can follow different trajectories because the recurrence is
+sensitive to rounding. Use [`attractor-double.bas`](attractor-double.bas) when
+DOUBLE precision is preferred. The clock option changes the ESP32's
+device-wide CPU frequency; it is ignored by Linux and macOS builds.
+`CPUFREQ()` reports the current clock in MHz on ESP32 and returns zero on host
+builds. See the
 [performance results](../docs/test-results/attractor-performance-2026-11-12.md).
 
 The p5 sketch uses a custom 16-entry RGB565 table and 3-pixel filled circles.

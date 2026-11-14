@@ -1,0 +1,21 @@
+' Verify that GUPDATE 0 suppresses automatic output until bare GUPDATE.
+channel = OPEN(2)
+PAPER 0
+INK 7
+CLS
+PRINT "SCREEN A: visible for 3 seconds"
+PRINT #channel,"GUPDATE_TEST_A"
+PAUSE 3000
+
+GUPDATE 0
+CLS
+PRINT "SCREEN B: hidden while GUPDATE is off"
+PRINT #channel,"GUPDATE_TEST_OFF_BEGIN"
+PAUSE 5000
+PRINT #channel,"GUPDATE_TEST_OFF_END"
+
+GUPDATE
+PRINT #channel,"GUPDATE_TEST_FLUSHED"
+PAUSE 3000
+GUPDATE 1
+PRINT #channel,"GUPDATE_TEST_AUTO"

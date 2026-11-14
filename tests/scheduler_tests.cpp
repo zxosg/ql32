@@ -107,6 +107,16 @@ public:
     }
     void clear(ql32::graphics::SessionId) override {}
     void closeSession(ql32::graphics::SessionId) override {}
+    void setUpdateMode(ql32::graphics::SessionId,
+                       ql32::graphics::UpdateMode mode) override {
+        updateMode = mode;
+        updateModeHistory.push_back(mode);
+    }
+    void setFrameSkip(ql32::graphics::SessionId, std::uint32_t frames) override {
+        frameSkip = frames;
+        frameSkipHistory.push_back(frames);
+    }
+    void update(ql32::graphics::SessionId) override { ++updateCount; }
     ql32::graphics::WindowInfo windowInfo(ql32::graphics::SessionId) override {
         return info;
     }
@@ -117,6 +127,11 @@ public:
 
     std::string writtenText;
     ql32::graphics::WindowInfo info{120, 32, 4, 16, 0, 0, 0};
+    ql32::graphics::UpdateMode updateMode = ql32::graphics::UpdateMode::Auto;
+    std::uint32_t frameSkip = 0;
+    std::size_t updateCount = 0;
+    std::vector<ql32::graphics::UpdateMode> updateModeHistory;
+    std::vector<std::uint32_t> frameSkipHistory;
 };
 
 class TestDisplayModes final : public ql32::runtime::DisplayModeService {
@@ -700,6 +715,37 @@ void testSupervisorCanSetSliceAndWorkerPriority() {
                 supervisorOutput.str().find("SUSPENDED (resume P=12)") !=
                     std::string::npos,
             "supervisor did not receive scheduler command confirmations");
+}
+
+void testRunCompletionRestoresAutomaticGraphicsUpdatesForConsole() {
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+
+    const auto submitAndFinish = [&](const std::string& command) {
+        require(scheduler.submit(supervisor, command),
+                "supervisor did not accept graphics reset test command");
+        for (int tick = 0; tick < 100 && scheduler.task(supervisor)->status !=
+                ql32::vm::TaskStatus::WaitingInput; ++tick)
+            require(scheduler.tick(), "scheduler stopped before command completed");
+        require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
+                "supervisor did not return to its console prompt");
+    };
+
+    submitAndFinish("10 GUPDATE 0\n");
+    submitAndFinish("20 GUPDATE SKIP,3\n");
+    const auto updatesBeforeRun = graphics->updateCount;
+    submitAndFinish("RUN\n");
+    require(graphics->updateMode == ql32::graphics::UpdateMode::Auto &&
+                graphics->frameSkip == 0 && graphics->updateCount > updatesBeforeRun &&
+                graphics->updateModeHistory.size() >= 2 &&
+                graphics->updateModeHistory[0] == ql32::graphics::UpdateMode::Off &&
+                graphics->frameSkipHistory.size() >= 2 &&
+                graphics->frameSkipHistory[0] == 3,
+            "program completion did not restore and present normal console updates");
 }
 
 void testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts() {
@@ -1471,6 +1517,7 @@ int main() {
     testPriorityWeightsChangeFrequency();
     testSchedulerReleasesTaskBookkeepingAfterWorkerBursts();
     testSupervisorCanSetSliceAndWorkerPriority();
+    testRunCompletionRestoresAutomaticGraphicsUpdatesForConsole();
     testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts();
     testCancellingWorkerDiscardsItsGraphicsAllocations();
     testSupervisorTaskViewportUsesTaskToSessionMapping();

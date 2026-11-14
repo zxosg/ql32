@@ -54,8 +54,9 @@ Rect unite(Rect first, Rect second) {
 } // namespace
 
 WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screenHeight,
-                                 std::shared_ptr<FramePresenter> presenter)
-    : manager_(screenWidth, screenHeight),
+                                 std::shared_ptr<FramePresenter> presenter,
+                                 std::shared_ptr<const CanvasRasterOps> rasterOps)
+    : manager_(screenWidth, screenHeight, std::move(rasterOps)),
       presenter_(std::move(presenter)) {}
 
 void WindowedService::discardFrozenWindows() {
@@ -492,8 +493,64 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
             static_cast<std::int32_t>(static_cast<std::int64_t>(bounds.x) + dirty.x),
             static_cast<std::int32_t>(static_cast<std::int64_t>(bounds.y) + dirty.y),
             dirty.width, dirty.height};
-        presentRegion(intersect(translated, manager_.windowState(id).screenClip));
+        const Rect screenDirty = intersect(
+            translated, manager_.windowState(id).screenClip);
+        const auto batch = textOutputBatches_.find(key);
+        if (batch != textOutputBatches_.end() && batch->second.depth != 0)
+            batch->second.dirty = unite(batch->second.dirty, screenDirty);
+        else
+            presentRegion(screenDirty);
     }
+}
+
+void WindowedService::beginTextOutputBatch(SessionId session, ChannelId channel) {
+    if (channel == 0) {
+        if (consoleOutputBatchBeginCallback_) consoleOutputBatchBeginCallback_();
+        return;
+    }
+    ++textOutputBatches_[{session, channel}].depth;
+}
+
+void WindowedService::endTextOutputBatch(SessionId session, ChannelId channel) {
+    if (channel == 0) {
+        if (consoleOutputBatchEndCallback_) consoleOutputBatchEndCallback_();
+        return;
+    }
+    const SurfaceKey key{session, channel};
+    const auto batch = textOutputBatches_.find(key);
+    if (batch == textOutputBatches_.end() || batch->second.depth == 0) return;
+    if (--batch->second.depth != 0) return;
+    const Rect dirty = batch->second.dirty;
+    textOutputBatches_.erase(batch);
+    presentRegion(dirty);
+}
+
+void WindowedService::flushTextOutputBatches(SessionId session) {
+    for (auto batch = textOutputBatches_.begin(); batch != textOutputBatches_.end();) {
+        if (batch->first.session != session) {
+            ++batch;
+            continue;
+        }
+        const Rect dirty = batch->second.dirty;
+        batch = textOutputBatches_.erase(batch);
+        presentRegion(dirty);
+    }
+}
+
+void WindowedService::beginPresentationBatch(SessionId session) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    ++presentationBatchDepth_;
+}
+
+void WindowedService::endPresentationBatch(SessionId session) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    if (presentationBatchDepth_ == 0 || --presentationBatchDepth_ != 0) return;
+    const bool fullFrame = presentationBatchNeedsFullFrame_;
+    const Rect dirty = presentationBatchDirty_;
+    presentationBatchNeedsFullFrame_ = false;
+    presentationBatchDirty_ = {};
+    if (fullFrame) present();
+    else if (dirty.width != 0 && dirty.height != 0) presentRegion(dirty);
 }
 
 void WindowedService::clear(SessionId session) {
@@ -545,6 +602,10 @@ void WindowedService::closeWindow(SessionId session, ChannelId channel) {
 }
 
 void WindowedService::closeSession(SessionId session) {
+    for (auto batch = textOutputBatches_.begin(); batch != textOutputBatches_.end();) {
+        if (batch->first.session == session) batch = textOutputBatches_.erase(batch);
+        else ++batch;
+    }
     for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
         if (found->first.session != session) {
             ++found;
@@ -568,6 +629,10 @@ void WindowedService::closeSession(SessionId session) {
 }
 
 void WindowedService::discardSession(SessionId session) {
+    for (auto batch = textOutputBatches_.begin(); batch != textOutputBatches_.end();) {
+        if (batch->first.session == session) batch = textOutputBatches_.erase(batch);
+        else ++batch;
+    }
     Rect dirty{};
     for (const auto& [key, id] : sessionWindows_)
         if (key.session == session)
@@ -608,11 +673,26 @@ void WindowedService::discardSession(SessionId session) {
 void WindowedService::setUpdateMode(SessionId session, UpdateMode mode) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
     updateMode_ = mode;
-    if (mode != UpdateMode::Off) present();
+    if (mode != UpdateMode::Off) update(session);
+}
+
+void WindowedService::setFrameSkip(SessionId session, std::uint32_t frames) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    frameSkip_ = frames;
+    frameSkipRemaining_ = 0;
+}
+
+void WindowedService::resetUpdateState(SessionId session) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    updateMode_ = UpdateMode::Auto;
+    frameSkip_ = 0;
+    frameSkipRemaining_ = 0;
+    present();
 }
 
 void WindowedService::update(SessionId session) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    if (skipPresentationRequest()) return;
     present();
 }
 
@@ -765,6 +845,11 @@ void WindowedService::tileWindows() {
 
 void WindowedService::present() {
     if (!presenter_) return;
+    if (presentationBatchDepth_ != 0) {
+        presentationBatchNeedsFullFrame_ = true;
+        presentationBatchDirty_ = {};
+        return;
+    }
     for (std::size_t index = 0; index < frame_.palette.size(); ++index)
         frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
     const auto width = manager_.screenWidth();
@@ -794,6 +879,12 @@ void WindowedService::presentRegion(Rect region) {
     region = intersect(region,
         {0, 0, manager_.screenWidth(), manager_.screenHeight()});
     if (region.width == 0 || region.height == 0) return;
+    if (presentationBatchDepth_ != 0) {
+        if (!presentationBatchNeedsFullFrame_)
+            presentationBatchDirty_ = unite(presentationBatchDirty_, region);
+        return;
+    }
+    if (skipPresentationRequest()) return;
     for (std::size_t index = 0; index < frame_.palette.size(); ++index)
         frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
     const auto width = manager_.screenWidth();
@@ -802,9 +893,17 @@ void WindowedService::presentRegion(Rect region) {
             [this, region](std::uint32_t y, std::vector<ColorIndex>& row) {
                 composeDisplayRegionRow(y,
                     static_cast<std::uint32_t>(region.x), region.width, row);
-            }))
-        return;
+            })) return;
     present();
+}
+
+bool WindowedService::skipPresentationRequest() {
+    if (frameSkipRemaining_ != 0) {
+        --frameSkipRemaining_;
+        return true;
+    }
+    frameSkipRemaining_ = frameSkip_;
+    return false;
 }
 
 void WindowedService::composeDisplayRegionRow(std::uint32_t y, std::uint32_t x,
@@ -841,11 +940,7 @@ void WindowedService::invalidateSystemRegion(Rect region) {
     region = intersect(region,
         {0, 0, manager_.screenWidth(), manager_.screenHeight()});
     if (region.width == 0 || region.height == 0) return;
-    const auto saved = updateMode_;
-    updateMode_ = UpdateMode::Auto;
-    try { presentRegion(region); }
-    catch (...) { updateMode_ = saved; throw; }
-    updateMode_ = saved;
+    presentRegion(region);
 }
 
 void WindowedService::discardPresentationBuffer() {

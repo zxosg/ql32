@@ -67,6 +67,7 @@ struct VMExecutionState {
     std::optional<std::chrono::steady_clock::time_point> pauseUntil;
     std::uint64_t printChannel = 1;
     std::size_t printChannelColumn = 0;
+    std::optional<runtime::ChannelId> printBatchChannel;
     std::optional<ui::RequestId> pendingUiRequest;
     std::optional<runtime::ChannelId> pendingChannelRead;
     ui::RequestKind pendingUiKind = ui::RequestKind::Alert;

@@ -182,6 +182,15 @@ void testInteractiveFileCommands() {
                     "10 PRINT \"first\"\n20 PRINT \"second\"\nfirst\nsecond\n",
                 "LOAD did not auto-number and run unnumbered BASIC source");
 
+        storage->writeText("options.bas",
+            "CONST KOptMathSingle = 1\n"
+            "OPTION KOptMathSingle\n"
+            "PRINT 16777216 + 1 - 16777216\n");
+        std::ostringstream optionsOutput;
+        interpreter.executeInteractive("LOAD \"options.bas\"\nRUN\n", optionsOutput);
+        require(optionsOutput.str() == "0\n",
+                "LOAD did not auto-number module-level CONST and OPTION lines");
+
         storage->writeText("broken.bas", "PRINT )\n");
         std::ostringstream brokenOutput;
         interpreter.executeInteractive("LOAD \"broken.bas\"\nLIST\n", brokenOutput);
