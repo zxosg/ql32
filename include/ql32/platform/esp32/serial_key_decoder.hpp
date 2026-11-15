@@ -11,6 +11,7 @@ enum class SerialKey : unsigned char {
     Backspace,
     Delete,
     Up,
+    Down,
     Left,
     Right,
     Home,
@@ -20,6 +21,7 @@ enum class SerialKey : unsigned char {
 struct SerialKeyEvent {
     SerialKey key;
     char character = 0;
+    bool control = false;
 };
 
 // Decodes printable input and common VT100/ANSI cursor-key sequences used by
@@ -55,8 +57,9 @@ public:
                 state_ = State::Text;
                 switch (byte) {
                 case 'A': return event(SerialKey::Up);
-                case 'D': return event(SerialKey::Left);
-                case 'C': return event(SerialKey::Right);
+                case 'B': return event(SerialKey::Down);
+                case 'D': return event(SerialKey::Left, controlParameter());
+                case 'C': return event(SerialKey::Right, controlParameter());
                 case 'H': return event(SerialKey::Home);
                 case 'F': return event(SerialKey::End);
                 case '~':
@@ -98,7 +101,14 @@ public:
 private:
     enum class State : unsigned char { Text, Escape, Csi, Ss3 };
 
-    static SerialKeyEvent event(SerialKey key) noexcept { return {key, 0}; }
+    bool controlParameter() const noexcept {
+        const auto separator = parameters_.find(';');
+        return parameters_ == "5" || (separator != std::string::npos &&
+               parameters_.substr(separator + 1) == "5");
+    }
+    static SerialKeyEvent event(SerialKey key, bool control = false) noexcept {
+        return {key, 0, control};
+    }
 
     State state_ = State::Text;
     std::string parameters_;

@@ -589,6 +589,20 @@ void handleEditorKey(const ql32::input::KeyEvent& event) {
 
     const auto oldSize = lineEditor.text().size();
     const auto oldCursor = lineEditor.cursor();
+    if (editingLineNumber > 0 &&
+        (event.key == ql32::input::Key::Up || event.key == ql32::input::Key::Down)) {
+        if (scheduler) {
+            const int direction = event.key == ql32::input::Key::Up ? -1 : 1;
+            if (const auto edit = scheduler->navigateProgramEdit(
+                    scheduler->focusedTask(), editingLineNumber, direction)) {
+                editingLineNumber = edit->lineNumber;
+                lineEditor.setText(edit->text);
+                redrawInputLine();
+                return;
+            }
+        }
+        return;
+    }
     const auto action = lineEditor.handleKey(event);
     if (action == ql32::ui::LineEditorAction::Submit) {
         submitInputLine();
@@ -619,11 +633,13 @@ ql32::input::KeyEvent toInputKey(
     case ql32::platform::esp32::SerialKey::Backspace: event.key = ql32::input::Key::Backspace; break;
     case ql32::platform::esp32::SerialKey::Delete: event.key = ql32::input::Key::Delete; break;
     case ql32::platform::esp32::SerialKey::Up: event.key = ql32::input::Key::Up; break;
+    case ql32::platform::esp32::SerialKey::Down: event.key = ql32::input::Key::Down; break;
     case ql32::platform::esp32::SerialKey::Left: event.key = ql32::input::Key::Left; break;
     case ql32::platform::esp32::SerialKey::Right: event.key = ql32::input::Key::Right; break;
     case ql32::platform::esp32::SerialKey::Home: event.key = ql32::input::Key::Home; break;
     case ql32::platform::esp32::SerialKey::End: event.key = ql32::input::Key::End; break;
     }
+    event.control = serialKey.control;
     return event;
 }
 

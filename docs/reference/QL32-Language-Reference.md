@@ -446,8 +446,9 @@ target shell services. Examples use prompt syntax.
 | --- | --- | --- | --- |
 | `HELP` | `HELP` | Lists shell commands, BASIC words, functions, and optional-service notes. | `HELP` |
 | `RUN` | `RUN` | Compiles and executes the numbered program; clears variables for a new run. | `RUN` |
-| `LIST` | `LIST [first[-last]] [#channel]` | Lists stored numbered lines in ascending order. | `LIST 10-50` |
-| `EDIT` | `EDIT [lineNumber]` | Opens a numbered program line for replacement. | `EDIT 100` |
+| `LIST` | `LIST [line [TO [end]]] [#channel]` | Lists all lines, one exact line, or an inclusive line range. `LIST TO end` starts at the first line; `LIST start TO` continues through the last. The legacy `start-end` form remains accepted. | `LIST 10 TO 50` |
+| `EDIT` | `EDIT [lineNumber]` | Opens a numbered program line for replacement. While editing, Up/Down selects the previous/next stored line; Ctrl+Left/Right moves by word. | `EDIT 100` |
+| `RENUMBER` | `RENUMBER [start, step]` | Renumbers stored lines; defaults to start 10 and step 10. Updates numeric `GOTO`/`GO TO` and `RESTORE` references that target existing lines. | `RENUMBER 100, 10` |
 | `NEW` | `NEW` | Clears the stored numbered program. | `NEW` |
 | `LOAD` | `LOAD "path.bas"` | Loads numbered or unnumbered source from storage. | `LOAD "FFS:/demo.bas"` |
 | `SAVE` | `SAVE "path.bas"` | Saves the stored program. | `SAVE "SDC:/demo.bas"` |

@@ -325,6 +325,8 @@ void receiveSerialCharacter(char character) {
             Serial.print(inputLine.c_str());
         }
         break;
+    case ql32::platform::esp32::SerialKey::Down:
+        break;
     case ql32::platform::esp32::SerialKey::Left:
         if (inputCursor > 0) { --inputCursor; Serial.write('\b'); }
         break;

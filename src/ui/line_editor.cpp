@@ -1,5 +1,6 @@
 #include "ql32/ui/line_editor.hpp"
 
+#include <cctype>
 #include <utility>
 
 namespace ql32::ui {
@@ -23,11 +24,25 @@ LineEditorAction LineEditor::handleKey(const input::KeyEvent& event) {
         return LineEditorAction::Changed;
     case input::Key::Left:
         if (cursor_ == 0) return LineEditorAction::Ignored;
-        --cursor_;
+        if (event.control) {
+            while (cursor_ > 0 && std::isspace(
+                       static_cast<unsigned char>(text_[cursor_ - 1]))) --cursor_;
+            while (cursor_ > 0 && !std::isspace(
+                       static_cast<unsigned char>(text_[cursor_ - 1]))) --cursor_;
+        } else {
+            --cursor_;
+        }
         return LineEditorAction::Changed;
     case input::Key::Right:
         if (cursor_ >= text_.size()) return LineEditorAction::Ignored;
-        ++cursor_;
+        if (event.control) {
+            while (cursor_ < text_.size() && !std::isspace(
+                       static_cast<unsigned char>(text_[cursor_]))) ++cursor_;
+            while (cursor_ < text_.size() && std::isspace(
+                       static_cast<unsigned char>(text_[cursor_]))) ++cursor_;
+        } else {
+            ++cursor_;
+        }
         return LineEditorAction::Changed;
     case input::Key::Home:
         if (cursor_ == 0) return LineEditorAction::Ignored;

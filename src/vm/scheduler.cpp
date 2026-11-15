@@ -302,6 +302,17 @@ std::optional<InteractiveLineEdit> SessionScheduler::takePendingLineEdit(
     return std::nullopt;
 }
 
+std::optional<InteractiveLineEdit> SessionScheduler::navigateProgramEdit(
+    TaskId id, int currentLine, int direction) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interactive ||
+            current->status != TaskStatus::WaitingInput || !current->interpreter)
+            continue;
+        return current->interpreter->navigateProgramEdit(currentLine, direction);
+    }
+    return std::nullopt;
+}
+
 bool SessionScheduler::logon(TaskId id) {
     for (const auto& current : tasks_) {
         if (current->id != id || current->supervisor || !current->interactive ||

@@ -110,6 +110,8 @@ public:
     std::string takePendingRunSource() noexcept;
     std::string takePendingInteractiveTail() noexcept;
     std::optional<InteractiveLineEdit> takePendingLineEdit() noexcept;
+    std::optional<InteractiveLineEdit> navigateProgramEdit(int currentLine,
+                                                            int direction);
     bool hasPendingInteractivePager() const noexcept;
     ExecutionStatus resumeInteractivePager(std::ostream& output);
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }

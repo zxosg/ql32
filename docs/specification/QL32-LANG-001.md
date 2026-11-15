@@ -612,7 +612,14 @@ function calls are bound when `RUN` compiles the complete program. Unnumbered
 statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
 interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
-`DELETE`, `RENAME`, `FORMAT`, and `CD`. `DELETE lineNumber1,...` atomically
+`DELETE`, `RENAME`, `FORMAT`, and `CD`. `LIST line` selects one exact line;
+`LIST start TO end` selects an inclusive range, `LIST start TO` continues to
+the final stored line, and `LIST TO end` begins at the first stored line.
+The legacy `LIST start-end` range syntax remains accepted. `RENUMBER` defaults
+to start 10 and step 10; `RENUMBER start, step` supplies both values. It
+rewrites numeric `GOTO`, `GO TO`, and `RESTORE` targets when they refer to a
+stored line, and commits only if the renumbered program validates. It rejects
+line-number overflow without changing the program. `DELETE lineNumber1,...` atomically
 removes the listed numbered program lines and validates the result once, so a
 matching block start and end can be removed in one command. `DELETE path$`
 continues to remove a file; a quoted string or string variable is treated as a
@@ -774,9 +781,10 @@ are statement commands. See
 [QL32-API-001](QL32-API-001.md). `EDIT [lineNumber]` loads a stored numbered
 line into the REPL editor. With no number, it opens the last line selected with
 `EDIT`, or the first program line when no line has been edited yet. On serial
-REPLs, Left/Right move the cursor, Home/End move to the line boundaries, and
-Backspace/Delete remove characters. Up on an empty prompt recalls the last
-submitted BASIC line. Enter replaces the line; clearing the
+REPLs, Left/Right move the cursor, Ctrl+Left/Right move by words, Home/End move
+to the line boundaries, and Backspace/Delete remove characters. While a stored
+line is being edited, Up/Down loads the previous/next existing numbered line.
+At an ordinary empty prompt, Up recalls the last submitted BASIC line. Enter replaces the line; clearing the
 buffer then pressing Enter submits the line number alone, deleting that line.
 The host stream REPL displays the selected line and accepts a replacement
 numbered line; an empty response deletes it. Invalid numbers and line numbers

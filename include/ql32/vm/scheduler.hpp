@@ -82,6 +82,9 @@ public:
     TaskId launchInteractive(std::ostream& output, std::string initialProgram = {});
     bool submit(TaskId id, std::string source);
     std::optional<InteractiveLineEdit> takePendingLineEdit(TaskId id) noexcept;
+    std::optional<InteractiveLineEdit> navigateProgramEdit(TaskId id,
+                                                            int currentLine,
+                                                            int direction);
     bool logon(TaskId id);
     TaskId logoff();
     TaskId focusedTask() const noexcept;

@@ -127,7 +127,7 @@ constexpr std::string_view builtinFunctions[] = {
 };
 
 constexpr std::string_view shellHelpCommands[] = {
-    "HELP", "RUN", "LIST", "EDIT", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
+    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
     "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "MODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
@@ -150,8 +150,12 @@ std::string commandHelpListing() {
     std::ostringstream listing;
     listing << "Shell commands:\n";
     appendHelpNames(listing, shellHelpCommands);
-    listing << "EDIT [lineNumber] opens a stored line; bare EDIT reopens the last "
-            << "edited line, or the first program line.\n";
+    listing << "LIST [line [TO [end]]] lists all stored lines, one line, or an "
+            << "inclusive range.\n"
+            << "EDIT [lineNumber] opens a stored line; bare EDIT reopens the last "
+            << "edited line or the first line. Up/Down selects adjacent lines; "
+            << "Ctrl+Left/Right moves by word.\n"
+            << "RENUMBER [start, step] renumbers the stored program (default 10, 10).\n";
     listing << "DELETE lineNumber1,... atomically deletes numbered program lines; "
             << "DELETE path$ removes a file.\n";
     listing << "BASIC statements and commands:\n";
@@ -457,9 +461,10 @@ private:
         if (errno == ERANGE || parsedEnd != text.c_str() + text.size() ||
             !std::isfinite(value))
             fail("invalid number");
-        return {Kind::Number, text, value, line_, column};
+        return {Kind::Number, text, value, line_, column, start, offset_ - start};
     }
     Token radixNumber() {
+        const auto start = offset_;
         const int column = column_;
         advance();
         const char prefix = static_cast<char>(std::toupper(static_cast<unsigned char>(peek())));
@@ -484,7 +489,8 @@ private:
         if (digits == 0) fail("radix prefix must be followed by digits");
         if (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_')
             fail("invalid digit in radix integer literal");
-        return {Kind::Number, std::string{}, static_cast<double>(value), line_, column};
+        return {Kind::Number, std::string{}, static_cast<double>(value), line_, column,
+                start, offset_ - start};
     }
     Token string() {
         const int column = column_;
@@ -2655,6 +2661,25 @@ std::optional<InteractiveLineEdit> Interpreter::takePendingLineEdit() noexcept {
     return std::exchange(pendingLineEdit_, std::nullopt);
 }
 
+std::optional<InteractiveLineEdit> Interpreter::navigateProgramEdit(
+    int currentLine, int direction) {
+    if (direction != -1 && direction != 1) return std::nullopt;
+    auto found = program_.find(currentLine);
+    if (found == program_.end()) return std::nullopt;
+    if (direction < 0) {
+        if (found == program_.begin()) return std::nullopt;
+        --found;
+    } else {
+        ++found;
+        if (found == program_.end()) return std::nullopt;
+    }
+    lastEditedLine_ = found->first;
+    return InteractiveLineEdit{
+        std::to_string(found->first) +
+            (found->second.empty() ? std::string{} : " " + found->second),
+        found->first};
+}
+
 bool Interpreter::hasPendingInteractivePager() const noexcept {
     return pendingPagerRequest_.has_value();
 }
@@ -3131,7 +3156,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         const std::size_t numberEnd = lineNumberEnd(line);
         const std::string word = command(line);
         if (numberEnd != 0 || word == "HELP" || word == "EDIT" ||
-            word.rfind("EDIT ", 0) == 0 || word == "PAGER" ||
+            word.rfind("EDIT ", 0) == 0 || word == "RENUMBER" ||
+            word.rfind("RENUMBER ", 0) == 0 || word == "PAGER" ||
             word.rfind("PAGER ", 0) == 0 || word == "RUN" || word == "LIST" ||
             word.rfind("LIST ", 0) == 0 || word.rfind("LIST#", 0) == 0 ||
             word == "NEW" || word == "REBOOT" ||
@@ -3238,6 +3264,92 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 lineNumber};
             preserveInteractiveTail();
             return ExecutionStatus::InteractivePending;
+        } else if (word == "RENUMBER" || word.rfind("RENUMBER ", 0) == 0) {
+            const std::string argument = trim(normalizedLine.substr(8));
+            int first = 10;
+            int step = 10;
+            if (!argument.empty()) {
+                const auto comma = argument.find(',');
+                if (comma == std::string::npos ||
+                    argument.find(',', comma + 1) != std::string::npos)
+                    throw std::runtime_error("RENUMBER syntax is RENUMBER [start, step]");
+                const std::string firstText = trim(argument.substr(0, comma));
+                const std::string stepText = trim(argument.substr(comma + 1));
+                const auto parseInteger = [](const std::string& text, int& value) {
+                    if (text.empty()) return false;
+                    const auto parsed = std::from_chars(text.data(),
+                        text.data() + text.size(), value);
+                    return parsed.ec == std::errc{} &&
+                        parsed.ptr == text.data() + text.size();
+                };
+                if (!parseInteger(firstText, first) ||
+                    !parseInteger(stepText, step))
+                    throw std::runtime_error("RENUMBER requires integer start and step values");
+            }
+            if (first < 1 || first > 32767 || step < 1 || step > 32767)
+                throw std::runtime_error("RENUMBER start and step must be in 1..32767");
+
+            std::map<int, int> mapping;
+            int next = first;
+            for (const auto& [oldLine, unusedBody] : program_) {
+                (void)unusedBody;
+                if (next > 32767)
+                    throw std::runtime_error("RENUMBER would exceed line 32767");
+                mapping.emplace(oldLine, next);
+                if (mapping.size() < program_.size()) {
+                    if (step > 32767 - next)
+                        throw std::runtime_error("RENUMBER would exceed line 32767");
+                    next += step;
+                }
+            }
+
+            std::map<int, std::string> candidate;
+            for (const auto& [oldLine, body] : program_) {
+                std::string rewritten = body;
+                const std::vector<Token> tokens = Lexer(body).scan();
+                struct Replacement {
+                    std::size_t offset;
+                    std::size_t length;
+                    std::string text;
+                };
+                std::vector<Replacement> replacements;
+                for (std::size_t i = 0; i < tokens.size(); ++i) {
+                    std::size_t target = i + 1;
+                    if (tokens[i].kind == Kind::Go && target < tokens.size() &&
+                        tokens[target].kind == Kind::To)
+                        ++target;
+                    else if (tokens[i].kind != Kind::Goto &&
+                             tokens[i].kind != Kind::Restore)
+                        continue;
+                    if (target >= tokens.size() || tokens[target].kind != Kind::Number ||
+                        tokens[target].sourceLength == 0 || tokens[target].text.empty() ||
+                        !std::all_of(tokens[target].text.begin(), tokens[target].text.end(),
+                            [](unsigned char c) { return std::isdigit(c); }))
+                        continue;
+                    int referencedLine = 0;
+                    const auto parsed = std::from_chars(tokens[target].text.data(),
+                        tokens[target].text.data() + tokens[target].text.size(),
+                        referencedLine);
+                    if (parsed.ec != std::errc{}) continue;
+                    const auto mapped = mapping.find(referencedLine);
+                    if (mapped != mapping.end())
+                        replacements.push_back({tokens[target].sourceStart,
+                            tokens[target].sourceLength, std::to_string(mapped->second)});
+                    i = target;
+                }
+                for (auto replacement = replacements.rbegin();
+                     replacement != replacements.rend(); ++replacement)
+                    rewritten.replace(replacement->offset, replacement->length,
+                                      replacement->text);
+                candidate.emplace(mapping.at(oldLine), std::move(rewritten));
+            }
+            validateProgramLines(candidate, storage_.get());
+            program_.swap(candidate);
+            if (lastEditedLine_) {
+                const auto mapped = mapping.find(*lastEditedLine_);
+                if (mapped == mapping.end()) lastEditedLine_.reset();
+                else lastEditedLine_ = mapped->second;
+            }
         } else if (word == "HELP") {
             if (writeGeneratedListing(default_output_channel_, commandHelpListing())) {
                 preserveInteractiveTail();
@@ -3261,12 +3373,85 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word.rfind("LIST#", 0) == 0) {
             std::uint64_t channel = default_output_channel_;
             std::string selector = trim(normalizedLine.substr(4));
-            if (!selector.empty()) {
+            std::transform(selector.begin(), selector.end(), selector.begin(),
+                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            if (selector.empty()) {
+                // Whole program.
+            } else if (selector.front() == '#') {
                 channel = parseChannelSelector(selector, "LIST");
+                selector.clear();
+            } else {
+                const auto channelPos = selector.find(" #");
+                if (channelPos != std::string::npos) {
+                    channel = parseChannelSelector(trim(selector.substr(channelPos + 1)),
+                                                   "LIST");
+                    selector = trim(selector.substr(0, channelPos));
+                }
             }
+            enum class RangeKind { All, Exact, From, Through, Between };
+            RangeKind rangeKind = RangeKind::All;
+            int rangeStart = 0;
+            int rangeEnd = 32767;
+            const auto parseLineNumber = [](const std::string& text, int& number) {
+                if (text.empty()) return false;
+                const auto parsed = std::from_chars(text.data(),
+                    text.data() + text.size(), number);
+                return parsed.ec == std::errc{} &&
+                    parsed.ptr == text.data() + text.size() &&
+                    number >= 1 && number <= 32767;
+            };
+            if (!selector.empty()) {
+                const bool beginsWithTo = selector.rfind("TO ", 0) == 0;
+                const bool endsWithTo = selector.size() >= 3 &&
+                    selector.compare(selector.size() - 3, 3, " TO") == 0;
+                const auto to = beginsWithTo ? std::size_t{0} :
+                    (endsWithTo ? selector.size() - 3 : selector.find(" TO "));
+                if (to != std::string::npos) {
+                    const std::string left = beginsWithTo ? std::string{} :
+                        trim(selector.substr(0, to));
+                    const std::string right = endsWithTo ? std::string{} : trim(
+                        selector.substr(beginsWithTo ? 3 : to + 4));
+                    if (left.empty()) {
+                        rangeKind = RangeKind::Through;
+                        if (!parseLineNumber(right, rangeEnd))
+                            throw std::runtime_error("LIST TO requires an end line in 1..32767");
+                    } else {
+                        if (!parseLineNumber(left, rangeStart))
+                            throw std::runtime_error("LIST requires a start line in 1..32767");
+                        if (right.empty()) rangeKind = RangeKind::From;
+                        else {
+                            rangeKind = RangeKind::Between;
+                            if (!parseLineNumber(right, rangeEnd))
+                                throw std::runtime_error("LIST requires an end line in 1..32767");
+                        }
+                    }
+                } else {
+                    const auto dash = selector.find('-');
+                    if (dash == std::string::npos) {
+                        rangeKind = RangeKind::Exact;
+                        if (!parseLineNumber(selector, rangeStart))
+                            throw std::runtime_error("LIST line must be in 1..32767");
+                        rangeEnd = rangeStart;
+                    } else {
+                        rangeKind = RangeKind::Between;
+                        if (!parseLineNumber(trim(selector.substr(0, dash)), rangeStart) ||
+                            !parseLineNumber(trim(selector.substr(dash + 1)), rangeEnd))
+                            throw std::runtime_error("LIST range syntax is LIST start-end");
+                    }
+                }
+            }
+            if (rangeKind == RangeKind::Between && rangeStart > rangeEnd)
+                throw std::runtime_error("LIST range start must not exceed end");
             std::string listing;
-            for (const auto& [number, body] : program_)
+            for (const auto& [number, body] : program_) {
+                if ((rangeKind == RangeKind::Exact && number != rangeStart) ||
+                    (rangeKind == RangeKind::From && number < rangeStart) ||
+                    (rangeKind == RangeKind::Through && number > rangeEnd) ||
+                    (rangeKind == RangeKind::Between &&
+                     (number < rangeStart || number > rangeEnd)))
+                    continue;
                 listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
+            }
             if (writeGeneratedListing(channel, listing)) {
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;

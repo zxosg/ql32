@@ -524,6 +524,13 @@ void testSerialKeyDecoder() {
     require(character && character->key == ql32::platform::esp32::SerialKey::Character &&
                 character->character == 'x',
             "printable serial input was not preserved after cursor sequences");
+    require(!decoder.feed('\x1b') && !decoder.feed('[') && !decoder.feed('1') &&
+                !decoder.feed(';') && !decoder.feed('5'),
+            "Ctrl+Left sequence prefix was exposed as text");
+    const auto controlLeft = decoder.feed('D');
+    require(controlLeft && controlLeft->key == ql32::platform::esp32::SerialKey::Left &&
+                controlLeft->control,
+            "ANSI Ctrl+Left was not decoded with its modifier");
 }
 
 void testStoredProgramDiagnosticsAndArrayTypes() {

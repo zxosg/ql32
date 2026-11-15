@@ -396,6 +396,56 @@ void testEditPrefillIsDeliveredToInteractiveInputHost() {
             "edited line did not replace the stored program source");
 }
 
+void testRenumberListRangesAndEditNavigation() {
+    ql32::vm::SessionScheduler scheduler({}, 8);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    for (const char* line : {"10 GOTO 40\n", "20 DATA 7\n",
+                             "30 RESTORE 20\n", "40 PRINT 40\n"}) {
+        require(scheduler.submit(repl, line), "REPL rejected a numbered fixture line");
+        require(scheduler.tick(), "scheduler did not store a numbered fixture line");
+    }
+    require(scheduler.submit(repl, "RENUMBER 100, 10\n") && scheduler.tick(),
+            "REPL rejected custom RENUMBER");
+    require(scheduler.submit(repl, "LIST\n") && scheduler.tick(),
+            "REPL rejected LIST after RENUMBER");
+    require(output.str() ==
+                "100 GOTO 130\n110 DATA 7\n120 RESTORE 110\n130 PRINT 40\n",
+            "RENUMBER failed to update line references or changed a numeric literal");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST 110\n") && scheduler.tick() &&
+                output.str() == "110 DATA 7\n",
+            "LIST line did not select exactly one numbered line");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST 110 TO\n") && scheduler.tick() &&
+                output.str() == "110 DATA 7\n120 RESTORE 110\n130 PRINT 40\n",
+            "LIST start TO did not list through the end of the program");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST TO 120\n") && scheduler.tick() &&
+                output.str() == "100 GOTO 130\n110 DATA 7\n120 RESTORE 110\n",
+            "LIST TO end did not list from the beginning through the end line");
+    require(scheduler.submit(repl, "EDIT 120\n") && scheduler.tick(),
+            "REPL rejected EDIT for line navigation");
+    const auto edit = scheduler.takePendingLineEdit(repl);
+    require(edit && edit->lineNumber == 120,
+            "EDIT did not provide the selected line to the input host");
+    const auto previous = scheduler.navigateProgramEdit(repl, 120, -1);
+    const auto next = scheduler.navigateProgramEdit(repl, 120, 1);
+    require(previous && previous->lineNumber == 110 &&
+                previous->text == "110 DATA 7" && next &&
+                next->lineNumber == 130 && next->text == "130 PRINT 40" &&
+                !scheduler.navigateProgramEdit(repl, 100, -1) &&
+                !scheduler.navigateProgramEdit(repl, 130, 1),
+            "EDIT Up/Down did not navigate adjacent stored lines");
+    require(scheduler.submit(repl, "RENUMBER\n") && scheduler.tick(),
+            "REPL rejected default RENUMBER");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST\n") && scheduler.tick() &&
+                output.str() ==
+                    "10 GOTO 40\n20 DATA 7\n30 RESTORE 20\n40 PRINT 40\n",
+            "default RENUMBER did not use the 10,10 sequence or retain references");
+}
+
 void testInteractiveStartupProgramSharesReplSession() {
     ql32::vm::SessionScheduler scheduler({}, 1);
     std::ostringstream output;
@@ -1558,6 +1608,7 @@ int main() {
     testInteractiveSessionUsesSlicesAndKeepsReplState();
     testStopContinueReturnsToPromptWithoutSuspendingSession();
     testEditPrefillIsDeliveredToInteractiveInputHost();
+    testRenumberListRangesAndEditNavigation();
     testInteractiveStartupProgramSharesReplSession();
     testInteractiveStartupKeepsOpenedGraphicsWindows();
     testInteractiveSessionRecoversFromCommandErrors();
