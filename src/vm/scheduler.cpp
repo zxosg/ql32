@@ -197,7 +197,8 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency, services_.displayModes);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes,
+        services_.systemInfo);
     const TaskId id = task->id;
     tasks_.push_back(std::move(task));
     if (windowMode_ == runtime::WindowMode::Isolated)
@@ -215,7 +216,9 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency, services_.displayModes);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes,
+        services_.systemInfo);
+    task->interpreter->setPersistentSessionResources(true);
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
@@ -258,7 +261,9 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency, services_.displayModes);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes,
+        services_.systemInfo);
+    task->interpreter->setPersistentSessionResources(true);
     task->interactive = true;
     task->supervisor = true;
     task->hasPendingSource = !task->source.empty();
@@ -878,13 +883,9 @@ bool SessionScheduler::tick() {
                     current.interactiveSubmission = true;
                     current.status = TaskStatus::Runnable;
                 } else {
-                    // A worker remains a live interactive session after its
-                    // startup source completes. Keep its windows and channels
-                    // available while it waits for LOGON. The supervisor's
-                    // one-shot startup program can release graphics resources;
-                    // submitted REPL commands already keep the session alive.
-                    if (current.supervisor && !submittedInteractiveCommand)
-                        current.interpreter->releaseGraphicsResources();
+                    // Interactive sessions remain alive at the prompt, so
+                    // their opened channels and configured windows remain
+                    // available until explicitly closed or the session ends.
                     current.status = TaskStatus::WaitingInput;
                     current.releaseSource();
                 }

@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt, QTimer, QSignalBlocker, Signal
-from PySide6.QtGui import QColor, QPainter, QTextFormat
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QTextFormat
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel,
     QInputDialog,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from .serial_worker import SerialWorker
+from .qimg import convert_image, suggest_device_path, validate_device_path
 
 
 class LineNumberArea(QWidget):
@@ -187,6 +188,7 @@ class DebuggerWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_debug_tab(), "Debugger")
         self.tabs.addTab(self._build_files_tab(), "Files")
+        self.tabs.addTab(self._build_qimg_tab(), "Image converter")
         self.tabs.addTab(self._build_screen_tab(), "Screen")
         self.tabs.addTab(self._build_repl_tab(), "REPL")
         outer.addWidget(self.tabs)
@@ -383,6 +385,75 @@ class DebuggerWindow(QMainWindow):
         self.screen_view.setStyleSheet("background:#20242b;color:#d0d5dc")
         layout.addWidget(self.screen_view, 1)
         self._screen_path: Path | None = None
+        return page
+
+    def _build_qimg_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        controls = QHBoxLayout()
+        self.qimg_load_button = QPushButton("Load image")
+        self.qimg_load_button.clicked.connect(self._qimg_load)
+        controls.addWidget(self.qimg_load_button)
+        self.qimg_width = self._spinbox(1, 2048, 320, "QIMG output width")
+        self.qimg_height = self._spinbox(1, 2048, 240, "QIMG output height")
+        self.qimg_width.valueChanged.connect(
+            lambda value: self._qimg_resize_changed("width", value))
+        self.qimg_height.valueChanged.connect(
+            lambda value: self._qimg_resize_changed("height", value))
+        controls.addWidget(QLabel("Width"))
+        controls.addWidget(self.qimg_width)
+        controls.addWidget(QLabel("Height"))
+        controls.addWidget(self.qimg_height)
+        self.qimg_keep_aspect = QCheckBox("Keep aspect ratio")
+        self.qimg_keep_aspect.setChecked(True)
+        controls.addWidget(self.qimg_keep_aspect)
+        layout.addLayout(controls)
+
+        self.qimg_preview = QLabel("Load an image to preview its 16-color conversion")
+        self.qimg_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qimg_preview.setMinimumSize(500, 320)
+        self.qimg_preview.setStyleSheet("background:#20242b;color:#d0d5dc")
+        self.qimg_preview.setScaledContents(False)
+        layout.addWidget(self.qimg_preview, 1)
+
+        export_row = QHBoxLayout()
+        self.qimg_status = QLabel("No image loaded")
+        export_row.addWidget(self.qimg_status, 1)
+        self.qimg_dither = QCheckBox("Dither")
+        self.qimg_dither.setChecked(True)
+        self.qimg_dither.toggled.connect(self._qimg_rebuild)
+        export_row.addWidget(self.qimg_dither)
+        self.qimg_export_button = QPushButton("Export QIMG")
+        self.qimg_export_button.clicked.connect(self._qimg_export)
+        self.qimg_upload_button = QPushButton("Upload to device")
+        self.qimg_upload_button.clicked.connect(self._qimg_upload)
+        export_row.addWidget(self.qimg_export_button)
+        export_row.addWidget(self.qimg_upload_button)
+        layout.addLayout(export_row)
+
+        destination_row = QHBoxLayout()
+        destination_row.addWidget(QLabel("Device path"))
+        self.qimg_device_path = QLineEdit()
+        self.qimg_device_path.setPlaceholderText("FFS:/image.qimg")
+        destination_row.addWidget(self.qimg_device_path, 1)
+        layout.addLayout(destination_row)
+
+        transfer_row = QHBoxLayout()
+        self.qimg_transfer_status = QLabel("Ready")
+        self.qimg_transfer_progress = QProgressBar()
+        self.qimg_transfer_progress.setRange(0, 1000)
+        self.qimg_transfer_progress.setValue(0)
+        transfer_row.addWidget(self.qimg_transfer_status)
+        transfer_row.addWidget(self.qimg_transfer_progress, 1)
+        layout.addLayout(transfer_row)
+
+        self._qimg_source = None
+        self._qimg_source_path: Path | None = None
+        self._qimg_data: bytes | None = None
+        self._qimg_preview_image = None
+        self._qimg_resize_guard = False
+        self.qimg_export_button.setEnabled(False)
+        self.qimg_upload_button.setEnabled(False)
         return page
 
     def _build_repl_tab(self):
@@ -625,6 +696,132 @@ class DebuggerWindow(QMainWindow):
         self.transfer_jobs[key] = ("upload", device_path)
         self.worker.upload(key, local, device_path)
 
+    def _qimg_load(self):
+        local, _ = QFileDialog.getOpenFileName(
+            self, "Load image", "",
+            "Images (*.png *.bmp *.jpg *.jpeg *.gif *.tga *.pcx *.webp);;All files (*)")
+        if not local:
+            return
+        try:
+            from PIL import Image
+            with Image.open(local) as opened:
+                self._qimg_source = opened.copy()
+            self._qimg_source_path = Path(local)
+            self._qimg_resize_guard = True
+            scale = min(1.0, 2048 / self._qimg_source.width,
+                        2048 / self._qimg_source.height)
+            width = max(1, round(self._qimg_source.width * scale))
+            height = max(1, round(self._qimg_source.height * scale))
+            self.qimg_width.setValue(width)
+            self.qimg_height.setValue(height)
+            self._qimg_resize_guard = False
+            self.qimg_device_path.setText(suggest_device_path(
+                str(self._qimg_source_path),
+                self.remote_dir or self.root_box.currentText() or "FFS:/"))
+            self._qimg_rebuild()
+        except Exception as error:
+            self._qimg_resize_guard = False
+            self._qimg_source = None
+            self._qimg_data = None
+            self._qimg_preview_image = None
+            self.qimg_preview.setText(f"Could not load image: {error}")
+            self.qimg_preview.setPixmap(QPixmap())
+            self.qimg_export_button.setEnabled(False)
+            self.qimg_upload_button.setEnabled(False)
+            self._show_error(f"Could not load image: {error}")
+
+    def _qimg_resize_changed(self, changed, value):
+        if self._qimg_resize_guard or self._qimg_source is None:
+            return
+        if self.qimg_keep_aspect.isChecked():
+            self._qimg_resize_guard = True
+            ratio = self._qimg_source.width / self._qimg_source.height
+            if changed == "width":
+                self.qimg_height.setValue(max(1, min(2048, round(value / ratio))))
+            else:
+                self.qimg_width.setValue(max(1, min(2048, round(value * ratio))))
+            self._qimg_resize_guard = False
+        self._qimg_rebuild()
+
+    def _qimg_rebuild(self, *_):
+        if self._qimg_source is None:
+            return
+        try:
+            data, preview = convert_image(
+                self._qimg_source, self.qimg_width.value(), self.qimg_height.value(),
+                dither=self.qimg_dither.isChecked())
+            self._qimg_data = data
+            self._qimg_preview_image = preview
+            self._show_qimg_preview()
+            self.qimg_status.setText(
+                f"{self.qimg_width.value()}×{self.qimg_height.value()} · "
+                f"{len(data)} bytes · 16-color indexed QIMG v2")
+            self.qimg_export_button.setEnabled(True)
+            self.qimg_upload_button.setEnabled(True)
+        except Exception as error:
+            self._qimg_data = None
+            self.qimg_export_button.setEnabled(False)
+            self.qimg_upload_button.setEnabled(False)
+            self.qimg_status.setText(f"Conversion error: {error}")
+
+    def _show_qimg_preview(self):
+        if self._qimg_preview_image is None:
+            return
+        image = self._qimg_preview_image
+        raw = image.tobytes("raw", "RGB")
+        qimage = QImage(raw, image.width, image.height, image.width * 3,
+                        QImage.Format.Format_RGB888).copy()
+        pixmap = QPixmap.fromImage(qimage)
+        self.qimg_preview.setPixmap(pixmap.scaled(
+            self.qimg_preview.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation))
+
+    def _qimg_export(self):
+        if not self._qimg_data:
+            return
+        default = (self._qimg_source_path.stem if self._qimg_source_path else "image") + ".qimg"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export QIMG v2", default, "QL/32 indexed image (*.qimg)")
+        if path:
+            if Path(path).suffix.lower() != ".qimg":
+                path += ".qimg"
+            try:
+                Path(path).write_bytes(self._qimg_data)
+                self._log(f"Exported QIMG v2: {path}")
+            except OSError as error:
+                self._show_error(f"Could not write QIMG file: {error}")
+
+    def _qimg_upload(self):
+        if not self._qimg_data:
+            self._show_error("Load and convert an image first.")
+            return
+        if not self._is_connected:
+            self._show_error("Connect to QL/32 before uploading an image.")
+            return
+        device_path = self.qimg_device_path.text().strip()
+        if not device_path:
+            self._show_error("Enter a device path for the QIMG file.")
+            return
+        try:
+            validate_device_path(device_path)
+        except ValueError as error:
+            self._show_error(str(error))
+            return
+        temp = tempfile.NamedTemporaryFile(prefix="ql32-image-", suffix=".qimg",
+                                           delete=False)
+        try:
+            temp.write(self._qimg_data)
+            temp.close()
+        except OSError as error:
+            temp.close()
+            Path(temp.name).unlink(missing_ok=True)
+            self._show_error(f"Could not prepare QIMG upload: {error}")
+            return
+        key = f"qimg-upload-{id(temp)}"
+        self.transfer_jobs[key] = ("qimg-upload", device_path, temp.name)
+        self.worker.upload(key, temp.name, device_path)
+        self._log(f"Uploading QIMG v2 to {device_path}")
+
     def _download_file(self):
         item = self.file_tree.currentItem()
         entry = item.data(0, Qt.ItemDataRole.UserRole) if item else None
@@ -758,12 +955,28 @@ class DebuggerWindow(QMainWindow):
     def _on_transfer_progress(self, key, done, total):
         self.transfer_progress.setValue(0 if not total else int(done * 1000 / total))
         self.status_label.setText(f"Transfer {done}/{total} bytes")
+        job = self.transfer_jobs.get(key)
+        if job and job[0] == "qimg-upload":
+            self.qimg_transfer_progress.setValue(
+                0 if not total else int(done * 1000 / total))
+            self.qimg_transfer_status.setText(f"Uploading {done}/{total} bytes")
 
     def _on_transfer_status(self, key, status):
         self.status_label.setText(status)
+        job = self.transfer_jobs.get(key)
+        if job and job[0] == "qimg-upload":
+            self.qimg_transfer_status.setText(status)
 
     def _on_transfer_finished(self, key, kind, path, error):
         job = self.transfer_jobs.pop(key, None)
+        if job and job[0] == "qimg-upload":
+            try:
+                Path(job[2]).unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                self._log(f"Could not remove temporary image: {cleanup_error}")
+            self.qimg_transfer_progress.setValue(0)
+            self.qimg_transfer_status.setText(
+                "Upload failed" if error else f"Uploaded to {job[1]}")
         self.transfer_progress.setValue(0)
         if self._is_connected and self._connected_port:
             self.status_label.setText(f"Connected: {self._connected_port}")
@@ -809,6 +1022,11 @@ class DebuggerWindow(QMainWindow):
         if text.strip() == ">":
             return
         self.repl_view.appendPlainText(text)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._qimg_preview_image is not None:
+            self._show_qimg_preview()
 
     def _send_repl_command(self):
         command = self.repl_input.text().strip()

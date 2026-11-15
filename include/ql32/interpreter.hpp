@@ -18,11 +18,13 @@
 #include "ql32/runtime/network.hpp"
 #include "ql32/runtime/memory.hpp"
 #include "ql32/runtime/system_control.hpp"
+#include "ql32/runtime/system_info.hpp"
 #include "ql32/runtime/cpu_frequency.hpp"
 #include "ql32/runtime/display_mode.hpp"
 #include "ql32/runtime/task_control.hpp"
 #include "ql32/runtime/error.hpp"
 #include "ql32/graphics/service.hpp"
+#include "ql32/graphics/bitmap.hpp"
 #include "ql32/ui/service.hpp"
 
 namespace ql32 {
@@ -52,7 +54,8 @@ public:
                          runtime::TaskId taskId = 0,
                          std::shared_ptr<runtime::SystemControlService> systemControl = {},
                          std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency = {},
-                         std::shared_ptr<runtime::DisplayModeService> displayModes = {});
+                         std::shared_ptr<runtime::DisplayModeService> displayModes = {},
+                         std::shared_ptr<runtime::SystemInfoService> systemInfo = {});
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -81,6 +84,11 @@ public:
     std::size_t openChannelCount() const;
     void setErrorContext(runtime::ErrorCode code, std::string detail = {});
     void abortExecution() noexcept;
+    // Keeps channels opened by programs in a long-lived interactive session
+    // until explicitly closed or until the session itself ends.
+    void setPersistentSessionResources(bool persistent) noexcept {
+        persistentSessionResources_ = persistent;
+    }
     // Release retained display memory while keeping this interpreter session
     // available for the next interactive command.
     void releaseGraphicsResources() noexcept;
@@ -140,11 +148,13 @@ private:
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;
     std::vector<runtime::ChannelId> executionChannels_;
     bool interactiveCommandExecution_ = false;
+    bool persistentSessionResources_ = false;
     std::map<int, std::string> program_;
     std::optional<int> lastEditedLine_;
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;
     graphics::FontRegistry fontRegistry_;
+    graphics::BitmapRegistry bitmapRegistry_;
     std::shared_ptr<runtime::ChannelService> channels_;
     runtime::BufferManager buffers_;
     std::shared_ptr<ui::Service> ui_;
@@ -153,6 +163,7 @@ private:
     std::shared_ptr<runtime::MemoryService> memory_;
     std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency_;
     std::shared_ptr<runtime::DisplayModeService> displayModes_;
+    std::shared_ptr<runtime::SystemInfoService> systemInfo_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::shared_ptr<runtime::SystemControlService> systemControl_;
     runtime::SessionId session_id_ = 0;

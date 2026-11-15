@@ -116,7 +116,10 @@ cursor. Each BASIC session has its own data cursor.
 Channels are session-owned handles. `#0` is the command/error console and
 keyboard input; `#1` is the default user output and graphics channel. `OPEN`
 allocates additional handles. File, serial, window, null, hardware, and touch
-channels are selected through services available on the current target.
+channels are selected through services available on the current target. An
+interactive session keeps opened channels and their window state across
+program completion and REPL commands; `CLOSE` or ending the session releases
+them.
 
 A command that waits for UI input, a touch event, serial input, or a task
 completion suspends only its BASIC session. Other scheduler sessions continue.
@@ -237,7 +240,7 @@ All entries in this subsection require a graphics display service `[DISPLAY]`.
 | `PAPER` | `PAPER [#window,] color` | Sets the current paper palette index. | `PAPER 0` |
 | `OVER` | `OVER [#window,] mode` | Chooses set, clear, or XOR drawing behavior (`0`, `1`, `2`). | `OVER 2` |
 | `PLOT` | `PLOT [#window,] x, y` | Draws one pixel in the current ink. | `PLOT 10, 12` |
-| `LINE` | `LINE [#window,] x1, y1, x2, y2` | Draws a line between pixel coordinates. | `LINE 0, 0, 30, 20` |
+| `LINE` | `LINE [#window,] x1, y1, x2, y2` or `LINE [#window,] x, y [TO x2, y2]` or `LINE [#window,] TO x, y` | Draws a line or sets/uses the current graphics cursor. The original four-coordinate form remains supported. | `LINE 0, 0 TO 30, 20` |
 | `RECT` | `RECT [#window,] x, y, width, height[, fill]` | Draws a rectangle; nonzero `fill` makes it solid. | `RECT 4, 4, 30, 20, 1` |
 | `CIRCLE` | `CIRCLE [#window,] x, y, radius[, fill]` | Draws a circle at a center point. | `CIRCLE 40, 30, 12` |
 | `TEXT` | `TEXT [#window,] x, y, string$` | Draws a string at a pixel position. | `TEXT 2, 2, "QL/32"` |
@@ -251,6 +254,8 @@ All entries in this subsection require a graphics display service `[DISPLAY]`.
 | `FONT` | `FONT [#channel,] handle, style` | Selects a normal text-output font and style flags. `[DISPLAY]` | `FONT font%, 1` |
 | `GFONT` | `GFONT [#window,] handle, style` | Selects the graphics `TEXT` font and style. `[DISPLAY]` | `GFONT font%, 0` |
 | `UNLOADFONT` | `UNLOADFONT handle` | Releases a loaded font. `[DISPLAY]` | `UNLOADFONT font%` |
+| `BLIT` | `BLIT [#window,] image%, x, y[, transparentIndex]` | Draws a QIMG indexed bitmap at pixel coordinates; the optional palette index is transparent. `[DISPLAY]` | `BLIT logo%, 20, 12, 0` |
+| `UNLOADIMAGE` | `UNLOADIMAGE handle` | Releases a session-owned bitmap and its open file handle. `[DISPLAY]` | `UNLOADIMAGE logo%` |
 
 ### User interface
 
@@ -274,6 +279,7 @@ display presenters provide different interaction surfaces.
 | `DGET$` | `value$ = DGET$(dialog, fieldNumber)` | Reads a string dialog field result. | `name$ = DGET$(dialog%, 2)` |
 | `MINIT` | `menu% = MINIT(title$)` | Creates a session-owned menu definition. | `menu% = MINIT("File")` |
 | `MCARD` | `MCARD menu%, id, label$, shortcut$` | Adds a stable-ID command to a menu. | `MCARD menu%, 10, "Open", "O"` |
+| `MENABLE` | `MENABLE menu%, id, enabled` | Enables or disables a previously defined menu item for the next presentation; enabled is 0 or 1. | `MENABLE menu%, 10, 0` |
 | `MENU` | `item% = MENU(menu%)` | Presents a menu and returns the selected item ID. | `item% = MENU(menu%)` |
 | `CONFIRM` | `answer% = CONFIRM(title$, message$)` | Shows a confirmation request and returns its result. | `answer% = CONFIRM("Exit", "Continue?")` |
 
@@ -373,6 +379,8 @@ logical operators.
 | `FREE` | `FREE()` or `FREE(selector)` | Returns formatted memory information or selected total/contiguous/fragment values. | `bytes = FREE(0)` |
 | `CPUFREQ` | `CPUFREQ()` | Current CPU clock in MHz, or zero when unavailable. `[ESP32]` | `mhz% = CPUFREQ()` |
 | `MODE` | `MODE()` | Returns the current display mode. `[DISPLAY]` | `mode% = MODE()` |
+| `SYSINFO$` | `SYSINFO$(selector)` | Returns version, build ID, profile, display, input, storage, or feature summary. Selector constants are in `ql32.inc`; values describe the compiled profile. | `board$ = SYSINFO$(KSysPlatform)` |
+| `CAPABILITY` | `CAPABILITY(query$)` | Returns `KCapabilityYes`, `KCapabilityNo`, or `KCapabilityUnknown` for compiled profile support; it does not report live device state. | `hasPs2% = CAPABILITY("ps2")` |
 
 ### Graphics information and fonts
 
@@ -388,6 +396,14 @@ These functions require a graphics display service `[DISPLAY]`.
 | `GROTATION` | `GROTATION()` | Current presenter rotation. | `r% = GROTATION()` |
 | `GPALETTESIZE` | `GPALETTESIZE()` | Number of palette entries. | `n% = GPALETTESIZE()` |
 | `GPALETTE$` | `GPALETTE$(index)` | Palette entry as a `#RRGGBB` string. | `color$ = GPALETTE$(1)` |
+| `LOADIMAGE` | `LOADIMAGE(path$)` | Loads a bounded QIMG indexed-4 bitmap and returns a session-owned handle. `[DISPLAY]` | `logo% = LOADIMAGE("logo.qimg")` |
+| `GX` | `GX()` | Current graphics cursor X coordinate. | `x% = GX()` |
+| `GY` | `GY()` | Current graphics cursor Y coordinate. | `y% = GY()` |
+| `PALETTE` | `PALETTE start, rgb[, rgb ...]` | Replaces a contiguous range in the display-wide palette. Each packed RGB value represents `0xRRGGBB`; retained pixels in every window use the new mapping. QL/32-specific. | `PALETTE 1,RGB(128,128,255)` |
+| `PALROT` | `PALROT start, count, steps` | Circularly rotates a palette range; positive steps rotate toward higher indices. | `PALROT 1, 4, 1` |
+| `PALSHIFT` | `PALSHIFT start, count, direction, rgb` | Shifts a range one entry; direction is `1` or `-1`, and `rgb` is inserted at the vacated end. | `PALSHIFT 1, 4, 1, RGB(0,0,0)` |
+| `PALFADE` | `PALFADE start, count, targetRgb, amount` | Moves each color component toward the target by an amount from `0` to `1`. | `PALFADE 1, 4, RGB(255,255,255), 0.25` |
+| `RGB` | `RGB(red, green, blue)` | Packs three integer components in the range 0..255 into an `RRGGBB` color value. | `blue% = RGB(0,0,255)` |
 | `LOADFONT` | `LOADFONT(path$)` | Loads a font and returns a handle. | `font% = LOADFONT("font.fnt")` |
 | `GETFONT` | `GETFONT(selector, handle)` | Returns font metrics selected by `KFontMetric...` constants. | `height% = GETFONT(KFontMetricHeight, font%)` |
 
@@ -435,7 +451,7 @@ target shell services. Examples use prompt syntax.
 | `NEW` | `NEW` | Clears the stored numbered program. | `NEW` |
 | `LOAD` | `LOAD "path.bas"` | Loads numbered or unnumbered source from storage. | `LOAD "FFS:/demo.bas"` |
 | `SAVE` | `SAVE "path.bas"` | Saves the stored program. | `SAVE "SDC:/demo.bas"` |
-| `DIR` | `DIR [path] [#channel]` | Lists a directory in sorted name order. | `DIR "FFS:/"` |
+| `DIR` | `DIR [#channel] [DETAILS] [path]` | Lists a directory in sorted name order; `DETAILS` includes file sizes and labels subdirectories. | `DIR DETAILS "FFS:/"` |
 | `CD` | `CD [path]` | Changes the current directory for this interpreter session. | `CD "SDC:/programs"` |
 | `DELETE` | `DELETE line[, line ...]` or `DELETE path$` | Deletes program lines atomically or removes a file. | `DELETE 10, 20` |
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |
@@ -452,6 +468,7 @@ target shell services. Examples use prompt syntax.
 | `SLICE` | `SLICE [instructions]` | Reports or changes the scheduler instruction slice. Embedded REPL. `[ESP32]` | `SLICE 256` |
 | `PRIORITY` | `PRIORITY id, weight` | Sets a task's scheduling weight. Embedded REPL. `[ESP32]` | `PRIORITY 2, 3` |
 | `TASKVIEW` | `TASKVIEW id, x, y, width, height[, offsetX, offsetY]` | Positions a task's display viewport. Embedded display target. `[DISPLAY]` | `TASKVIEW 2, 0, 0, 120, 120` |
+| `TILE` | `TILE` | Re-tiles visible retained windows on the display. Supervisor only. `[DISPLAY] [ESP32]` | `TILE` |
 | `MODE` | `MODE [id[, options]\|name\|LIST]` | Lists, reports, or changes the display mode. `[DISPLAY]` | `MODE LIST` |
 | `WINDOWMODE` | `WINDOWMODE ISOLATED\|SHARED` | Selects a task's window mode where supported. | `WINDOWMODE SHARED` |
 | `CONTINUE` | `CONTINUE` | Resumes a stored run after BASIC `STOP`. | `CONTINUE` |

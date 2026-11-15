@@ -128,8 +128,9 @@ FabGL and ESP-IDF types.
   rotate, directional shift with inserted color, component-wise fade, and
   save/restore. A double-bank exchange stages changes and exposes them only
   when the scanout refill worker prepares the next frame's first row. Indexed-4
-  scanout reads through the active palette; BASIC palette commands and a
-  physical test that changes palettes during scanout remain pending. Palette
+  scanout reads through the active palette. BASIC `PALETTE`/`RGB` and manual
+  palette rotate/shift/fade commands are implemented and verified over serial;
+  active-scanout palette behavior and broader image patterns remain pending. Palette
   unit tests pass and both RGB222 and packed-4 diagnostic firmware profiles
   compile. On repeat runs of the same firmware revision, the owner confirmed
   stable moving bars for both RGB222 and packed-4. Serial reports showed zero
@@ -138,8 +139,18 @@ FabGL and ESP-IDF types.
   staged palette every 500 ms. The owner confirmed the bars stayed stable and
   colors changed at each step; serial showed palette-apply counts increasing
   with zero late refills or spurious IRQs. Phase 4's core and low-transition
-  palette animation qualification pass. BASIC palette commands and broader
-  image patterns remain open; Phase 5 drawing and blitting primitives are next.
+  palette animation qualification pass. The QL/32 command interface supports
+  direct range replacement and program-controlled rotation, shifting, and
+  fading; a timer is not used. BASIC `LOADIMAGE`, transparent `BLIT`, and
+  `UNLOADIMAGE` now use the QL/32-specific QIMG v2 indexed-4 format with an
+  embedded RGB palette. Host tests passed. On 2026-11-15 the Olimex PSRAM image
+  was rebuilt/flashed; YMODEM upload, `LOAD`/`BLIT`/`UNLOADIMAGE`, and
+  SCREEN-capture checks passed. The capture showed the expected colors and
+  transparent pixels revealing the contrasting background. A three-channel `TILE`
+  fixture passed over serial and the owner confirmed three separate tiled
+  areas on VGA. The owner also visually confirmed that a `MENABLE`-disabled
+  menu item is dimmed. See the [bitmap test results](test-results/bitmap-load-blit-2026-11-14.md) and
+  [system/UI test results](test-results/system-info-and-dynamic-ui-2026-11-14.md).
 - Phase 5 has started in the portable framebuffer core: transparent bitmap
   blits, framebuffer-to-bitmap copies, vertical scroll with exposed-row clear,
   indexed-4 translation, clipped general lines, circle outlines/fills, and
@@ -641,6 +652,32 @@ the HELP page added 4, and dismissing it added 7. IRQs stayed at zero. The
 owner still saw minor horizontally moving lines during the page, so one fewer
 publication did not eliminate the disturbance. The pager was restored to OFF.
 Continue tracing DMA refill deadlines during partial framebuffer publication.
+
+**Programmable palette command (2026-11-14):** implemented
+`PALETTE start,rgb[,rgb...]` and `RGB(red,green,blue)` on the retained
+indexed-canvas service. RGB values are packed `RRGGBB` integers, palette
+updates are display-wide, and indexed
+canvas pixels remain unchanged. The command observes `GUPDATE` and frame-skip
+settings, and `GPALETTE$` reads the current mapping. Linux graphics tests passed;
+the Olimex double-buffer profile built and flashed. Serial REPL checks reported
+palette size 16, round-tripped `#123456`, `#ABCDEF`, and `#654321`, confirmed
+that a palette edit made under `GUPDATE 0` could be read before the explicit
+flush, and rejected a range beyond the active palette. VGA color appearance
+was not evaluated as part of this functionality check. This QL/32 command is
+informed by SuperBASIC `PALETTE_QL`; per-window palettes and automatic timer
+cycling remain deferred. See
+[programmable palette results](test-results/graphics-palette-2026-11-14.md).
+
+**Cursor-based line drawing (2026-11-14):** extended `LINE` with the
+SuperBASIC-style cursor subset `LINE x,y`, `LINE TO x,y`, and
+`LINE x,y TO x2,y2`, while retaining `LINE x1,y1,x2,y2`. `GX()` and `GY()`
+return the current cursor; state is independent for each session and graphics
+channel. The Linux graphics test executable passed. The Olimex profile rebuilt
+and flashed; serial REPL checks observed cursor positions `(2,3)`, `(5,6)`,
+`(11,12)`, and `(3,1)` across the new and existing forms. VGA appearance was
+not assessed. This implements the basic `LINE` behavior documented by
+SuperBASIC; polyline lists remain unsupported. See
+[cursor-line results](test-results/graphics-line-cursor-2026-11-14.md).
 
 **Backlog — console prompt with `GUPDATE SKIP,1`:** the owner reports that
 repeated Enter presses create new console lines but intermittently omit the

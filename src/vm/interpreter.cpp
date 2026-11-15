@@ -3,6 +3,7 @@
 #include "execution_state.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -1034,7 +1035,24 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 arguments.erase(arguments.begin());
             }
             if (instruction.builtin) {
-                if (instruction.name == "MODE") {
+                if (instruction.name == "TILE") {
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "session supervisor unavailable");
+                    const auto tasks = taskControl_->listTasks();
+                    const auto self = std::find_if(tasks.begin(), tasks.end(),
+                        [this](const runtime::ManagedTaskInfo& task) {
+                            return task.id == task_id_;
+                        });
+                    if (self == tasks.end() || !self->supervisor)
+                        runtimeError(instruction, "TILE is supervisor-only");
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    if (!graphics_->tileWindows())
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "window tiling is unsupported");
+                } else if (instruction.name == "MODE") {
                     if (!displayModes_ || !graphics_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "display mode service unavailable");
@@ -1376,6 +1394,20 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     else
                         result = std::floor(*number);
                     pushValue(result);
+                    break;
+                }
+                if (instruction.name == "RGB") {
+                    std::uint32_t packed = 0;
+                    for (std::size_t index = 0; index < 3; ++index) {
+                        const auto* component = std::get_if<double>(&arguments[index]);
+                        if (!component || !std::isfinite(*component) ||
+                            std::trunc(*component) != *component ||
+                            *component < 0 || *component > 255)
+                            runtimeError(instruction,
+                                "RGB components must be integers in range 0..255");
+                        packed = (packed << 8) | static_cast<std::uint32_t>(*component);
+                    }
+                    pushValue(static_cast<double>(packed));
                     break;
                 }
                 if (instruction.name == "BAND" || instruction.name == "BOR" ||
@@ -1853,6 +1885,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     instruction.name == "GDEPTH" || instruction.name == "GORIGINX" ||
                     instruction.name == "GORIGINY" || instruction.name == "GROTATION" ||
                     instruction.name == "GPALETTESIZE" || instruction.name == "GPALETTE$" ||
+                    instruction.name == "GX" || instruction.name == "GY" ||
                     instruction.name == "ROTATE") {
                     if (!graphics_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -1883,6 +1916,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             result[2 + i * 2] = hex[channels[i] & 0x0F];
                         }
                         pushValue(std::move(result));
+                    } else if (instruction.name == "GX" || instruction.name == "GY") {
+                        const auto position = graphics_->graphicsPosition(session_id_, 1);
+                        pushValue(static_cast<double>(instruction.name == "GX" ?
+                            position.x : position.y));
                     } else {
                         const auto info = graphics_->windowInfo(session_id_);
                         if (instruction.name == "GWIDTH") pushValue(static_cast<double>(info.width));
@@ -2071,7 +2108,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     instruction.name == "DCHOICE" || instruction.name == "DCHECK" ||
                     instruction.name == "DBUTTONS" || instruction.name == "DIALOG" ||
                     instruction.name == "DGET" || instruction.name == "DGET$" ||
-                    instruction.name == "MCARD" || instruction.name == "MENU") {
+                    instruction.name == "MCARD" || instruction.name == "MENABLE" ||
+                    instruction.name == "MENU") {
                     const auto stringArgument = [&](std::size_t index) -> const std::string& {
                         if (const auto* value = std::get_if<std::string>(&arguments[index]))
                             return *value;
@@ -2242,6 +2280,29 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             if (item.commandId == id)
                                 runtimeError(instruction, "duplicate menu command ID");
                         found->second.items.push_back({id, stringArgument(2), stringArgument(3), true});
+                    } else if (instruction.name == "MENABLE") {
+                        const std::uint64_t handle = handleArgument(0);
+                        const auto found = uiSession_->menus.find(handle);
+                        if (found == uiSession_->menus.end())
+                            runtimeError(instruction, "unknown menu handle");
+                        const double rawId = numericArgument(1);
+                        if (!std::isfinite(rawId) || std::trunc(rawId) != rawId ||
+                            rawId < 1 || rawId > static_cast<double>(
+                                std::numeric_limits<std::uint32_t>::max()))
+                            runtimeError(instruction,
+                                "menu command ID must be a positive 32-bit integer");
+                        const double rawEnabled = numericArgument(2);
+                        if (!std::isfinite(rawEnabled) || std::trunc(rawEnabled) != rawEnabled ||
+                            (rawEnabled != 0 && rawEnabled != 1))
+                            runtimeError(instruction, "menu enabled flag must be 0 or 1");
+                        const auto id = static_cast<std::uint32_t>(rawId);
+                        const auto item = std::find_if(found->second.items.begin(),
+                            found->second.items.end(), [id](const ui::MenuItem& candidate) {
+                                return candidate.commandId == id;
+                            });
+                        if (item == found->second.items.end())
+                            runtimeError(instruction, "unknown menu command ID");
+                        item->enabled = rawEnabled == 1;
                     } else if (instruction.name == "MENU") {
                         if (!ui_) throw runtime::ServiceError(
                             runtime::ServiceErrorCode::Unavailable, "UI service unavailable");
@@ -2292,11 +2353,128 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     }
                     break;
                 }
+                if (instruction.name == "PALETTE") {
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    if (arguments.size() < 2)
+                        runtimeError(instruction,
+                            "PALETTE expects a start index and at least one RGB color");
+                    const auto integerArgument = [&](std::size_t index,
+                                                     const char* description,
+                                                     std::uint32_t maximum) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number) runtimeError(instruction, "numeric value required");
+                        if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < 0 || *number > maximum)
+                            runtimeError(instruction, description);
+                        return static_cast<std::uint32_t>(*number);
+                    };
+                    const auto first = integerArgument(0,
+                        "palette start index must be an integer in range", 255);
+                    const auto paletteSize = graphics_->windowInfo(session_id_).paletteSize;
+                    if (first >= paletteSize || arguments.size() - 1 > paletteSize - first)
+                        runtimeError(instruction, "palette range exceeds the active palette");
+                    std::vector<graphics::RgbColor> colors;
+                    colors.reserve(arguments.size() - 1);
+                    for (std::size_t index = 1; index < arguments.size(); ++index) {
+                        const auto value = integerArgument(index,
+                            "RGB color must be an integer in range 0..16777215", 0xFFFFFF);
+                        colors.push_back({
+                            static_cast<std::uint8_t>((value >> 16) & 0xFF),
+                            static_cast<std::uint8_t>((value >> 8) & 0xFF),
+                            static_cast<std::uint8_t>(value & 0xFF)});
+                    }
+                    graphics_->setPaletteColors(session_id_,
+                        static_cast<std::uint16_t>(first), colors);
+                    break;
+                }
+                if (instruction.name == "PALROT" || instruction.name == "PALSHIFT" ||
+                    instruction.name == "PALFADE") {
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    const auto integerArgument = [&](std::size_t index,
+                                                     const char* description,
+                                                     std::int64_t minimum,
+                                                     std::int64_t maximum) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < static_cast<double>(minimum) ||
+                            *number > static_cast<double>(maximum))
+                            runtimeError(instruction, description);
+                        return static_cast<std::int64_t>(*number);
+                    };
+                    const auto first = integerArgument(0,
+                        "palette start must be an integer", 0, 255);
+                    const auto count = integerArgument(1,
+                        "palette count must be a positive integer", 1, 256);
+                    const auto paletteSize = graphics_->windowInfo(session_id_).paletteSize;
+                    if (first >= paletteSize || count > paletteSize - first)
+                        runtimeError(instruction, "palette range exceeds the active palette");
+                    std::vector<graphics::RgbColor> colors;
+                    colors.reserve(static_cast<std::size_t>(count));
+                    for (std::int64_t offset = 0; offset < count; ++offset)
+                        colors.push_back(graphics_->paletteColor(session_id_,
+                            static_cast<std::uint16_t>(first + offset)));
+
+                    if (instruction.name == "PALROT") {
+                        const auto steps = integerArgument(2,
+                            "palette rotation steps must be an integer", INT32_MIN, INT32_MAX);
+                        const auto length = static_cast<std::int64_t>(count);
+                        const auto right = (steps % length + length) % length;
+                        if (right != 0)
+                            std::rotate(colors.begin(), colors.end() - right, colors.end());
+                    } else if (instruction.name == "PALSHIFT") {
+                        const auto direction = integerArgument(2,
+                            "palette shift direction must be -1 or 1", -1, 1);
+                        if (direction == 0)
+                            runtimeError(instruction, "palette shift direction must be -1 or 1");
+                        const auto packed = integerArgument(3,
+                            "RGB color must be an integer in range 0..16777215", 0, 0xFFFFFF);
+                        const graphics::RgbColor inserted{
+                            static_cast<std::uint8_t>((packed >> 16) & 0xFF),
+                            static_cast<std::uint8_t>((packed >> 8) & 0xFF),
+                            static_cast<std::uint8_t>(packed & 0xFF)};
+                        if (direction > 0) {
+                            std::move_backward(colors.begin(), colors.end() - 1, colors.end());
+                            colors.front() = inserted;
+                        } else {
+                            std::move(colors.begin() + 1, colors.end(), colors.begin());
+                            colors.back() = inserted;
+                        }
+                    } else {
+                        const auto packed = integerArgument(2,
+                            "target RGB must be an integer in range 0..16777215", 0, 0xFFFFFF);
+                        const auto* amountValue = std::get_if<double>(&arguments[3]);
+                        if (!amountValue || !std::isfinite(*amountValue) ||
+                            *amountValue < 0.0 || *amountValue > 1.0)
+                            runtimeError(instruction, "fade amount must be in the range 0..1");
+                        const graphics::RgbColor target{
+                            static_cast<std::uint8_t>((packed >> 16) & 0xFF),
+                            static_cast<std::uint8_t>((packed >> 8) & 0xFF),
+                            static_cast<std::uint8_t>(packed & 0xFF)};
+                        const auto mix = [amount = *amountValue](std::uint8_t from,
+                                                                 std::uint8_t to) {
+                            return static_cast<std::uint8_t>(std::lround(
+                                from + (static_cast<double>(to) - from) * amount));
+                        };
+                        for (auto& color : colors) {
+                            color.red = mix(color.red, target.red);
+                            color.green = mix(color.green, target.green);
+                            color.blue = mix(color.blue, target.blue);
+                        }
+                    }
+                    graphics_->setPaletteColors(session_id_,
+                        static_cast<std::uint16_t>(first), colors);
+                    break;
+                }
                 if (instruction.name == "INK" || instruction.name == "PAPER" ||
                     instruction.name == "OVER" || instruction.name == "PLOT" ||
                     instruction.name == "LINE" ||
                     instruction.name == "RECT" ||
                     instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
+                    instruction.name == "BLIT" ||
                     instruction.name == "FONT" || instruction.name == "GFONT" ||
                     instruction.name == "CLS" || instruction.name == "WINDOW" ||
                     instruction.name == "CLOSEWINDOW") {
@@ -2353,7 +2531,79 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             runtimeError(instruction, "fill flag must be 0 or 1");
                         return fill == 1;
                     };
-                    if (instruction.name == "FONT" || instruction.name == "GFONT") {
+                    if (instruction.name == "BLIT") {
+                        const auto handle = integerArgument(0,
+                            "bitmap handle must be a positive integer");
+                        if (handle <= 0)
+                            runtimeError(instruction, "bitmap handle must be a positive integer");
+                        const auto destination = graphics::Point{
+                            pixelArgument(1, "pixel coordinate out of range"),
+                            pixelArgument(2, "pixel coordinate out of range")};
+                        const auto bitmapHandle = static_cast<graphics::BitmapHandle>(handle);
+                        const auto& bitmap = bitmapRegistry_.get(bitmapHandle);
+                        const auto info = bitmap.info();
+                        const auto paletteSize = graphics_->windowInfo(session_id_, channel).paletteSize;
+                        std::array<graphics::ColorIndex, 16> paletteMap{};
+                        for (std::size_t sourceIndex = 0;
+                             sourceIndex < paletteMap.size(); ++sourceIndex) {
+                            const auto& sourceColor = bitmap.palette()[sourceIndex];
+                            std::uint32_t bestDistance = std::numeric_limits<std::uint32_t>::max();
+                            for (std::uint16_t targetIndex = 0;
+                                 targetIndex < paletteSize; ++targetIndex) {
+                                const auto targetColor = graphics_->paletteColor(
+                                    session_id_, channel, targetIndex);
+                                const auto red = static_cast<int>(sourceColor[0]) - targetColor.red;
+                                const auto green = static_cast<int>(sourceColor[1]) - targetColor.green;
+                                const auto blue = static_cast<int>(sourceColor[2]) - targetColor.blue;
+                                const auto distance = static_cast<std::uint32_t>(
+                                    red * red + green * green + blue * blue);
+                                if (distance < bestDistance) {
+                                    bestDistance = distance;
+                                    paletteMap[sourceIndex] =
+                                        static_cast<graphics::ColorIndex>(targetIndex);
+                                }
+                            }
+                        }
+                        std::optional<graphics::ColorIndex> transparent;
+                        if (arguments.size() > 3) {
+                            const auto index = integerArgument(3,
+                                "transparent palette index must be an integer from 0 to 15");
+                            if (index < 0 || index > 15)
+                                runtimeError(instruction,
+                                    "transparent palette index must be from 0 to 15");
+                            transparent = static_cast<graphics::ColorIndex>(index);
+                        }
+                        std::vector<std::uint8_t> row;
+                        for (std::uint32_t y = 0; y < info.height; ++y) {
+                            if (!bitmap.readRow(y, row))
+                                runtimeError(instruction, "QIMG row is unavailable");
+                        }
+                        graphics_->beginPresentationBatch(session_id_);
+                        try {
+                            for (std::uint32_t y = 0; y < info.height; ++y) {
+                                if (!bitmap.readRow(y, row))
+                                    runtimeError(instruction, "QIMG row is unavailable");
+                                for (auto& index : row) {
+                                    index = transparent && index == *transparent
+                                        ? std::numeric_limits<graphics::ColorIndex>::max()
+                                        : paletteMap[index];
+                                }
+                                const auto rowY = static_cast<std::int64_t>(destination.y) + y;
+                                if (rowY < std::numeric_limits<std::int32_t>::min() ||
+                                    rowY > std::numeric_limits<std::int32_t>::max()) continue;
+                                graphics_->drawIndexedRow(session_id_, channel,
+                                    {destination.x, static_cast<std::int32_t>(rowY)},
+                                    row.data(), row.size(),
+                                    transparent ? std::optional<graphics::ColorIndex>(
+                                        std::numeric_limits<graphics::ColorIndex>::max())
+                                        : std::nullopt);
+                            }
+                        } catch (...) {
+                            try { graphics_->endPresentationBatch(session_id_); } catch (...) {}
+                            throw;
+                        }
+                        graphics_->endPresentationBatch(session_id_);
+                    } else if (instruction.name == "FONT" || instruction.name == "GFONT") {
                         const auto handle = integerArgument(0,
                             "font handle must be a positive integer");
                         const auto style = integerArgument(1,
@@ -2414,11 +2664,29 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } else if (instruction.name == "PLOT") {
                         graphics_->pixel(session_id_, channel, pointArguments());
                     } else if (instruction.name == "LINE") {
-                        const auto from = pointArguments();
-                        const auto to = graphics::Point{
-                            pixelArgument(2, "pixel coordinate out of range"),
-                            pixelArgument(3, "pixel coordinate out of range")};
-                        graphics_->line(session_id_, channel, from, to);
+                        const std::string lineForm = instruction.parameters.empty() ?
+                            std::string{} : instruction.parameters[0];
+                        if (lineForm == "MOVE") {
+                            graphics_->setGraphicsPosition(session_id_, channel,
+                                                           pointArguments());
+                        } else if (lineForm == "TO") {
+                            const auto to = pointArguments();
+                            graphics_->line(session_id_, channel,
+                                graphics_->graphicsPosition(session_id_, channel), to);
+                        } else if (lineForm == "FROM_TO") {
+                            const auto from = pointArguments();
+                            const auto to = graphics::Point{
+                                pixelArgument(2, "pixel coordinate out of range"),
+                                pixelArgument(3, "pixel coordinate out of range")};
+                            graphics_->setGraphicsPosition(session_id_, channel, from);
+                            graphics_->line(session_id_, channel, from, to);
+                        } else {
+                            const auto from = pointArguments();
+                            const auto to = graphics::Point{
+                                pixelArgument(2, "pixel coordinate out of range"),
+                                pixelArgument(3, "pixel coordinate out of range")};
+                            graphics_->line(session_id_, channel, from, to);
+                        }
                     } else if (instruction.name == "RECT") {
                         const auto topLeft = pointArguments();
                         const auto width = pixelArgument(2, "rectangle size must be positive");
@@ -2490,7 +2758,26 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         runtimeError(instruction, label);
                     return static_cast<std::uint64_t>(*number);
                 };
-                if (instruction.name == "LOADFONT") {
+                if (instruction.name == "LOADIMAGE") {
+                    const auto* path = std::get_if<std::string>(&arguments[0]);
+                    if (!path) runtimeError(instruction, "image path must be a string");
+                    try {
+                        pushValue(static_cast<double>(bitmapRegistry_.load(*path)));
+                    } catch (const std::invalid_argument& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                } else if (instruction.name == "UNLOADIMAGE") {
+                    const auto handle = integerArgument(0,
+                        "bitmap handle must be a positive integer", 1,
+                        std::numeric_limits<std::uint32_t>::max());
+                    if (handle <= 0)
+                        runtimeError(instruction, "bitmap handle must be a positive integer");
+                    try {
+                        bitmapRegistry_.unload(static_cast<graphics::BitmapHandle>(handle));
+                    } catch (const std::invalid_argument& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                } else if (instruction.name == "LOADFONT") {
                     const auto* path = std::get_if<std::string>(&arguments[0]);
                     if (!path) runtimeError(instruction, "font path must be a string");
                     try {
@@ -2520,6 +2807,17 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } catch (const std::invalid_argument& error) {
                         runtimeError(instruction, error.what());
                     }
+                } else if (instruction.name == "SYSINFO$") {
+                    const auto selector = integerArgument(0,
+                        "system information selector must be an integer", 0, 6);
+                    pushValue(systemInfo_->value(
+                        static_cast<runtime::SystemInfoSelector>(selector)));
+                } else if (instruction.name == "CAPABILITY") {
+                    const auto* query = std::get_if<std::string>(&arguments[0]);
+                    if (!query) runtimeError(instruction,
+                        "capability query must be a string");
+                    const auto supported = systemInfo_->capability(*query);
+                    pushValue(supported ? (*supported ? 1.0 : 0.0) : -1.0);
                 } else if (instruction.name == "OPEN") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,

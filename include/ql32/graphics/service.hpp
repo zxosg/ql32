@@ -5,9 +5,12 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ql32::graphics {
 
@@ -89,11 +92,42 @@ public:
         (void)channel;
         line(session, from, to);
     }
+    virtual void setGraphicsPosition(SessionId, ChannelId, Point) {
+        throw std::runtime_error("graphics cursor unsupported");
+    }
+    virtual Point graphicsPosition(SessionId, ChannelId) const {
+        throw std::runtime_error("graphics cursor unsupported");
+    }
     virtual void pixel(SessionId session, Point position) {
         line(session, position, position);
     }
     virtual void pixel(SessionId session, ChannelId channel, Point position) {
         line(session, channel, position, position);
+    }
+    virtual ColorIndex inkColor(SessionId, ChannelId) { return 7; }
+    virtual void drawIndexedRow(SessionId session, ChannelId channel, Point topLeft,
+                                const std::uint8_t* pixels, std::size_t count,
+                                std::optional<ColorIndex> transparentIndex = {}) {
+        if (!pixels && count != 0)
+            throw std::invalid_argument("bitmap row is null");
+        const auto previousInk = inkColor(session, channel);
+        try {
+            for (std::size_t x = 0; x < count; ++x) {
+                const auto color = pixels[x];
+                if (transparentIndex && color == *transparentIndex) continue;
+                const auto coordinateX = static_cast<std::int64_t>(topLeft.x) +
+                    static_cast<std::int64_t>(x);
+                if (coordinateX < std::numeric_limits<std::int32_t>::min() ||
+                    coordinateX > std::numeric_limits<std::int32_t>::max()) continue;
+                setInk(session, channel, static_cast<ColorIndex>(color));
+                pixel(session, channel,
+                      {static_cast<std::int32_t>(coordinateX), topLeft.y});
+            }
+        } catch (...) {
+            try { setInk(session, channel, previousInk); } catch (...) {}
+            throw;
+        }
+        setInk(session, channel, previousInk);
     }
     virtual void rectangle(SessionId session, Point topLeft,
                            std::int32_t width, std::int32_t height) = 0;
@@ -201,6 +235,9 @@ public:
         (void)channel;
         closeWindow(session);
     }
+    // Re-arrange retained windows for the active display. Unsupported adapters
+    // leave the current layout untouched and report false.
+    virtual bool tileWindows() { return false; }
     virtual void closeSession(SessionId session) = 0;
     // Discard session-owned graphics state when the task is cancelled or
     // terminated. Services that retain completed output may override this;
@@ -233,6 +270,12 @@ public:
                                   std::uint16_t index) {
         (void)channel;
         return paletteColor(session, index);
+    }
+    // Replace a contiguous range in the display-wide palette. Retained pixels
+    // keep their indices, so every window using those indices changes color.
+    virtual void setPaletteColors(SessionId, std::uint16_t,
+                                  const std::vector<RgbColor>&) {
+        throw std::runtime_error("palette changes unsupported");
     }
     virtual void setWindowBounds(SessionId, Rect) {
         throw std::runtime_error("window positioning unsupported");

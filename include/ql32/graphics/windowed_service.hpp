@@ -8,6 +8,7 @@
 #include <optional>
 #include <cstdint>
 #include <cstddef>
+#include <array>
 #include <functional>
 #include <list>
 #include <map>
@@ -31,8 +32,15 @@ public:
     void setOverMode(SessionId session, ChannelId channel, OverMode mode) override;
     void line(SessionId session, Point from, Point to) override;
     void line(SessionId session, ChannelId channel, Point from, Point to) override;
+    void setGraphicsPosition(SessionId session, ChannelId channel,
+                             Point position) override;
+    Point graphicsPosition(SessionId session, ChannelId channel) const override;
     void pixel(SessionId session, Point position) override;
     void pixel(SessionId session, ChannelId channel, Point position) override;
+    ColorIndex inkColor(SessionId session, ChannelId channel) override;
+    void drawIndexedRow(SessionId session, ChannelId channel, Point topLeft,
+                        const std::uint8_t* pixels, std::size_t count,
+                        std::optional<ColorIndex> transparentIndex = {}) override;
     void rectangle(SessionId session, Point topLeft,
                    std::int32_t width, std::int32_t height) override;
     void rectangle(SessionId session, ChannelId channel, Point topLeft,
@@ -80,6 +88,8 @@ public:
     RgbColor paletteColor(SessionId session, std::uint16_t index) override;
     RgbColor paletteColor(SessionId session, ChannelId channel,
                           std::uint16_t index) override;
+    void setPaletteColors(SessionId session, std::uint16_t firstIndex,
+                          const std::vector<RgbColor>& colors) override;
     void setWindowBounds(SessionId session, Rect bounds) override;
     void setWindowBounds(SessionId session, ChannelId channel, Rect bounds) override;
     void setTaskViewport(SessionId session, TaskViewport viewport) override;
@@ -123,7 +133,7 @@ public:
     void setWindowPixelDepth(SessionId session, PixelDepth depth);
     void setWindowVisible(SessionId session, bool visible);
     void raiseWindow(SessionId session);
-    void tileWindows();
+    bool tileWindows() override;
     void present();
     using RowLayer = std::function<void(std::uint32_t, std::uint32_t,
                                         std::vector<ColorIndex>&)>;
@@ -174,6 +184,7 @@ private:
     std::map<SurfaceKey, WindowId> sessionWindows_;
     std::vector<WindowId> frozenWindows_;
     std::map<SurfaceKey, Point> textCursors_;
+    std::map<SurfaceKey, Point> graphicsCursors_;
     struct TextOutputBatch { std::size_t depth = 0; Rect dirty{}; };
     std::map<SurfaceKey, TextOutputBatch> textOutputBatches_;
     std::size_t presentationBatchDepth_ = 0;
@@ -189,6 +200,7 @@ private:
     std::function<void()> consoleOutputBatchBeginCallback_;
     std::function<void()> consoleOutputBatchEndCallback_;
     Frame frame_;
+    std::array<RgbColor, 256> palette_{};
     bool lastDisplayResizeDiscardedWindows_ = false;
     std::uint16_t rotationDegrees_ = 0;
     UpdateMode updateMode_ = UpdateMode::Auto;

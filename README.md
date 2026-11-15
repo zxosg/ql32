@@ -219,6 +219,14 @@ editor gutter to toggle a breakpoint, then use Continue, Step, Next, and Pause.
 The panels show source position, locals, globals, arrays, watches, stack, and
 opt-in execution counters. EVAL and watches accept only side-effect-free
 expressions. Screen captures are on demand and can be saved as BMP files.
+The Image converter tab loads common raster files, previews a 16-color QIMG v2
+conversion, resizes with optional aspect preservation, exports `.qimg`, and
+uploads the result to a chosen device path over YMODEM. Install the listed
+Pillow dependency with the other debugger requirements. Source transparency is
+composited onto black; BASIC `BLIT` can still treat a selected palette index as
+transparent. For ESP32 `FFS:` destinations, suggested names fit SPIFFS's
+31-byte path-component limit; longer manually entered components are rejected
+before the transfer starts.
 
 The Debugger tab also exposes each task's screen-space canvas origin and clip
 size. Select a task, edit X/Y/W/H, and choose **Set selected canvas** to move or

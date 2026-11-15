@@ -208,6 +208,54 @@ public:
     void remove(const std::string&) override {}
 };
 
+class BitmapTestStorage final : public ql32::runtime::StorageService {
+public:
+    explicit BitmapTestStorage(std::string image) : image_(std::move(image)) {}
+    std::string readText(const std::string&) override { return {}; }
+    std::unique_ptr<ql32::runtime::StorageReadHandle> openRead(
+            const std::string& path) override {
+        if (path != "sprite.qimg") throw std::runtime_error("file not found");
+        return std::make_unique<ql32::runtime::MemoryStorageReadHandle>(image_);
+    }
+    void writeText(const std::string&, const std::string&) override {}
+    std::vector<ql32::runtime::FileEntry> list(const std::string&) override { return {}; }
+    bool exists(const std::string& path) override { return path == "sprite.qimg"; }
+    std::uintmax_t size(const std::string&) override { return image_.size(); }
+    void rename(const std::string&, const std::string&) override {}
+    void remove(const std::string&) override {}
+private:
+    std::string image_;
+};
+
+std::string makeTestQimg(std::uint16_t width, std::uint16_t height,
+                         const std::vector<std::uint8_t>& packedRows) {
+    const auto stride = static_cast<std::uint16_t>((width + 1u) / 2u);
+    std::string bytes(64, '\0');
+    bytes[0] = 'Q'; bytes[1] = 'I'; bytes[2] = 'M'; bytes[3] = 'G';
+    bytes[4] = 2; bytes[5] = 4;
+    bytes[6] = static_cast<char>(width & 0xff);
+    bytes[7] = static_cast<char>(width >> 8);
+    bytes[8] = static_cast<char>(height & 0xff);
+    bytes[9] = static_cast<char>(height >> 8);
+    bytes[10] = static_cast<char>(stride & 0xff);
+    bytes[11] = static_cast<char>(stride >> 8);
+    const auto payloadSize = static_cast<std::uint32_t>(packedRows.size());
+    for (std::size_t i = 0; i < 4; ++i)
+        bytes[12 + i] = static_cast<char>(payloadSize >> (8 * i));
+    constexpr std::array<std::array<std::uint8_t, 3>, 16> palette{{
+        {{0, 0, 0}}, {{0, 0, 255}}, {{255, 0, 0}}, {{255, 0, 255}},
+        {{0, 255, 0}}, {{0, 255, 255}}, {{255, 255, 0}}, {{255, 255, 255}},
+        {{85, 85, 85}}, {{85, 85, 255}}, {{255, 85, 85}}, {{255, 85, 255}},
+        {{85, 255, 85}}, {{85, 255, 255}}, {{255, 255, 85}}, {{192, 192, 192}}
+    }};
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        for (std::size_t component = 0; component < palette[index].size(); ++component)
+            bytes[16 + index * 3 + component] = static_cast<char>(palette[index][component]);
+    }
+    for (const auto byte : packedRows) bytes.push_back(static_cast<char>(byte));
+    return bytes;
+}
+
 std::string makeTestQfnt() {
     constexpr std::size_t headerSize = 26;
     constexpr std::size_t indexEntrySize = 13;
@@ -382,6 +430,216 @@ void testGupdateOffSuppressesVmDrawingUntilExplicitUpdate() {
     interpreter.execute("GUPDATE 1\nPLOT 4,4\n", output);
     require(presenter->presentCount == 3,
             "GUPDATE 1 did not restore automatic presentation");
+}
+
+void testProgrammableGlobalPalette() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(16, 8, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT #0,RGB(18,52,86)\n"
+        "GUPDATE 0\nPALETTE 1,RGB(18,52,86),RGB(171,205,239)\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\n", output);
+    require(output.str() == "1193046\n#123456\n#ABCDEF\n",
+            "RGB packing or PALETTE readback was incorrect");
+    require(presenter->presentCount == 0,
+            "PALETTE bypassed GUPDATE 0 presentation suppression");
+    interpreter.execute("GUPDATE\n", output);
+    require(presenter->presentCount == 1 &&
+                presenter->lastFrame.palette[1].red == 0x12 &&
+                presenter->lastFrame.palette[1].green == 0x34 &&
+                presenter->lastFrame.palette[1].blue == 0x56 &&
+                presenter->lastFrame.palette[2].red == 0xAB &&
+                presenter->lastFrame.palette[2].green == 0xCD &&
+                presenter->lastFrame.palette[2].blue == 0xEF,
+            "palette range was not reflected in the composed frame");
+
+    require(graphics->paletteColor(2, 1).red == 0x12 &&
+                graphics->paletteColor(2, 2).blue == 0xEF,
+            "palette changes were not shared across graphics sessions");
+
+    bool outOfRangeRejected = false;
+    try {
+        interpreter.execute("PALETTE 15,16777215,0\n", output);
+    } catch (const std::runtime_error& error) {
+        outOfRangeRejected = std::string(error.what()).find("palette range") !=
+                             std::string::npos;
+    }
+    require(outOfRangeRejected, "PALETTE accepted a range past the active palette");
+
+    bool invalidColorRejected = false;
+    try {
+        interpreter.execute("PALETTE 1,16777216\n", output);
+    } catch (const std::runtime_error& error) {
+        invalidColorRejected = std::string(error.what()).find("RGB color") !=
+                               std::string::npos;
+    }
+    require(invalidColorRejected, "PALETTE accepted an RGB value above 24 bits");
+
+    bool invalidComponentRejected = false;
+    try {
+        interpreter.execute("PRINT RGB(256,0,0)\n", output);
+    } catch (const std::runtime_error& error) {
+        invalidComponentRejected = std::string(error.what()).find("RGB components") !=
+                                   std::string::npos;
+    }
+    require(invalidComponentRejected, "RGB accepted a component above 255");
+}
+
+void testProgramControlledPaletteTransforms() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(16, 8, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "GUPDATE 0\n"
+        "PALETTE 1,RGB(16,32,48),RGB(64,80,96),RGB(112,128,144)\n"
+        "PALROT 1,3,1\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\nPRINT #0,GPALETTE$(3)\n"
+        "PALSHIFT 1,3,1,RGB(170,187,204)\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\nPRINT #0,GPALETTE$(3)\n"
+        "PALSHIFT 1,3,-1,RGB(1,2,3)\n"
+        "PALFADE 1,2,16777215,0.5\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\nPRINT #0,GPALETTE$(3)\n", output);
+    require(output.str() ==
+                "#708090\n#102030\n#405060\n"
+                "#AABBCC\n#708090\n#102030\n"
+                "#B8C0C8\n#889098\n#010203\n",
+            "palette rotate, shift, or fade produced unexpected colors");
+    require(presenter->presentCount == 0,
+            "palette transforms bypassed GUPDATE 0 suppression");
+    interpreter.execute("GUPDATE\n", output);
+    require(presenter->presentCount == 1 &&
+                presenter->lastFrame.palette[1].red == 0xB8 &&
+                presenter->lastFrame.palette[2].blue == 0x98,
+            "palette transform result was not presented by GUPDATE");
+
+    const auto rejects = [&](const std::string& command, const std::string& expected) {
+        try {
+            interpreter.execute(command, output);
+        } catch (const std::runtime_error& error) {
+            return std::string(error.what()).find(expected) != std::string::npos;
+        }
+        return false;
+    };
+    require(rejects("PALROT 15,2,1\n", "palette range"),
+            "PALROT accepted a range beyond the palette");
+    require(rejects("PALSHIFT 1,2,0,0\n", "direction must be -1 or 1"),
+            "PALSHIFT accepted a zero direction");
+    require(rejects("PALFADE 1,2,0,1.1\n", "fade amount"),
+            "PALFADE accepted an amount above one");
+}
+
+void testIndexedBitmapLoadBlitAndRelease() {
+    auto storage = std::make_shared<BitmapTestStorage>(
+        makeTestQimg(3, 2, {0x12, 0x30, 0x40, 0x60}));
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(24, 16, presenter);
+    ql32::Interpreter interpreter(storage, {}, {}, graphics);
+    std::ostringstream output;
+
+    interpreter.execute(
+        "image = LOADIMAGE(\"sprite.qimg\")\n"
+        "INK 9\n"
+        "BLIT image,4,5,0\n", output);
+
+    const auto windows = graphics->windowManager().compositionOrder();
+    require(windows.size() == 1, "bitmap draw created unexpected graphics windows");
+    const auto& canvas = graphics->windowManager().canvas(windows.front().id);
+    require(canvas.pixel(4, 5) == 1 && canvas.pixel(5, 5) == 2 &&
+                canvas.pixel(6, 5) == 3,
+            "QIMG high-nibble-first pixels were not blitted in row order");
+    require(canvas.pixel(4, 6) == 4 && canvas.pixel(5, 6) == 0 &&
+                canvas.pixel(6, 6) == 6,
+            "odd-width QIMG row or transparent color was rendered incorrectly");
+    require(presenter->presentCount == 1,
+            "BLIT did not coalesce row updates into one presentation");
+    interpreter.execute("PLOT 0,0\n", output);
+    require(canvas.pixel(0, 0) == 9,
+            "BLIT failed to restore the caller's graphics ink");
+
+    interpreter.execute("UNLOADIMAGE image\n", output);
+    bool unloadedRejected = false;
+    try {
+        interpreter.execute("BLIT image,0,0\n", output);
+    } catch (const std::exception& error) {
+        unloadedRejected = std::string(error.what()).find("unknown bitmap handle") !=
+                           std::string::npos;
+    }
+    require(unloadedRejected, "BLIT accepted a released image handle");
+
+    auto malformedStorage = std::make_shared<BitmapTestStorage>(
+        makeTestQimg(3, 2, {0x12, 0x30, 0x40}));
+    ql32::Interpreter malformed(malformedStorage);
+    bool malformedRejected = false;
+    try {
+        malformed.execute("image = LOADIMAGE(\"sprite.qimg\")\n", output);
+    } catch (const std::runtime_error& error) {
+        malformedRejected = std::string(error.what()).find("QIMG stride or payload") !=
+                            std::string::npos;
+    }
+    require(malformedRejected, "LOADIMAGE accepted a truncated QIMG payload");
+
+    auto remappedQimg = makeTestQimg(3, 2, {0x12, 0x30, 0x40, 0x60});
+    remappedQimg[16 + 3] = static_cast<char>(255);
+    remappedQimg[16 + 4] = 0;
+    remappedQimg[16 + 5] = 0;
+    auto remappedStorage = std::make_shared<BitmapTestStorage>(remappedQimg);
+    auto remappedGraphics = std::make_shared<WindowedService>(
+        24, 16, std::make_shared<CapturingPresenter>());
+    ql32::Interpreter remapped(remappedStorage, {}, {}, remappedGraphics);
+    remapped.execute("image = LOADIMAGE(\"sprite.qimg\")\nBLIT image,0,0\n", output);
+    const auto remappedWindows = remappedGraphics->windowManager().compositionOrder();
+    const auto& remappedCanvas = remappedGraphics->windowManager().canvas(
+        remappedWindows.front().id);
+    require(remappedCanvas.pixel(0, 0) == 2,
+            "QIMG embedded palette color was not mapped to the closest display color");
+
+    auto legacyQimg = makeTestQimg(3, 2, {0x12, 0x30, 0x40, 0x60});
+    legacyQimg[4] = 1;
+    auto legacyStorage = std::make_shared<BitmapTestStorage>(legacyQimg);
+    ql32::Interpreter legacy(legacyStorage);
+    bool legacyRejected = false;
+    try {
+        legacy.execute("image = LOADIMAGE(\"sprite.qimg\")\n", output);
+    } catch (const std::runtime_error& error) {
+        legacyRejected = std::string(error.what()).find("invalid QIMG header") !=
+                         std::string::npos;
+    }
+    require(legacyRejected, "QIMG v1 was accepted after the format moved to v2");
+}
+
+void testSuperBasicLineCursorForms() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(24, 16, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "INK 2\n"
+        "LINE 2,3\n"
+        "LINE TO 5,6\n"
+        "LINE 8,9 TO 11,12\n"
+        "LINE 1,1,3,1\n"
+        "PRINT #0,GX()\nPRINT #0,GY()\n", output);
+
+    const auto windows = graphics->windowManager().compositionOrder();
+    require(windows.size() == 1, "LINE forms created unexpected graphics windows");
+    const auto session = windows.front().owner;
+    auto& defaultCanvas = graphics->windowManager().canvas(windows.front().id);
+    require(defaultCanvas.pixel(2, 3) == 2 && defaultCanvas.pixel(5, 6) == 2 &&
+                defaultCanvas.pixel(8, 9) == 2 && defaultCanvas.pixel(11, 12) == 2 &&
+                defaultCanvas.pixel(1, 1) == 2 && defaultCanvas.pixel(3, 1) == 2,
+            "cursor-based LINE forms or the original coordinate form drew incorrectly");
+    const auto cursor = graphics->graphicsPosition(session, 1);
+    require(cursor.x == 3 && cursor.y == 1,
+            "LINE did not retain the endpoint as the graphics cursor");
+    require(output.str() == "3\n1\n",
+            "GX or GY did not report the current graphics cursor");
+    graphics->setGraphicsPosition(session, 2, {4, 4});
+    const auto channelCursor = graphics->graphicsPosition(session, 2);
+    require(channelCursor.x == 4 && channelCursor.y == 4,
+            "graphics cursors were not stored independently by channel");
 }
 
 void testGraphicsUpdateSkipCommandDispatch() {
@@ -1918,6 +2176,140 @@ void testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure() {
             "active session did not recreate its window at the new display size");
 }
 
+void testSystemInfoFunctionsUseInjectedPortableProfile() {
+    ql32::runtime::SystemInfoProfile profile;
+    profile.values = {"0.1.0", "test-build", "test-board",
+                      "vga 320x200", "ps2", "ffs,sd", "vga,ps2"};
+    profile.capabilities = {{"display", true}, {"PS2", true},
+                            {"spi bus", false}};
+    auto systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+        std::move(profile));
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {},
+                                  systemInfo);
+    std::ostringstream output;
+    interpreter.executeResumable(
+        "PRINT SYSINFO$(0);\"|\";SYSINFO$(1);\"|\";SYSINFO$(2);\"|\";"
+        "SYSINFO$(3);\"|\";SYSINFO$(4);\"|\";SYSINFO$(5);\"|\";SYSINFO$(6)\n"
+        "PRINT CAPABILITY(\"ps2\");\"|\";CAPABILITY(\"  SPI   BUS \");\"|\";"
+        "CAPABILITY(\"missing\")\n", output);
+    require(output.str() ==
+                "0.1.0|test-build|test-board|vga 320x200|ps2|ffs,sd|vga,ps2\n1|0|-1\n",
+            "SYSINFO$/CAPABILITY did not expose the injected portable profile");
+}
+
+void testSystemInfoRejectsInvalidSelector() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        interpreter.executeResumable("PRINT SYSINFO$(7)\n", output);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("system information selector") !=
+                   std::string::npos;
+    }
+    require(rejected, "SYSINFO$ accepted an out-of-range selector");
+}
+
+class SupervisorTaskControl final : public ql32::runtime::TaskControlService {
+public:
+    explicit SupervisorTaskControl(bool isSupervisor = true)
+        : isSupervisor_(isSupervisor) {}
+    ql32::runtime::TaskId startTask(std::string, std::ostream&,
+                                    ql32::runtime::TaskId, std::uint32_t) override {
+        return 0;
+    }
+    bool killTask(ql32::runtime::TaskId) override { return false; }
+    bool logon(ql32::runtime::TaskId) override { return false; }
+    ql32::runtime::TaskId logoff() override { return 0; }
+    ql32::runtime::TaskId focusedTask() const override { return 9; }
+    bool suspendTask(ql32::runtime::TaskId) override { return false; }
+    bool resumeTask(ql32::runtime::TaskId) override { return false; }
+    std::size_t instructionBudget() const override { return 128; }
+    bool setInstructionBudget(std::size_t) override { return false; }
+    bool setTaskPriority(ql32::runtime::TaskId, std::uint32_t) override {
+        return false;
+    }
+    std::vector<ql32::runtime::ManagedTaskInfo> listTasks() const override {
+        ql32::runtime::ManagedTaskInfo supervisor;
+        supervisor.id = 9;
+        supervisor.supervisor = isSupervisor_;
+        return {supervisor};
+    }
+    std::vector<ql32::runtime::ChannelInfo> listChannels(
+        ql32::runtime::TaskId) const override { return {}; }
+private:
+    bool isSupervisor_;
+};
+
+void testSupervisorTileCommandUsesGraphicsWindowManager() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(32, 24, nullptr);
+    auto tasks = std::make_shared<SupervisorTaskControl>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics, {}, {}, tasks, 9);
+    graphics->pixel(interpreter.graphicsSessionId(), {2, 3});
+    std::ostringstream output;
+    interpreter.executeResumable("TILE\n", output);
+    const auto window = graphics->windowInfo(interpreter.graphicsSessionId());
+    require(window.originX == 0 && window.originY == 0 &&
+                window.width == 32 && window.height == 24,
+            "supervisor TILE did not arrange the retained graphics window");
+}
+
+void testTileCommandIsSupervisorOnly() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(32, 24, nullptr);
+    auto tasks = std::make_shared<SupervisorTaskControl>(false);
+    ql32::Interpreter interpreter({}, {}, {}, graphics, {}, {}, tasks, 9);
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        interpreter.executeResumable("TILE\n", output);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("TILE is supervisor-only") !=
+                   std::string::npos;
+    }
+    require(rejected, "TILE was available to a non-supervisor session");
+}
+
+void testMenuEnableCommandChangesNextPresentation() {
+    auto ui = std::make_shared<ql32::ui::QueuedService>();
+    ql32::Interpreter interpreter({}, {}, ui);
+    std::ostringstream output;
+    const auto status = interpreter.executeResumable(
+        "menu% = MINIT(\"Actions\")\n"
+        "MCARD menu%, 41, \"Save\", \"S\"\n"
+        "MENABLE menu%, 41, 0\n"
+        "selected% = MENU(menu%)\n", output);
+    require(status == ql32::ExecutionStatus::Suspended,
+            "MENU did not suspend after applying its enabled-state update");
+    const auto request = ui->takeNextRequest();
+    require(request && request->kind == ql32::ui::RequestKind::Menu &&
+                request->items.size() == 1 && request->items[0].commandId == 41 &&
+                !request->items[0].enabled,
+            "MENABLE did not disable the selected command in the next menu request");
+    require(!ui->selectMenu(request->id, 41),
+            "disabled menu item was still accepted as a selection");
+}
+
+void testMenuEnableRejectsInvalidValuesAndUnknownItems() {
+    const std::array<std::pair<const char*, const char*>, 2> cases{{
+        {"MENABLE menu%, 41, 2\n", "menu enabled flag must be 0 or 1"},
+        {"MENABLE menu%, 42, 1\n", "unknown menu command ID"}
+    }};
+    for (const auto& test : cases) {
+        ql32::Interpreter interpreter({}, {}, std::make_shared<ql32::ui::QueuedService>());
+        std::ostringstream output;
+        bool rejected = false;
+        try {
+            interpreter.executeResumable(
+                "menu% = MINIT(\"Actions\")\n"
+                "MCARD menu%, 41, \"Save\", \"S\"\n" +
+                    std::string(test.first), output);
+        } catch (const std::runtime_error& error) {
+            rejected = std::string(error.what()).find(test.second) != std::string::npos;
+        }
+        require(rejected, "MENABLE accepted invalid state or a missing command ID");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1928,6 +2320,10 @@ int main() {
     testLoadFontIsBoundedAndChannelScoped();
     testGraphicsUpdateCommandDispatch();
     testGupdateOffSuppressesVmDrawingUntilExplicitUpdate();
+    testProgrammableGlobalPalette();
+    testProgramControlledPaletteTransforms();
+    testIndexedBitmapLoadBlitAndRelease();
+    testSuperBasicLineCursorForms();
     testGraphicsUpdateSkipCommandDispatch();
     testUiInteractionResetsGraphicsUpdateStateAndKeepsIt();
     testWindowedGraphicsUpdateBatching();
@@ -1972,4 +2368,10 @@ int main() {
     testFailedPrintFlushesItsPartialOutputBatch();
     testDisplayGeometryChangeResizesDefaultWindowsAndPresents();
     testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure();
+    testSystemInfoFunctionsUseInjectedPortableProfile();
+    testSystemInfoRejectsInvalidSelector();
+    testSupervisorTileCommandUsesGraphicsWindowManager();
+    testTileCommandIsSupervisorOnly();
+    testMenuEnableCommandChangesNextPresentation();
+    testMenuEnableRejectsInvalidValuesAndUnknownItems();
 }

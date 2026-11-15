@@ -520,6 +520,21 @@ void setup() {
     }
 
     ql32::vm::Services services;
+    {
+        ql32::runtime::SystemInfoProfile profile;
+        profile.values = {"0.1.0", "unknown", "tenstar_ts_esp32s3_st7789",
+                          "st7789-tft 240x135 rgb565", "serial", "ffs",
+                          "tft,psram,network,wifi"};
+        profile.capabilities = {{"display", true}, {"input", true},
+                                {"storage", true}, {"network", true},
+                                {"wifi", true}, {"ps2", false}, {"serial", true},
+                                {"sd", false}, {"ffs", true}, {"psram", true},
+                                {"spi", true}, {"i2c", true}, {"gpio", true},
+                                {"adc", true}, {"timer", true}, {"touch", false},
+                                {"buttons", false}, {"usb-hid", false}};
+        services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+            std::move(profile));
+    }
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(

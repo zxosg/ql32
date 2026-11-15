@@ -15,6 +15,7 @@ endif()
 
 add_library(ql32_portable
   src/language/interpreter.cpp
+  src/graphics/bitmap.cpp
   src/graphics/font.cpp
   src/graphics/window_manager.cpp
   src/graphics/windowed_service.cpp
@@ -57,6 +58,9 @@ if(QL32_BUILD_TESTS)
   if(Python3_Interpreter_FOUND)
     add_test(NAME ql32_font_converter_tests
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/font_converter_tests.py)
+    add_test(NAME ql32_qimg_converter_tests
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/ql32_remote_debugger/tests/test_qimg.py)
   endif()
   function(add_cli_conformance_test name)
     add_test(

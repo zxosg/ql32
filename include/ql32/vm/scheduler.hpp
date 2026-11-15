@@ -56,6 +56,7 @@ struct Services {
     std::shared_ptr<runtime::SystemControlService> systemControl;
     std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency;
     std::shared_ptr<runtime::DisplayModeService> displayModes;
+    std::shared_ptr<runtime::SystemInfoService> systemInfo;
 };
 
 // Cooperative, single-threaded weighted scheduler. Each task owns one

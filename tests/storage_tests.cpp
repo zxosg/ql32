@@ -132,8 +132,25 @@ void testInteractiveFileCommands() {
         require(output.str() == "10 PRINT \"loaded\"\nloaded\ndemo.bas\n",
                 "LOAD, LIST, RUN, or DIR returned unexpected output");
 
+        std::ostringstream detailedRoot;
+        interpreter.executeInteractive("DIR DETAILS\n", detailedRoot);
+        const auto demoSize = std::filesystem::file_size(root / "demo.bas");
+        require(detailedRoot.str() ==
+                    "demo.bas (" + std::to_string(demoSize) + " bytes)\n",
+                "DIR DETAILS did not report the file size");
+
         std::filesystem::create_directories(root / "work" / "child");
         storage->writeText("work/child/item.bas", "10 PRINT \"item\"\n");
+        std::ostringstream detailedDirectory;
+        interpreter.executeInteractive("DIR DETAILS\n", detailedDirectory);
+        require(detailedDirectory.str().find("<work>\n") != std::string::npos,
+                "DIR DETAILS did not label subdirectories");
+        std::ostringstream detailedPath;
+        interpreter.executeInteractive("DIR DETAILS work/child\n", detailedPath);
+        const auto itemSize = std::filesystem::file_size(root / "work/child/item.bas");
+        require(detailedPath.str() ==
+                    "item.bas (" + std::to_string(itemSize) + " bytes)\n",
+                "DIR DETAILS path did not report nested file size");
         interpreter.executeInteractive("CD \"work/child\"\nDIR\n", output);
         require(output.str().size() >= 9 &&
                     output.str().compare(output.str().size() - 9, 9, "item.bas\n") == 0,

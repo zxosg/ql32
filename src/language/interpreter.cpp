@@ -102,11 +102,13 @@ constexpr Keyword keywords[] = {
 
 constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "IPRINT", "BUSY", "DTEXT", "DEDIT", "DINT", "DFLOAT",
-    "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
-    "INK", "PAPER", "OVER", "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
+    "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "MENABLE", "GETNET", "DISNET",
+    "INK", "PAPER", "OVER", "PALETTE", "PALROT", "PALSHIFT", "PALFADE",
+    "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
     "FONT", "GFONT", "UNLOADFONT",
     "CLS", "ROTATE", "WINDOW",
-    "CLOSEWINDOW", "GUPDATE", "MODE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
+    "CLOSEWINDOW", "GUPDATE", "MODE", "TILE", "KILL", "TASKVIEW", "BLIT", "UNLOADIMAGE",
+    "OUT", "POKE", "POKE_W", "POKE_L",
     "DEALLOC", "XFER", "PAUSE", "RANDOMIZE"
 };
 
@@ -119,8 +121,9 @@ constexpr std::string_view builtinFunctions[] = {
     "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
-    "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$",
-    "LOADFONT", "GETFONT", "RND", "MODE", "CPUFREQ"
+    "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$", "GX", "GY",
+    "LOADFONT", "GETFONT", "LOADIMAGE", "SYSINFO$", "CAPABILITY",
+    "RND", "RGB", "MODE", "CPUFREQ"
 };
 
 constexpr std::string_view shellHelpCommands[] = {
@@ -234,6 +237,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "TASKVIEW") return {5, false};
     if (instruction.name == "TASK") return {1, instruction.expectsValue};
     if (instruction.name == "TASKRESULT") return {2, true};
+    if (instruction.name == "RGB") return {3, true};
     if (instruction.name == "MODE") return {1, instruction.expectsValue};
     if (instruction.name == "IPRINT") return {1, false};
     if (instruction.name == "BUSY") return {1, false};
@@ -291,8 +295,13 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "DIALOG" || instruction.name == "MENU") return {1, true};
     if (instruction.name == "DGET" || instruction.name == "DGET$") return {2, true};
     if (instruction.name == "MCARD") return {4, false};
+    if (instruction.name == "MENABLE") return {3, false};
     if (instruction.name == "INK" || instruction.name == "PAPER") return {1, false};
     if (instruction.name == "OVER") return {1, false};
+    if (instruction.name == "PALETTE") return {2, false};
+    if (instruction.name == "PALROT") return {3, false};
+    if (instruction.name == "PALSHIFT") return {4, false};
+    if (instruction.name == "PALFADE") return {4, false};
     if (instruction.name == "PLOT") return {2, false};
     if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
     if (instruction.name == "CIRCLE") return {3, false};
@@ -301,15 +310,22 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "UNLOADFONT") return {1, false};
     if (instruction.name == "LOADFONT") return {1, true};
     if (instruction.name == "GETFONT") return {2, true};
+    if (instruction.name == "LOADIMAGE") return {1, true};
+    if (instruction.name == "SYSINFO$") return {1, true};
+    if (instruction.name == "CAPABILITY") return {1, true};
+    if (instruction.name == "UNLOADIMAGE") return {1, false};
+    if (instruction.name == "BLIT") return {3, false};
     if (instruction.name == "CLS") return {2, false};
     if (instruction.name == "ROTATE") return {1, false};
     if (instruction.name == "WINDOW") return {4, false};
     if (instruction.name == "CLOSEWINDOW") return {0, false};
+    if (instruction.name == "TILE") return {0, false};
     if (instruction.name == "GUPDATE") return {0, false};
     if (instruction.name == "GWIDTH" || instruction.name == "GHEIGHT" ||
         instruction.name == "GORIGINX" || instruction.name == "GORIGINY" ||
         instruction.name == "GDEPTH" || instruction.name == "GROTATION" ||
-        instruction.name == "GPALETTESIZE") return {0, true};
+        instruction.name == "GPALETTESIZE" || instruction.name == "GX" ||
+        instruction.name == "GY") return {0, true};
     if (instruction.name == "GPALETTE$") return {1, true};
     return {0, false};
 }
@@ -910,6 +926,9 @@ private:
                 } else if (instruction.name == "TASKVIEW") {
                     if (passedArguments != 5 && passedArguments != 7)
                         error(instruction, "TASKVIEW expects task ID, origin X/Y, canvas width/height, and optional offset X/Y");
+                } else if (instruction.name == "MENABLE") {
+                    if (passedArguments != 3)
+                        error(instruction, "MENABLE expects menu handle, command ID, and enabled flag");
                 } else if (instruction.name == "DINIT") {
                     if (passedArguments > 2)
                         error(instruction, "DINIT expects an optional title and options mask");
@@ -938,6 +957,26 @@ private:
                 } else if (instruction.name == "CIRCLE") {
                     if (passedArguments < 3 || passedArguments > 4)
                         error(instruction, "CIRCLE expects x, y, radius, and optional fill flag");
+                } else if (instruction.name == "LINE") {
+                    if (passedArguments != 2 && passedArguments != 4)
+                        error(instruction,
+                            "LINE expects x,y, optional TO x,y, or four coordinates");
+                } else if (instruction.name == "PALETTE") {
+                    if (passedArguments < 2)
+                        error(instruction, "PALETTE expects a start index and at least one RGB color");
+                } else if (instruction.name == "PALROT") {
+                    if (passedArguments != 3)
+                        error(instruction, "PALROT expects start, count, and signed steps");
+                } else if (instruction.name == "PALSHIFT") {
+                    if (passedArguments != 4)
+                        error(instruction, "PALSHIFT expects start, count, direction, and RGB color");
+                } else if (instruction.name == "PALFADE") {
+                    if (passedArguments != 4)
+                        error(instruction, "PALFADE expects start, count, target RGB, and amount");
+                } else if (instruction.name == "BLIT") {
+                    if (passedArguments != 3 && passedArguments != 4)
+                        error(instruction,
+                            "BLIT expects image handle, x, y, and optional transparent index");
                 } else if (instruction.name == "CLS") {
                     if (passedArguments != 0 && passedArguments != 2)
                         error(instruction, "CLS expects no colors or ink and paper colors");
@@ -947,6 +986,12 @@ private:
                            instruction.name != "EOF" &&
                            instruction.name != "TASKVIEW" && instruction.name != "DINIT" &&
                            instruction.name != "IPRINT" && instruction.name != "BUSY" &&
+                           instruction.name != "PALETTE" &&
+                           instruction.name != "PALROT" &&
+                           instruction.name != "PALSHIFT" &&
+                           instruction.name != "PALFADE" &&
+                           instruction.name != "BLIT" &&
+                           instruction.name != "LINE" &&
                            instruction.name != "MODE" &&
                            passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
@@ -1996,11 +2041,62 @@ private:
                 code_.back().parameters = std::move(options);
                 return;
             }
+            if (name.text == "LINE") {
+                const bool hasChannelArgument = match(Kind::Hash);
+                if (hasChannelArgument) {
+                    expression();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' after graphics channel selector");
+                }
+                const auto isToKeyword = [&]() {
+                    return check(Kind::To);
+                };
+                std::size_t arguments = 0;
+                std::string lineForm;
+                if (isToKeyword()) {
+                    advance();
+                    expression();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' between LINE coordinates");
+                    expression();
+                    arguments = 2;
+                    lineForm = "TO";
+                } else {
+                    expression();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' between LINE coordinates");
+                    expression();
+                    arguments = 2;
+                    if (isToKeyword()) {
+                        advance();
+                        expression();
+                        if (!match(Kind::Comma))
+                            error(peek(), "expected ',' between LINE coordinates");
+                        expression();
+                        arguments = 4;
+                        lineForm = "FROM_TO";
+                    } else if (match(Kind::Comma)) {
+                        expression();
+                        if (!match(Kind::Comma))
+                            error(peek(), "expected ',' between LINE coordinates");
+                        expression();
+                        arguments = 4;
+                    } else {
+                        lineForm = "MOVE";
+                    }
+                }
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of statement after LINE coordinates");
+                emitCall(name, arguments, false, {}, hasChannelArgument);
+                code_.back().parameters = {std::move(lineForm)};
+                return;
+            }
             const bool supportsChannelSelector =
                 name.text == "INK" || name.text == "PAPER" || name.text == "OVER" ||
                 name.text == "PLOT" ||
                 name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
+                name.text == "BLIT" ||
                 name.text == "FONT" || name.text == "GFONT" ||
                 name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW" ||
                 name.text == "XFER";
@@ -2504,14 +2600,16 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          runtime::TaskId taskId,
                          std::shared_ptr<runtime::SystemControlService> systemControl,
                          std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency,
-                         std::shared_ptr<runtime::DisplayModeService> displayModes)
+                         std::shared_ptr<runtime::DisplayModeService> displayModes,
+                         std::shared_ptr<runtime::SystemInfoService> systemInfo)
     : uiSession_(std::make_unique<detail::UISessionState>()),
-    storage_(std::move(storage)), fontRegistry_(storage_),
+    storage_(std::move(storage)), fontRegistry_(storage_), bitmapRegistry_(storage_),
     channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
       cpuFrequency_(std::move(cpuFrequency)),
       displayModes_(std::move(displayModes)),
+      systemInfo_(systemInfo ? std::move(systemInfo) : runtime::makeHostSystemInfoService()),
       taskControl_(std::move(taskControl)),
       systemControl_(std::move(systemControl)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)),
@@ -2762,6 +2860,7 @@ void Interpreter::closeExecutionChannels() noexcept {
         try { graphics_->flushTextOutputBatches(session_id_); }
         catch (...) { /* Cleanup must not replace the program's result or error. */ }
     }
+    if (persistentSessionResources_) return;
     if (!channels_) {
         executionChannels_.clear();
         return;
@@ -3353,12 +3452,27 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 argument = separator == std::string::npos ? std::string{} :
                     trim(argument.substr(separator));
             }
+            bool details = false;
+            const auto upperArgument = uppercaseAscii(argument);
+            if (upperArgument == "DETAILS" || upperArgument.rfind("DETAILS ", 0) == 0 ||
+                upperArgument.rfind("DETAILS\t", 0) == 0) {
+                details = true;
+                argument = trim(argument.substr(7));
+            }
             std::string path;
             if (!argument.empty()) path = normalizePath(commandPathValue(argument, "DIR"));
             else path = current_directory_;
             std::string listing;
-            for (const auto& entry : storage_->list(path))
-                listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
+            for (const auto& entry : storage_->list(path)) {
+                if (!details) {
+                    listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
+                } else if (entry.isDirectory) {
+                    listing += "<" + entry.name + ">\n";
+                } else {
+                    listing += entry.name + " (" + std::to_string(entry.size) +
+                        " bytes)\n";
+                }
+            }
             if (writeGeneratedListing(channel, listing)) {
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;

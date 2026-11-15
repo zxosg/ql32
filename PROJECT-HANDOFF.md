@@ -17,12 +17,14 @@ session.
 
 ## Repository state reviewed
 
-Reviewed 2026-11-08: `main` is at [`f1fadad`](https://github.com/zxosg/ql32/commit/f1fadad)
-and matches `origin/main`. The working tree contains uncommitted TENSTAR target,
-graphics/console adapter, test, SPIFFS, monitor-transfer, README, and
-specification changes. Inspect `git status` before staging or committing; do
-not discard these changes. Math precision and ESP32 CPU frequency options are
-committed.
+Reviewed 2026-11-15: branch `main` is at `5997aff` (2026-11-14). The working
+tree contains uncommitted QIMG, palette, profile-introspection, `TILE` and
+`MENABLE` implementation, tests, examples, and documentation changes. Inspect
+`git status` before staging or committing; do not discard these changes. The
+latest Olimex WROVER/PSRAM build succeeded. CYD and Tenstar builds were not
+revalidated in this session because required PlatformIO packages were not
+cached and network access was unavailable. No claim is made that local `main`
+matches GitHub; check the remote before syncing.
 
 The latest implementation includes:
 
@@ -44,7 +46,7 @@ The latest implementation includes:
   remains console output. CYD and FabGL console overlays follow `#0` bounds.
   `CLS` accepts no arguments, `#channel`, `ink,paper`, or
   `#channel,ink,paper`; color arguments persist on that graphics surface.
-  Linux and all maintained ESP32 profiles build. Graphics channels support
+  Graphics channels support
   Spleen 5×8, 6×12, 8×16, and 12×24 via shared session font handles, separate
   `FONT`/`GFONT` styles, `UNLOADFONT`, and `GETFONT`; QFNT v2 reads glyphs from
   storage on demand. The CYD received and visually rendered all four files over
@@ -74,6 +76,40 @@ The latest implementation includes:
   `ROL`, `ROR`, `SRA`, `SRL`, `SLA`, `SLL`; `&H`/`&B` literals and
   `HEX$`/`BIN$`; session-owned `RND()` overloads and `RANDOMIZE seed`.
   Graphics refresh batching uses `GUPDATE`.
+
+The 2026-11-14/15 functionality milestone added QL/32-specific QIMG v2
+indexed-4 images (`LOADIMAGE`, transparent `BLIT`, `UNLOADIMAGE`) with an
+embedded 16-color RGB palette and nearest-color mapping to the active display
+palette. The Python remote debugger now includes image load, resize, preview,
+QIMG export, and YMODEM upload. Earlier physical image checks used v1 fixtures;
+the Olimex PSRAM build was flashed on 2026-11-15 and passed the QIMG v2
+YMODEM/LOAD/BLIT/UNLOAD fixture with a VGA capture. Host checks and the desktop
+GUI dependency limitation are recorded in
+`docs/test-results/qimg-v2-implementation-2026-11-15.md`.
+The milestone also includes program-controlled
+`PALETTE`/`RGB`/`PALROT`/`PALSHIFT`/`PALFADE`, portable
+`SYSINFO$`/`CAPABILITY` profile introspection, supervisor `TILE`, and menu item
+enablement via `MENABLE`. Olimex serial checks covered the profile APIs and
+palette transforms. The three-window TILE layout and visibly dimmed disabled
+menu item were verified on VGA. See the SRS backlog and dated test reports.
+The Olimex debugger serial receiver now detects raw `@QL32DBG/...` frames
+before the graphical terminal/keyboard decoding path; a direct `tasks.list`
+request returned valid JSON after flashing. The PS/2 Break event is already
+queued, but a scheduler tick and synchronous BLIT can delay handling it. Fast
+Break within long drawing operations remains open; see
+`docs/test-results/debugger-serial-input-2026-11-15.md`.
+The VGA console also now refreshes its cached screen dimensions when the
+window manager resizes for a display mode change. This fixes clipping the
+console to the original 320×200 geometry on larger/taller modes. Olimex PSRAM
+firmware builds with the fix; physical mode cycling still needs device
+verification.
+Olimex startup graphics now persist after `FFS:/startup.bas` returns to its
+supervisor REPL. The VM/scheduler were closing the program's `OPEN(4)` window
+channel and tearing down the supervisor graphics session; both now follow the
+interactive session lifetime. The startup source uses the returned handle
+instead of assuming `#2`. Host scheduler regression and on-device serial
+checks passed; VGA visual confirmation is pending. See
+`docs/test-results/startup-window-lifetime-2026-11-15.md`.
 On 2026-11-08 the native Linux CMake build and full CTest suite passed (65/65).
 The scheduler pager assertion was stale: its expected text used lowercase
 `Enter=page`, while the current prompt is `Enter=Page, L=Line, Q=Quit`. The test
@@ -182,34 +218,41 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. **Attractor performance tuning:** Olimex has a complete 80/160/240 MHz ×
-   SINGLE/DOUBLE matrix with three runs per setting and actual `CPUFREQ()`
-   readback. 240 MHz is 2.12× faster than 80 MHz for the full bounded render;
-   precision mode has no consistent measurable winner. CPU-only companion
-   samples indicate a substantial display-side cost. `attractor.bas` now
-   hoists the row-invariant multiplication, but this edit still needs a board
-   A/B timing. The draw-only isolation transfer failed after temporary FFS
-   storage filled; the device is currently disconnected. Results:
-   `docs/test-results/attractor-performance-2026-11-12.md`. A bounded
-   Mandelbrot workload completed once in 33.929 seconds and later timed out,
-   so its performance still needs repeatable isolation.
-2. **Board acceptance left open by user choice:** Tenstar Wi-Fi was skipped;
-   Olimex physical PS/2 shortcuts, clock, Wi-Fi and related checks were skipped;
-   LILYGO physical acceptance was skipped. Current results and profiles are in
-   the board acceptance report. Do not treat these checks as passed.
-3. **Tenstar performance follow-up:** determine whether the variable Mandelbrot
-   duration comes from BASIC math, interpreter execution, or display transfer.
-   Keep the debug bar available for heap/task observation. QMI8658C, BMP280,
-   and RGB LED support remain deferred by user decision.
-4. **Other backlog:** scope palette changes, task-window management,
-   system/build/platform and capability introspection,
-   enhanced `DIR` output with optional file sizes and `<subdir>` directory
-   labels, `DATA`/`READ`/`RESTORE` statements, string splitting, indirect
-   procedure calls, and network channels.
-   BLE and new hardware families remain deferred. Introspection should build
-   on the portable board capability descriptors while defining product
-   version/build ID, host/board identity, supported BASIC queries (for example
-   SPI, I2C, and serial), and how support differs from runtime availability.
+1. **Attractor and Mandelbrot performance:** `attractor.bas` hoists a
+   row-invariant calculation, but needs a board A/B retest and separate
+   draw-versus-presentation measurements. The 80/160/240 MHz × SINGLE/DOUBLE
+   matrix showed 2.12× improvement from 80 to 240 MHz, with no consistent
+   precision-mode winner. The bounded Mandelbrot run has only one reliable
+   completion; repeatable timing is still needed. See
+   `docs/test-results/attractor-performance-2026-11-12.md`.
+2. **Olimex configuration test:** add a host test for Olimex GPIO and FFS
+   configuration; recent board checks do not replace this profile-specific
+   CTest coverage.
+3. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The latest
+   Olimex QIMG, TILE, and MENABLE checks passed on 2026-11-15; LILYGO was not
+   tested in this round. Tenstar Wi-Fi remains unverified. Other not-run items
+   are recorded in the board reports.
+4. **Language, UI, and image candidates:** define scope before implementing
+   string splitting, indirect procedure calls, network channels, or cascading
+   menus. `LOADIMAGE` now reads QIMG v2 with an embedded 16-color RGB palette;
+   v1 compatibility is not required before release. The Python debugger has an
+   image converter tab for load, preview, resize, export, and YMODEM upload.
+   QIMG v2 passed on Olimex; launch the desktop GUI with its dependencies
+   installed and exercise image conversion. See
+   `docs/plans/bitmap-format-study.md`.
+5. **System profile accuracy:** build ID currently reports `unknown`; validate
+   capability flags against exact board builds, including LilyGo.
+6. **Shared display-buffer design:** define task ownership, overlap, visibility,
+   and mode-change semantics before implementation. Retained per-session
+   windows remain the default.
+7. **Parked graphics work:** the custom PSRAM-DMA scanout loses sync on some
+   high-transition patterns; keep FabGL as the qualified path. The optimized
+   framebuffer primitives are not yet the backing store for BASIC drawing,
+   and the full Phase 6 benchmark matrix remains open. The `GUPDATE SKIP,1`
+   missing-prompt report stays in the issue backlog. PS/2 Break is queued by
+   FabGL but is only handled between scheduler ticks; long BLIT operations need
+   cooperative Break polling to improve response time without slowing every
+   VM slice.
 
 ## Recently completed
 

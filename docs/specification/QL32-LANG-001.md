@@ -300,6 +300,24 @@ QFNT v2 preserves each BDF glyph’s bitmap bounds, signed offsets, and advance;
 it is limited to 8,192 bytes. Printable ASCII is supported and other characters
 map to `?`; Czech glyphs are not included initially.
 
+`LOADIMAGE(path$)` opens a session-owned indexed bitmap and returns its handle.
+`BLIT [#channel,] handle,x,y[,transparentIndex]` draws it into a graphics
+window, and `UNLOADIMAGE handle` closes the reader and releases the resource.
+Loaded images are limited to 2,048 pixels per side and 1 MiB of pixel data.
+The QL/32-specific QIMG v2 file is uncompressed indexed-4 with an embedded
+palette. Its fixed 64-byte header contains `QIMG`, version `2`, format `4`,
+little-endian width, height, row stride, and 32-bit payload size in the first
+16 bytes, followed by 16 RGB palette entries (48 bytes, RGB component order).
+The payload stores rows from top to bottom, two pixels per byte, with the left
+pixel in the high nibble. For odd widths the unused low nibble is ignored.
+Pixel indexes refer to the embedded palette. During `BLIT`, each source color
+maps to the nearest color in the active display palette; this does not change
+the shared display palette. The optional transparent index refers to the
+source image palette and skips matching pixels. Blits validate the complete
+image before drawing, batch the presentation, obey `GUPDATE`, and restore the
+caller's current ink. Image readers and handles belong to the interpreter
+session and are released when it is destroyed. QIMG v1 is not supported.
+
 Numbers print using locale-independent shortest round-trip decimal notation;
 zero, including negative zero, prints as `0`. Strings print as their contents.
 There is no implicit padding or number-to-string conversion outside PRINT.
@@ -625,10 +643,12 @@ escape its root. A drive prefix can be used by any operation that accepts a
 storage path, including `LOAD`, `SAVE`, `DIR`, `INCLUDE`, `TASK`, and file
 channels, as well as the file commands below.
 
-`DIR [path]` lists the immediate entries of a directory in sorted name order;
-directory names end in `/`. With no path it lists the session's current
-directory. `CD path$` changes that directory for the current interpreter
-session. `CD` accepts a quoted path, a string variable, or a bare path such as
+`DIR [#channel] [DETAILS] [path]` lists the immediate entries of a directory
+in sorted name order; plain directory names end in `/`. In details mode,
+directories appear as `<name>` and files as `name (N bytes)`. With no path
+either form lists the session's current directory. `CD path$` changes that
+directory for the current interpreter session. `CD` accepts a quoted path, a
+string variable, or a bare path such as
 `CD ..`; relative paths start at the current directory. `.` and `..` components
 walk the directory tree, and a drive-qualified path selects its root or a
 directory on that drive.
@@ -791,6 +811,46 @@ Geometric numeric arguments to `WINDOW`, `PLOT`, `LINE`, `RECT`, `CIRCLE`, and
 32-bit pixel-coordinate range; window and shape dimensions must remain positive
 after conversion. Palette indices, fill flags, font handles, and other control
 values remain integer-only. This is pixel rounding, not subpixel rendering.
+`PALETTE start,rgb[,rgb...]` changes a contiguous range in the display-wide
+palette. Each `rgb` is a packed 24-bit `RRGGBB` integer (red in bits 16–23,
+green in bits 8–15, blue in bits 0–7). The range must fit within
+`GPALETTESIZE()`. The retained indexed pixels are unchanged, so every window
+using an edited index changes color. The command follows the range-redefinition
+model of SuperBASIC `PALETTE_QL`, but this spelling and packed value contract
+are QL/32-specific. Palette changes follow the current `GUPDATE` and frame-skip
+settings; with updates off, a later bare `GUPDATE` presents the new mapping.
+`RGB(red,green,blue)` packs three integer components in the range 0..255 into
+that 24-bit value. `PALROT start,count,steps` circularly rotates the selected
+range toward higher palette indices for positive steps; negative steps rotate
+the other way. `PALSHIFT start,count,direction,rgb` shifts the range one entry
+in direction `1` or `-1` and writes the supplied packed RGB value into the
+vacated entry. `PALFADE start,count,targetRgb,amount` moves each selected RGB
+component linearly toward the target by a fraction from 0 to 1, rounded to the
+nearest integer. These commands operate on the shared display palette and do
+not use a timer; programs control animation timing and step size. They follow
+the current `GUPDATE` and frame-skip settings and are QL/32-specific.
+`SYSINFO$(selector)` returns stable strings from the selected runtime profile.
+Selectors `KSysVersion`, `KSysBuild`, `KSysPlatform`, `KSysDisplay`,
+`KSysInput`, `KSysStorage`, and `KSysFeatures` are defined in `ql32.inc`.
+`CAPABILITY(query$)` returns `KCapabilityYes` (1), `KCapabilityNo` (0), or
+`KCapabilityUnknown` (-1). Capability names are case-insensitive and repeated
+whitespace is collapsed. These calls describe support compiled into the
+selected profile; they do not report changing state such as whether storage is
+mounted or Wi-Fi is associated. Current profiles include the host, Olimex VGA,
+CYD, and Tenstar ESP32-S3 targets.
+
+`TILE` is a supervisor-only display command that re-arranges all visible
+retained windows to fit the screen. It is provided by graphics services that
+support multi-window composition; the command reports unsupported service
+errors on other adapters.
+`LINE x,y` sets the current graphics cursor without drawing;
+`LINE TO x,y` draws from that cursor and advances it; `LINE x,y TO x2,y2`
+draws from the supplied start point and advances it to the endpoint. The
+existing `LINE x1,y1,x2,y2` form remains available and also advances the
+cursor. `GX()` and `GY()` return the cursor coordinates. Cursor state belongs
+to each session and graphics channel. These forms implement the basic
+cursor-relative subset of SuperBASIC `LINE`; omitted polyline-list forms are
+not claimed compatible.
 graphics commands use the current graphics output default; channel-qualified
 graphics commands use a `#channel` selector. The clear command accepts
 `CLS`, `CLS #channel`, `CLS ink,paper`, or `CLS #channel,ink,paper`; the color

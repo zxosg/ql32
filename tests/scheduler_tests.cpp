@@ -106,7 +106,12 @@ public:
         writtenText += value;
     }
     void clear(ql32::graphics::SessionId) override {}
-    void closeSession(ql32::graphics::SessionId) override {}
+    void closeSession(ql32::graphics::SessionId) override { ++closeSessionCount; }
+    void setWindowBounds(ql32::graphics::SessionId,
+                         ql32::graphics::ChannelId channel,
+                         ql32::graphics::Rect bounds) override {
+        windowBounds[channel] = bounds;
+    }
     void setUpdateMode(ql32::graphics::SessionId,
                        ql32::graphics::UpdateMode mode) override {
         updateMode = mode;
@@ -130,6 +135,8 @@ public:
     ql32::graphics::UpdateMode updateMode = ql32::graphics::UpdateMode::Auto;
     std::uint32_t frameSkip = 0;
     std::size_t updateCount = 0;
+    std::size_t closeSessionCount = 0;
+    std::unordered_map<ql32::graphics::ChannelId, ql32::graphics::Rect> windowBounds;
     std::vector<ql32::graphics::UpdateMode> updateModeHistory;
     std::vector<std::uint32_t> frameSkipHistory;
 };
@@ -402,6 +409,52 @@ void testInteractiveStartupProgramSharesReplSession() {
     for (int tick = 0; tick < 20 && scheduler.tick(); ++tick) {}
     require(output.str() == "startup complete\n42\n",
             "startup and REPL did not share one interpreter session");
+}
+
+void testInteractiveStartupKeepsOpenedGraphicsWindows() {
+    auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(nullptr);
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.channels = channels;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 128);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output,
+        "rightChannel=OPEN(4)\n"
+        "WINDOW #1,0,0,160,176\n"
+        "PAPER #1,1\nINK #1,6\nCLS #1\n"
+        "WINDOW #rightChannel,160,0,160,176\n"
+        "PAPER #rightChannel,2\nINK #rightChannel,6\nCLS #rightChannel\n"
+        "WINDOW #0,0,176,320,24\nPAPER #0,0\nINK #0,4\nCLS #0\n"
+        "CHANNEL #1\nPRINT #0,GETCHANNEL(0)\n");
+    for (int tick = 0; tick < 20 && scheduler.tick(); ++tick) {}
+
+    const auto startupTask = scheduler.task(repl);
+    require(startupTask &&
+                startupTask->status == ql32::vm::TaskStatus::WaitingInput,
+            "interactive startup did not return to the supervisor prompt");
+    const auto rightWindow = graphics->windowBounds.at(2);
+    const auto consoleWindow = graphics->windowBounds.at(0);
+    if (!(output.str() == "3\n" && graphics->closeSessionCount == 0 &&
+          rightWindow.x == 160 && rightWindow.width == 160 &&
+          rightWindow.height == 176 && consoleWindow.y == 176 &&
+          consoleWindow.width == 320 && consoleWindow.height == 24)) {
+        throw std::runtime_error("startup retained-state check: output=" + output.str() +
+            " closeSession=" + std::to_string(graphics->closeSessionCount) +
+            " right=" + std::to_string(rightWindow.x) + "," +
+            std::to_string(rightWindow.y) + "," + std::to_string(rightWindow.width) +
+            "," + std::to_string(rightWindow.height) + " console=" +
+            std::to_string(consoleWindow.x) + "," + std::to_string(consoleWindow.y) +
+            "," + std::to_string(consoleWindow.width) + "," +
+            std::to_string(consoleWindow.height) + " error=" + startupTask->error);
+    }
+
+    require(scheduler.submit(repl, "CLS #2\nPRINT #0,GETCHANNEL(0)\n") &&
+                scheduler.tick(),
+            "supervisor could not use startup window channel #2 after returning to REPL");
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput &&
+                output.str() == "3\n3\n" && graphics->closeSessionCount == 0,
+            "startup window channel did not survive a subsequent REPL command");
 }
 
 void testInteractiveSessionRecoversFromCommandErrors() {
@@ -1506,6 +1559,7 @@ int main() {
     testStopContinueReturnsToPromptWithoutSuspendingSession();
     testEditPrefillIsDeliveredToInteractiveInputHost();
     testInteractiveStartupProgramSharesReplSession();
+    testInteractiveStartupKeepsOpenedGraphicsWindows();
     testInteractiveSessionRecoversFromCommandErrors();
     testSchedulerOffersNonAllocatingTaskStatusAndErrorViews();
     testInteractiveUiWaitResumesThroughScheduler();

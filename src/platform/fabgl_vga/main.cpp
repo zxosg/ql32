@@ -104,6 +104,12 @@ public:
         redraw(true);
     }
 
+    void setScreenSize(std::uint32_t width, std::uint32_t height) {
+        if (width == 0 || height == 0) return;
+        screenWidth_ = width;
+        screenHeight_ = height;
+    }
+
     void setBounds(ql32::graphics::Rect bounds) {
         if (bounds.width == 0 || bounds.height == 0) return;
         bounds.x = std::clamp<std::int32_t>(bounds.x, 0, screenWidth_);
@@ -685,16 +691,19 @@ void submitInputLine() {
 }
 
 void receiveSerialCharacter(char character) {
+    // Debugger frames use a raw ASCII line beginning with '@'. Recognize that
+    // prefix before either the graphical terminal adapter or the keyboard
+    // escape decoder can echo or transform it into REPL keystrokes.
+    if (!protocolInputLine && character == '@' && lineEditor.text().empty()) {
+        protocolInputLine = true;
+        lineEditor.insertRawCharacter(character);
+        return;
+    }
     if (character == '\n' && serialSawCarriageReturn) {
         serialSawCarriageReturn = false;
         return;
     }
     if (uiPresenter && uiPresenter->graphicActive() && !protocolInputLine) {
-        if (character == '@' && lineEditor.text().empty()) {
-            protocolInputLine = true;
-            lineEditor.insertRawCharacter(character);
-            return;
-        }
         serialSawCarriageReturn = character == '\r';
         uiPresenter->handleSerialByte(character, millis());
         return;
@@ -1473,6 +1482,8 @@ void setup() {
     graphics->setDefaultWindowBounds(1,
         {0, 0, screenWidth, screenHeight - consoleHeight});
     graphics->setConsoleBoundsCallback([](ql32::graphics::Rect bounds) {
+        const auto [width, height] = graphics->displaySize();
+        screenConsole.setScreenSize(width, height);
         screenConsole.setBounds(bounds);
     });
     graphics->setConsoleColorsCallback([](ql32::graphics::ColorIndex ink,
@@ -1626,6 +1637,45 @@ void setup() {
 #endif
 
     ql32::vm::Services services;
+    {
+        ql32::runtime::SystemInfoProfile profile;
+        profile.values = {"0.1.0", "unknown",
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+                          "olimex_esp32_sbc_fabgl_rev_b",
+#else
+                          "lilygo_vga32",
+#endif
+                          "fabgl-vga 320x200 indexed3", "ps2", "sd",
+                          "vga,ps2,sd,network"};
+#if defined(QL32_OLIMEX_USE_SPIFFS)
+        profile.values[5] = "ffs,sd";
+        profile.values[6] += ",ffs";
+#endif
+#if defined(QL32_OLIMEX_PSRAM)
+        profile.values[6] += ",psram";
+#endif
+        profile.capabilities = {{"display", true}, {"input", true},
+                                {"storage", true}, {"network", true},
+                                {"wifi", true}, {"ps2", true}, {"serial", true},
+                                {"sd", true}, {"ffs",
+#if defined(QL32_OLIMEX_USE_SPIFFS)
+                                true
+#else
+                                false
+#endif
+                                }, {"psram",
+#if defined(QL32_OLIMEX_PSRAM)
+                                true
+#else
+                                false
+#endif
+                                }, {"spi", true}, {"i2c", true},
+                                {"gpio", true}, {"adc", true}, {"timer", true},
+                                {"touch", false}, {"buttons", false},
+                                {"usb-hid", false}};
+        services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+            std::move(profile));
+    }
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &driveStorage, [](ql32::runtime::StorageService*) {});

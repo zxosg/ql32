@@ -57,7 +57,10 @@ WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screen
                                  std::shared_ptr<FramePresenter> presenter,
                                  std::shared_ptr<const CanvasRasterOps> rasterOps)
     : manager_(screenWidth, screenHeight, std::move(rasterOps)),
-      presenter_(std::move(presenter)) {}
+      presenter_(std::move(presenter)) {
+    for (std::size_t index = 0; index < palette_.size(); ++index)
+        palette_[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
+}
 
 void WindowedService::discardFrozenWindows() {
     if (frozenWindows_.empty()) return;
@@ -205,6 +208,7 @@ bool WindowedService::setDisplaySize(std::uint32_t width, std::uint32_t height) 
         frozenWindows_.clear();
         manager_.clearWindows();
         textCursors_.clear();
+        graphicsCursors_.clear();
         manager_.setScreenSize(width, height);
         defaultWindowBounds_ = std::move(resizedDefaults);
         lastDisplayResizeDiscardedWindows_ = true;
@@ -290,11 +294,23 @@ void WindowedService::line(SessionId session, Point from, Point to) {
 
 void WindowedService::line(SessionId session, ChannelId channel, Point from, Point to) {
     canvas(session, channel).line(from, to);
+    graphicsCursors_[SurfaceKey{session, channel}] = to;
     const auto left = std::min<std::int64_t>(from.x, to.x);
     const auto top = std::min<std::int64_t>(from.y, to.y);
     const auto width = std::abs(static_cast<std::int64_t>(from.x) - to.x) + 1;
     const auto height = std::abs(static_cast<std::int64_t>(from.y) - to.y) + 1;
     presentRegion(screenRegion(session, channel, left, top, width, height));
+}
+
+void WindowedService::setGraphicsPosition(SessionId session, ChannelId channel,
+                                          Point position) {
+    (void)canvas(session, channel);
+    graphicsCursors_[SurfaceKey{session, channel}] = position;
+}
+
+Point WindowedService::graphicsPosition(SessionId session, ChannelId channel) const {
+    const auto found = graphicsCursors_.find(SurfaceKey{session, channel});
+    return found == graphicsCursors_.end() ? Point{} : found->second;
 }
 
 void WindowedService::pixel(SessionId session, Point position) {
@@ -305,6 +321,30 @@ void WindowedService::pixel(SessionId session, ChannelId channel, Point position
     auto& target = canvas(session, channel);
     target.plotPixel(position.x, position.y);
     presentRegion(screenRegion(session, channel, position.x, position.y, 1, 1));
+}
+
+ColorIndex WindowedService::inkColor(SessionId session, ChannelId channel) {
+    return canvas(session, channel).ink();
+}
+
+void WindowedService::drawIndexedRow(SessionId session, ChannelId channel,
+                                     Point topLeft, const std::uint8_t* pixels,
+                                     std::size_t count,
+                                     std::optional<ColorIndex> transparentIndex) {
+    if (!pixels && count != 0) throw std::invalid_argument("bitmap row is null");
+    auto& target = canvas(session, channel);
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const auto color = pixels[offset];
+        if (transparentIndex && color == *transparentIndex) continue;
+        const auto x = static_cast<std::int64_t>(topLeft.x) +
+            static_cast<std::int64_t>(offset);
+        if (x < std::numeric_limits<std::int32_t>::min() ||
+            x > std::numeric_limits<std::int32_t>::max()) continue;
+        target.setPixel(static_cast<std::int32_t>(x), topLeft.y, color);
+    }
+    if (count != 0)
+        presentRegion(screenRegion(session, channel, topLeft.x, topLeft.y,
+                                   static_cast<std::int64_t>(count), 1));
 }
 
 void WindowedService::rectangle(SessionId session, Point topLeft,
@@ -575,12 +615,14 @@ void WindowedService::closeWindow(SessionId session, ChannelId channel) {
     const auto found = sessionWindows_.find(key);
     if (found == sessionWindows_.end()) {
         textCursors_.erase(key);
+        graphicsCursors_.erase(key);
         return;
     }
     const auto oldBounds = manager_.windowState(found->second).screenClip;
     manager_.close(found->second);
     sessionWindows_.erase(found);
     textCursors_.erase(key);
+    graphicsCursors_.erase(key);
     if (channel == 0 && consoleBoundsCallback_) {
         const auto fallback = defaultWindowBounds_.find(channel);
         if (fallback != defaultWindowBounds_.end()) {
@@ -613,6 +655,7 @@ void WindowedService::closeSession(SessionId session) {
         }
         frozenWindows_.push_back(found->second);
         textCursors_.erase(found->first);
+        graphicsCursors_.erase(found->first);
         textFonts_.erase(found->first);
         graphicsFonts_.erase(found->first);
         found = sessionWindows_.erase(found);
@@ -644,6 +687,7 @@ void WindowedService::discardSession(SessionId session) {
     for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
         if (found->first.session == session) {
             textCursors_.erase(found->first);
+            graphicsCursors_.erase(found->first);
             textFonts_.erase(found->first);
             graphicsFonts_.erase(found->first);
             found = sessionWindows_.erase(found);
@@ -724,7 +768,19 @@ RgbColor WindowedService::paletteColor(SessionId session, ChannelId channel,
                                        std::uint16_t index) {
     const auto& window = canvas(session, channel);
     if (index >= window.paletteSize()) throw std::out_of_range("palette index out of range");
-    return defaultPaletteColor(index);
+    return palette_[index];
+}
+
+void WindowedService::setPaletteColors(
+    SessionId session, std::uint16_t firstIndex,
+    const std::vector<RgbColor>& colors) {
+    if (colors.empty()) throw std::invalid_argument("palette range cannot be empty");
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    const auto paletteSize = windowInfo(session).paletteSize;
+    if (firstIndex >= paletteSize || colors.size() > paletteSize - firstIndex)
+        throw std::out_of_range("palette range exceeds the active palette");
+    std::copy(colors.begin(), colors.end(), palette_.begin() + firstIndex);
+    presentRegion({0, 0, manager_.screenWidth(), manager_.screenHeight()});
 }
 
 void WindowedService::setWindowBounds(SessionId session, Rect bounds) {
@@ -838,9 +894,10 @@ void WindowedService::raiseWindow(SessionId session) {
     presentIfConfigured();
 }
 
-void WindowedService::tileWindows() {
+bool WindowedService::tileWindows() {
     manager_.tile();
     presentIfConfigured();
+    return true;
 }
 
 void WindowedService::present() {
@@ -850,8 +907,7 @@ void WindowedService::present() {
         presentationBatchDirty_ = {};
         return;
     }
-    for (std::size_t index = 0; index < frame_.palette.size(); ++index)
-        frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
+    frame_.palette = palette_;
     const auto width = manager_.screenWidth();
     const auto height = manager_.screenHeight();
     if (presenter_->presentRows(
@@ -885,8 +941,7 @@ void WindowedService::presentRegion(Rect region) {
         return;
     }
     if (skipPresentationRequest()) return;
-    for (std::size_t index = 0; index < frame_.palette.size(); ++index)
-        frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
+    frame_.palette = palette_;
     const auto width = manager_.screenWidth();
     const auto height = manager_.screenHeight();
     if (presenter_->presentRowsRegion(width, height, frame_.palette, region,

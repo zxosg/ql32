@@ -1,4 +1,5 @@
-' OPEN(4) allocates the right pane as the first opened window channel, #2.
+' Keep the window channel returned by OPEN; session handles can change if the
+' startup program is rerun in the same supervisor session.
 
 ' Two top graphics panes with a two-line console across the bottom.
 screenWidth = INT(GWIDTH())
@@ -8,7 +9,7 @@ panelHeight = screenHeight - consoleHeight
 leftWidth = INT(screenWidth / 2)
 rightWidth = screenWidth - leftWidth
 
-' Channel #2 is allocated as a graphics window for the right pane.
+' Allocate a graphics window channel for the right pane.
 rightChannel = OPEN(4)
 
 ' Left pane: blue paper with yellow ink.
@@ -19,10 +20,10 @@ CHANNEL #1
 CLS
 
 ' Right pane: red paper with yellow ink.
-WINDOW #2,leftWidth,0,rightWidth,panelHeight
-PAPER #2,2
-INK #2,6
-CHANNEL #2
+WINDOW #rightChannel,leftWidth,0,rightWidth,panelHeight
+PAPER #rightChannel,2
+INK #rightChannel,6
+CHANNEL #rightChannel
 CLS
 
 ' Console: green text on black, occupying the bottom two text rows.

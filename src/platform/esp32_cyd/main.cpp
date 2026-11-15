@@ -637,6 +637,36 @@ void setup() {
     }
 
     ql32::vm::Services services;
+    {
+        ql32::runtime::SystemInfoProfile profile;
+        profile.values = {"0.1.0", "unknown", "esp32_2432s028_yellow_tft",
+                          "ili9341-tft 320x240 rgb565", "serial,touch", "sd",
+                          "tft,touch,network,wifi"};
+#if defined(QL32_CYD_USE_SPIFFS)
+        profile.values[5] = "ffs";
+        profile.values[6] += ",ffs";
+#endif
+        profile.capabilities = {{"display", true}, {"input", true},
+                                {"storage", true}, {"network", true},
+                                {"wifi", true}, {"ps2", false}, {"serial", true},
+                                {"touch", true}, {"sd",
+#if defined(QL32_CYD_USE_SPIFFS)
+                                false
+#else
+                                true
+#endif
+                                }, {"ffs",
+#if defined(QL32_CYD_USE_SPIFFS)
+                                true
+#else
+                                false
+#endif
+                                }, {"psram", false}, {"spi", true}, {"i2c", true},
+                                {"gpio", true}, {"adc", true}, {"timer", true},
+                                {"buttons", false}, {"usb-hid", false}};
+        services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+            std::move(profile));
+    }
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
