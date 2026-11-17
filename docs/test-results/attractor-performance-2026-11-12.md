@@ -231,3 +231,54 @@ stale pixels, so each automatic dirty text update falls back to a full-frame
 compose, row conversion, and swap. For bulk BASIC output, `GUPDATE 0` around
 the print loop followed by one `GUPDATE` avoids those repeated full-frame
 presentations. It intentionally hides intermediate lines while the loop runs.
+
+## Attractor drawing and presentation split — 2026-11-16
+
+The attractor workload was retested on the previously VGA-qualified
+`olimex_esp32_sbc_fabgl_psram_double_buffer_test` profile at 320x200 and
+240 MHz/SINGLE. Three variants were run in interleaved order, with serial
+start/done marker arrival used for elapsed time:
+
+| Workload | Run times (s) | Median (s) |
+|:---|---:|---:|
+| CPU-only recurrence | 11.225, 11.227, 10.921 | 11.225 |
+| Retained-canvas drawing; one final update | 8.320, 8.317, 8.318 | 8.318 |
+| Pseudo-point drawing; update every frame | 10.021, 9.924, 9.919 | 9.924 |
+| Full attractor; recurrence and update every frame | 18.743, 15.932, 15.934 | 15.934 |
+
+The retained-canvas variant keeps `GUPDATE 0` active across 100 frames and
+flushes once at the end. The per-frame variant draws the same number of points
+and presents after each frame. Their median difference is 1.606 s, about
+16 ms for each of the 99 additional explicit updates. This estimates the cost
+of repeated presentation on this profile; it does not isolate every VM and
+framebuffer cost. The full attractor's first run was slower, while its last two
+were consistent. The current full median is below the earlier 19.778 s
+240 MHz/SINGLE median, but these end-to-end samples do not attribute the change
+to one specific code path.
+
+An initial CPU-only run on the custom DMA runtime did not produce its completion
+marker within 80 seconds; the marker appeared during a follow-up read. That
+profile was excluded from the comparison, and the board was restored to the
+qualified FabGL profile before the measurements above. The uploaded benchmark
+sources remain in the repository and the test files remain on the board's FFS.
+
+## Mandelbrot render/update split — 2026-11-16
+
+The 80×56, 24-iteration Mandelbrot fixture ran on the same VGA-qualified
+`olimex_esp32_sbc_fabgl_psram_double_buffer_test` profile at 320×200 and
+240 MHz/SINGLE. Three samples were collected per variant; the CPU-only version
+produced checksum `13318` in every run.
+
+| Workload | Run times (s) | Median (s) |
+|:---|---:|---:|
+| CPU-only escape calculation | 32.777, 32.774, 32.776 | 32.776 |
+| Drawing with automatic updates | 40.882, 40.593, 40.613 | 40.613 |
+| Drawing with updates batched to one final flush | 34.270, 34.179, 34.185 | 34.185 |
+
+The batched version was 6.428 s (15.8%) faster than automatic updates for this
+workload. The CPU-only median was 1.409 s faster than the batched drawing
+median; this remaining difference includes pixel/shape drawing and one final
+presentation, so it does not isolate framebuffer work alone. VGA was visually
+confirmed stable and correct during the timing run. The two BASIC fixtures are
+[`mandelbrot-benchmark.bas`](../../examples/mandelbrot-benchmark.bas) and
+[`mandelbrot-benchmark-cpu.bas`](../../examples/mandelbrot-benchmark-cpu.bas).

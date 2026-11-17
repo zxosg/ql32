@@ -112,6 +112,9 @@ public:
                          ql32::graphics::Rect bounds) override {
         windowBounds[channel] = bounds;
     }
+    void raiseWindows(ql32::graphics::SessionId session) override {
+        raisedSessions.push_back(session);
+    }
     void setUpdateMode(ql32::graphics::SessionId,
                        ql32::graphics::UpdateMode mode) override {
         updateMode = mode;
@@ -139,6 +142,7 @@ public:
     std::unordered_map<ql32::graphics::ChannelId, ql32::graphics::Rect> windowBounds;
     std::vector<ql32::graphics::UpdateMode> updateModeHistory;
     std::vector<std::uint32_t> frameSkipHistory;
+    std::vector<ql32::graphics::SessionId> raisedSessions;
 };
 
 class TestDisplayModes final : public ql32::runtime::DisplayModeService {
@@ -1329,6 +1333,37 @@ void testTaskWaitResumesCallerAndExposesChildStatus() {
             "wait form did not finish child and return caller to its prompt");
     require(graphics->writtenText == "COMPLETED\n",
             "TASKRESULT did not expose the completed standard task status");
+    require(!graphics->raisedSessions.empty() &&
+                graphics->raisedSessions.back() == supervisor,
+            "completed child did not raise its caller's windows");
+}
+
+void testAltTabCyclesLiveTasksIncludingNonInteractiveTasks() {
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+    const auto first = scheduler.launch("x=1\n", output);
+    const auto second = scheduler.launch("x=2\n", output);
+
+    require(scheduler.focusedTask() == supervisor &&
+                scheduler.focusedTaskNumber() == 1 &&
+                scheduler.activeTaskCount() == 3,
+            "initial active task position was incorrect");
+    require(scheduler.focusNextTask() && scheduler.focusedTask() == first &&
+                scheduler.focusedTaskNumber() == 2,
+            "Alt+Tab did not activate a running non-interactive task");
+    require(!graphics->raisedSessions.empty() &&
+                graphics->raisedSessions.back() == first,
+            "Alt+Tab did not raise the selected task's windows");
+    require(scheduler.focusNextTask() && scheduler.focusedTask() == second &&
+                scheduler.focusedTaskNumber() == 3,
+            "Alt+Tab did not advance to the next task");
+    require(scheduler.focusNextTask() && scheduler.focusedTask() == supervisor &&
+                scheduler.focusedTaskNumber() == 1,
+            "Alt+Tab did not wrap to the first live task");
 }
 
 void testWaitTaskResumesAfterDialogAndMenu() {
@@ -1636,6 +1671,7 @@ int main() {
     testTaskSupportsCommandAndFunctionSyntax();
     testCompletedTaskCanBeReapedExplicitly();
     testTaskWaitResumesCallerAndExposesChildStatus();
+    testAltTabCyclesLiveTasksIncludingNonInteractiveTasks();
     testWaitTaskResumesAfterDialogAndMenu();
     testTaskWaitReturnsChildErrorContext();
     testTaskAndVmPausePreserveRunnableSessions();

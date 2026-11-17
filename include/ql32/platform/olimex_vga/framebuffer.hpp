@@ -42,6 +42,29 @@ struct FramebufferView {
     }
 };
 
+struct PixelRect {
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+
+    constexpr bool empty() const noexcept { return width == 0 || height == 0; }
+};
+
+constexpr PixelRect unite(PixelRect a, PixelRect b) noexcept {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+    const auto left = a.x < b.x ? a.x : b.x;
+    const auto top = a.y < b.y ? a.y : b.y;
+    const auto rightA = a.x + a.width;
+    const auto rightB = b.x + b.width;
+    const auto bottomA = a.y + a.height;
+    const auto bottomB = b.y + b.height;
+    const auto right = rightA > rightB ? rightA : rightB;
+    const auto bottom = bottomA > bottomB ? bottomA : bottomB;
+    return {left, top, right - left, bottom - top};
+}
+
 struct BitmapView {
     const std::uint8_t* pixels = nullptr;
     std::uint32_t width = 0;
@@ -112,6 +135,95 @@ inline bool writePixel(FramebufferView framebuffer, std::uint32_t x,
             packed = static_cast<std::uint8_t>((packed & 0xF0u) | (value & 0x0Fu));
         else
             packed = static_cast<std::uint8_t>((packed & 0x0Fu) | ((value & 0x0Fu) << 4));
+    }
+    return true;
+}
+
+// Convert and write a complete row segment. Packed-4 output writes two
+// adjacent mapped pixels per byte, avoiding a read/modify/write for each
+// pixel during framebuffer presentation.
+inline bool writeMappedRow(FramebufferView framebuffer, std::uint32_t x,
+                           std::uint32_t y, const std::uint8_t* indices,
+                           std::uint32_t count,
+                           const std::uint8_t* indexMap) noexcept {
+    if (!framebuffer.valid() || !indices || !indexMap || y >= framebuffer.height ||
+        x > framebuffer.width || count > framebuffer.width - x)
+        return false;
+    auto* row = framebuffer.pixels + static_cast<std::size_t>(y) * framebuffer.stride;
+    if (framebuffer.format == PixelFormat::Rgb222) {
+        for (std::uint32_t i = 0; i < count; ++i)
+            row[x + i] = indexMap[indices[i]] & 0x3Fu;
+        return true;
+    }
+
+    std::uint32_t i = 0;
+    if ((x & 1u) && count != 0) {
+        auto& packed = row[x / 2];
+        packed = static_cast<std::uint8_t>((packed & 0xF0u) |
+                                           (indexMap[indices[i++]] & 0x0Fu));
+        ++x;
+        --count;
+    }
+    while (count >= 2) {
+        row[x / 2] = static_cast<std::uint8_t>(
+            ((indexMap[indices[i]] & 0x0Fu) << 4) |
+             (indexMap[indices[i + 1]] & 0x0Fu));
+        x += 2;
+        i += 2;
+        count -= 2;
+    }
+    if (count != 0) {
+        auto& packed = row[x / 2];
+        packed = static_cast<std::uint8_t>((packed & 0x0Fu) |
+                                           ((indexMap[indices[i]] & 0x0Fu) << 4));
+    }
+    return true;
+}
+
+// Synchronize a pixel rectangle between distinct framebuffers of the same
+// format. Packed-4 edges preserve the untouched neighboring nibble.
+inline bool copyRegion(const FramebufferView& source, FramebufferView destination,
+                       std::uint32_t x, std::uint32_t y,
+                       std::uint32_t width, std::uint32_t height) noexcept {
+    if (!source.valid() || !destination.valid() || !source.pixels ||
+        source.format != destination.format || source.width != destination.width ||
+        source.height != destination.height || x > source.width ||
+        y > source.height || width > source.width - x ||
+        height > source.height - y)
+        return false;
+    if (width == 0 || height == 0) return true;
+
+    for (std::uint32_t rowIndex = y; rowIndex < y + height; ++rowIndex) {
+        const auto* input = source.pixels +
+            static_cast<std::size_t>(rowIndex) * source.stride;
+        auto* output = destination.pixels +
+            static_cast<std::size_t>(rowIndex) * destination.stride;
+        if (source.format == PixelFormat::Rgb222) {
+            std::memcpy(output + x, input + x, width);
+            continue;
+        }
+
+        auto column = x;
+        auto remaining = width;
+        if ((column & 1u) && remaining != 0) {
+            auto& target = output[column / 2];
+            target = static_cast<std::uint8_t>((target & 0xF0u) |
+                                               (input[column / 2] & 0x0Fu));
+            ++column;
+            --remaining;
+        }
+        const auto pairedPixels = remaining & ~std::uint32_t{1};
+        if (pairedPixels != 0) {
+            std::memcpy(output + column / 2, input + column / 2,
+                        pairedPixels / 2);
+            column += pairedPixels;
+            remaining -= pairedPixels;
+        }
+        if (remaining != 0) {
+            auto& target = output[column / 2];
+            target = static_cast<std::uint8_t>((target & 0x0Fu) |
+                                               (input[column / 2] & 0xF0u));
+        }
     }
     return true;
 }

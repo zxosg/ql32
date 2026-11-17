@@ -1193,8 +1193,9 @@ void testQ32ErrorFunctions() {
         "PRINT ERR\n"
         "PRINT ERR$(0)\n"
         "PRINT ERR$(22)\n"
+        "PRINT ERR$(23)\n"
         "PRINT ERRX$\n", output);
-    require(output.str() == "0\nNo error\nUnknown QL/32 error code 22\n\n",
+    require(output.str() == "0\nNo error\nResource is already in use\nUnknown QL/32 error code 23\n\n",
             "ERR, ERR$, or ERRX$ returned an incorrect value");
 }
 

@@ -73,14 +73,13 @@ void externalInputsAndLifetimeTest() {
         runtime::ChannelRegistry::SerialWriter{}, hardware);
     Interpreter interpreter({}, channels);
     std::ostringstream output;
-    interpreter.execute("g=OPEN(5,7,0)\na=OPEN(6,8,12)\nPRINT IN(g);IN(a)\n", output);
-    require(output.str() == "01234\n", "GPIO/ADC input values were not returned");
-    bool duplicateRejected = false;
-    try { interpreter.execute("other=OPEN(5,7,0)\n", output); }
-    catch (const std::exception&) { duplicateRejected = true; }
-    require(duplicateRejected, "duplicate pin reservation was accepted");
-    interpreter.execute("CLOSE g\nCLOSE a\n", output);
-    interpreter.execute("other=OPEN(5,7,0)\nCLOSE other\n", output);
+    interpreter.execute(
+        "g=OPEN(5,7,0)\na=OPEN(6,8,12)\nPRINT IN(g);IN(a)\n"
+        "other=OPEN(5,7,0)\nPRINT other\n"
+        "PRINT IN(g)\nCLOSE g\nCLOSE a\n"
+        "other=OPEN(5,7,0)\nPRINT other>=0\nCLOSE other\n", output);
+    require(output.str() == "01234\n-22\n0\n1\n",
+            "pin conflict must return -22 and reopening after CLOSE must succeed");
 }
 
 void invalidSyntaxTest() {

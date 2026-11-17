@@ -54,7 +54,7 @@ runtime::ChannelId VirtualHardware::open(
             invalid("hardware OPEN contains duplicate pins");
         const auto owner = pinOwners_.find(pin);
         if (owner != pinOwners_.end())
-            throw ServiceError(ServiceErrorCode::Unavailable, "hardware pin is already reserved");
+            throw ServiceError(ServiceErrorCode::ResourceBusy, "hardware pin is already reserved");
         reserved.push_back(pin);
     };
     switch (device) {

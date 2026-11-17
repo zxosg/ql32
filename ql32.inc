@@ -15,6 +15,7 @@ CONST KCapabilityUnknown = -1
 CONST KCapabilityNo = 0
 CONST KCapabilityYes = 1
 ' Built-in bitmap font handles
+CONST KFontDefault = 0
 CONST KFontSmall = 1
 CONST KFontNormal = 2
 CONST KFontLarge = 3
@@ -123,3 +124,4 @@ CONST KVgaMode640x400 = 3
 CONST KVgaMode640x480 = 4
 CONST KVgaDisplayOptionsDefault = 0
 CONST KVgaDisplayOptionDoubleBuffered = 1
+CONST KOpenResourceBusy = -22

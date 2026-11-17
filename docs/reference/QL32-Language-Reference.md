@@ -37,6 +37,7 @@ Target tags mark behavior that depends on a particular runtime or driver:
 | `[DISPLAY]` | A target with a graphics display service |
 | `[TOUCH]` | CYD screen-touch event driver |
 | `[NETWORK]` | A target with the network service enabled |
+| `[AUDIO]` | Olimex ESP32-SBC-FabGL AY/VTX audio output |
 | `[HARDWARE]` | Hardware channel or managed-memory API; available device drivers vary by target |
 
 An untagged entry is part of the portable language or shell. A tag means that
@@ -133,7 +134,7 @@ completion suspends only its BASIC session. Other scheduler sessions continue.
 | `esp32_2432s028_spiffs` `[CYD]` | 320×240 TFT; serial REPL; screen touch | Internal SPIFFS as `FFS:` and SD as `SDC:` | ESP32 GPIO, ADC, SPI, I2C, UART, parallel, capacitive touch, timer, Wi-Fi, graphics, and screen-touch events. Touch event behavior verified at rotation 0. |
 | `ql32_tenstar_esp32s3` `[TENSTAR]` | 240×135 TFT; USB serial REPL | SPIFFS as `FFS:` | GPIO, ADC, SPI, I2C, UART, timer, Wi-Fi, and graphics services. Some board checks remain open. |
 | `lilygo_vga32` `[VGA32]` | 320×200 VGA; PS/2 input | SD as `SDC:` | FabGL display/input with ESP32 GPIO, ADC, SPI, I2C, UART, parallel, capacitive touch, timer, and network service adapters. Physical verification is incomplete. |
-| `olimex_esp32_sbc_fabgl` `[VGA32]` | 320×200 VGA; PS/2 input | SD and configured flash filesystem | FabGL display/input with ESP32 hardware services. Physical verification is incomplete. |
+| `olimex_esp32_sbc_fabgl` `[VGA32]` | 320×200 VGA; PS/2 input | SD and configured flash filesystem | FabGL display/input, mono AY/VTX output on GPIO25, and ESP32 hardware services. Audio output quality requires hardware verification. |
 
 `esp32s3_tft`, `esp32p4_tft`, and experimental Olimex PSRAM/DMA environments
 are not presented here as supported user targets. The language APIs are
@@ -143,6 +144,12 @@ portable; `OPEN` reports unavailable when the selected driver is absent.
 
 These device kinds use `OPEN(kind, ...)`. Pin and bus aliases are supplied by
 `ql32.inc` and board-specific `ql32-hardware.inc` files.
+
+When a hardware pin is already reserved, `OPEN` returns the negative value
+`KOpenResourceBusy` (`-22`) and execution continues. Successful channel
+handles are nonnegative. Check the result before using it as a channel; after
+the owning channel is closed, the pin can be opened again. Other `OPEN` errors
+retain their documented error behavior.
 
 | Driver | Open form | Operations | Availability |
 | --- | --- | --- | --- |
@@ -228,6 +235,7 @@ SMSQ/E compatibility.
 | `CHANNEL` | `CHANNEL #channel` or `CHANNEL #source TO #destination` | Changes the default output channel or session-local channel route. | `CHANNEL #0` |
 | `GETNET` | `GETNET ssid$, password$` | Connects to a Wi-Fi network. `[NETWORK]` | `GETNET ssid$, pass$` |
 | `DISNET` | `DISNET` | Disconnects the network service. `[NETWORK]` | `DISNET` |
+| `MUSIC` | `MUSIC PLAY path$`, `MUSIC PAUSE`, `MUSIC RESUME`, `MUSIC STOP`, `MUSIC STATUS` | Plays VTX AY/YM register streams through the Olimex mono DAC. File loading and decoding finish before `PLAY` returns; sample streaming then runs independently. File size is limited to 64 KiB and decoded register data to 96 KiB. Other sound chips and file formats are not yet supported. `[AUDIO]` | `MUSIC PLAY "SDC:/music/theme.vtx"` |
 | `FLASH` | `FLASH mode` inside `IPRINT` or `BUSY` options | Selects a toast flash mode; it is an option in these commands, not a standalone display command. `[DISPLAY]` | `IPRINT FLASH KInfoFlashText, "Ready"` |
 
 ### Graphics and display
@@ -251,8 +259,8 @@ All entries in this subsection require a graphics display service `[DISPLAY]`.
 | `MODE` | `MODE id` | Selects a display mode exposed by the runtime. `[DISPLAY]` | `MODE 0` |
 | `GUPDATE` | `GUPDATE [0\|1]` | `0` suppresses automatic presentation, bare command presents now, `1` resumes automatic presentation. `[DISPLAY]` | `GUPDATE 0` |
 | `LOADFONT` | `font% = LOADFONT(path$)` | Loads a session-owned bitmap font. `[DISPLAY]` | `font% = LOADFONT("font.fnt")` |
-| `FONT` | `FONT [#channel,] handle, style` | Selects a normal text-output font and style flags. `[DISPLAY]` | `FONT font%, 1` |
-| `GFONT` | `GFONT [#window,] handle, style` | Selects the graphics `TEXT` font and style. `[DISPLAY]` | `GFONT font%, 0` |
+| `FONT` | `FONT [#channel,] handle, style` | Selects a normal text-output font and style flags. Handle `0` with style `0` restores the platform default. `[DISPLAY]` | `FONT KFontDefault, 0` |
+| `GFONT` | `GFONT [#window,] handle, style` | Selects the graphics `TEXT` font and style. Handle `0` with style `0` restores the platform default. `[DISPLAY]` | `GFONT KFontDefault, 0` |
 | `UNLOADFONT` | `UNLOADFONT handle` | Releases a loaded font. `[DISPLAY]` | `UNLOADFONT font%` |
 | `BLIT` | `BLIT [#window,] image%, x, y[, transparentIndex]` | Draws a QIMG indexed bitmap at pixel coordinates; the optional palette index is transparent. `[DISPLAY]` | `BLIT logo%, 20, 12, 0` |
 | `UNLOADIMAGE` | `UNLOADIMAGE handle` | Releases a session-owned bitmap and its open file handle. `[DISPLAY]` | `UNLOADIMAGE logo%` |

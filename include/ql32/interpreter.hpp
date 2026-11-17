@@ -21,6 +21,7 @@
 #include "ql32/runtime/system_info.hpp"
 #include "ql32/runtime/cpu_frequency.hpp"
 #include "ql32/runtime/display_mode.hpp"
+#include "ql32/runtime/music.hpp"
 #include "ql32/runtime/task_control.hpp"
 #include "ql32/runtime/error.hpp"
 #include "ql32/graphics/service.hpp"
@@ -55,7 +56,8 @@ public:
                          std::shared_ptr<runtime::SystemControlService> systemControl = {},
                          std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency = {},
                          std::shared_ptr<runtime::DisplayModeService> displayModes = {},
-                         std::shared_ptr<runtime::SystemInfoService> systemInfo = {});
+                         std::shared_ptr<runtime::SystemInfoService> systemInfo = {},
+                         std::shared_ptr<runtime::MusicService> music = {});
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -166,6 +168,7 @@ private:
     std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency_;
     std::shared_ptr<runtime::DisplayModeService> displayModes_;
     std::shared_ptr<runtime::SystemInfoService> systemInfo_;
+    std::shared_ptr<runtime::MusicService> music_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::shared_ptr<runtime::SystemControlService> systemControl_;
     runtime::SessionId session_id_ = 0;

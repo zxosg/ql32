@@ -204,6 +204,8 @@ public:
     }
     virtual void setTextFont(SessionId, ChannelId, const BitmapFont*, FontStyle) {}
     virtual void setGraphicsFont(SessionId, ChannelId, const BitmapFont*, FontStyle) {}
+    virtual void resetTextFont(SessionId, ChannelId) {}
+    virtual void resetGraphicsFont(SessionId, ChannelId) {}
     virtual void clearFontSelections(SessionId, ChannelId) {}
     virtual void writeText(SessionId session, const std::string& value) {
         text(session, {0, 0}, value);
@@ -284,6 +286,8 @@ public:
         (void)channel;
         setWindowBounds(session, bounds);
     }
+    // Raise every window owned by the session as a group.
+    virtual void raiseWindows(SessionId) {}
     virtual void setTaskViewport(SessionId, TaskViewport) {
         throw std::runtime_error("task viewport positioning unsupported");
     }

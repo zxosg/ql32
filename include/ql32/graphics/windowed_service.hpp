@@ -62,6 +62,8 @@ public:
                      const BitmapFont* font, FontStyle style) override;
     void setGraphicsFont(SessionId session, ChannelId channel,
                          const BitmapFont* font, FontStyle style) override;
+    void resetTextFont(SessionId session, ChannelId channel) override;
+    void resetGraphicsFont(SessionId session, ChannelId channel) override;
     void clearFontSelections(SessionId session, ChannelId channel) override;
     void writeText(SessionId session, const std::string& value) override;
     void writeText(SessionId session, ChannelId channel,
@@ -132,6 +134,7 @@ public:
     }
     void setWindowPixelDepth(SessionId session, PixelDepth depth);
     void setWindowVisible(SessionId session, bool visible);
+    void raiseWindows(SessionId session) override;
     void raiseWindow(SessionId session);
     bool tileWindows() override;
     void present();

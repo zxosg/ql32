@@ -679,6 +679,220 @@ not assessed. This implements the basic `LINE` behavior documented by
 SuperBASIC; polyline lists remain unsupported. See
 [cursor-line results](test-results/graphics-line-cursor-2026-11-14.md).
 
+**Full-height PSRAM scanout qualification (2026-11-15):** added an opt-in
+400x300 packed-4 scanout profile using the PSRAM framebuffer and internal DMA
+line ring. The initial 100-row ring rolled/lost sync during live refill, while
+the same 400x300 modeline and descriptor chain stayed synced with refill
+interrupts disabled. A 150-row ring on core 0 then starved IDLE0 and triggered
+the task watchdog; moving refill to core 1 alone still rolled. Optimized packed
+row encoding with a precomputed 16-bit pair LUT and emitted the required
+`2,3,0,1,6,7,4,5` pixel order in one pass. High-resolution diagnostics now
+avoid the moving-source shift so the test isolates refill throughput; palette
+rotation and the PSRAM stress writer remain active. The owner confirmed stable
+sync with the animated bars visible. Serial counters then recorded 5,195
+frames / 1,558,725 rows, 20,783 EOFs, zero late refills, zero spurious
+interrupts, and 513 MB of PSRAM stress writes. This qualifies the 400x300
+packed-4 scanout diagnostic with a 150-row ring, 75-row refill group, and core-1
+worker. It does not yet integrate full-height scanout with the BASIC window
+manager. A follow-up 640x480 packed-4 test used a 120-row ring and core-1
+worker. The owner confirmed stable/readable VGA, including after increasing the
+ring from 96 to 120 rows. Counters still rose from 1,325 to 2,036 late-refill
+events across 4,736 to 7,336 EOFs, and three spurious interrupts were recorded;
+visual stability is a pass, but timing telemetry remains open before calling
+640x480 qualified. PSRAM stress writes were active during both captures. Keep
+the standard FabGL runtime as the default/recovery profile; the DMA runtime
+profile remains opt-in.
+
+**640x480 QL/32 runtime profile (2026-11-15):** connected the build-selected DMA
+mode to the platform's fixed display-mode service and initialized the runtime
+window manager, console, and `PsramFramePresenter` at the scanout dimensions.
+The `olimex_esp32_sbc_fabgl_psram_dma_display_640x480_packed4` profile built
+and flashed. Startup allocated the expected 460,800-byte PSRAM framebuffer
+triple-buffer set and 90,620 bytes of internal DMA data, leaving 116,496 bytes
+of the internal DMA heap. Serial checks confirmed `MODE LIST` reports 640x480
+and `MODE 0,0` preserves/reports the same geometry. The owner confirmed the
+channel-1 diagonal, circle, and console text were correct with stable sync.
+During drawing and console updates, telemetry showed zero late refills; the
+spurious-interrupt count rose to 22 without visible artifacts. This is a
+successful runtime visual/functionality check, with spurious IRQ accounting
+still open. The DMA runtime profile exposes only its build-selected mode today;
+switching between modelines at runtime remains future work. The standard
+FabGL profile remains the default/recovery build.
+
+**400x300 QL/32 runtime profile (2026-11-15):** added and flashed the matching
+`olimex_esp32_sbc_fabgl_psram_dma_display_400x300_packed4` profile using the
+150-row internal ring and core-1 refill worker. `MODE LIST` reported 400x300;
+`MODE 0,0` retained 400x300. The owner confirmed the channel-1 diagonal and
+circle plus console text rendered correctly with stable sync. Serial counters
+showed zero late refills and zero spurious interrupts across the capture. The
+connected board was left running this 400x300 QL/32 runtime profile for full
+height use; standard FabGL remains the configured default build.
+
+**640x400 QL/32 runtime profile (2026-11-15):** added the opt-in
+`olimex_esp32_sbc_fabgl_psram_dma_display_640x400_packed4` profile using the
+FabGL 640x400 70 Hz modeline, packed-4 PSRAM framebuffer, 100-row internal DMA
+ring, and core-1 refill worker. Build and flash succeeded. Serial boot reported
+640x400 at 70.09 Hz, 384,000 bytes for the three PSRAM framebuffers, and
+75,948 bytes for the internal DMA chain with 131,248 bytes of DMA heap
+remaining. A 12-second runtime capture recorded about 7,800 frames, zero late
+refills, and 30 spurious-IRQ counts; the interrupt counter incremented slowly
+while the presenter continued to clone frames. The owner later confirmed that
+this 640x400 image was stable and readable. The previous 400x300 runtime
+profile had passed the owner’s visual check before this profile was flashed.
+
+The fixed DMA profiles now report the same mode IDs as the FabGL VGA presets:
+0 for 320x200, 2 for 400x300, 3 for 640x400, and 4 for 640x480. Each
+profile accepts only its own ID until live modeline switching is implemented.
+The prior serial checks using `MODE 0,0` on the high-resolution profiles
+preceded this correction.
+
+Scanout allocation now releases partially allocated framebuffer, line-ring,
+blanking, descriptor, and stress buffers when allocation or memory capability
+validation fails. The interrupt is allocated before workers, and failures to
+create either worker release the interrupt and allocated buffers; a refill
+worker waiting for its first notification is deleted if stress-task creation
+fails. The 640x400 firmware builds with this cleanup. A coordinated shutdown of
+active workers and the interrupt is still needed for live modeline changes.
+Startup failure paths have not yet been fault-injected on hardware.
+
+The scanout now has a cooperative stop operation: it rejects a staged frame,
+disables and frees the interrupt on its allocating core, stops the stream,
+waits for workers to leave their buffers, then frees the allocations. A
+640x480 diagnostic stopped and restarted the same 160-row configuration;
+serial counters then reached 603 frames with zero late refills and unexpected
+interrupts. DMA heap before allocation was 251,320 bytes initially and
+251,028 bytes immediately after stop, while heap remaining after each start
+was 130,232 bytes. This is one no-stress cycle, not a leak soak or a live mode
+change. The stop currently waits synchronously and must be adapted to preserve
+scheduler responsiveness before exposing it through `MODE`. Geometry changes,
+rollback, concurrent sessions, stress, and visual verification remain open.
+The 640x480 QL/32 runtime was rebuilt and reflashed after this diagnostic.
+
+Shutdown has since been split into request and nonblocking poll operations;
+the synchronous wrapper is used only by isolated diagnostics. Scanout geometry
+can be changed only while stopped and is validated against the preset table.
+The hardware diagnostic rejected a geometry change while running and an
+unsupported size, then alternated 640x480 → 400x300 → 640x480 → 400x300.
+All three stop/restart cycles completed; the DMA heap before each subsequent
+allocation was 251,020 bytes and the final 400x300 scanout reached 605 frames
+with zero late refills and unexpected interrupts. This validates the scanout
+lifecycle only: `MODE`, the window manager, concurrent sessions, rollback,
+stress, and monitor appearance were not exercised by that diagnostic.
+The diagnostic was subsequently repeated with four-second holds between
+changes; the owner confirmed the monitor regained stable sync after each
+transition. This remains a scanout-only check, without BASIC `MODE`, window
+manager integration, active drawing, or concurrent PSRAM stress.
+An expanded no-stress diagnostic then cycled 640x480 → 400x300 → 640x480 →
+320x240 → 320x200 → 640x400 → 640x480. All starts and nonblocking shutdowns
+completed; free DMA heap before each restart was 251,020 bytes, and the final
+640x480 mode reached 483 frames with zero late refills and unexpected IRQs.
+The owner has been asked to check monitor sync across the expanded sequence.
+A host graphics regression also confirms that two sessions' retained drawing
+survives a deferred presentation and display resize. This does not yet wire
+the scanout transition to BASIC `MODE`.
+
+The scanout's width and height are now instance fields initialized from the
+boot profile, preparing the encoder and presenter for runtime geometry. The
+640x400 profile was rebuilt and flashed; an idle serial capture reached
+1,367 frames with zero late refills and nine spurious IRQ counts. Visual
+qualification, the timing impact under active drawing, runtime geometry
+changes, and safe shutdown/restart are still outstanding.
+
+Ring and refill sizes are now instance state with validation that the ring
+fits its maximum capacity, divides the frame height, and consists of whole
+refill groups. A host-tested geometry table records candidate defaults for the
+five VGA sizes; the boot profiles still select their existing ring sizes and
+the table does not yet expose runtime mode switching. The refactored 640x400
+image built and flashed; serial idle counters reached 1,294 frames with zero
+late refills and six spurious IRQ counts. Active-drawing and monitor checks
+remain necessary, and 320x240 has not yet been qualified with this ring.
+
+The EOF interrupt handler now samples status once and acknowledges that
+sample before processing it. Previously it read status again at the end,
+which could acknowledge a newly arrived event that it had not processed.
+Additional counters distinguish empty interrupts from other status bits. The
+updated 640x400 runtime built and flashed; an idle serial capture reached
+1,452 frames with zero late refills and zero unexpected or empty interrupts.
+This short idle run is encouraging but does not yet explain the earlier
+interrupt counts or qualify active drawing and the 640x480 profile.
+
+On the same 640x400 image, the FFS `graphics-partial-draw-test.bas` worker
+reported both `PARTIAL_DRAW_START` and `PARTIAL_DRAW_DONE`. During the captured
+run, the counters advanced from 4,944 to 8,830 frames with zero late refills,
+empty IRQs, or unexpected IRQs; frame clone counts increased from 126 to 350.
+The fixture took more than 35 seconds across the serial observation windows,
+so this is a scanout-counter and completion check, not a performance pass.
+The monitor image was not visually assessed in this run.
+
+The updated 640x480 runtime also built and flashed, and the same bounded
+fixture reported `PARTIAL_DRAW_START` and `PARTIAL_DRAW_DONE`. Serial samples
+through frame 7,484 recorded zero late refills and zero empty or unexpected
+interrupts while framebuffer clones rose from 19 to 226. The run took over
+100 seconds, so performance remains an open concern. This fixture exercises a
+320x200 portion of the larger display, and no visual check was made for this
+build; it does not establish sustained full-frame stability. The previous
+640x480 diagnostic with concurrent PSRAM stress remains a separate open
+qualification case.
+
+The 640x480 packed-4 diagnostic was rebuilt with the single-sample interrupt
+handler and rerun with its PSRAM stress writer active. Late refills increased
+from 1,418 to 4,504 while 101,449,728 additional stress bytes were written;
+empty and unexpected interrupt counts stayed at zero. The worker refilled
+fewer rows than were consumed, so the high-contention case still fails its
+deadline and cannot be qualified from the clean runtime drawing counters.
+The 640x480 QL/32 runtime profile was reflashed after this diagnostic.
+
+An aligned four-byte packed framebuffer read reduced observed missed refill
+events from approximately 27.5% to 21.5% of EOF events in short separate
+stress captures, but did not eliminate the deadline failures. The comparison
+is diagnostic rather than a controlled benchmark; visual pixel correctness
+and active workload behavior after this encoder change still need checking.
+Supported geometry now requires widths divisible by eight to preserve the
+aligned row-load invariant. The updated 640x480 runtime was rebuilt and flashed.
+An extracted encoder helper passed 65,536 host input combinations but the
+subsequent runtime image repeatedly restarted during startup on hardware.
+The helper extraction and its host-only test were removed; the inline aligned
+encoder was restored. After flashing that version the 640x480 REPL started
+and ran through 1,635 idle frames with zero late refills or unexpected IRQs.
+The exact cause of the restart is not yet proven.
+
+A 640x480 diagnostic with a 160-row ring and 40-row refill groups allocated
+and reported scanout startup, but serial output stopped partway through the
+startup message. No stress counters were obtained. That diagnostic also used
+the subsequently reverted encoder helper, so the ring itself cannot yet be
+identified as the cause. The 120-row QL/32 runtime has been restored.
+Repeating the 160-row diagnostic with the restored inline encoder produced the
+same truncated startup output and no counters over 16 seconds. This rules out
+the helper extraction as a necessary cause of that diagnostic failure; worker
+scheduling and interrupt cadence remain hypotheses. The 120-row runtime was
+reflashed and reached the REPL with zero late refills through frame 995.
+A follow-up 160-row, 40-row-group diagnostic with the stress writer disabled
+reached 1,382 frames with zero late refills and zero unexpected interrupts.
+Thus the 160-row scanout and palette cycling can run without the competing
+writer; the stress-enabled diagnostic's loss of serial output depends on the
+combined workload or scheduling. This does not establish visual stability.
+The 120-row 640x480 QL/32 runtime was reflashed after the comparison.
+At refill priority 1, the same 160-row diagnostic with stress enabled continued
+reporting: between frames 421 and 1,321, late refills rose from 2,834 to 8,986
+over 10,797 additional EOF events, while the stress writer advanced by about
+81 MB. Unexpected IRQs stayed at zero. This supports core starvation as an
+explanation for the priority-4 diagnostic's missing output, but priority 1
+missed roughly 57% of refill deadlines and is not an acceptable fix. The
+120-row priority-4 QL/32 runtime was reflashed after the experiment.
+
+A separate 640x480 diagnostic combined adjacent 16-bit pixel pairs into
+32-bit DMA writes and recorded approximately 23% late EOF events under stress,
+comparable to the prior aligned-read capture (about 22%). This short test
+showed no meaningful improvement, so the experimental word-store path was
+removed and the 120-row QL/32 runtime was rebuilt and reflashed.
+
+A diagnostic compiled with GCC's `dupldst` PSRAM cache workaround instead of
+the profile's `memw` strategy also failed under the 640x480 stress writer:
+late refills increased by 1,578 over 5,896 EOF events (about 27%), with no
+unexpected interrupts. This is comparable to the `memw` stress result and
+does not justify changing the normal profile. The 120-row `memw` QL/32 runtime
+was rebuilt and reflashed after the comparison.
+
 **Backlog — console prompt with `GUPDATE SKIP,1`:** the owner reports that
 repeated Enter presses create new console lines but intermittently omit the
 `>` prompt when frame skipping is enabled; with `GUPDATE SKIP,0`, each new line
@@ -687,9 +901,138 @@ a separate issue, with a possible link to screen refresh/presentation, and
 retest after the active VGA refresh investigation. No firmware change was made
 for this report.
 
+**High-resolution responsiveness investigation (2026-11-16):** runtime DMA
+telemetry had been printing a large status block every second from the main
+loop. It is now opt-in under `QL32_OLIMEX_DMA_STATUS_TEST`, so ordinary runtime
+and mode-test firmware do not block REPL/scheduler work for diagnostic output.
+`PsramFramePresenter` also writes converted row segments directly, packing two
+adjacent Indexed4 pixels into one byte rather than read/modify/writing each
+pixel separately. The framebuffer unit test covers packed nibbles, odd segment
+offsets, preserved neighboring pixels, RGB222 mapping, and range rejection.
+The updated dynamic-mode build compiled and flashed.
+
+A 10-frame drawing fixture at 240 MHz measured 1.404 s at 400x300, 2.408 s at
+640x400, and 2.911 s at 640x480 when the refill worker was moved to core 0.
+Although the fixture completed, the owner observed the 640x480 display blink
+and lose sync. The core-0 experiment was rejected and its build profile removed.
+With the known core-1 profile restored, the same fixture took 2.107 s at
+400x300 but did not produce a completion marker within 25 seconds at 640x400.
+The device was reflashed to the core-1 profile and rebooted; the owner confirmed
+stable sync but continues to report a slow REPL. A second candidate using
+priority 1 and a 160-row ring also blinked/lost sync at idle, so both scheduling
+experiments were removed. The measurements indicate severe app/refill
+contention on core 1 at high resolution, while the tested core-0 placement
+damages VGA stability. The row-segment change has not yet been isolated in an
+A/B timing comparison.
+
+**FabGL high-resolution allocation (2026-11-16):** FabGL stores VGA viewport
+pixels as one byte per pixel in internal DMA-capable memory. A complete
+640x400 viewport therefore needs 256,000 bytes and 640x480 needs 307,200 bytes,
+before DMA descriptors and runtime allocations. Its allocator can keep a
+shorter viewport when it cannot allocate all requested rows. QL/32 previously
+accepted any nonempty viewport, which made a partially allocated mode appear
+to have succeeded. Mode changes now verify the actual FabGL width and height
+against the selected preset and roll back to the previous mode on a short
+allocation. The firmware was flashed over `/dev/ttyUSB0` on 2026-11-16.
+Serial testing showed `MODE 3,0` allocated only 640x210 of 640x400 and
+`MODE 4,0` allocated only 640x206 of 640x480. Both commands raised the new
+allocation error, and `MODE(0)`/`MODE(1)` stayed at 0/0 after each rollback.
+The owner confirmed VGA returned to the stable 320x200 REPL after both tests.
+
+The full-resolution path should move the scanout source into PSRAM and retain
+only the DMA line ring in internal RAM. The existing experimental path does
+this with three packed-4 PSRAM frames (about 384,000 bytes at 640x400 and
+460,800 bytes at 640x480) plus a 120-row internal ring (76,800 bytes at either
+mode). This avoids FabGL's 256/307 KiB internal viewport, but the larger-mode
+runtime still needs stable update/refill behavior. Reducing to two PSRAM frames
+could save another 128/153.6 KiB, at the cost of blocking frame production until
+the inactive frame becomes available; validate that only after the three-frame
+path is visually qualified.
+
+To reduce the cost of small REPL redraws without changing scanout scheduling,
+the presenter now tells the triple-buffer owner the changed rectangle. Instead
+of cloning a complete PSRAM frame before every small text update, it repairs
+only the stale rectangle in the recycled frame. Full-frame updates still copy
+the full frame. The owner confirmed stable VGA and faster REPL input on this
+build.
+
+HELP remained slow, so graphics text output now batches glyphs into runs, uses
+packed-byte writes for the default font on even-width Indexed4 canvases, and
+defers multiple line scrolls until the output string is complete. The scroll
+path skips text that would be scrolled off before it could remain visible.
+Host graphics tests pass, including a comparison against the prior per-glyph
+draw-and-scroll behavior across wrapping and multiple scrolls. On the flashed
+Olimex, three consecutive serial `HELP` calls returned to the prompt in 1.404,
+1.502, and 1.603 seconds; serial timing does not measure monitor response or
+confirm visible glyph quality. The owner confirmed the latest build is stable
+and readable on VGA and that repeated HELP output is clearly faster.
+
+**Mode qualification and stress follow-up (2026-11-16):** the functional
+mode record confirms FabGL modes 0–2 (320x200, 320x240, 400x300) and all five
+resolutions through the switchable PSRAM DMA runtime. Modes 3 and 4 passed
+full-window drawing, console scrolling, and a ten-frame workload with stable
+VGA. New 640x400 and 640x480 scrolling-source-gradient stress builds looked
+stable and smooth, but neither scripted capture nor the interactive monitor
+returned profiler lines. Startup geometry and refill/stress counters therefore
+remain unverified. A switchable-runtime flash after the stress tests showed
+blank/no-sync output; the stable 320x200 FabGL profile was restored. See the
+[mode qualification record](test-results/olimex-vga-functional-modes-2026-11-16.md)
+and [low-level comparison report](test-results/agon-vga-low-level-comparison-2026-11-16.md).
+
+**Scheduler contention follow-up (2026-11-17):** an Olimex serial trace found
+that continuously printing worker tasks delay other graphics programs
+severely. With one tight `PRINT` worker active, Mandelbrot advanced one row in
+78.958 seconds; suspending the worker returned row time to about 0.66 seconds.
+Three workers produced no next-row marker within 120 seconds. This is a
+separate runtime scheduling/presentation issue from the unresolved DMA refill
+qualification. Record tick and presentation durations before changing the
+DMA worker or default graphics profile. See the
+[worker contention report](test-results/olimex-mandelbrot-worker-starvation-2026-11-17.md).
+
+**High-resolution telemetry follow-up (2026-11-17):** opt-in runtime profiles
+at 640x400 and 640x480 collect detailed refill counters in memory and print
+one report when the diagnostic profile receives `DMADIAG` after a test,
+avoiding periodic serial traffic.
+Both builds passed. Idle scanout captures showed zero late refills, unexpected
+interrupts, and active-slot overwrites; 640x400 also logged its full startup
+geometry. The 640x480 run reported 480 rows per frame and passed the full-size
+graphics/text smoke test. `DMADIAG` was verified over serial and reported zero
+late refills, unexpected interrupts, and active-slot overwrites. Stress
+profiles at both sizes showed stable moving
+gradients by owner observation, but emitted no serial telemetry. See the
+[high-resolution telemetry report](test-results/olimex-dma-high-resolution-telemetry-2026-11-17.md).
+
+**640x480 responsiveness probe (2026-11-17):** moving the Arduino loop to
+core 0 improved CPU-only BASIC performance (14.562 s, then 14.670 s for the
+240 MHz recurrence in two variants). Pinning the EOF interrupt and refill
+worker together on core 1 still missed 1,457 refill deadlines in 9,345 EOF
+events under drawing load; the owner observed whole-console flashing and an
+unstable attractor image. The stable core-1 runtime profile was reflashed
+and counters returned to zero late refills. A deeper 160-row ring on the same
+split-core placement was worse before the attractor started: 8,781 late
+refills in 38,451 EOF events, with 440 rows of maximum backlog. It was rejected
+without running the attractor. The standard 120-row profile then ran the
+attractor across two snapshots separated by nearly 4 minutes 53 seconds, with
+zero late refills across 286,600 EOF events.
+The stable same-core profile outperformed both split-core attempts for scanout
+reliability. Shared PSRAM contention is one hypothesis, not yet measured.
+Do not repeat core pinning or ring-depth changes alone. A future design needs
+bounded display updates and proof that the scanout deadline holds under full
+drawing load. See the
+[split-core probe report](test-results/olimex-dma-split-core-performance-2026-11-17.md).
+The owner-present replay confirmed a stable but very slow attractor; the
+draw-only benchmark showed a second channel-2 console and slight flashing. The
+benchmark did not complete before the standard 640x480 profile was restored.
+The owner confirmed VGA stable/readable after restore. See the
+[visual replay report](test-results/olimex-vga-replay-640x480-2026-11-17.md).
+
 ## Deferred work
 
-- 640x400 and 640x480 qualification until lower resolutions pass.
+- Recheck switchable-runtime recovery after a diagnostic image and verify that
+  the serial diagnostic output works at high resolutions.
+- Improve deferred telemetry for 640x400/640x480 stress profiles, whose monitor
+  visuals passed but serial captures returned no bytes; investigate per-row
+  refill deadlines under PSRAM write contention. Idle runtime counters pass.
 - Compressed on-disk bitmap formats and advanced sprite effects.
 - PSRAM-to-PSRAM DMA experiments unless profiling identifies a real bottleneck.
 - Removing the FabGL fallback before the target-local path has a sustained

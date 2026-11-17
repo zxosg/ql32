@@ -98,6 +98,11 @@ request returned valid JSON after flashing. The PS/2 Break event is already
 queued, but a scheduler tick and synchronous BLIT can delay handling it. Fast
 Break within long drawing operations remains open; see
 `docs/test-results/debugger-serial-input-2026-11-15.md`.
+Olimex profile configuration now has CTest coverage for the GPIO assignments,
+capabilities, PlatformIO SPIFFS flags, and non-overlapping 512 KiB FFS
+partition. The checks passed directly with `g++` and Python on 2026-11-16;
+CMake is not installed in this environment, so CTest registration could not be
+exercised here.
 The VGA console also now refreshes its cached screen dimensions when the
 window manager resizes for a display mode change. This fixes clipping the
 console to the original 320×200 geometry on larger/taller modes. Olimex PSRAM
@@ -218,21 +223,49 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-1. **Attractor and Mandelbrot performance:** `attractor.bas` hoists a
-   row-invariant calculation, but needs a board A/B retest and separate
-   draw-versus-presentation measurements. The 80/160/240 MHz × SINGLE/DOUBLE
-   matrix showed 2.12× improvement from 80 to 240 MHz, with no consistent
-   precision-mode winner. The bounded Mandelbrot run has only one reliable
-   completion; repeatable timing is still needed. See
-   `docs/test-results/attractor-performance-2026-11-12.md`.
-2. **Olimex configuration test:** add a host test for Olimex GPIO and FFS
-   configuration; recent board checks do not replace this profile-specific
-   CTest coverage.
-3. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The latest
+### Hardware session update (2026-11-17)
+
+The 640x400 and 640x480 runtime DMA telemetry profiles build; idle captures
+reported zero late refills, IRQ errors, and active-slot overwrites. Stress
+profiles at both sizes showed stable moving gradients by owner observation, but
+produced no serial telemetry. The 640x480 runtime now accumulates counters in
+memory and the diagnostic profile exposes `DMADIAG` to print one snapshot
+after a test. The command was verified over serial and reported no late
+refills, IRQ errors, or active-slot overwrites. It was reflashed, booted, and
+visually checked: full 640x480 allocation and printed graphics/text were
+correct. The board is left on this runtime profile. The Mandelbrot/worker
+contention results and raw serial captures are in
+`docs/test-results/olimex-mandelbrot-worker-starvation-2026-11-17.md`.
+The owner reports that full-screen REPL/BASIC feels about one tenth as fast as
+320x200. Two split-core 640x480 probes moved the Arduino loop to core 0; the
+second also pinned the EOF interrupt and refill worker to core 1. CPU-only
+BASIC took 14.562/14.670 s, but the second profile had 1,457 late refills in
+9,345 EOF events, whole-console flashing, and an unstable image during the
+attractor. A 160-row ring on the same split-core setup was worse even before
+starting attractor: 8,781 late refills in 38,451 events. The standard 120-row
+profile was restored and returned to zero late refills in 15,904 events.
+The standard profile then ran the attractor across two snapshots separated by
+nearly 4 minutes 53 seconds, with zero late refills across 286,600 EOF events.
+This points to a core-placement or shared memory-contention effect; PSRAM bus
+stalls are not directly instrumented.
+Further core pinning or ring-depth increases alone are not the next step; bound
+and isolate drawing/presentation work, then verify refill deadlines under full
+load before another split-core trial. MUSIC implementation is complete. See
+`docs/test-results/olimex-dma-split-core-performance-2026-11-17.md`.
+The owner-present visual replay found the standard 640x480 attractor stable but
+nearly still; the finite draw-only test opened a second channel-2 console and
+caused slight flashing before it was stopped by reflashing. The owner confirmed
+the post-flash screen stable/readable. See
+`docs/test-results/olimex-vga-replay-640x480-2026-11-17.md`.
+
+1. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The Olimex
+   serial port was accessible with host-device permissions on 2026-11-16; the
+   latest high-resolution allocation guard passed serial rollback checks and
+   the owner confirmed stable VGA recovery. The latest
    Olimex QIMG, TILE, and MENABLE checks passed on 2026-11-15; LILYGO was not
    tested in this round. Tenstar Wi-Fi remains unverified. Other not-run items
    are recorded in the board reports.
-4. **Language, UI, and image candidates:** define scope before implementing
+2. **Language, UI, and image candidates:** define scope before implementing
    string splitting, indirect procedure calls, network channels, or cascading
    menus. `LOADIMAGE` now reads QIMG v2 with an embedded 16-color RGB palette;
    v1 compatibility is not required before release. The Python debugger has an
@@ -240,19 +273,25 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
    QIMG v2 passed on Olimex; launch the desktop GUI with its dependencies
    installed and exercise image conversion. See
    `docs/plans/bitmap-format-study.md`.
-5. **System profile accuracy:** build ID currently reports `unknown`; validate
+3. **System profile accuracy:** build ID currently reports `unknown`; validate
    capability flags against exact board builds, including LilyGo.
-6. **Shared display-buffer design:** define task ownership, overlap, visibility,
+4. **Shared display-buffer design:** define task ownership, overlap, visibility,
    and mode-change semantics before implementation. Retained per-session
    windows remain the default.
-7. **Parked graphics work:** the custom PSRAM-DMA scanout loses sync on some
+5. **Parked graphics work:** the custom PSRAM-DMA scanout loses sync on some
    high-transition patterns; keep FabGL as the qualified path. The optimized
    framebuffer primitives are not yet the backing store for BASIC drawing,
    and the full Phase 6 benchmark matrix remains open. The `GUPDATE SKIP,1`
    missing-prompt report stays in the issue backlog. PS/2 Break is queued by
    FabGL but is only handled between scheduler ticks; long BLIT operations need
    cooperative Break polling to improve response time without slowing every
-   VM slice.
+   VM slice. FabGL 640x400/640x480 needs 256/307 KiB of internal DMA viewport
+   memory and may silently shorten the viewport. The firmware now rejects and
+   rolls back partial allocations; serial checks measured only 640x210 and
+   640x206 respectively, with successful return to 320x200 and stable VGA.
+   Full-height modes need the PSRAM framebuffer plus internal DMA line ring
+   path to be stable under live text/drawing updates. See
+   `docs/olimex-vga-graphics-plan.md`.
 
 ## Recently completed
 

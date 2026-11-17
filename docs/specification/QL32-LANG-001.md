@@ -288,7 +288,9 @@ window colors before the first expression, for example
 `PRINT INK 3, PAPER 6, "hello"`. Commas after the first expression retain their
 normal tab-stop meaning. Graphical text defaults to 5×7 glyphs in 6×8 cells.
 `LOADFONT(path$)` returns a session-owned font handle; built-in handles are
-`KFontSmall`, `KFontNormal`, `KFontLarge`, and `KFontTitle`. `FONT handle,style`
+`KFontSmall`, `KFontNormal`, `KFontLarge`, and `KFontTitle`. Handle
+`KFontDefault` (0) with style 0 clears the selection and restores the platform
+default for that channel. `FONT handle,style`
 selects normal text output, while `GFONT handle,style` independently selects
 graphical `TEXT`; both accept an optional `#channel` selector. Styles are
 combinable flags: normal `0`, bold `1`, underline `2`. `UNLOADFONT handle`

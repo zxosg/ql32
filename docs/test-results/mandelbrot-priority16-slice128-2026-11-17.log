@@ -1,0 +1,5 @@
+152259.778167 PRIORITY 8,16> PRIORITY 8,16
+Session 8 priority set to 16
+GFXPROFILE requests=1 full=0 partial=1 fallback=0 rows=16 composed_px=5120 written_px=10240 compose_us=3888 convert_us=900 write_us=53 update_us=9544 update_samples=1 update_p50_us=9544 update_p95_us=9544 update_p99_us=9544 swap_requested=1 swap_queued=1 swap_executed=1 swap_skipped=0 swap_us=4557 swap_calls=1 swap_avg_us=4557 swap_min_us=4557 swap_max_us=4557 swap_samples=1 swap_p50_us=4557 swap_p95_us=4557 swap_p99_us=4557
+> MB_ROW 2
+152279.317261 MB_ROW 3

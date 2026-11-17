@@ -36,7 +36,8 @@ enum class ErrorCode : std::int32_t {
     TaskLimit = 18,
     UnsupportedOperation = 19,
     InvalidSelector = 20,
-    TaskStillRunning = 21
+    TaskStillRunning = 21,
+    ResourceBusy = 22
 };
 
 enum class ServiceErrorCode {
@@ -45,7 +46,8 @@ enum class ServiceErrorCode {
     PermissionDenied,
     IoError,
     Unavailable,
-    InvalidHandle
+    InvalidHandle,
+    ResourceBusy
 };
 
 inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
@@ -56,6 +58,7 @@ inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
     case ServiceErrorCode::IoError: return ErrorCode::IoError;
     case ServiceErrorCode::Unavailable: return ErrorCode::ServiceUnavailable;
     case ServiceErrorCode::InvalidHandle: return ErrorCode::InvalidHandle;
+    case ServiceErrorCode::ResourceBusy: return ErrorCode::ResourceBusy;
     }
     return ErrorCode::GeneralFailure;
 }
@@ -103,6 +106,7 @@ inline const char* errorText(ErrorCode code) noexcept {
     case ErrorCode::UnsupportedOperation: return "Operation not supported";
     case ErrorCode::InvalidSelector: return "Invalid task result selector";
     case ErrorCode::TaskStillRunning: return "Task has not completed";
+    case ErrorCode::ResourceBusy: return "Resource is already in use";
     }
     return "Unknown QL/32 error code";
 }

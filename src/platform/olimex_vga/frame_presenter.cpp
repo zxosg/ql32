@@ -47,7 +47,10 @@ bool PsramFramePresenter::presentRegion(
         return false;
     if (region.width == 0 || region.height == 0) return true;
 
-    auto* frame = scanout_.beginFrameUpdate();
+    const PixelRect damage{static_cast<std::uint32_t>(region.x),
+                           static_cast<std::uint32_t>(region.y),
+                           region.width, region.height};
+    auto* frame = scanout_.beginFrameUpdate(damage);
     if (!frame) return false;
     const bool indexed = frame->format == PixelFormat::Indexed4;
     bool paletteChanged = !paletteCacheValid_;
@@ -73,18 +76,15 @@ bool PsramFramePresenter::presentRegion(
             rowProvider(y, row_);
             if (row_.size() != region.width)
                 throw std::invalid_argument("PSRAM presenter row has the wrong width");
-            for (std::uint32_t x = 0; x < region.width; ++x) {
-                const auto sourceIndex = row_[x];
-                (void)writePixel(*frame,
-                    static_cast<std::uint32_t>(region.x) + x, y,
-                    indexMap_[sourceIndex]);
-            }
+            (void)writeMappedRow(*frame,
+                static_cast<std::uint32_t>(region.x), y, row_.data(),
+                region.width, indexMap_.data());
         }
     } catch (...) {
         scanout_.cancelFrameUpdate(frame);
         throw;
     }
-    if (!scanout_.publishFrameUpdate(frame)) {
+    if (!scanout_.publishFrameUpdate(frame, damage)) {
         scanout_.cancelFrameUpdate(frame);
         return false;
     }

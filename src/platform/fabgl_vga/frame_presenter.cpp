@@ -21,6 +21,53 @@ bool FabglFramePresenter::doubleBuffered() const noexcept {
     return display_.isDoubleBufferedEnabled();
 }
 
+void FabglFramePresenter::swapBuffers() {
+#if defined(QL32_GRAPHICS_PROFILE)
+    ++profile_.swapRequested;
+    // Canvas::swapBuffers queues exactly one SwapBuffers primitive and waits
+    // for the executor's task notification. The local FabGL source confirms
+    // this call path; the post-return count is therefore an executed swap.
+    ++profile_.swapQueued;
+    const auto swapStart = micros();
+#endif
+    canvas_.swapBuffers();
+#if defined(QL32_GRAPHICS_PROFILE)
+    const auto duration = static_cast<std::uint32_t>(micros() - swapStart);
+    profile_.swapMicros += duration;
+    if (profile_.swapCalls == 0 || duration < profile_.swapMinMicros)
+        profile_.swapMinMicros = duration;
+    if (duration > profile_.swapMaxMicros)
+        profile_.swapMaxMicros = duration;
+    ++profile_.swapCalls;
+    ++profile_.swapExecuted;
+    if (profile_.swapSampleCount < PresentationProfile::kSampleCapacity)
+        profile_.swapSamples[profile_.swapSampleCount++] = duration;
+#endif
+}
+
+#if defined(QL32_GRAPHICS_PROFILE)
+void FabglFramePresenter::finalizePresentationProfile() noexcept {
+    const auto summarize = [](auto& samples, std::size_t count,
+                              std::uint32_t& p50, std::uint32_t& p95,
+                              std::uint32_t& p99) {
+        if (count == 0) return;
+        std::sort(samples.begin(), samples.begin() + count);
+        const auto atPercentile = [count](std::size_t percentile) {
+            return ((count - 1) * percentile) / 100;
+        };
+        p50 = samples[atPercentile(50)];
+        p95 = samples[atPercentile(95)];
+        p99 = samples[atPercentile(99)];
+    };
+    summarize(profile_.swapSamples, profile_.swapSampleCount,
+              profile_.swapP50Micros, profile_.swapP95Micros,
+              profile_.swapP99Micros);
+    summarize(profile_.updateSamples, profile_.updateSampleCount,
+              profile_.updateP50Micros, profile_.updateP95Micros,
+              profile_.updateP99Micros);
+}
+#endif
+
 bool FabglFramePresenter::presentDirect(
     std::uint32_t width, std::uint32_t height,
     const std::array<graphics::RgbColor, 256>& palette,
@@ -48,8 +95,22 @@ bool FabglFramePresenter::presentDirectRegion(
         region.width == width && region.height == height;
     if (useDoubleBuffer && !fullRegion && !doubleBuffersSynchronized_) {
         synchronizeOnNextFullPresentation_ = true;
+#if defined(QL32_GRAPHICS_PROFILE)
+        ++profile_.swapRequested;
+        ++profile_.swapSkipped;
+#endif
         return false;
     }
+
+#if defined(QL32_GRAPHICS_PROFILE)
+    const auto updateStart = micros();
+    const auto recordUpdate = [&]() {
+        const auto duration = static_cast<std::uint32_t>(micros() - updateStart);
+        profile_.updateMicros += duration;
+        if (profile_.updateSampleCount < PresentationProfile::kSampleCapacity)
+            profile_.updateSamples[profile_.updateSampleCount++] = duration;
+    };
+#endif
 
     bool paletteChanged = !rawPaletteCacheValid_;
 #if defined(QL32_GRAPHICS_PROFILE)
@@ -168,20 +229,7 @@ bool FabglFramePresenter::presentDirectRegion(
         writeRegion();
         if (restoreOverlay_) restoreOverlay_(region);
         if (useDoubleBuffer) {
-#if defined(QL32_GRAPHICS_PROFILE)
-            const auto swapStart = micros();
-#endif
-            canvas_.swapBuffers();
-#if defined(QL32_GRAPHICS_PROFILE)
-            const auto swapDuration =
-                static_cast<std::uint32_t>(micros() - swapStart);
-            profile_.swapMicros += swapDuration;
-            if (profile_.swapCalls == 0 || swapDuration < profile_.swapMinMicros)
-                profile_.swapMinMicros = swapDuration;
-            if (swapDuration > profile_.swapMaxMicros)
-                profile_.swapMaxMicros = swapDuration;
-            ++profile_.swapCalls;
-#endif
+            swapBuffers();
             const bool syncBuffers = fullRegion
                 ? synchronizeOnNextFullPresentation_
                 : doubleBuffersSynchronized_;
@@ -203,8 +251,12 @@ bool FabglFramePresenter::presentDirectRegion(
 #if defined(QL32_GRAPHICS_PROFILE)
         if (fullRegion) ++profile_.fullFrames;
         else ++profile_.partialFrames;
+        recordUpdate();
 #endif
     } catch (...) {
+#if defined(QL32_GRAPHICS_PROFILE)
+        recordUpdate();
+#endif
         if (useDoubleBuffer) doubleBuffersSynchronized_ = false;
         throw;
     }
@@ -239,7 +291,7 @@ bool FabglFramePresenter::presentRows(
         if (!presentRowsRegion(width, height, palette, {0, 0, width, height},
                                rowProvider))
             return false;
-        canvas_.swapBuffers();
+        swapBuffers();
         return true;
     }
     return presentRowsRegion(width, height, palette, {0, 0, width, height}, rowProvider);
@@ -281,6 +333,8 @@ bool FabglFramePresenter::presentRowsRegion(
          region.height != height)) {
 #if defined(QL32_GRAPHICS_PROFILE)
         ++profile_.fullFallbacks;
+        ++profile_.swapRequested;
+        ++profile_.swapSkipped;
 #endif
         return false;
     }

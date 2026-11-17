@@ -63,6 +63,102 @@ void testPacked4OddWidthAndOverlap() {
             require(readPixel(framebuffer, x, y) == 7, "packed4 clear missed a pixel");
 }
 
+void testMappedRowWrites() {
+    using namespace ql32::platform::olimex_vga;
+    std::array<std::uint8_t, 4> packedStorage{{0xAB, 0xCD, 0xEF, 0x12}};
+    FramebufferView packed{packedStorage.data(), 6, 1, 4, PixelFormat::Indexed4};
+    std::array<std::uint8_t, 256> mapping{};
+    for (std::uint32_t i = 0; i < mapping.size(); ++i)
+        mapping[i] = static_cast<std::uint8_t>(i ^ 0x05u);
+    const std::array<std::uint8_t, 4> indices{{1, 2, 3, 4}};
+    require(writeMappedRow(packed, 1, 0, indices.data(), indices.size(), mapping.data()),
+            "packed mapped row rejected a valid odd-offset range");
+    require(packedStorage[0] == 0xA4 && packedStorage[1] == 0x76 &&
+            packedStorage[2] == 0x1F && packedStorage[3] == 0x12,
+            "packed mapped row changed neighboring nibbles or mapped pixels incorrectly");
+    require(!writeMappedRow(packed, 4, 0, indices.data(), indices.size(), mapping.data()),
+            "packed mapped row accepted an out-of-range segment");
+
+    std::array<std::uint8_t, 8> rgbStorage{};
+    FramebufferView rgb{rgbStorage.data(), 4, 1, 8, PixelFormat::Rgb222};
+    require(writeMappedRow(rgb, 1, 0, indices.data(), 2, mapping.data()),
+            "RGB mapped row rejected a valid range");
+    require(rgbStorage[0] == 0 && rgbStorage[1] == (mapping[1] & 0x3Fu) &&
+            rgbStorage[2] == (mapping[2] & 0x3Fu) && rgbStorage[3] == 0,
+            "RGB mapped row wrote incorrect values or crossed its range");
+}
+
+void testRegionSynchronization() {
+    using namespace ql32::platform::olimex_vga;
+    constexpr std::uint32_t width = 7;
+    constexpr std::uint32_t height = 3;
+    constexpr std::size_t stride = (width + 1) / 2;
+    std::array<std::uint8_t, stride * height> sourceStorage{};
+    std::array<std::uint8_t, stride * height> destinationStorage{};
+    destinationStorage.fill(0xA5);
+    FramebufferView source{sourceStorage.data(), width, height, stride,
+                           PixelFormat::Indexed4};
+    FramebufferView destination{destinationStorage.data(), width, height, stride,
+                                PixelFormat::Indexed4};
+    for (std::uint32_t y = 0; y < height; ++y)
+        for (std::uint32_t x = 0; x < width; ++x)
+            (void)writePixel(source, x, y, static_cast<std::uint8_t>(x + y * 7));
+
+    require(copyRegion(source, destination, 1, 1, 5, 2),
+            "packed region synchronization rejected a valid rectangle");
+    for (std::uint32_t y = 0; y < height; ++y) {
+        for (std::uint32_t x = 0; x < width; ++x) {
+            const auto expected = y >= 1 && x >= 1 && x < 6
+                ? readPixel(source, x, y) : ((x & 1u) ? 0x05 : 0x0A);
+            require(readPixel(destination, x, y) == expected,
+                    "packed region synchronization changed an edge nibble or missed a pixel");
+        }
+    }
+    require(!copyRegion(source, destination, 6, 1, 2, 1),
+            "region synchronization accepted an out-of-range rectangle");
+}
+
+void testIncrementalTripleBufferRepair() {
+    using namespace ql32::platform::olimex_vga;
+    constexpr std::uint32_t width = 8;
+    constexpr std::uint32_t height = 4;
+    constexpr std::size_t bytes = width * height / 2;
+    std::array<std::array<std::uint8_t, bytes>, 3> storage{};
+    std::array<FramebufferView, 3> frames{};
+    for (std::size_t i = 0; i < frames.size(); ++i)
+        frames[i] = {storage[i].data(), width, height, width / 2,
+                     PixelFormat::Indexed4};
+    std::array<PixelRect, 3> stale{};
+    std::size_t active = 0;
+
+    const auto updateAndSwap = [&](std::size_t next, PixelRect changed,
+                                   std::uint8_t color) {
+        require(copyRegion(frames[active], frames[next], stale[next].x,
+                           stale[next].y, stale[next].width,
+                           stale[next].height),
+                "triple-buffer stale-region repair failed");
+        stale[next] = {};
+        fillRect(frames[next], changed.x, changed.y, changed.width,
+                 changed.height, color);
+        for (std::size_t i = 0; i < frames.size(); ++i)
+            if (i != next) stale[i] = unite(stale[i], changed);
+        active = next;
+    };
+
+    const PixelRect first{1, 1, 3, 1};
+    const PixelRect second{5, 2, 2, 1};
+    updateAndSwap(1, first, 4);
+    updateAndSwap(0, second, 9);
+    const auto repair = stale[2];
+    require(copyRegion(frames[active], frames[2], repair.x, repair.y,
+                       repair.width, repair.height),
+            "triple-buffer accumulated repair failed");
+    for (std::uint32_t y = 0; y < height; ++y)
+        for (std::uint32_t x = 0; x < width; ++x)
+            require(readPixel(frames[2], x, y) == readPixel(frames[active], x, y),
+                    "triple-buffer repair left stale pixels behind");
+}
+
 void testPacked4TriangleFillMatchesPixelWrites() {
     using namespace ql32::platform::olimex_vga;
     constexpr std::uint32_t width = 96;
@@ -95,6 +191,35 @@ void testDmaPixelOrderPermutation() {
     const std::array<std::uint8_t, 16> expected{{
         2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13}};
     require(row == expected, "DMA pixel order must be applied per eight-pixel group");
+}
+
+void testPacked4ShiftedRowEncoderMatchesScalar() {
+    using namespace ql32::platform::olimex_vga;
+    constexpr std::size_t width = 32;
+    std::array<std::uint8_t, width / 2> source{};
+    for (std::size_t i = 0; i < source.size(); ++i)
+        source[i] = static_cast<std::uint8_t>((i * 37u) ^ (i << 3));
+
+    std::array<std::uint16_t, 256> pairLut{};
+    for (std::uint32_t key = 0; key < pairLut.size(); ++key)
+        pairLut[key] = static_cast<std::uint16_t>(
+            (key >> 4) | ((key & 0x0Fu) << 8));
+
+    for (const std::size_t shift : {0u, 1u, 7u, 15u, 31u}) {
+        std::array<std::uint8_t, width> expected{};
+        std::array<std::uint8_t, width> actual{};
+        for (std::size_t x = 0; x < width; ++x) {
+            const auto index = (x + shift) % width;
+            const auto packed = source[index / 2];
+            expected[x] = static_cast<std::uint8_t>(
+                (index & 1u) ? (packed & 0x0Fu) : (packed >> 4));
+        }
+        applyDmaPixelOrder(expected.data(), expected.size());
+        encodePacked4ShiftedRow(source.data(), actual.data(), width, shift,
+                                pairLut.data());
+        require(actual == expected,
+                "packed4 shifted row encoder must match scalar output and DMA pixel order");
+    }
 }
 
 void testLinesAndBitmapCopies() {
@@ -260,8 +385,12 @@ int main() {
     testOlimexColorMapping();
     testRgb222ClippingAndOverlap();
     testPacked4OddWidthAndOverlap();
+    testMappedRowWrites();
+    testRegionSynchronization();
+    testIncrementalTripleBufferRepair();
     testPacked4TriangleFillMatchesPixelWrites();
     testDmaPixelOrderPermutation();
+    testPacked4ShiftedRowEncoderMatchesScalar();
     testLinesAndBitmapCopies();
     testPaletteOperationsAndStagedSwap();
     testRefillWindowDropsObsoleteRows();

@@ -209,6 +209,7 @@ public:
     void clearWindows() noexcept;
     void setVisible(WindowId id, bool visible);
     void raise(WindowId id);
+    bool raiseSession(SessionId owner);
     void tile();
 
     IndexedCanvas& canvas(WindowId id);

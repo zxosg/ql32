@@ -753,6 +753,46 @@ Rect IndexedCanvas::renderText(Point topLeft, const std::string& value,
         const auto advance = font ? bitmapGlyph.advance : 6;
         const auto underlineY = font ? std::min<std::int64_t>(cellHeight - 1,
             font->metrics().ascent + 1) : 6;
+        // The default PRINT font uses 6x8 cells and most QL/32 windows use
+        // packed 4-bit pixels. Write three complete packed bytes per glyph
+        // row instead of testing and read/modify/writing all 48 cell pixels.
+        if (!font && fillBackground && !useOverMode && depth_ == PixelDepth::Four &&
+            (width_ & 1u) == 0 && x >= 0 && (x & 1) == 0 && y >= 0 &&
+            x + 6 <= width_ && y + 8 <= height_) {
+            auto* pixels = pixelData();
+            const auto packedRow = static_cast<std::size_t>(y) * width_ +
+                                   static_cast<std::size_t>(x);
+            for (std::int64_t row = 0; row < 8; ++row) {
+                const auto rowIndex = packedRow + static_cast<std::size_t>(row) * width_;
+                for (std::int64_t pair = 0; pair < 3; ++pair) {
+                    const auto firstColumn = pair * 2;
+                    const auto colorAt = [&](std::int64_t column) {
+                        return column < 5 && row < 7 &&
+                            (pattern[static_cast<std::size_t>(column)] &
+                             (1u << static_cast<unsigned>(row))) != 0 ? ink_ : paper_;
+                    };
+                    pixels[(rowIndex + static_cast<std::size_t>(firstColumn)) / 2] =
+                        static_cast<std::uint8_t>((colorAt(firstColumn) << 4u) |
+                                                  colorAt(firstColumn + 1));
+                }
+            }
+            const auto left = static_cast<std::int64_t>(x);
+            const auto top = static_cast<std::int64_t>(y);
+            if (!hasDirty) {
+                dirtyLeft = left;
+                dirtyTop = top;
+                dirtyRight = left + 6;
+                dirtyBottom = top + 8;
+                hasDirty = true;
+            } else {
+                dirtyLeft = std::min(dirtyLeft, left);
+                dirtyTop = std::min(dirtyTop, top);
+                dirtyRight = std::max(dirtyRight, left + 6);
+                dirtyBottom = std::max(dirtyBottom, top + 8);
+            }
+            x += advance;
+            continue;
+        }
         const auto left = std::min<std::int64_t>(fillBackground ? 0 : glyphLeft,
                                                  glyphLeft);
         const auto top = std::min<std::int64_t>(fillBackground ? 0 : glyphTop,
@@ -1068,6 +1108,20 @@ void WindowManager::raise(WindowId id) {
                                     [id](const Entry& item) { return item.id == id; });
     if (found == windows_.end()) throw std::out_of_range("unknown window identifier");
     windows_.splice(windows_.end(), windows_, found);
+}
+
+bool WindowManager::raiseSession(SessionId owner) {
+    auto current = windows_.begin();
+    const auto originalWindowCount = windows_.size();
+    bool raised = false;
+    for (std::size_t index = 0; index < originalWindowCount; ++index) {
+        const auto window = current++;
+        if (window->owner == owner) {
+            windows_.splice(windows_.end(), windows_, window);
+            raised = true;
+        }
+    }
+    return raised;
 }
 
 void WindowManager::validate(TaskViewport viewport) {

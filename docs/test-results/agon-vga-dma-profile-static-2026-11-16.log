@@ -1,0 +1,19 @@
+QL/32 Olimex DMA static scanout isolation
+Capture: 2026-11-16 UTC
+Profile: olimex_esp32_sbc_fabgl_psram_dma_test_packed4_profile_static
+EOF interrupts: disabled; live refills: disabled; PSRAM stress: disabled
+
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=0, rows=0, EOF-events=0, refills=0, late-refills=0, spurious-IRQ=0, palette-applies=0, PSRAM-stress-bytes=0, checksum=0, frame-clones=0, clone-bytes=0, pending-reuses=0, refill-batches=0, refill-max-us=0, refill-max-rows=0, backlog-max-rows=0, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=0, rows=0, EOF-events=0, refills=0, late-refills=0, spurious-IRQ=0, palette-applies=0, PSRAM-stress-bytes=0, checksum=0, frame-clones=0, clone-bytes=0, pending-reuses=0, refill-batches=0, refill-max-us=0, refill-max-rows=0, backlog-max-rows=0, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=0, rows=0, EOF-events=0, refills=0, late-refills=0, spurious-IRQ=0, palette-applies=0, PSRAM-stress-bytes=0, checksum=0, frame-clones=0, clone-bytes=0, pending-reuses=0, refill-batches=0, refill-max-us=0, refill-max-rows=0, backlog-max-rows=0, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=0, rows=0, EOF-events=0, refills=0, late-refills=0, spurious-IRQ=0, palette-applies=0, PSRAM-stress-bytes=0, checksum=0, frame-clones=0, clone-bytes=0, pending-reuses=0, refill-batches=0, refill-max-us=0, refill-max-rows=0, backlog-max-rows=0, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=0, rows=0, EOF-events=0, refills=0, late-refills=0, spurious-IRQ=0, palette-applies=0, PSRAM-stress-bytes=0, checksum=0, frame-clones=0, clone-bytes=0, pending-reuses=0, refill-batches=0, refill-max-us=0, refill-max-rows=0, backlog-max-rows=0, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=0, rows=0, EOF-events=0, refills=0, late-refills=0, spurious-IRQ=0, palette-applies=0, PSRAM-stress-bytes=0, checksum=0, frame-clones=0, clone-bytes=0, pending-reuses=0, refill-batches=0, refill-max-us=0, refill-max-rows=0, backlog-max-rows=0, obsolete-skipped=0
+
+Visual result: user reports synchronized and stable.

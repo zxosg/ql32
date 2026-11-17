@@ -425,6 +425,14 @@ void WindowedService::setGraphicsFont(SessionId session, ChannelId channel,
     graphicsFonts_[{session, channel}] = {font, style};
 }
 
+void WindowedService::resetTextFont(SessionId session, ChannelId channel) {
+    textFonts_.erase({session, channel});
+}
+
+void WindowedService::resetGraphicsFont(SessionId session, ChannelId channel) {
+    graphicsFonts_.erase({session, channel});
+}
+
 void WindowedService::clearFontSelections(SessionId session, ChannelId channel) {
     textFonts_.erase({session, channel});
     graphicsFonts_.erase({session, channel});
@@ -491,6 +499,23 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
     bool scrolled = false;
     cursor.x = std::clamp(cursor.x, 0, std::max(0, maxX - cellWidth));
     cursor.y = std::clamp(cursor.y, 0, std::max(0, maxY - cellHeight));
+    struct PendingTextRun {
+        Point position;
+        std::uint64_t scrollRowsBefore;
+        std::string text;
+    };
+    std::vector<PendingTextRun> pendingRuns;
+    pendingRuns.reserve(std::min<std::size_t>(value.size() / columns + 1, rows + 1));
+    std::uint64_t scrollRows = 0;
+    std::string run;
+    run.reserve(std::min<std::size_t>(value.size(), columns));
+    Point runPosition = cursor;
+    std::uint64_t runScrollRows = 0;
+    const auto flushRun = [&] {
+        if (run.empty()) return;
+        pendingRuns.push_back({runPosition, runScrollRows, std::move(run)});
+        run.clear();
+    };
     for (std::size_t offset = 0; offset < value.size();) {
         const auto raw = static_cast<std::uint8_t>(value[offset]);
         if (raw == '\r') {
@@ -498,6 +523,7 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
             continue;
         }
         if (raw == '\n') {
+            flushRun();
             cursor.x = 0;
             cursor.y += cellHeight;
             ++offset;
@@ -511,21 +537,44 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
                 advance = glyph.advance;
             }
             if (cursor.x + advance > maxX) {
+                flushRun();
                 cursor.x = 0;
                 cursor.y += cellHeight;
             }
-            const Rect glyphDirty = selectedFont ?
-                target.printText(cursor, std::string(1, static_cast<char>(character)),
-                                 *selectedFont, selection.style) :
-                target.printText(cursor, std::string(1, static_cast<char>(character)));
-            dirty = unite(dirty, glyphDirty);
+            if (run.empty()) {
+                runPosition = cursor;
+                runScrollRows = scrollRows;
+            }
+            run.push_back(static_cast<char>(character));
             cursor.x += advance;
         }
         if (cursor.y + cellHeight - 1 >= maxY) {
-            target.scrollUp(cellHeight);
+            flushRun();
+            scrollRows += cellHeight;
             cursor.y = std::max(0, cursor.y - cellHeight);
             scrolled = true;
         }
+    }
+    flushRun();
+    if (scrolled)
+        target.scrollUp(static_cast<std::uint32_t>(std::min<std::uint64_t>(
+            scrollRows, target.height())));
+    for (const auto& pending : pendingRuns) {
+        Point position = pending.position;
+        if (scrolled) {
+            // Text written before later scrolls moves up with the existing
+            // canvas. Runs already below the bottom edge were clipped before
+            // those scrolls and must remain invisible.
+            if (position.y < 0 || position.y + cellHeight > maxY) continue;
+            const auto laterScrollRows = scrollRows - pending.scrollRowsBefore;
+            const auto finalY = static_cast<std::int64_t>(position.y) - laterScrollRows;
+            if (finalY + cellHeight <= 0 || finalY >= maxY) continue;
+            position.y = static_cast<std::int32_t>(finalY);
+        }
+        const Rect runDirty = selectedFont ?
+            target.printText(position, pending.text, *selectedFont, selection.style) :
+            target.printText(position, pending.text);
+        dirty = unite(dirty, runDirty);
     }
     if (scrolled) dirty = {0, 0, target.width(), target.height()};
     if (dirty.width != 0 && dirty.height != 0) {
@@ -887,6 +936,10 @@ void WindowedService::setWindowVisible(SessionId session, bool visible) {
     const auto dirty = manager_.windowState(id).screenClip;
     manager_.setVisible(id, visible);
     presentRegion(dirty);
+}
+
+void WindowedService::raiseWindows(SessionId session) {
+    if (manager_.raiseSession(session)) presentIfConfigured();
 }
 
 void WindowedService::raiseWindow(SessionId session) {

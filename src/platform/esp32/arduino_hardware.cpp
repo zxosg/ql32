@@ -105,7 +105,7 @@ runtime::ChannelId ArduinoHardware::open(
         if (std::find(pins.begin(), pins.end(), pin) != pins.end())
             invalid("hardware OPEN contains duplicate pins");
         if (pinOwners_.find(pin) != pinOwners_.end())
-            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+            throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
                                         "hardware pin is already reserved");
         pins.push_back(pin);
     };

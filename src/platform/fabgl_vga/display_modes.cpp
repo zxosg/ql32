@@ -100,14 +100,30 @@ runtime::DisplayMode DisplayModes::setMode(std::uint32_t id,
     if (id == 4 && (options & kDoubleBufferedOption) != 0)
         throw std::invalid_argument(
             "640x480 double buffering is unavailable on this VGA target");
+    // This service is constructed as a global before setup() configures the
+    // controller. Reconcile the tracked option with the live controller before
+    // deciding that a requested mode is already active.
+    currentOptions_ = display_.isDoubleBufferedEnabled()
+        ? kDoubleBufferedOption : 0;
     const auto next = static_cast<std::size_t>(id);
     const auto previous = current_;
     const auto previousOptions = currentOptions_;
     if (next != previous || options != previousOptions) {
         try {
             apply(next, (options & kDoubleBufferedOption) != 0);
-            if (canvas_.getWidth() <= 0 || canvas_.getHeight() <= 0)
-                throw std::runtime_error("VGA viewport allocation failed");
+            const auto& preset = presets[next];
+            const auto allocatedWidth = canvas_.getWidth();
+            const auto allocatedHeight = canvas_.getHeight();
+            if (allocatedWidth != static_cast<int>(preset.width) ||
+                allocatedHeight != static_cast<int>(preset.height)) {
+                throw std::runtime_error(
+                    "VGA framebuffer allocation incomplete for " +
+                    std::string(preset.name) + ": allocated " +
+                    std::to_string(allocatedWidth) + "x" +
+                    std::to_string(allocatedHeight) + ", required " +
+                    std::to_string(preset.width) + "x" +
+                    std::to_string(preset.height));
+            }
             if ((options & kDoubleBufferedOption) != 0 &&
                 !display_.isDoubleBuffered())
                 throw std::runtime_error("VGA double buffering could not be enabled");

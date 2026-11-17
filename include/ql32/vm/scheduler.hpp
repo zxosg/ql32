@@ -3,6 +3,7 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/runtime/error.hpp"
 #include "ql32/runtime/display_mode.hpp"
+#include "ql32/runtime/music.hpp"
 #include "ql32/vm/smooth_weighted_round_robin.hpp"
 
 #include <cstddef>
@@ -57,6 +58,7 @@ struct Services {
     std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency;
     std::shared_ptr<runtime::DisplayModeService> displayModes;
     std::shared_ptr<runtime::SystemInfoService> systemInfo;
+    std::shared_ptr<runtime::MusicService> music;
 };
 
 // Cooperative, single-threaded weighted scheduler. Each task owns one
@@ -88,6 +90,8 @@ public:
     bool logon(TaskId id);
     TaskId logoff();
     TaskId focusedTask() const noexcept;
+    bool focusNextTask();
+    std::size_t focusedTaskNumber() const noexcept;
     bool suspendTask(TaskId id) noexcept;
     bool resumeTask(TaskId id) noexcept;
     std::optional<bool> toggleTaskPaused(TaskId id) noexcept;

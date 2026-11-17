@@ -77,6 +77,37 @@ character-cell size used by graphics channel `#1`; console text uses QL ink 4
 (green). The default `#1` graphics window occupies the area above those rows;
 output continues to mirror to USB serial.
 
+## AY/VTX music playback
+
+The Olimex profile exposes software AY-3-8912 playback through the board's
+schematic-confirmed GPIO25 audio output. The renderer uses I2S0's built-in DAC
+and DMA, leaving the VGA scanout on I2S1. Copy
+`examples/music/Bosconia1.vtx` to the SD card root to use the included test
+song. `MUSIC PLAY` reads and decodes a VTX AY/YM register-stream file before
+returning, then streams audio independently of BASIC scheduler ticks:
+
+```basic
+MUSIC PLAY "SDC:/Bosconia1.vtx"
+MUSIC STATUS
+MUSIC PAUSE
+MUSIC RESUME
+MUSIC STOP
+```
+
+The same command uses an `FFS:/` path in the SPIFFS profile. `MUSIC`
+commands are QL/32-specific. This profile accepts VTX files up to 64 KiB with
+register streams up to 96 KiB; SQT, STC, AY containers, other sound chips, and
+other boards are not included yet. The
+GPIO25 connection is confirmed by the schematic, but analog level, amplifier
+requirements, audio quality, and VGA coexistence still need physical playback
+verification. See `examples/music/vtx-player.bas` for a short control example.
+
+VTX register data is decompressed into memory before playback. The included
+`Bosconia1.vtx` expands to 93,184 bytes, so use the
+`olimex_esp32_sbc_fabgl_psram` profile on WROVER-E boards for this test; the
+standard profile may not have a large enough free heap block. The LH5 history
+dictionary is heap allocated to keep it off the BASIC task stack.
+
 ## Hardware checks (2026-11-05)
 
 The firmware was rebuilt and flashed to an Olimex Rev B board. A 320x200 VGA

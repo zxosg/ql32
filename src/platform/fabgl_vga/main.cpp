@@ -22,6 +22,7 @@
 #include <streambuf>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -43,6 +44,7 @@
 #include "ql32/platform/esp32/remote_debug_protocol.hpp"
 #include "ql32/platform/esp32/serial_key_decoder.hpp"
 #include "ql32/ui/line_editor.hpp"
+#include "ql32/ui/line_damage.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/platform/fabgl_vga/graphics.hpp"
 #include "ql32/platform/fabgl_vga/frame_presenter.hpp"
@@ -50,10 +52,14 @@
 #include "ql32/platform/fabgl_vga/keyboard.hpp"
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
 #include "ql32/platform/olimex_vga/canvas_raster_ops.hpp"
+#include "ql32/platform/olimex_vga/music.hpp"
 #endif
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
 #include "ql32/platform/olimex_vga/fixed_display_modes.hpp"
 #include "ql32/platform/olimex_vga/frame_presenter.hpp"
+#if defined(QL32_OLIMEX_DMA_DYNAMIC_MODE_TEST)
+#include "ql32/platform/olimex_vga/switchable_display_modes.hpp"
+#endif
 #endif
 #if defined(QL32_OLIMEX_RENDER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK)
@@ -158,19 +164,25 @@ public:
                          bool caretVisible = true) {
         if (!inputLineActive_ || inputRow_ >= lines_.size()) return;
         auto& line = lines_[inputRow_];
-        line.resize(std::min(inputColumn_, line.size()));
+        std::string nextLine = line.substr(0, std::min(inputColumn_, line.size()));
 
         const auto available = columns_ - std::min(inputColumn_, columns_ - 1);
         const auto maxCursorOffset = available - 1;
+        cursor = std::min(cursor, text.size());
         const auto viewOffset = cursor > maxCursorOffset ? cursor - maxCursorOffset : 0;
         const auto visibleCount = std::min(available, text.size() - viewOffset);
         if (visibleCount != 0)
-            line.append(text.data() + viewOffset, visibleCount);
+            nextLine.append(text.data() + viewOffset, visibleCount);
 
+        const auto nextCaret = inputColumn_ + std::min(cursor - viewOffset, maxCursorOffset);
+        const auto damage = ql32::ui::lineDamage(line, nextLine, columns_,
+            caretVisible_ && caretRow_ == inputRow_, caretColumn_,
+            caretVisible, nextCaret);
+        line.swap(nextLine);
         caretRow_ = inputRow_;
-        caretColumn_ = inputColumn_ + std::min(cursor - viewOffset, maxCursorOffset);
+        caretColumn_ = nextCaret;
         caretVisible_ = caretVisible;
-        invalidateInputRow();
+        if (!damage.empty()) invalidateInputSpan(damage.first, damage.last);
     }
 
     void setInputCaretVisible(bool visible) {
@@ -299,12 +311,13 @@ private:
                              static_cast<std::uint32_t>(bottom - top)};
     }
 
-    void invalidateInputRow() {
-        if (inputRow_ >= rows_ || inputColumn_ >= columns_) return;
+    void invalidateInputSpan(std::size_t first, std::size_t last) {
+        if (inputRow_ >= rows_ || first >= last || first >= columns_) return;
+        last = std::min(last, columns_);
         const ql32::graphics::Rect region{
-            bounds_.x + static_cast<std::int32_t>(inputColumn_ * consoleCharacterWidth),
+            bounds_.x + static_cast<std::int32_t>(first * consoleCharacterWidth),
             bounds_.y + static_cast<std::int32_t>(inputRow_ * consoleCharacterHeight),
-            static_cast<std::uint32_t>((columns_ - inputColumn_) * consoleCharacterWidth),
+            static_cast<std::uint32_t>((last - first) * consoleCharacterWidth),
             consoleCharacterHeight};
         if (invalidate_) invalidateRegion(region);
         else redraw(false, region);
@@ -386,7 +399,34 @@ ql32::platform::olimex_vga::PsramDmaScanout psramDmaScanout;
 #endif
 fabgl::Canvas canvas(&display);
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
+#if defined(QL32_OLIMEX_DMA_DYNAMIC_MODE_TEST)
+void applyDmaDisplayMode(std::uint32_t requested, std::uint32_t previous) {
+    struct Preset { std::uint32_t width, height; const char* modeline; };
+    static const std::array<Preset, 5> presets{{
+        {320, 200, VGA_320x200_70Hz}, {320, 240, QVGA_320x240_60Hz},
+        {400, 300, VGA_400x300_60Hz}, {640, 400, VGA_640x400_70Hz},
+        {640, 480, VGA_640x480_60Hz},
+    }};
+    const auto start = [&](std::uint32_t id) {
+        const auto& preset = presets.at(id);
+        return psramDmaScanout.configureGeometry(preset.width, preset.height) &&
+            psramDmaScanout.begin(preset.modeline,
+                ql32_board::vgaRed, ql32_board::vgaGreen, ql32_board::vgaBlue,
+                ql32_board::vgaHSync, ql32_board::vgaVSync, false);
+    };
+    if (!psramDmaScanout.end())
+        throw std::runtime_error("unable to stop Olimex DMA scanout");
+    if (!start(requested)) {
+        if (!start(previous))
+            throw std::runtime_error("DMA mode change failed and previous mode could not be restored");
+        throw std::runtime_error("DMA mode change failed; previous mode restored");
+    }
+}
+ql32::platform::olimex_vga::SwitchableDisplayModes displayModes(
+    ql32::platform::olimex_vga::FixedDisplayModes::kModeId, applyDmaDisplayMode);
+#else
 ql32::platform::olimex_vga::FixedDisplayModes displayModes;
+#endif
 #else
 ql32::platform::fabgl_vga::DisplayModes displayModes(display, canvas);
 #endif
@@ -440,10 +480,19 @@ std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
 ql32::vm::TaskId replTask = 0;
 std::shared_ptr<ql32::ui::QueuedService> uiService =
     std::make_shared<ql32::ui::QueuedService>();
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+std::shared_ptr<ql32::runtime::MusicService> boardMusicService;
+#endif
 std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
 std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
 ql32::ui::LineEditor lineEditor;
 std::string inputPrompt;
+struct SavedTaskInput {
+    std::string text;
+    int editingLineNumber = 0;
+};
+std::unordered_map<ql32::vm::TaskId, SavedTaskInput> savedTaskInputs;
+ql32::vm::TaskId inputEditorOwner = 0;
 ql32::platform::esp32::SerialKeyDecoder serialKeyDecoder;
 int editingLineNumber = 0;
 bool protocolInputLine = false;
@@ -644,6 +693,7 @@ ql32::input::KeyEvent toInputKey(
 }
 
 void submitInputLine() {
+    const auto submittedTask = scheduler ? scheduler->focusedTask() : 0;
     if (lineEditor.text().empty() && editingLineNumber > 0)
         lineEditor.setText(std::to_string(editingLineNumber));
     const std::string submittedLine = lineEditor.text();
@@ -657,6 +707,12 @@ void submitInputLine() {
         Serial.println();
         screenConsole.finishInputLine(submittedLine);
         screenConsole.write("\n", 1);
+#if defined(QL32_GRAPHICS_PROFILE)
+        // Exclude REPL typing and echo from the next command's presentation
+        // measurements. The profile then covers the submitted workload only.
+        if (profilePresenter && submittedTask == replTask)
+            profilePresenter->resetPresentationProfile();
+#endif
     } else {
         Serial.println();
         screenConsole.updateInputLine({}, 0, false);
@@ -678,6 +734,14 @@ void submitInputLine() {
             });
     } else if (uiPresenter && uiPresenter->active()) {
         (void)uiPresenter->consumeLine(submittedLine);
+#if defined(QL32_OLIMEX_DMA_DISPLAY) && \
+    defined(QL32_OLIMEX_DMA_STATUS_TEST)
+    } else if (submittedLine == "DMADIAG") {
+        // Diagnostic profiles retain counters in RAM while workloads run.
+        // The user requests one snapshot after the test to avoid adding UART
+        // output to the measured scanout and REPL workload.
+        psramDmaScanout.reportStatus();
+#endif
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
                    submittedLine, driveStorage, driveChannels, Serial,
@@ -699,6 +763,8 @@ void submitInputLine() {
         Serial.println("BASIC session is busy");
     }
     lineEditor.clear();
+    savedTaskInputs.erase(submittedTask);
+    inputEditorOwner = 0;
     inputPrompt.clear();
     serialKeyDecoder.reset();
     editingLineNumber = 0;
@@ -768,10 +834,11 @@ void refreshDebugOverlay() {
                           parts.tm_hour, parts.tm_min, parts.tm_sec);
     }
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u/%u %s",
         static_cast<unsigned long long>(freeBytes / 1024),
         static_cast<unsigned long long>(heap ? heap->largestFreeBlockBytes / 1024 : 0),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
+        static_cast<unsigned>(scheduler ? scheduler->focusedTaskNumber() : 0),
         static_cast<unsigned>(activeTasks), clockText);
     graphics->setDebugOverlayText(line);
 }
@@ -811,15 +878,27 @@ void advanceScheduler() {
             replReadyMessageShown = true;
         }
         if (!replPromptShown) {
+            if (inputEditorOwner != focused) {
+                lineEditor.clear();
+                editingLineNumber = 0;
+                const auto saved = savedTaskInputs.find(focused);
+                if (saved != savedTaskInputs.end()) {
+                    lineEditor.setText(saved->second.text);
+                    editingLineNumber = saved->second.editingLineNumber;
+                    savedTaskInputs.erase(saved);
+                }
+                inputEditorOwner = focused;
+            }
 #if defined(QL32_GRAPHICS_PROFILE)
             if (focused == replTask && profilePresenter) {
                 if (!profilePromptPrimed) {
                     profilePromptPrimed = true;
                 } else {
-                    const auto stats = profilePresenter->presentationProfile();
+                    profilePresenter->finalizePresentationProfile();
+                    const auto& stats = profilePresenter->presentationProfile();
                     if (stats.regionRequests != 0) {
                         Serial.printf(
-                            "GFXPROFILE requests=%llu full=%llu partial=%llu fallback=%llu rows=%llu composed_px=%llu written_px=%llu compose_us=%llu convert_us=%llu write_us=%llu swap_us=%llu swap_calls=%llu swap_avg_us=%llu swap_min_us=%llu swap_max_us=%llu\n",
+                            "GFXPROFILE requests=%llu full=%llu partial=%llu fallback=%llu rows=%llu composed_px=%llu written_px=%llu compose_us=%llu convert_us=%llu write_us=%llu update_us=%llu update_samples=%u update_p50_us=%u update_p95_us=%u update_p99_us=%u swap_requested=%llu swap_queued=%llu swap_executed=%llu swap_skipped=%llu swap_us=%llu swap_calls=%llu swap_avg_us=%llu swap_min_us=%llu swap_max_us=%llu swap_samples=%u swap_p50_us=%u swap_p95_us=%u swap_p99_us=%u\n",
                             static_cast<unsigned long long>(stats.regionRequests),
                             static_cast<unsigned long long>(stats.fullFrames),
                             static_cast<unsigned long long>(stats.partialFrames),
@@ -830,12 +909,25 @@ void advanceScheduler() {
                             static_cast<unsigned long long>(stats.composeMicros),
                             static_cast<unsigned long long>(stats.convertMicros),
                             static_cast<unsigned long long>(stats.writeMicros),
+                            static_cast<unsigned long long>(stats.updateMicros),
+                            static_cast<unsigned>(stats.updateSampleCount),
+                            static_cast<unsigned>(stats.updateP50Micros),
+                            static_cast<unsigned>(stats.updateP95Micros),
+                            static_cast<unsigned>(stats.updateP99Micros),
+                            static_cast<unsigned long long>(stats.swapRequested),
+                            static_cast<unsigned long long>(stats.swapQueued),
+                            static_cast<unsigned long long>(stats.swapExecuted),
+                            static_cast<unsigned long long>(stats.swapSkipped),
                             static_cast<unsigned long long>(stats.swapMicros),
                             static_cast<unsigned long long>(stats.swapCalls),
                             static_cast<unsigned long long>(stats.swapCalls
                                 ? stats.swapMicros / stats.swapCalls : 0),
                             static_cast<unsigned long long>(stats.swapMinMicros),
-                            static_cast<unsigned long long>(stats.swapMaxMicros));
+                            static_cast<unsigned long long>(stats.swapMaxMicros),
+                            static_cast<unsigned>(stats.swapSampleCount),
+                            static_cast<unsigned>(stats.swapP50Micros),
+                            static_cast<unsigned>(stats.swapP95Micros),
+                            static_cast<unsigned>(stats.swapP99Micros));
                     }
                 }
                 profilePresenter->resetPresentationProfile();
@@ -870,6 +962,22 @@ void advanceScheduler() {
 
 bool handleKeyboardShortcut(const ql32::input::KeyEvent& event) {
     if (!event.pressed || !scheduler) return false;
+    if (event.key == ql32::input::Key::Tab && event.alt) {
+        const auto current = scheduler->focusedTask();
+        const auto status = scheduler->taskStatus(current);
+        if (!protocolInputLine && status &&
+            *status == ql32::vm::TaskStatus::WaitingInput &&
+            (!uiPresenter || !uiPresenter->active())) {
+            savedTaskInputs[current] = {lineEditor.text(), editingLineNumber};
+        }
+        if (scheduler->focusNextTask()) {
+            inputEditorOwner = 0;
+            replPromptShown = false;
+            lastDebugOverlayRefresh = millis() - 1000;
+            refreshDebugOverlay();
+        }
+        return true;
+    }
     if (event.key == ql32::input::Key::Delete && event.control && event.alt) {
         boardSystemControl.reboot();
         return true;
@@ -1394,18 +1502,75 @@ void runDmaFramebufferBenchmark() {
 } // namespace
 
 void setup() {
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+    // YMODEM sends 1 KiB packets. Allow a complete packet to queue while the
+    // DMA refill worker preempts the serial consumer during high-resolution
+    // scanout; the Arduino default receive buffer is smaller than one block.
+    Serial.setRxBufferSize(2048);
+#endif
     Serial.begin(115200);
 #if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
+#if defined(QL32_OLIMEX_DMA_TEST_MODE_400X300)
+    constexpr auto dmaTestModeline = VGA_400x300_60Hz;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X400)
+    constexpr auto dmaTestModeline = VGA_640x400_70Hz;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X480)
+    constexpr auto dmaTestModeline = VGA_640x480_60Hz;
+#else
+    constexpr auto dmaTestModeline = VGA_320x200_70Hz;
+#endif
     if (!psramFound()) {
         Serial.println("Fatal: PSRAM VGA scanout requires initialized PSRAM");
         return;
     }
-    if (!psramDmaScanout.begin(VGA_320x200_70Hz,
+    if (!psramDmaScanout.begin(dmaTestModeline,
             ql32_board::vgaRed, ql32_board::vgaGreen, ql32_board::vgaBlue,
             ql32_board::vgaHSync, ql32_board::vgaVSync)) {
         Serial.println("Fatal: PSRAM VGA scanout initialization failed");
         return;
     }
+#if defined(QL32_OLIMEX_DMA_RESTART_TEST)
+    if (psramDmaScanout.configureGeometry(400, 300)) {
+        Serial.println("PSRAM VGA restart: accepted geometry while running");
+        return;
+    }
+    struct RestartMode {
+        std::uint32_t width;
+        std::uint32_t height;
+        const char* modeline;
+    };
+    const RestartMode modes[] = {
+        {400, 300, VGA_400x300_60Hz}, {640, 480, VGA_640x480_60Hz},
+        {320, 240, QVGA_320x240_60Hz}, {320, 200, VGA_320x200_70Hz},
+        {640, 400, VGA_640x400_70Hz}, {640, 480, VGA_640x480_60Hz},
+    };
+    for (unsigned cycle = 1; cycle <= sizeof(modes) / sizeof(modes[0]); ++cycle) {
+        delay(4000);
+        if (!psramDmaScanout.requestStop()) {
+            Serial.println("PSRAM VGA restart: stop failed");
+            return;
+        }
+        unsigned polls = 0;
+        while (!psramDmaScanout.pollStop()) {
+            ++polls;
+            delay(1);
+        }
+        Serial.printf("PSRAM VGA restart: stopped cycle=%u polls=%u\n", cycle, polls);
+        const auto& mode = modes[cycle - 1];
+        if (psramDmaScanout.configureGeometry(800, 600) ||
+            !psramDmaScanout.configureGeometry(mode.width, mode.height)) {
+            Serial.println("PSRAM VGA restart: invalid geometry selection");
+            return;
+        }
+        if (!psramDmaScanout.begin(mode.modeline,
+                ql32_board::vgaRed, ql32_board::vgaGreen, ql32_board::vgaBlue,
+                ql32_board::vgaHSync, ql32_board::vgaVSync)) {
+            Serial.println("PSRAM VGA restart: start failed");
+            return;
+        }
+        Serial.printf("PSRAM VGA restart: restarted cycle=%u\n", cycle);
+    }
+#endif
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK)
     runDmaFramebufferBenchmark();
 #endif
@@ -1468,8 +1633,10 @@ void setup() {
 #endif
 
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
-    constexpr std::uint32_t screenWidth = 320;
-    constexpr std::uint32_t screenHeight = 200;
+    constexpr std::uint32_t screenWidth =
+        ql32::platform::olimex_vga::PsramDmaScanout::kOutputWidth;
+    constexpr std::uint32_t screenHeight =
+        ql32::platform::olimex_vga::PsramDmaScanout::kOutputHeight;
     screenConsole.begin(screenWidth, screenHeight);
     auto framePresenter = std::make_shared<ql32::platform::olimex_vga::PsramFramePresenter>(
         psramDmaScanout);
@@ -1670,8 +1837,17 @@ void setup() {
 #if defined(QL32_OLIMEX_PSRAM)
         profile.values[6] += ",psram";
 #endif
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+        profile.values[6] += ",audio";
+#endif
         profile.capabilities = {{"display", true}, {"input", true},
-                                {"storage", true}, {"network", true},
+                                {"storage", true}, {"audio",
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+                                true
+#else
+                                false
+#endif
+                                }, {"network", true},
                                 {"wifi", true}, {"ps2", true}, {"serial", true},
                                 {"sd", true}, {"ffs",
 #if defined(QL32_OLIMEX_USE_SPIFFS)
@@ -1713,6 +1889,11 @@ void setup() {
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
 #endif
+#if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
+    boardMusicService = std::make_shared<ql32::platform::olimex_vga::MusicService>(
+        services.storage);
+    services.music = boardMusicService;
+#endif
     services.channels = std::make_shared<ql32::runtime::ChannelRegistry>(
         std::move(fileChannels), [](std::string_view bytes) {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
@@ -1753,7 +1934,16 @@ void setup() {
     // may briefly occupy the CPU or reconfigure shared ESP32 resources. Start
     // continuous VGA scanout after those services and immediately before the
     // first console invalidation queues a frame.
-    if (!psramDmaScanout.begin(VGA_320x200_70Hz,
+#if defined(QL32_OLIMEX_DMA_TEST_MODE_640X480)
+    constexpr auto dmaDisplayModeline = VGA_640x480_60Hz;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X400)
+    constexpr auto dmaDisplayModeline = VGA_640x400_70Hz;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_400X300)
+    constexpr auto dmaDisplayModeline = VGA_400x300_60Hz;
+#else
+    constexpr auto dmaDisplayModeline = VGA_320x200_70Hz;
+#endif
+    if (!psramDmaScanout.begin(dmaDisplayModeline,
             ql32_board::vgaRed, ql32_board::vgaGreen, ql32_board::vgaBlue,
             ql32_board::vgaHSync, ql32_board::vgaVSync,
             dmaDisplayDiagnostic)) {
@@ -1773,9 +1963,16 @@ void setup() {
 
 void loop() {
 #if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
-    static std::uint32_t lastStatus = millis();
+    // Keep scanout counters in the PsramDmaScanout instance throughout the
+    // run. UART output every second perturbs the workload and can make the
+    // REPL appear stalled, so emit one accumulated snapshot after 30 seconds.
+    static const std::uint32_t statusStart = millis();
+    static bool statusReported = false;
 #if defined(QL32_OLIMEX_DMA_TEST_PACKED4) && \
     !defined(QL32_OLIMEX_DMA_TEST_PIXEL_EDGES) && \
+    (!defined(QL32_OLIMEX_DMA_TEST_CHECKER) || \
+     defined(QL32_OLIMEX_DMA_TEST_ROTATE_PALETTE)) && \
+    !defined(QL32_OLIMEX_DMA_TEST_NO_PALETTE_ROTATION) && \
     !defined(QL32_OLIMEX_DMA_TEST_TRIANGLE)
     static std::uint32_t lastPaletteRotation = millis();
     if (millis() - lastPaletteRotation >= 500) {
@@ -1783,18 +1980,15 @@ void loop() {
         (void)psramDmaScanout.stagePaletteRotation(1);
     }
 #endif
-    if (millis() - lastStatus >= 1000) {
-        lastStatus = millis();
+    if (!statusReported && millis() - statusStart >= 30000) {
+        statusReported = true;
         psramDmaScanout.reportStatus();
     }
     delay(1);
 #else
-#if defined(QL32_OLIMEX_DMA_DISPLAY)
-    static std::uint32_t lastDmaStatus = millis();
-    if (millis() - lastDmaStatus >= 1000) {
-        lastDmaStatus = millis();
-        psramDmaScanout.reportStatus();
-    }
+#if defined(QL32_OLIMEX_DMA_DISPLAY) && \
+    defined(QL32_OLIMEX_DMA_STATUS_TEST)
+    // The counters remain in RAM until the user runs DMADIAG after a test.
 #endif
     while (Serial.available() > 0) {
         if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;

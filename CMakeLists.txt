@@ -14,6 +14,10 @@ if(QL32_ENABLE_SANITIZERS)
 endif()
 
 add_library(ql32_portable
+  src/music/ay38912.cpp
+  src/music/lh5.cpp
+  src/music/vtx.cpp
+  src/music/vtx_player.cpp
   src/language/interpreter.cpp
   src/graphics/bitmap.cpp
   src/graphics/font.cpp
@@ -61,6 +65,9 @@ if(QL32_BUILD_TESTS)
     add_test(NAME ql32_qimg_converter_tests
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/ql32_remote_debugger/tests/test_qimg.py)
+    add_test(NAME ql32_olimex_profile_config_tests
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/olimex_profile_config_tests.py)
   endif()
   function(add_cli_conformance_test name)
     add_test(
@@ -121,6 +128,9 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_runtime_tests tests/runtime_tests.cpp)
   target_link_libraries(ql32_runtime_tests PRIVATE ql32_host)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
+  add_executable(ql32_music_tests tests/music_tests.cpp)
+  target_link_libraries(ql32_music_tests PRIVATE ql32_host)
+  add_test(NAME ql32_music_tests COMMAND ql32_music_tests)
   add_executable(ql32_scheduler_tests tests/scheduler_tests.cpp)
   target_link_libraries(ql32_scheduler_tests PRIVATE ql32_host)
   add_test(NAME ql32_scheduler_tests COMMAND ql32_scheduler_tests)
@@ -142,6 +152,9 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_hardware_tests tests/hardware_tests.cpp)
   target_link_libraries(ql32_hardware_tests PRIVATE ql32_host)
   add_test(NAME ql32_hardware_tests COMMAND ql32_hardware_tests)
+  add_executable(ql32_pin_conflict_tests tests/pin_conflict_tests.cpp)
+  target_link_libraries(ql32_pin_conflict_tests PRIVATE ql32_host)
+  add_test(NAME ql32_pin_conflict_tests COMMAND ql32_pin_conflict_tests)
   add_test(
     NAME ql32_hardware_repl
     COMMAND ${CMAKE_COMMAND}
@@ -157,6 +170,9 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_line_editor_tests tests/line_editor_tests.cpp)
   target_link_libraries(ql32_line_editor_tests PRIVATE ql32_portable)
   add_test(NAME ql32_line_editor_tests COMMAND ql32_line_editor_tests)
+  add_executable(ql32_line_damage_tests tests/line_damage_tests.cpp)
+  target_link_libraries(ql32_line_damage_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_line_damage_tests COMMAND ql32_line_damage_tests)
   add_executable(ql32_graphic_ui_tests tests/graphic_ui_tests.cpp)
   target_link_libraries(ql32_graphic_ui_tests PRIVATE ql32_host)
   add_test(NAME ql32_graphic_ui_tests COMMAND ql32_graphic_ui_tests)
@@ -166,6 +182,21 @@ if(QL32_BUILD_TESTS)
   add_executable(ql32_olimex_framebuffer_tests tests/olimex_framebuffer_tests.cpp)
   target_link_libraries(ql32_olimex_framebuffer_tests PRIVATE ql32_portable)
   add_test(NAME ql32_olimex_framebuffer_tests COMMAND ql32_olimex_framebuffer_tests)
+  add_executable(ql32_olimex_scanout_geometry_tests tests/olimex_scanout_geometry_tests.cpp)
+  target_link_libraries(ql32_olimex_scanout_geometry_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_olimex_scanout_geometry_tests COMMAND ql32_olimex_scanout_geometry_tests)
+  add_executable(ql32_olimex_switchable_modes_tests tests/olimex_switchable_display_modes_tests.cpp)
+  target_link_libraries(ql32_olimex_switchable_modes_tests PRIVATE ql32_portable)
+  add_test(NAME ql32_olimex_switchable_modes_tests COMMAND ql32_olimex_switchable_modes_tests)
+  foreach(mode IN ITEMS default 400X300 640X400 640X480)
+    set(mode_test ql32_olimex_fixed_mode_${mode}_tests)
+    add_executable(${mode_test} tests/olimex_fixed_display_modes_tests.cpp)
+    target_link_libraries(${mode_test} PRIVATE ql32_portable)
+    if(NOT mode STREQUAL "default")
+      target_compile_definitions(${mode_test} PRIVATE QL32_OLIMEX_DMA_TEST_MODE_${mode})
+    endif()
+    add_test(NAME ${mode_test} COMMAND ${mode_test})
+  endforeach()
   add_executable(ql32_olimex_canvas_raster_tests
     tests/olimex_canvas_raster_tests.cpp
     src/platform/olimex_vga/canvas_raster_ops.cpp
@@ -224,6 +255,15 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_lilygo_vga32_profile_tests PRIVATE boards/lilygo_vga32 include)
   target_compile_features(ql32_lilygo_vga32_profile_tests PRIVATE cxx_std_17)
   add_test(NAME ql32_lilygo_vga32_profile_tests COMMAND ql32_lilygo_vga32_profile_tests)
+
+  add_executable(ql32_olimex_esp32_sbc_fabgl_profile_tests
+    tests/olimex_esp32_sbc_fabgl_profile_tests.cpp
+  )
+  target_include_directories(ql32_olimex_esp32_sbc_fabgl_profile_tests PRIVATE
+    boards/olimex_esp32_sbc_fabgl include)
+  target_compile_features(ql32_olimex_esp32_sbc_fabgl_profile_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_olimex_esp32_sbc_fabgl_profile_tests
+    COMMAND ql32_olimex_esp32_sbc_fabgl_profile_tests)
 
   add_executable(ql32_esp32_2432s028_profile_tests
     tests/esp32_2432s028_profile_tests.cpp

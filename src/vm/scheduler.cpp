@@ -198,7 +198,7 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
         services_.systemControl, services_.cpuFrequency, services_.displayModes,
-        services_.systemInfo);
+        services_.systemInfo, services_.music);
     const TaskId id = task->id;
     tasks_.push_back(std::move(task));
     if (windowMode_ == runtime::WindowMode::Isolated)
@@ -217,7 +217,7 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
         services_.systemControl, services_.cpuFrequency, services_.displayModes,
-        services_.systemInfo);
+        services_.systemInfo, services_.music);
     task->interpreter->setPersistentSessionResources(true);
     task->interactive = true;
     task->hasPendingSource = true;
@@ -247,6 +247,8 @@ TaskId SessionScheduler::launchAndWait(std::string source, std::ostream& output,
     child->priority = parent->priority;
     child->resumePriority = parent->resumePriority;
     focusedTaskId_ = childId;
+    if (services_.graphics)
+        services_.graphics->raiseWindows(child->interpreter->graphicsSessionId());
     return childId;
 }
 
@@ -262,7 +264,7 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
         services_.systemControl, services_.cpuFrequency, services_.displayModes,
-        services_.systemInfo);
+        services_.systemInfo, services_.music);
     task->interpreter->setPersistentSessionResources(true);
     task->interactive = true;
     task->supervisor = true;
@@ -331,6 +333,53 @@ TaskId SessionScheduler::logoff() {
 
 TaskId SessionScheduler::focusedTask() const noexcept {
     return focusedTaskId_ != 0 ? focusedTaskId_ : supervisorId_;
+}
+
+bool SessionScheduler::focusNextTask() {
+    Task* first = nullptr;
+    Task* current = nullptr;
+    Task* next = nullptr;
+    bool afterCurrent = false;
+    const auto isActive = [](const Task& task) {
+        return task.status != TaskStatus::Completed &&
+               task.status != TaskStatus::Failed &&
+               task.status != TaskStatus::Cancelled;
+    };
+
+    for (auto& task : tasks_) {
+        if (!isActive(*task)) continue;
+        if (!first) first = task.get();
+        if (afterCurrent) {
+            next = task.get();
+            break;
+        }
+        if (task->id == focusedTask()) {
+            current = task.get();
+            afterCurrent = true;
+        }
+    }
+    if (!first) return false;
+    if (!next) next = first;
+    if (next == current || (current == nullptr && next->id == focusedTask()))
+        return false;
+
+    focusedTaskId_ = next->id;
+    if (services_.graphics && next->interpreter)
+        services_.graphics->raiseWindows(next->interpreter->graphicsSessionId());
+    return true;
+}
+
+std::size_t SessionScheduler::focusedTaskNumber() const noexcept {
+    std::size_t number = 0;
+    for (const auto& current : tasks_) {
+        if (current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled)
+            continue;
+        ++number;
+        if (current->id == focusedTask()) return number;
+    }
+    return 0;
 }
 
 bool SessionScheduler::suspendTask(TaskId id) noexcept {
@@ -702,6 +751,9 @@ bool SessionScheduler::tick() {
                 parent.started = true;
                 parent.status = TaskStatus::Runnable;
                 focusedTaskId_ = parent.id;
+                if (services_.graphics && parent.interpreter)
+                    services_.graphics->raiseWindows(
+                        parent.interpreter->graphicsSessionId());
             }
             break;
         }
@@ -807,6 +859,7 @@ bool SessionScheduler::tick() {
         } else {
             removeFromSchedule(current);
             current.status = TaskStatus::Failed;
+            if (services_.music) services_.music->stopSession(current.id);
             if (current.interpreter)
                 current.interpreter->discardGraphicsResources();
             current.interpreter.reset();
@@ -875,6 +928,7 @@ bool SessionScheduler::tick() {
                     current.releaseSource();
                 }
             } else {
+                if (services_.music) services_.music->stopSession(current.id);
                 current.status = TaskStatus::Completed;
                 current.releaseSource();
                 current.interpreter.reset();
@@ -901,6 +955,7 @@ bool SessionScheduler::tick() {
                     current.releaseSource();
                 }
             } else {
+                if (services_.music) services_.music->stopSession(current.id);
                 current.status = TaskStatus::Completed;
                 current.releaseSource();
                 current.interpreter.reset();
@@ -966,6 +1021,7 @@ bool SessionScheduler::cancel(TaskId id) {
             task->programExecutionActive = false;
         }
         if (task->interpreter) task->interpreter->discardGraphicsResources();
+        if (services_.music) services_.music->stopSession(task->id);
         task->interpreter.reset();
         removeFromSchedule(*task);
         task->releaseSource();

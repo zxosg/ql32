@@ -807,6 +807,32 @@ void testPresentationBatchCoalescesResetAndPageUpdate() {
             "presentation batch did not restore automatic updates");
 }
 
+void testPresentationBatchPreservesConcurrentDrawingAcrossResize() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter);
+    graphics.setWindowBounds(1, {0, 0, 4, 4});
+    graphics.setWindowBounds(2, {5, 0, 4, 4});
+    graphics.setInk(1, 2);
+    graphics.setInk(2, 4);
+    const auto baseline = presenter->presentCount;
+
+    graphics.beginPresentationBatch(1);
+    graphics.pixel(1, 1, {1, 1});
+    graphics.beginPresentationBatch(2);
+    graphics.pixel(2, 1, {1, 1});
+    graphics.endPresentationBatch(2);
+    require(graphics.setDisplaySize(12, 12), "batched resize failed");
+    require(presenter->presentCount == baseline,
+            "resize or another session presented while batched");
+    graphics.endPresentationBatch(1);
+    require(presenter->presentCount == baseline + 1 &&
+                presenter->lastFrame.width == 12 &&
+                presenter->lastFrame.height == 12 &&
+                presenter->lastFrame.pixels[1 * 12 + 1] == 2 &&
+                presenter->lastFrame.pixels[1 * 12 + 6] == 4,
+            "batched resize lost a session's retained drawing");
+}
+
 void testDrawingArgumentValidation() {
     auto graphics = std::make_shared<RecordingGraphics>();
     ql32::Interpreter interpreter({}, {}, {}, graphics);
@@ -1030,6 +1056,26 @@ void testTextAndGraphicsFontStateAndStyles() {
             "normal PRINT did not fill the complete font cell with paper");
         require(canvas.pixel(0, underlineY) == 7,
             "normal PRINT did not rasterize the underline style");
+}
+
+void testDefaultFontHandleResetsSelections() {
+    FontRegistry fonts;
+    fonts.selectText(1, 4, 0);
+    fonts.selectGraphics(1, 4, 0);
+    fonts.resetText(1);
+    fonts.resetGraphics(1);
+    require(fonts.textSelection(1).handle == 0 &&
+                fonts.graphicsSelection(1).handle == 0,
+            "font handle zero did not clear the registry selection");
+
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(32, 32, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "FONT #1,4,0\nGFONT #1,4,0\n"
+        "FONT #1,0,0\nGFONT #1,0,0\n"
+        "PRINT #1,\"default\"\nTEXT #1,0,16,\"default\"\n", output);
 }
 
 void testLoadFontIsBoundedAndChannelScoped() {
@@ -2105,6 +2151,45 @@ void testTextOutputBatchPresentsOnceForMultiplePrintFragments() {
             "channel-0 output batch did not reach the console or presented graphics");
 }
 
+void testBatchedGraphicsTextMatchesLegacyScrolling() {
+    auto batchPresenter = std::make_shared<CapturingPresenter>();
+    auto batched = std::make_shared<WindowedService>(32, 24, batchPresenter);
+    batched->setDefaultWindowBounds(1, {0, 0, 32, 24});
+
+    const std::string text = "ABCD EF\nline 2\n0123456789\nlast";
+    batched->writeText(17, 1, text);
+
+    ql32::graphics::IndexedCanvas reference(32, 24);
+    reference.setInk(7);
+    reference.setPaper(0);
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    for (const auto character : text) {
+        if (character == '\r') continue;
+        if (character == '\n') {
+            x = 0;
+            y += 8;
+        } else {
+            if (x + 6 > 30) {
+                x = 0;
+                y += 8;
+            }
+            reference.printText({x, y}, std::string(1, character));
+            x += 6;
+        }
+        if (y + 7 >= 24) {
+            reference.scrollUp(8);
+            y = std::max(0, y - 8);
+        }
+    }
+
+    for (std::uint32_t yPixel = 0; yPixel < 24; ++yPixel)
+        for (std::uint32_t xPixel = 0; xPixel < 32; ++xPixel)
+            require(batchPresenter->lastFrame.pixels[yPixel * 32 + xPixel] ==
+                        reference.pixel(xPixel, yPixel),
+                    "batched graphics text changed wrapping or scroll results");
+}
+
 void testFailedPrintFlushesItsPartialOutputBatch() {
     auto presenter = std::make_shared<CapturingPresenter>();
     auto graphics = std::make_shared<WindowedService>(80, 64, presenter);
@@ -2317,6 +2402,7 @@ int main() {
     testFractionalDrawingGeometryFloorsToPixels();
     testFontSelectionChangesNativeTextCellSize();
     testTextAndGraphicsFontStateAndStyles();
+    testDefaultFontHandleResetsSelections();
     testLoadFontIsBoundedAndChannelScoped();
     testGraphicsUpdateCommandDispatch();
     testGupdateOffSuppressesVmDrawingUntilExplicitUpdate();
@@ -2330,6 +2416,7 @@ int main() {
     testWindowedGraphicsSkipsAutomaticPresentations();
     testWindowedGraphicsResetUpdateStatePresentsAndDisablesSkip();
     testPresentationBatchCoalescesResetAndPageUpdate();
+    testPresentationBatchPreservesConcurrentDrawingAcrossResize();
     testDrawingArgumentValidation();
     testClsChannelAndColorSyntax();
     testClsColorArgumentsClearWithNewPaper();
@@ -2365,6 +2452,7 @@ int main() {
     testAtRejectsZeroRowOrColumn();
     testScreenPrintPositionsArePerChannelAndSeparateFromText();
     testTextOutputBatchPresentsOnceForMultiplePrintFragments();
+    testBatchedGraphicsTextMatchesLegacyScrolling();
     testFailedPrintFlushesItsPartialOutputBatch();
     testDisplayGeometryChangeResizesDefaultWindowsAndPresents();
     testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure();

@@ -262,6 +262,14 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Pause:
             consumed = 1;
             break;
+        case Op::MusicPlay:
+            consumed = 1;
+            break;
+        case Op::MusicStop:
+        case Op::MusicPause:
+        case Op::MusicResume:
+        case Op::MusicStatus:
+            break;
         case Op::ForInit:
             for (const ForItemSpec& item : instruction.forItems)
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd) +
@@ -505,6 +513,11 @@ const char* opcodeName(Op op) {
     case Op::Input: return "INPUT";
     case Op::At: return "AT";
     case Op::Pause: return "PAUSE";
+    case Op::MusicPlay: return "MUSIC_PLAY";
+    case Op::MusicStop: return "MUSIC_STOP";
+    case Op::MusicPause: return "MUSIC_PAUSE";
+    case Op::MusicResume: return "MUSIC_RESUME";
+    case Op::MusicStatus: return "MUSIC_STATUS";
     case Op::JumpIfFalse: return "JUMP_IF_FALSE"; case Op::Jump: return "JUMP";
     case Op::ForInit: return "FOR_INIT"; case Op::ForNext: return "FOR_NEXT";
     case Op::LoopNext: return "LOOP_NEXT"; case Op::ExitLoop: return "EXIT_LOOP";
@@ -1295,7 +1308,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         *numericCode >= std::ldexp(1.0, 63))
                         runtimeError(instruction, "ERR$ error code is out of range");
                     const auto value = static_cast<std::int64_t>(*numericCode);
-                    if (value < 0 || value > 21)
+                    if (value < 0 || value > static_cast<std::int64_t>(runtime::ErrorCode::ResourceBusy))
                         pushValue("Unknown QL/32 error code " + std::to_string(value));
                     else
                         pushValue(std::string(runtime::errorText(
@@ -2608,11 +2621,24 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             "font handle must be a positive integer");
                         const auto style = integerArgument(1,
                             "font style must be a combination of style flags");
-                        if (handle <= 0 || static_cast<std::uint64_t>(handle) >
+                        if (handle < 0 || static_cast<std::uint64_t>(handle) >
                                 std::numeric_limits<graphics::FontHandle>::max())
                             runtimeError(instruction, "font handle is out of range");
                         if (style < 0 || style > 3)
                             runtimeError(instruction, "font style must be 0..3");
+                        if (handle == 0) {
+                            if (style != 0)
+                                runtimeError(instruction,
+                                    "default font handle 0 requires normal style 0");
+                            if (instruction.name == "FONT") {
+                                fontRegistry_.resetText(channel);
+                                graphics_->resetTextFont(session_id_, channel);
+                            } else {
+                                fontRegistry_.resetGraphics(channel);
+                                graphics_->resetGraphicsFont(session_id_, channel);
+                            }
+                            continue;
+                        }
                         try {
                             const auto fontHandle = static_cast<graphics::FontHandle>(handle);
                             const auto styleBits = static_cast<std::uint8_t>(style);
@@ -2843,10 +2869,15 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         parameters.emplace_back(textArgument(0));
                         parameters.emplace_back(textArgument(1));
                     }
-                    const auto id = channels_->openTypedDevice(session_id_, device, parameters);
-                    if (!interactiveCommandExecution_)
-                        executionChannels_.push_back(id);
-                    pushValue(static_cast<double>(id));
+                    try {
+                        const auto id = channels_->openTypedDevice(session_id_, device, parameters);
+                        if (!interactiveCommandExecution_)
+                            executionChannels_.push_back(id);
+                        pushValue(static_cast<double>(id));
+                    } catch (const runtime::ServiceError& error) {
+                        if (error.code() != runtime::ServiceErrorCode::ResourceBusy) throw;
+                        pushValue(-static_cast<double>(runtime::ErrorCode::ResourceBusy));
+                    }
                 } else if (instruction.name == "IN") {
                     if (!channels_) throw runtime::ServiceError(
                         runtime::ServiceErrorCode::Unavailable, "channel service unavailable");
@@ -3764,6 +3795,38 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 for (std::size_t index = 0; index < fields.size(); ++index)
                     storeInputValue(instruction.inputVariables[index], fields[index], instruction);
             }
+            break;
+        }
+        case Op::MusicPlay: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const Value pathValue = pop();
+            const auto* path = std::get_if<std::string>(&pathValue);
+            if (!path) runtimeError(instruction, "MUSIC PLAY requires a string path");
+            music_->play(task_id_ != 0 ? task_id_ : session_id_, *path);
+            break;
+        }
+        case Op::MusicStop:
+        case Op::MusicPause:
+        case Op::MusicResume: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const runtime::MusicSessionId owner = task_id_ != 0 ? task_id_ : session_id_;
+            if (instruction.op == Op::MusicStop) music_->stop(owner);
+            else if (instruction.op == Op::MusicPause) music_->pause(owner);
+            else music_->resume(owner);
+            break;
+        }
+        case Op::MusicStatus: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const char* state = "STOPPED";
+            if (music_->state() == runtime::MusicPlaybackState::Playing) state = "PLAYING";
+            else if (music_->state() == runtime::MusicPlaybackState::Paused) state = "PAUSED";
+            writePrintText(std::string("MUSIC ") + state + "\n", instruction);
             break;
         }
         }

@@ -116,6 +116,8 @@ public:
                                  std::uint8_t style);
     const BitmapFont& selectGraphics(FontChannel channel, FontHandle handle,
                                      std::uint8_t style);
+    void resetText(FontChannel channel) noexcept;
+    void resetGraphics(FontChannel channel) noexcept;
     FontSelection textSelection(FontChannel channel) const;
     FontSelection graphicsSelection(FontChannel channel) const;
     void clearChannel(FontChannel channel) noexcept;
