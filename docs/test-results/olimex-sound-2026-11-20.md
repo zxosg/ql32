@@ -54,3 +54,11 @@ failure was not reproduced on the new firmware.
 Listen to music while both workloads run; repeat on a 640x480 DMA profile; decide
 whether to remove the temporary diagnostics or keep them behind a debug flag; add a
 `linux` test preset or correct the handoff's reference to it.
+
+## BEEP and VOLUME (hardware, 2026-11-20)
+
+Build `olimex_esp32_sbc_fabgl_psram` flashed over serial. Verified by ear by the
+owner: square, sine, triangle, saw and sawdown beeps at 440 Hz; `VOLUME`
+32/128/255 (clearly increasing, no distortion at 255); 3 s beeps under a
+running, animating attractor task (clean tone, stable picture; maxGap about
+11.6 ms, 0 late blocks). Invalid arguments raise VM errors (also host-tested).

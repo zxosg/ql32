@@ -121,7 +121,7 @@ On 2026-11-20 the native Linux build (`cmake --preset linux`, then
 channel routing, hardware UART) were updated for program-owned channels and
 per-interpreter graphics session ids. `BEEP`/`VOLUME` were added (QL/32-specific,
 global volume, default 128); their host tests pass and the build succeeds, but
-listening verification of each waveform/volume level on the Olimex is pending.
+on 2026-11-20 the owner verified by ear on the Olimex: all five waveforms, VOLUME 32/128/255, and BEEP under a running attractor task (clean tone, stable picture, 0 late blocks).
 On 2026-11-08 the suite passed (65/65).
 The scheduler pager assertion was stale: its expected text used lowercase
 `Enter=page`, while the current prompt is `Enter=Page, L=Line, Q=Quit`. The test
