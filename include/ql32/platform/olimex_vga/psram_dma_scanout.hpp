@@ -74,7 +74,12 @@ private:
     static constexpr std::size_t kFramebufferCount = 3;
     // Keep ring sizes as divisors of each frame height so descriptor slots
     // restart at the same phase on every frame.
-#if defined(QL32_OLIMEX_DMA_TEST_MODE_640X480) && defined(QL32_OLIMEX_DMA_RING160_TEST)
+#if defined(QL32_OLIMEX_DMA_TEST_MODE_640X480) && defined(QL32_OLIMEX_DMA_RING160_GROUP20_TEST)
+    // Diagnostic: 160-row ring refilled in 20-row batches so one stall costs
+    // fewer rows and lead stays at 140 rows (160 * 640 B in internal DMA RAM).
+    static constexpr std::size_t kLineRingCount = 160;
+    static constexpr std::size_t kRefillGroupSize = 20;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X480) && defined(QL32_OLIMEX_DMA_RING160_TEST)
     // Four 40-row groups provide 120 rows of lead in the 480-line mode.
     static constexpr std::size_t kLineRingCount = 160;
     static constexpr std::size_t kRefillGroupSize = 40;
