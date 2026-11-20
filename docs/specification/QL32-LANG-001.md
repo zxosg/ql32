@@ -766,6 +766,13 @@ and `ERRX$` returns contextual detail for the current task error. Error code 0
 means no error; positive codes are stable QL/32 codes, with no SMSQ/E numeric
 compatibility claim.
 
+`MUSIC WAV "path"` (QL/32-specific, not SMSQ/E) streams an uncompressed PCM WAV
+file from storage without loading it into RAM (2 KiB read buffer). Supported:
+8-bit unsigned or 16-bit signed, mono or stereo (averaged to mono), 4000-48000 Hz
+(linearly resampled to the 22050 Hz output). Other formats raise a runtime error.
+WAV plays in the music slot of the platform-neutral mixer, so BEEP and MUSIC TEST
+mix over it; the audio output remains owned by one session at a time.
+
 | Code | `ERR$` message |
 | ---: | --- |
 | 0 | No error |

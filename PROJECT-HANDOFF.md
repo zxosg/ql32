@@ -228,6 +228,14 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 [QL32-PLAT-001](docs/specification/QL32-PLAT-001.md), and
 [QL32-NET-001](docs/specification/QL32-NET-001.md) for acceptance details.
 
+## Sound first cut: mixer and MUSIC WAV (2026-11)
+
+`music::Mixer` (include/ql32/music/mixer.hpp) sums a Music and an Effect slot;
+`MUSIC WAV "path"` streams PCM WAV (wav.hpp). Built (Linux, olimex psram env) and
+host-tested (ctest 82/82). NOT hardware-verified: SD reads now occur in the audio
+task, so check maxGap/late blocks and listen under VGA load before relying on it.
+Second cut (PT3, full VTX, SQT, Atari ST YM incl. SID/sync-buzzer) not started.
+
 ## Next work
 
 ### Hardware session update (2026-11-17)

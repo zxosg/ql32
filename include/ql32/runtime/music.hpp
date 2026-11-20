@@ -15,6 +15,8 @@ class MusicService {
 public:
     virtual ~MusicService() = default;
     virtual void play(MusicSessionId session, const std::string& path) = 0;
+    // Streams an uncompressed PCM WAV from storage without loading it fully.
+    virtual void playWav(MusicSessionId session, const std::string& path) = 0;
     virtual void testTone(MusicSessionId session) = 0;
     // Starts a tone and returns at once; it ends by itself after durationMs.
     virtual void beep(MusicSessionId session, std::uint32_t durationMs,

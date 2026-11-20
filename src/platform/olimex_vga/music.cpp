@@ -1,7 +1,10 @@
 #include "ql32/platform/olimex_vga/music.hpp"
 
 #include "ql32/music/dac_format.hpp"
+#include "ql32/music/mixer.hpp"
 #include "ql32/music/tone.hpp"
+#include "ql32/music/wav.hpp"
+#include "ql32/music/vtx_source.hpp"
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_player.hpp"
 
@@ -57,8 +60,7 @@ struct MusicService::Impl {
     std::shared_ptr<runtime::StorageService> storage;
     SemaphoreHandle_t mutex = nullptr;
     TaskHandle_t worker = nullptr;
-    std::unique_ptr<music::VtxPlayer> player;
-    music::ToneGenerator tone; // BEEP and MUSIC TEST; mixed over any player
+    music::Mixer mixer; // Music slot: VTX or WAV stream; Effect slot: BEEP and MUSIC TEST
     std::uint8_t outputVolume = music::DefaultVolume;
     runtime::MusicSessionId owner = 0;
     runtime::MusicPlaybackState playbackState = runtime::MusicPlaybackState::Stopped;
@@ -120,15 +122,10 @@ struct MusicService::Impl {
         int blockMax = std::numeric_limits<int>::min();
         for (;;) {            lock();
             const bool renderAudio = playbackState == runtime::MusicPlaybackState::Playing &&
-                (player || tone.active());
+                mixer.anyActive();
             if (renderAudio) {
-                pcm.fill(0);
-                if (player) {
-                    player->render(pcm.data(), pcm.size());
-                    if (!player->playing()) player.reset();
-                }
-                if (tone.active()) tone.mixInto(pcm.data(), pcm.size());
-                if (!player && !tone.active()) {
+                mixer.render(pcm.data(), pcm.size());
+                if (!mixer.anyActive()) {
                     owner = 0;
                     playbackState = runtime::MusicPlaybackState::Stopped;
                 }
@@ -256,8 +253,21 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                                         "music: short read while loading VTX file");
         offset += received;
     }
-    auto newPlayer = std::make_unique<music::VtxPlayer>(music::VtxSong::parse(std::move(bytes)));
+    startMusic(session, std::make_unique<music::VtxSource>(
+        music::VtxSong::parse(std::move(bytes))));
+}
 
+void MusicService::playWav(runtime::MusicSessionId session, const std::string& path) {
+    if (!impl_->storage)
+        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                    "music: storage service unavailable");
+    auto source = std::make_unique<music::WavSource>(
+        impl_->storage->openRead(path), music::VtxPlayer::DefaultSampleRate);
+    startMusic(session, std::move(source));
+}
+
+void MusicService::startMusic(runtime::MusicSessionId session,
+                              std::unique_ptr<music::AudioSource> source) {
     impl_->ensureOutput();
     impl_->lock();
     if (impl_->owner != 0 && impl_->owner != session) {
@@ -265,8 +275,7 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
         throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
                                     "music: audio output is owned by another session");
     }
-    impl_->player = std::move(newPlayer);
-    impl_->tone.stop();
+    impl_->mixer.set(music::Mixer::Music, std::move(source));
     impl_->owner = session;
     impl_->playbackState = runtime::MusicPlaybackState::Playing;
     if (impl_->worker) xTaskNotifyGive(impl_->worker);
@@ -281,9 +290,8 @@ void MusicService::testTone(runtime::MusicSessionId session) {
         throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
                                     "music: audio output is owned by another session");
     }
-    impl_->player.reset();
-    impl_->tone.start(TestToneHz, 0, music::VtxPlayer::DefaultSampleRate,
-                      music::Waveform::Sine, 6000);
+    impl_->mixer.set(music::Mixer::Effect, std::make_unique<music::ToneSource>(
+        TestToneHz, 0, music::VtxPlayer::DefaultSampleRate, music::Waveform::Sine, 6000));
     impl_->owner = session;
     impl_->playbackState = runtime::MusicPlaybackState::Playing;
     if (impl_->worker) xTaskNotifyGive(impl_->worker);
@@ -301,10 +309,11 @@ void MusicService::beep(runtime::MusicSessionId session, std::uint32_t durationM
                                     "audio output is owned by another session");
     }
     constexpr std::uint32_t Rate = music::VtxPlayer::DefaultSampleRate;
-    impl_->tone.start(pitchHz, static_cast<std::uint64_t>(durationMs) * Rate / 1000 + 1,
-                      Rate, static_cast<music::Waveform>(waveform));
+    impl_->mixer.set(music::Mixer::Effect, std::make_unique<music::ToneSource>(
+        pitchHz, static_cast<std::uint64_t>(durationMs) * Rate / 1000 + 1,
+        Rate, static_cast<music::Waveform>(waveform)));
     impl_->owner = session;
-    if (!impl_->player) impl_->playbackState = runtime::MusicPlaybackState::Playing;
+    if (!impl_->mixer.active(music::Mixer::Music)) impl_->playbackState = runtime::MusicPlaybackState::Playing;
     if (impl_->worker) xTaskNotifyGive(impl_->worker);
     impl_->unlock();
 }
@@ -329,8 +338,7 @@ void MusicService::stop(runtime::MusicSessionId session) {
         throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
                                     "music: audio output is owned by another session");
     }
-    impl_->player.reset();
-    impl_->tone.stop();
+    impl_->mixer.clearAll();
     impl_->owner = 0;
     impl_->playbackState = runtime::MusicPlaybackState::Stopped;
     impl_->unlock();
@@ -338,7 +346,7 @@ void MusicService::stop(runtime::MusicSessionId session) {
 
 void MusicService::pause(runtime::MusicSessionId session) {
     impl_->lock();
-    if (impl_->owner != session || (!impl_->player && !impl_->tone.active())) {
+    if (impl_->owner != session || !impl_->mixer.anyActive()) {
         impl_->unlock();
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
                                     "music: this session does not own a playing stream");
@@ -349,7 +357,7 @@ void MusicService::pause(runtime::MusicSessionId session) {
 
 void MusicService::resume(runtime::MusicSessionId session) {
     impl_->lock();
-    if (impl_->owner != session || (!impl_->player && !impl_->tone.active())) {
+    if (impl_->owner != session || !impl_->mixer.anyActive()) {
         impl_->unlock();
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
                                     "music: this session does not own a paused stream");
@@ -369,8 +377,7 @@ runtime::MusicPlaybackState MusicService::state() const noexcept {
 void MusicService::stopSession(runtime::MusicSessionId session) noexcept {
     impl_->lock();
     if (impl_->owner == session) {
-        impl_->player.reset();
-        impl_->tone.stop();
+        impl_->mixer.clearAll();
         impl_->owner = 0;
         impl_->playbackState = runtime::MusicPlaybackState::Stopped;
     }

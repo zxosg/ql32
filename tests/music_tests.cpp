@@ -1,7 +1,9 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/music/ay38912.hpp"
 #include "ql32/music/dac_format.hpp"
+#include "ql32/music/mixer.hpp"
 #include "ql32/music/tone.hpp"
+#include "ql32/music/wav.hpp"
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_player.hpp"
 #include "ql32/runtime/music.hpp"
@@ -80,6 +82,9 @@ public:
     void play(ql32::runtime::MusicSessionId session, const std::string& path) override {
         owner = session; lastPath = path; current = ql32::runtime::MusicPlaybackState::Playing;
     }
+    void playWav(ql32::runtime::MusicSessionId session, const std::string& path) override {
+        owner = session; lastWav = path; current = ql32::runtime::MusicPlaybackState::Playing;
+    }
     void testTone(ql32::runtime::MusicSessionId session) override {
         owner = session; toneRequested = true;
         current = ql32::runtime::MusicPlaybackState::Playing;
@@ -109,6 +114,7 @@ public:
 
     ql32::runtime::MusicSessionId owner = 0;
     std::string lastPath;
+    std::string lastWav;
     bool toneRequested = false;
     struct Beep { std::uint32_t durationMs, pitchHz; ql32::runtime::ToneWaveform waveform; };
     std::vector<Beep> beeps;
@@ -163,7 +169,10 @@ void testMusicBasicCommands() {
         "MUSIC STATUS\n"
         "MUSIC STOP\n"
         "MUSIC TEST\n"
-        "MUSIC STOP\n", output);
+        "MUSIC STOP\n"
+        "MUSIC WAV \"SDC:/a.wav\"\n", output);
+    require(music->lastWav == "SDC:/a.wav", "MUSIC WAV path was not passed to service");
+    music->stop(music->owner);
     require(music->lastPath == "SDC:/test.vtx", "MUSIC PLAY path was not passed to service");
     require(music->owner == 0 && music->state() ==
             ql32::runtime::MusicPlaybackState::Stopped,
@@ -273,6 +282,115 @@ void testBeepAndVolumeCommands() {
     }
     require(unavailable, "BEEP without an audio service must report it clearly");
 }
+
+// Read handle that records the largest single read, to prove WAV streaming.
+class SyntheticFile final : public ql32::runtime::StorageReadHandle {
+public:
+    explicit SyntheticFile(std::vector<std::uint8_t> bytes) : bytes_(std::move(bytes)) {}
+    std::uint64_t size() const noexcept override { return bytes_.size(); }
+    std::size_t readAt(std::uint64_t offset, std::uint8_t* out, std::size_t capacity) override {
+        maxRead = std::max(maxRead, capacity);
+        if (offset >= bytes_.size()) return 0;
+        const std::size_t n = std::min<std::size_t>(capacity, bytes_.size() - offset);
+        std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(offset), n, out);
+        return n;
+    }
+    std::size_t maxRead = 0;
+private:
+    std::vector<std::uint8_t> bytes_;
+};
+
+std::vector<std::uint8_t> makeWav(std::uint16_t channels, std::uint16_t bits,
+                                  std::uint32_t rate, const std::vector<std::uint8_t>& data,
+                                  bool extraChunk = false) {
+    std::vector<std::uint8_t> w;
+    auto p32 = [&](std::uint32_t v) { for (int i = 0; i < 4; ++i) w.push_back((v >> (8 * i)) & 255); };
+    auto p16 = [&](std::uint16_t v) { w.push_back(v & 255); w.push_back(v >> 8); };
+    auto tag = [&](const char* s) { w.insert(w.end(), s, s + 4); };
+    tag("RIFF"); p32(36 + static_cast<std::uint32_t>(data.size())); tag("WAVE");
+    tag("fmt "); p32(16); p16(1); p16(channels); p32(rate);
+    p32(rate * channels * bits / 8); p16(channels * bits / 8); p16(bits);
+    if (extraChunk) { tag("LIST"); p32(3); w.push_back(1); w.push_back(2); w.push_back(3); w.push_back(0); }
+    tag("data"); p32(static_cast<std::uint32_t>(data.size()));
+    w.insert(w.end(), data.begin(), data.end());
+    return w;
+}
+
+std::vector<std::int16_t> renderAll(ql32::music::AudioSource& source, std::size_t limit) {
+    std::vector<std::int16_t> out;
+    std::array<std::int16_t, 256> block{};
+    while (source.playing() && out.size() < limit) {
+        source.render(block.data(), block.size());
+        out.insert(out.end(), block.begin(), block.end());
+    }
+    return out;
+}
+
+void testMixer() {
+    using namespace ql32::music;
+    Mixer mixer;
+    mixer.set(Mixer::Music, std::make_unique<ToneSource>(1000, 0, 22050, Waveform::Square, 20000));
+    mixer.set(Mixer::Effect, std::make_unique<ToneSource>(1000, 100, 22050, Waveform::Square, 20000));
+    std::array<std::int16_t, 512> pcm{};
+    mixer.render(pcm.data(), pcm.size());
+    require(pcm[0] == 32767, "mixed voices must saturate");
+    require(!mixer.active(Mixer::Effect) && mixer.active(Mixer::Music),
+            "finished effect voice must be released without touching the music voice");
+    require(pcm[300] == 20000 || pcm[300] == -20000, "music voice must continue alone");
+    mixer.clearAll();
+    require(!mixer.anyActive(), "clearAll left voices active");
+}
+
+void testWavStreaming() {
+    using namespace ql32::music;
+    // 16-bit mono ramp at the output rate: output equals input.
+    std::vector<std::uint8_t> data;
+    for (int i = 0; i < 4000; ++i) {
+        const std::int16_t v = static_cast<std::int16_t>(i * 5 - 10000);
+        data.push_back(v & 255); data.push_back((v >> 8) & 255);
+    }
+    auto file = std::make_unique<SyntheticFile>(makeWav(1, 16, 22050, data, true));
+    auto* raw = file.get();
+    WavSource wav(std::move(file), 22050);
+    const auto pcm = renderAll(wav, 10000);
+    require(pcm[0] == -10000 && pcm[100] == 100 * 5 - 10000 && pcm[3000] == 3000 * 5 - 10000,
+            "16-bit mono WAV did not play back unchanged at the output rate");
+    require(!wav.playing(), "WAV did not end");
+    require(raw->maxRead <= WavSource::BufferBytes, "WAV reads must stay within the stream buffer");
+
+    // 8-bit stereo at half rate: upsampled 2x, channels averaged, unsigned offset removed.
+    std::vector<std::uint8_t> eight;
+    for (int i = 0; i < 2000; ++i) { eight.push_back(192); eight.push_back(64); }
+    WavSource low(std::make_unique<SyntheticFile>(makeWav(2, 8, 11025, eight)), 22050);
+    const auto lowPcm = renderAll(low, 10000);
+    require(lowPcm.size() >= 3900 && lowPcm[50] == 0, "8-bit stereo WAV was not averaged to centre");
+    require(lowPcm.size() < 4500, "half-rate WAV was not stretched to twice its length");
+
+    // A file far larger than the stream buffer is read in bounded blocks.
+    std::vector<std::uint8_t> big(400000, 0);
+    auto bigFile = std::make_unique<SyntheticFile>(makeWav(1, 16, 22050, big));
+    auto* bigRaw = bigFile.get();
+    WavSource bigWav(std::move(bigFile), 22050);
+    std::array<std::int16_t, 256> block{};
+    for (int i = 0; i < 10; ++i) bigWav.render(block.data(), block.size());
+    require(bigRaw->maxRead <= WavSource::BufferBytes, "large WAV was not streamed");
+
+    const std::vector<std::vector<std::uint8_t>> bad = {
+        {}, makeWav(1, 24, 22050, {0, 0}), makeWav(3, 16, 22050, {0, 0}),
+        makeWav(1, 16, 100, {0, 0}), makeWav(1, 16, 22050, {})};
+    for (const auto& bytes : bad) {
+        bool rejected = false;
+        try { WavSource x(std::make_unique<SyntheticFile>(bytes), 22050); }
+        catch (const std::runtime_error&) { rejected = true; }
+        require(rejected, "invalid WAV was accepted");
+    }
+    auto compressed = makeWav(1, 16, 22050, {0, 0, 0, 0});
+    compressed[20] = 2;
+    bool rejected = false;
+    try { WavSource x(std::make_unique<SyntheticFile>(compressed), 22050); }
+    catch (const std::runtime_error&) { rejected = true; }
+    require(rejected, "compressed WAV was accepted");
+}
 } // namespace
 
 int main() {
@@ -281,6 +399,8 @@ int main() {
         testMusicBasicCommands();
         testDacFormatAndTone();
         testWaveforms();
+        testMixer();
+        testWavStreaming();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';

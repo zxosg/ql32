@@ -5,6 +5,8 @@
 
 #include <memory>
 
+namespace ql32::music { class AudioSource; }
+
 namespace ql32::platform::olimex_vga {
 
 class MusicService final : public runtime::MusicService {
@@ -15,6 +17,7 @@ public:
     MusicService& operator=(const MusicService&) = delete;
 
     void play(runtime::MusicSessionId session, const std::string& path) override;
+    void playWav(runtime::MusicSessionId session, const std::string& path) override;
     void testTone(runtime::MusicSessionId session) override;
     void beep(runtime::MusicSessionId session, std::uint32_t durationMs,
               std::uint32_t pitchHz, runtime::ToneWaveform waveform) override;
@@ -27,6 +30,7 @@ public:
     void stopSession(runtime::MusicSessionId session) noexcept override;
 
 private:
+    void startMusic(runtime::MusicSessionId session, std::unique_ptr<music::AudioSource> source);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

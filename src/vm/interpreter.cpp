@@ -269,6 +269,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             consumed = instruction.argCount;
             break;
         case Op::MusicPlay:
+        case Op::MusicWav:
             consumed = 1;
             break;
         case Op::MusicTest:
@@ -544,6 +545,7 @@ const char* opcodeName(Op op) {
     case Op::Beep: return "BEEP";
     case Op::Volume: return "VOLUME";
     case Op::MusicPlay: return "MUSIC_PLAY";
+    case Op::MusicWav: return "MUSIC_WAV";
     case Op::MusicTest: return "MUSIC_TEST";
     case Op::MusicStop: return "MUSIC_STOP";
     case Op::MusicPause: return "MUSIC_PAUSE";
@@ -3870,6 +3872,16 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             const auto* path = std::get_if<std::string>(&pathValue);
             if (!path) runtimeError(instruction, "MUSIC PLAY requires a string path");
             music_->play(task_id_ != 0 ? task_id_ : session_id_, *path);
+            break;
+        }
+        case Op::MusicWav: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const Value pathValue = pop();
+            const auto* path = std::get_if<std::string>(&pathValue);
+            if (!path) runtimeError(instruction, "MUSIC WAV requires a string path");
+            music_->playWav(task_id_ != 0 ? task_id_ : session_id_, *path);
             break;
         }
         case Op::MusicTest: {

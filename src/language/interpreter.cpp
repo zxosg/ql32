@@ -1917,18 +1917,19 @@ private:
                 const std::string action = uppercaseAscii(subcommand.text);
                 detail::Op op;
                 if (action == "PLAY") op = Op::MusicPlay;
+                else if (action == "WAV") op = Op::MusicWav;
                 else if (action == "TEST") op = Op::MusicTest;
                 else if (action == "STOP") op = Op::MusicStop;
                 else if (action == "PAUSE") op = Op::MusicPause;
                 else if (action == "RESUME") op = Op::MusicResume;
                 else if (action == "STATUS") op = Op::MusicStatus;
-                else error(subcommand, "MUSIC expects PLAY, TEST, STOP, PAUSE, RESUME, or STATUS");
+                else error(subcommand, "MUSIC expects PLAY, WAV, TEST, STOP, PAUSE, RESUME, or STATUS");
                 Instruction music{op, 0.0, {}, name.line, name.column};
-                if (op == Op::MusicPlay) {
-                    if (commandArgumentTerminator()) error(name, "MUSIC PLAY requires a VTX path");
+                if (op == Op::MusicPlay || op == Op::MusicWav) {
+                    if (commandArgumentTerminator()) error(name, "MUSIC PLAY and MUSIC WAV require a file path");
                     expression();
                     if (!commandArgumentTerminator())
-                        error(peek(), "expected end of statement after MUSIC PLAY path");
+                        error(peek(), "expected end of statement after MUSIC PLAY or WAV path");
                 } else if (!commandArgumentTerminator()) {
                     error(peek(), "MUSIC subcommand takes no arguments");
                 }
