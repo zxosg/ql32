@@ -109,6 +109,26 @@ public:
     bool debugOverlayEnabled() const noexcept override { return debugOverlayEnabled_; }
     void setDebugOverlayText(const std::string& text) override;
 
+    // Optional presentation rate limit for slow presenters. Region presents
+    // are merged into one pending dirty rectangle and published when
+    // max(minIntervalUs, lastPresentUs * costRatio) has elapsed since the
+    // previous present finished. pollPendingPresentation() must be called
+    // regularly so a deferred tail is eventually shown; flushPendingPresentation()
+    // publishes it immediately. minIntervalUs == 0 and costRatio == 0 disable it.
+    struct CoalesceStats {
+        std::uint64_t requests = 0;
+        std::uint64_t deferred = 0;
+        std::uint64_t presented = 0;
+        std::uint64_t presentUs = 0;
+    };
+    void setPresentCoalescing(std::uint32_t minIntervalUs, std::uint32_t costRatio,
+                              std::function<std::uint64_t()> clockUs);
+    void pollPendingPresentation();
+    void flushPendingPresentation();
+    bool hasPendingPresentation() const noexcept { return pendingDirty_.width != 0 && pendingDirty_.height != 0; }
+    const CoalesceStats& coalesceStats() const noexcept { return coalesceStats_; }
+    void resetCoalesceStats() noexcept { coalesceStats_ = {}; }
+
     WindowId windowForSession(SessionId session);
     std::optional<ChannelId> channelForWindow(SessionId session,
                                                WindowId window) const;
@@ -190,6 +210,17 @@ private:
     std::map<SurfaceKey, Point> graphicsCursors_;
     struct TextOutputBatch { std::size_t depth = 0; Rect dirty{}; };
     std::map<SurfaceKey, TextOutputBatch> textOutputBatches_;
+    std::uint32_t coalesceMinIntervalUs_ = 0;
+    std::uint32_t coalesceCostRatio_ = 0;
+    std::function<std::uint64_t()> coalesceClockUs_;
+    Rect pendingDirty_{};
+    std::uint64_t nextPresentAllowedUs_ = 0;
+    CoalesceStats coalesceStats_{};
+    bool coalescingEnabled() const noexcept {
+        return coalesceClockUs_ && (coalesceMinIntervalUs_ != 0 || coalesceCostRatio_ != 0);
+    }
+    void presentRegionNow(Rect region);
+    bool takeCoalescedRegion(Rect& region);
     std::size_t presentationBatchDepth_ = 0;
     bool presentationBatchNeedsFullFrame_ = false;
     Rect presentationBatchDirty_{};

@@ -753,6 +753,17 @@ void submitInputLine() {
     } else if (submittedLine == "PRESDIAG") {
         // Snapshot of presenter counters; PRESRESET zeroes them between runs.
         if (psramPresenterDiag) psramPresenterDiag->reportStats();
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+        if (graphics) {
+            const auto& c = graphics->coalesceStats();
+            Serial.printf("QL32 present coalesce: requests=%llu, deferred=%llu, presented=%llu, present-us=%llu, pending=%d\n",
+                          static_cast<unsigned long long>(c.requests),
+                          static_cast<unsigned long long>(c.deferred),
+                          static_cast<unsigned long long>(c.presented),
+                          static_cast<unsigned long long>(c.presentUs),
+                          graphics->hasPendingPresentation() ? 1 : 0);
+        }
+#endif
     } else if (submittedLine.rfind("PRESBUDGET", 0) == 0) {
         // PRESBUDGET <bytes per video frame>; 0 disables the throttle.
         if (psramPresenterDiag) {
@@ -762,8 +773,22 @@ void submitInputLine() {
             Serial.printf("QL32 present budget=%u bytes/frame\n",
                           static_cast<unsigned>(psramPresenterDiag->frameByteBudget()));
         }
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+    } else if (submittedLine.rfind("PRESRATE", 0) == 0) {
+        // PRESRATE <min interval us> <cost ratio>; "PRESRATE 0 0" disables.
+        unsigned minUs = 0, ratio = 0;
+        std::sscanf(submittedLine.c_str() + 8, "%u %u", &minUs, &ratio);
+        if (graphics) {
+            graphics->setPresentCoalescing(minUs, ratio,
+                [] { return static_cast<std::uint64_t>(micros()); });
+            Serial.printf("QL32 present rate min-us=%u cost-ratio=%u\n", minUs, ratio);
+        }
+#endif
     } else if (submittedLine == "PRESRESET") {
         if (psramPresenterDiag) psramPresenterDiag->resetStats();
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+        if (graphics) graphics->resetCoalesceStats();
+#endif
         Serial.println("QL32 present stats reset");
 #endif
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
@@ -1687,6 +1712,12 @@ void setup() {
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         screenWidth, screenHeight, framePresenter);
 #endif
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+    // Default: at most ~25 presents/s and presenting never takes more than
+    // half of the VM's time (cost ratio 1). Tunable at runtime with PRESRATE.
+    graphics->setPresentCoalescing(40000, 1,
+        [] { return static_cast<std::uint64_t>(micros()); });
+#endif
     graphics->setDefaultWindowBounds(0,
         {0, static_cast<std::int32_t>(screenHeight - consoleHeight), screenWidth, consoleHeight});
     graphics->setDefaultWindowBounds(1,
@@ -2035,6 +2066,9 @@ void loop() {
         }
     }
     advanceScheduler();
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+    if (graphics) graphics->pollPendingPresentation();
+#endif
     refreshInputCaretBlink();
     delay(1);
 #endif

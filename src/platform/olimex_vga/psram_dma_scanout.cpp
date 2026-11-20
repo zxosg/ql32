@@ -887,8 +887,27 @@ void QL32_REFILL_HOT PsramDmaScanout::encodePacked4Row(const std::uint8_t* sourc
     // Precompute the pair conversion so a byte of PSRAM becomes one aligned
     // 16-bit output write. Emit each eight-pixel group in the VGA's physical
     // order directly, avoiding a second pass over the DMA line.
+#if defined(QL32_OLIMEX_LEGACY_ENCODER)
+    // A/B only: the pre-e7f8780 byte-store encoder.
+    std::uint32_t x = 0;
+    for (; x + 8 <= width_; x += 8) {
+        std::uint32_t packed;
+        const auto* aligned = static_cast<const std::uint8_t*>(
+            __builtin_assume_aligned(source + x / 2, 4));
+        std::memcpy(&packed, aligned, sizeof(packed));
+        const auto pair1 = packed4PairOutputLut_[(packed >> 8) & 0xffu];
+        const auto pair0 = packed4PairOutputLut_[packed & 0xffu];
+        const auto pair3 = packed4PairOutputLut_[packed >> 24];
+        const auto pair2 = packed4PairOutputLut_[(packed >> 16) & 0xffu];
+        std::memcpy(output + x, &pair1, sizeof(pair1));
+        std::memcpy(output + x + 2, &pair0, sizeof(pair0));
+        std::memcpy(output + x + 4, &pair3, sizeof(pair3));
+        std::memcpy(output + x + 6, &pair2, sizeof(pair2));
+    }
+#else
     std::uint32_t x = static_cast<std::uint32_t>(
         encodePacked4AlignedRow(source, output, width_, packed4PairOutputLut_));
+#endif
     for (; x < width_; x += 2) {
         const auto packed = source[x / 2];
         output[x] = pixelOutputLut_[packed >> 4];
