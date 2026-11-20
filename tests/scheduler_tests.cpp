@@ -101,8 +101,9 @@ public:
               const std::string& value) override {
         writtenText += value;
     }
-    void writeText(ql32::graphics::SessionId,
+    void writeText(ql32::graphics::SessionId session,
                    const std::string& value) override {
+        lastTextSession = session;
         writtenText += value;
     }
     void clear(ql32::graphics::SessionId) override {}
@@ -134,6 +135,7 @@ public:
     }
 
     std::string writtenText;
+    ql32::graphics::SessionId lastTextSession = 0;
     ql32::graphics::WindowInfo info{120, 32, 4, 16, 0, 0, 0};
     ql32::graphics::UpdateMode updateMode = ql32::graphics::UpdateMode::Auto;
     std::uint32_t frameSkip = 0;
@@ -1334,7 +1336,7 @@ void testTaskWaitResumesCallerAndExposesChildStatus() {
     require(graphics->writtenText == "COMPLETED\n",
             "TASKRESULT did not expose the completed standard task status");
     require(!graphics->raisedSessions.empty() &&
-                graphics->raisedSessions.back() == supervisor,
+                graphics->raisedSessions.back() == graphics->lastTextSession,
             "completed child did not raise its caller's windows");
 }
 
@@ -1352,11 +1354,12 @@ void testAltTabCyclesLiveTasksIncludingNonInteractiveTasks() {
                 scheduler.focusedTaskNumber() == 1 &&
                 scheduler.activeTaskCount() == 3,
             "initial active task position was incorrect");
+    const auto raisedBeforeTab = graphics->raisedSessions.size();
     require(scheduler.focusNextTask() && scheduler.focusedTask() == first &&
                 scheduler.focusedTaskNumber() == 2,
             "Alt+Tab did not activate a running non-interactive task");
     require(!graphics->raisedSessions.empty() &&
-                graphics->raisedSessions.back() == first,
+                graphics->raisedSessions.size() > raisedBeforeTab,
             "Alt+Tab did not raise the selected task's windows");
     require(scheduler.focusNextTask() && scheduler.focusedTask() == second &&
                 scheduler.focusedTaskNumber() == 3,

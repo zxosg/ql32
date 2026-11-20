@@ -301,9 +301,9 @@ void testDefaultAndRoutedOutputChannels() {
         std::ostringstream console;
         {
             ql32::Interpreter interpreter(storage, channels);
-            interpreter.execute("file = OPEN(\"routed.txt\", \"WRITE\")\n", console);
-            interpreter.execute("CHANNEL #1 TO #file\nPRINT \"print target\"\n", console);
-            interpreter.execute("WRITE 1, \"write target\"\n", console);
+            interpreter.executeInteractive("file = OPEN(\"routed.txt\", \"WRITE\")\n", console);
+            interpreter.executeInteractive("CHANNEL #1 TO #file\nPRINT \"print target\"\n", console);
+            interpreter.executeInteractive("WRITE 1, \"write target\"\n", console);
             interpreter.executeInteractive("10 PRINT \"stored\"\n", console);
             interpreter.executeInteractive("LIST\n", console);
             interpreter.executeInteractive("DIR\n", console);
