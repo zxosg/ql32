@@ -839,6 +839,16 @@ void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) 
     }
 #endif
     if (kFramebufferFormat == PixelFormat::Indexed4 && horizontalShift == 0) {
+#if defined(QL32_OLIMEX_DMA_REFILL_BULK_COPY_TEST)
+        // Pull the whole source row out of PSRAM with one bulk copy so the
+        // encoder reads internal RAM only. Single refill task, so static.
+        alignas(4) static std::uint8_t rowCache[1024];
+        const auto rowBytes = (static_cast<std::size_t>(width_) + 1) / 2;
+        if (rowBytes <= sizeof(rowCache)) {
+            std::memcpy(rowCache, source, rowBytes);
+            source = rowCache;
+        }
+#endif
         encodePacked4Row(source, out);
         markRowReady();
         return;
