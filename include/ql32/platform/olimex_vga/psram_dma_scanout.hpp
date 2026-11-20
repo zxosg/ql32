@@ -178,6 +178,7 @@ private:
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     volatile std::uint32_t refillBatchCount_ = 0;
     volatile std::uint32_t refillBatchMaxMicros_ = 0;
+    volatile std::uint32_t refillBatchTotalMicros_ = 0;
     volatile std::uint32_t refillBacklogMaxRows_ = 0;
     volatile std::uint32_t refillBatchMaxRows_ = 0;
     volatile std::uint32_t refillObsoleteRowsSkipped_ = 0;

@@ -751,6 +751,7 @@ void PsramDmaScanout::refillCompletedRows() {
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     const auto elapsed = static_cast<std::uint32_t>(micros() - started);
     ++refillBatchCount_;
+    refillBatchTotalMicros_ = refillBatchTotalMicros_ + elapsed;
     if (batchRows > refillBatchMaxRows_) refillBatchMaxRows_ = batchRows;
     if (elapsed > refillBatchMaxMicros_) refillBatchMaxMicros_ = elapsed;
 #endif
@@ -915,7 +916,7 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(unexpectedInterruptMask_));
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
-    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u\n",
+    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u, refill-total-us=%u\n",
                   static_cast<unsigned>(frameCount_),
                   static_cast<unsigned>(haveCompletedSequence_ ? completedSequence_ + 1 : 0),
                   static_cast<unsigned>(eofEventCount_),
@@ -934,7 +935,8 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(refillActiveSlotOverwriteCount_),
                   static_cast<unsigned>(refillBatchMaxRows_),
                   static_cast<unsigned>(refillBacklogMaxRows_),
-                  static_cast<unsigned>(refillObsoleteRowsSkipped_));
+                  static_cast<unsigned>(refillObsoleteRowsSkipped_),
+                  static_cast<unsigned>(refillBatchTotalMicros_));
 #else
     Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u\n",
                   static_cast<unsigned>(frameCount_),
