@@ -109,7 +109,7 @@ constexpr std::string_view builtinCommands[] = {
     "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "MODE", "TILE", "KILL", "TASKVIEW", "BLIT", "UNLOADIMAGE",
     "OUT", "POKE", "POKE_W", "POKE_L",
-    "DEALLOC", "XFER", "PAUSE", "RANDOMIZE", "MUSIC"
+    "DEALLOC", "XFER", "PAUSE", "RANDOMIZE", "MUSIC", "BEEP", "VOLUME"
 };
 
 constexpr std::string_view builtinFunctions[] = {
@@ -1917,11 +1917,12 @@ private:
                 const std::string action = uppercaseAscii(subcommand.text);
                 detail::Op op;
                 if (action == "PLAY") op = Op::MusicPlay;
+                else if (action == "TEST") op = Op::MusicTest;
                 else if (action == "STOP") op = Op::MusicStop;
                 else if (action == "PAUSE") op = Op::MusicPause;
                 else if (action == "RESUME") op = Op::MusicResume;
                 else if (action == "STATUS") op = Op::MusicStatus;
-                else error(subcommand, "MUSIC expects PLAY, STOP, PAUSE, RESUME, or STATUS");
+                else error(subcommand, "MUSIC expects PLAY, TEST, STOP, PAUSE, RESUME, or STATUS");
                 Instruction music{op, 0.0, {}, name.line, name.column};
                 if (op == Op::MusicPlay) {
                     if (commandArgumentTerminator()) error(name, "MUSIC PLAY requires a VTX path");
@@ -1932,6 +1933,32 @@ private:
                     error(peek(), "MUSIC subcommand takes no arguments");
                 }
                 code_.push_back(std::move(music));
+                return;
+            }
+            if (name.text == "BEEP") {
+                if (commandArgumentTerminator())
+                    error(name, "BEEP requires a duration in milliseconds and a pitch in Hz");
+                expression();
+                if (!match(Kind::Comma)) error(peek(), "expected ',' and pitch after BEEP duration");
+                expression();
+                Instruction beep{Op::Beep, 0.0, {}, name.line, name.column};
+                beep.argCount = 2;
+                if (match(Kind::Comma)) {
+                    expression();
+                    beep.argCount = 3;
+                }
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of statement after BEEP arguments");
+                code_.push_back(std::move(beep));
+                return;
+            }
+            if (name.text == "VOLUME") {
+                if (commandArgumentTerminator())
+                    error(name, "VOLUME requires a value from 0 through 255");
+                expression();
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of statement after VOLUME value");
+                code_.push_back({Op::Volume, 0.0, {}, name.line, name.column});
                 return;
             }
             if (name.text == "PAUSE") {

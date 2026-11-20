@@ -235,6 +235,8 @@ SMSQ/E compatibility.
 | `CHANNEL` | `CHANNEL #channel` or `CHANNEL #source TO #destination` | Changes the default output channel or session-local channel route. | `CHANNEL #0` |
 | `GETNET` | `GETNET ssid$, password$` | Connects to a Wi-Fi network. `[NETWORK]` | `GETNET ssid$, pass$` |
 | `DISNET` | `DISNET` | Disconnects the network service. `[NETWORK]` | `DISNET` |
+| `BEEP` | `BEEP ms, hz [, waveform]` | Plays a tone and suspends only the calling task for `ms` (1..600000). `hz` 20..10000. Waveform: `"SQUARE"` (default), `"SINE"`, `"TRIANGLE"`, `"SAW"` (rising), `"SAWDOWN"` (falling) or 0..4. QL/32-specific; differs from SMSQ/E `BEEP`. Needs the audio service. `[AUDIO]` | `BEEP 200, 440, "sine"` |
+| `VOLUME` | `VOLUME level` | Global output level 0..255 for `BEEP` and `MUSIC`; default 128. `[AUDIO]` | `VOLUME 200` |
 | `MUSIC` | `MUSIC PLAY path$`, `MUSIC PAUSE`, `MUSIC RESUME`, `MUSIC STOP`, `MUSIC STATUS` | Plays VTX AY/YM register streams through the Olimex mono DAC. File loading and decoding finish before `PLAY` returns; sample streaming then runs independently. File size is limited to 64 KiB and decoded register data to 96 KiB. Other sound chips and file formats are not yet supported. `[AUDIO]` | `MUSIC PLAY "SDC:/music/theme.vtx"` |
 | `FLASH` | `FLASH mode` inside `IPRINT` or `BUSY` options | Selects a toast flash mode; it is an option in these commands, not a standalone display command. `[DISPLAY]` | `IPRINT FLASH KInfoFlashText, "Ready"` |
 

@@ -148,6 +148,8 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Stop:
         case Op::Input:
         case Op::Pause:
+        case Op::Beep:
+        case Op::Volume:
         case Op::Return:
         case Op::FunctionEnd:
         case Op::SelectBegin:
@@ -260,11 +262,16 @@ void verifyBytecode(const detail::InstructionSequence& code) {
                        static_cast<std::size_t>(instruction.clearTarget);
             break;
         case Op::Pause:
+        case Op::Volume:
             consumed = 1;
+            break;
+        case Op::Beep:
+            consumed = instruction.argCount;
             break;
         case Op::MusicPlay:
             consumed = 1;
             break;
+        case Op::MusicTest:
         case Op::MusicStop:
         case Op::MusicPause:
         case Op::MusicResume:
@@ -348,6 +355,27 @@ double numeric(const Value& value, const Instruction& at) {
     const std::string detail = "line " + std::to_string(line) + ", column " +
                                std::to_string(at.column) + ": " + message;
     throw runtime::Error(runtime::errorCodeForMessage(detail), detail);
+}
+
+// Waveform is a number 0..4 or a case-insensitive name.
+runtime::ToneWaveform waveformArgument(const Value& value, const Instruction& at) {
+    using runtime::ToneWaveform;
+    if (const auto* number = std::get_if<double>(&value)) {
+        if (std::isfinite(*number) && std::trunc(*number) == *number &&
+            *number >= 0 && *number <= 4)
+            return static_cast<ToneWaveform>(static_cast<int>(*number));
+    } else if (const auto* text = std::get_if<std::string>(&value)) {
+        std::string upper;
+        for (const char c : *text)
+            upper.push_back(c >= 'a' && c <= 'z' ? static_cast<char>(c - 32) : c);
+        if (upper == "SQUARE") return ToneWaveform::Square;
+        if (upper == "SINE") return ToneWaveform::Sine;
+        if (upper == "TRIANGLE") return ToneWaveform::Triangle;
+        if (upper == "SAW" || upper == "SAWTOOTH" || upper == "/|")
+            return ToneWaveform::SawtoothRising;
+        if (upper == "SAWDOWN" || upper == "|\\") return ToneWaveform::SawtoothFalling;
+    }
+    runtimeError(at, "BEEP waveform must be 0-4 or SQUARE, SINE, TRIANGLE, SAW, SAWDOWN");
 }
 
 std::size_t utf8Length(const std::string& text) {
@@ -513,7 +541,10 @@ const char* opcodeName(Op op) {
     case Op::Input: return "INPUT";
     case Op::At: return "AT";
     case Op::Pause: return "PAUSE";
+    case Op::Beep: return "BEEP";
+    case Op::Volume: return "VOLUME";
     case Op::MusicPlay: return "MUSIC_PLAY";
+    case Op::MusicTest: return "MUSIC_TEST";
     case Op::MusicStop: return "MUSIC_STOP";
     case Op::MusicPause: return "MUSIC_PAUSE";
     case Op::MusicResume: return "MUSIC_RESUME";
@@ -3711,6 +3742,40 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 std::chrono::milliseconds(requestedPauseDurationMs_);
             return ExecutionStatus::WaitingTime;
         }
+        case Op::Beep: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "audio service unavailable");
+            runtime::ToneWaveform waveform = runtime::ToneWaveform::Square;
+            if (instruction.argCount == 3) waveform = waveformArgument(pop(), instruction);
+            const double pitch = numeric(pop(), instruction);
+            const double duration = numeric(pop(), instruction);
+            if (!std::isfinite(duration) || std::trunc(duration) != duration ||
+                duration < 1 || duration > 600000)
+                runtimeError(instruction,
+                    "BEEP duration must be an integer from 1 through 600000 milliseconds");
+            if (!std::isfinite(pitch) || std::trunc(pitch) != pitch ||
+                pitch < 20 || pitch > 10000)
+                runtimeError(instruction, "BEEP pitch must be an integer from 20 through 10000 Hz");
+            music_->beep(task_id_ != 0 ? task_id_ : session_id_,
+                         static_cast<std::uint32_t>(duration),
+                         static_cast<std::uint32_t>(pitch), waveform);
+            // Only this session waits for the tone; the scheduler keeps running.
+            requestedPauseDurationMs_ = static_cast<std::uint32_t>(duration);
+            state.pauseUntil = std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(requestedPauseDurationMs_);
+            return ExecutionStatus::WaitingTime;
+        }
+        case Op::Volume: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "audio service unavailable");
+            const double level = numeric(pop(), instruction);
+            if (!std::isfinite(level) || std::trunc(level) != level || level < 0 || level > 255)
+                runtimeError(instruction, "VOLUME must be an integer from 0 through 255");
+            music_->setVolume(static_cast<std::uint8_t>(level));
+            break;
+        }
         case Op::Input: {
             std::string prompt;
             runtime::ChannelId promptChannel = instruction.expectsValue ?
@@ -3805,6 +3870,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             const auto* path = std::get_if<std::string>(&pathValue);
             if (!path) runtimeError(instruction, "MUSIC PLAY requires a string path");
             music_->play(task_id_ != 0 ? task_id_ : session_id_, *path);
+            break;
+        }
+        case Op::MusicTest: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            music_->testTone(task_id_ != 0 ? task_id_ : session_id_);
             break;
         }
         case Op::MusicStop:

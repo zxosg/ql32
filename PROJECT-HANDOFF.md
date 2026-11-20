@@ -115,7 +115,14 @@ interactive session lifetime. The startup source uses the returned handle
 instead of assuming `#2`. Host scheduler regression and on-device serial
 checks passed; VGA visual confirmation is pending. See
 `docs/test-results/startup-window-lifetime-2026-11-15.md`.
-On 2026-11-08 the native Linux CMake build and full CTest suite passed (65/65).
+On 2026-11-20 the native Linux build (`cmake --preset linux`, then
+`cmake --build build/linux` and `ctest --test-dir build/linux`; there is no
+`linux` test preset) passed 82/82 after three stale tests (scheduler raise ids,
+channel routing, hardware UART) were updated for program-owned channels and
+per-interpreter graphics session ids. `BEEP`/`VOLUME` were added (QL/32-specific,
+global volume, default 128); their host tests pass and the build succeeds, but
+listening verification of each waveform/volume level on the Olimex is pending.
+On 2026-11-08 the suite passed (65/65).
 The scheduler pager assertion was stale: its expected text used lowercase
 `Enter=page`, while the current prompt is `Enter=Page, L=Line, Q=Quit`. The test
 was updated to the prompt contract, preserving the assertion that only the
@@ -250,7 +257,10 @@ This points to a core-placement or shared memory-contention effect; PSRAM bus
 stalls are not directly instrumented.
 Further core pinning or ring-depth increases alone are not the next step; bound
 and isolate drawing/presentation work, then verify refill deadlines under full
-load before another split-core trial. MUSIC implementation is complete. See
+load before another split-core trial. MUSIC implementation is complete. Olimex sound output works as of 2026-11-20
+(clean `MUSIC TEST` sine and Bosconia1.vtx, also under attractor plus
+Mandelbrot load; uncommitted, DMA 640x480 and long-run playback unverified);
+see `docs/test-results/olimex-sound-2026-11-20.md`. See
 `docs/test-results/olimex-dma-split-core-performance-2026-11-17.md`.
 The owner-present visual replay found the standard 640x480 attractor stable but
 nearly still; the finite draw-only test opened a second channel-2 console and

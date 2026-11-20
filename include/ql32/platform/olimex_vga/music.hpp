@@ -15,6 +15,11 @@ public:
     MusicService& operator=(const MusicService&) = delete;
 
     void play(runtime::MusicSessionId session, const std::string& path) override;
+    void testTone(runtime::MusicSessionId session) override;
+    void beep(runtime::MusicSessionId session, std::uint32_t durationMs,
+              std::uint32_t pitchHz, runtime::ToneWaveform waveform) override;
+    void setVolume(std::uint8_t volume) override;
+    std::uint8_t volume() const noexcept override;
     void stop(runtime::MusicSessionId session) override;
     void pause(runtime::MusicSessionId session) override;
     void resume(runtime::MusicSessionId session) override;

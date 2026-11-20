@@ -1,5 +1,7 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/music/ay38912.hpp"
+#include "ql32/music/dac_format.hpp"
+#include "ql32/music/tone.hpp"
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_player.hpp"
 #include "ql32/runtime/music.hpp"
@@ -78,6 +80,16 @@ public:
     void play(ql32::runtime::MusicSessionId session, const std::string& path) override {
         owner = session; lastPath = path; current = ql32::runtime::MusicPlaybackState::Playing;
     }
+    void testTone(ql32::runtime::MusicSessionId session) override {
+        owner = session; toneRequested = true;
+        current = ql32::runtime::MusicPlaybackState::Playing;
+    }
+    void beep(ql32::runtime::MusicSessionId session, std::uint32_t durationMs,
+              std::uint32_t pitchHz, ql32::runtime::ToneWaveform waveform) override {
+        owner = session; beeps.push_back({durationMs, pitchHz, waveform});
+    }
+    void setVolume(std::uint8_t level) override { level_ = level; }
+    std::uint8_t volume() const noexcept override { return level_; }
     void stop(ql32::runtime::MusicSessionId session) override {
         require(owner == session, "MUSIC STOP used the wrong session");
         owner = 0; current = ql32::runtime::MusicPlaybackState::Stopped;
@@ -97,6 +109,10 @@ public:
 
     ql32::runtime::MusicSessionId owner = 0;
     std::string lastPath;
+    bool toneRequested = false;
+    struct Beep { std::uint32_t durationMs, pitchHz; ql32::runtime::ToneWaveform waveform; };
+    std::vector<Beep> beeps;
+    std::uint8_t level_ = 128;
     ql32::runtime::MusicPlaybackState current = ql32::runtime::MusicPlaybackState::Stopped;
 };
 
@@ -145,6 +161,8 @@ void testMusicBasicCommands() {
         "MUSIC PAUSE\n"
         "MUSIC RESUME\n"
         "MUSIC STATUS\n"
+        "MUSIC STOP\n"
+        "MUSIC TEST\n"
         "MUSIC STOP\n", output);
     require(music->lastPath == "SDC:/test.vtx", "MUSIC PLAY path was not passed to service");
     require(music->owner == 0 && music->state() ==
@@ -152,6 +170,108 @@ void testMusicBasicCommands() {
             "MUSIC STOP did not release playback");
     require(output.str().find("MUSIC PLAYING") != std::string::npos,
             "MUSIC STATUS did not print the current state");
+    require(music->toneRequested && music->owner == 0,
+            "MUSIC TEST did not start the test tone or MUSIC STOP did not stop it");
+}
+void testDacFormatAndTone() {
+    using namespace ql32::music;
+    require(pcmToDac16(0) == 0x8000, "silence must map to DAC mid-scale");
+    require(pcmToDac16(-32768) == 0x0000 && pcmToDac16(32767) == 0xff00,
+            "DAC mapping must span the full unsigned range in the upper byte");
+    require((pcmToDac16(12345) & 0x00ff) == 0, "DAC value must use only the upper byte");
+    ToneGenerator tone;
+    tone.start(1000, 22050, 22050, Waveform::Sine, 6000);
+    std::array<std::int16_t, 22050> pcm{};
+    tone.mixInto(pcm.data(), pcm.size());
+    require(!tone.active(), "tone did not end after its duration");
+    int crossings = 0;
+    for (std::size_t i = 1; i < pcm.size(); ++i)
+        if (pcm[i - 1] < 0 && pcm[i] >= 0) ++crossings;
+    require(crossings >= 998 && crossings <= 1002, "1 kHz tone has the wrong frequency");
+    const auto limits = std::minmax_element(pcm.begin(), pcm.end());
+    require(*limits.first <= -5990 && *limits.second >= 5990 &&
+            *limits.first >= -6000 && *limits.second <= 6000, "tone amplitude is wrong");
+    require(pcmToDac16(*limits.second) != pcmToDac16(*limits.first),
+            "tone must produce distinct DAC levels");
+}
+
+void testWaveforms() {
+    using namespace ql32::music;
+    const Waveform all[] = {Waveform::Square, Waveform::Sine, Waveform::Triangle,
+                            Waveform::SawtoothRising, Waveform::SawtoothFalling};
+    for (const auto waveform : all) {
+        ToneGenerator tone;
+        tone.start(100, 220, 22050, waveform, 10000); // exactly one cycle
+        std::array<std::int16_t, 220> pcm{};
+        tone.mixInto(pcm.data(), pcm.size());
+        const auto limits = std::minmax_element(pcm.begin(), pcm.end());
+        require(*limits.second >= 9800 && *limits.second <= 10000 &&
+                *limits.first <= -9800 && *limits.first >= -10000,
+                "waveform does not span its amplitude");
+        long long sum = 0;
+        for (const auto sample : pcm) sum += sample;
+        require(std::llabs(sum) < 220 * 300, "waveform has a DC offset");
+        if (waveform == Waveform::SawtoothRising)
+            require(pcm[10] > pcm[0] && pcm[200] > pcm[100], "rising saw does not rise");
+        if (waveform == Waveform::SawtoothFalling)
+            require(pcm[10] < pcm[0] && pcm[200] < pcm[100], "falling saw does not fall");
+        if (waveform == Waveform::Triangle)
+            require(pcm[55] > pcm[0] && pcm[165] < pcm[110] && pcm[110] > pcm[165],
+                    "triangle shape is wrong");
+        if (waveform == Waveform::Square)
+            require(pcm[10] == 10000 && pcm[150] == -10000, "square levels are wrong");
+    }
+    require(applyVolume(10000, 255) == 10000 && applyVolume(10000, 0) == 0 &&
+            applyVolume(-10000, 128) < -4900 && applyVolume(-10000, 128) > -5100,
+            "volume scaling is wrong");
+    std::array<std::int16_t, 4> loud{30000, 30000, -30000, 0};
+    ToneGenerator tone;
+    tone.start(1000, 0, 22050, Waveform::Square, 12000);
+    tone.mixInto(loud.data(), loud.size());
+    require(loud[0] == 32767, "mixed tone must saturate, not wrap");
+}
+
+void testBeepAndVolumeCommands() {
+    using ql32::runtime::ToneWaveform;
+    auto music = std::make_shared<FakeMusic>();
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 42, {}, {}, {}, {}, music);
+    std::ostringstream output;
+    interpreter.execute(
+        "VOLUME 200\n"
+        "BEEP 5, 440\n"
+        "BEEP 5, 440, \"sine\"\n"
+        "BEEP 5, 880, \"/|\"\n"
+        "BEEP 5, 880, \"|\\\"\n"
+        "BEEP 5, 880, 2\n", output);
+    require(music->volume() == 200, "VOLUME was not applied");
+    require(music->beeps.size() == 5, "BEEP did not reach the service");
+    require(music->beeps[0].waveform == ToneWaveform::Square &&
+            music->beeps[0].durationMs == 5 && music->beeps[0].pitchHz == 440,
+            "BEEP default waveform or arguments are wrong");
+    require(music->beeps[1].waveform == ToneWaveform::Sine &&
+            music->beeps[2].waveform == ToneWaveform::SawtoothRising &&
+            music->beeps[3].waveform == ToneWaveform::SawtoothFalling &&
+            music->beeps[4].waveform == ToneWaveform::Triangle,
+            "BEEP waveform names were not mapped");
+
+    const char* bad[] = {
+        "BEEP -5, 440\n", "BEEP 0, 440\n", "BEEP 5.5, 440\n", "BEEP 5, 10\n",
+        "BEEP 5, 20000\n", "BEEP 5, 440, \"wobble\"\n", "BEEP 5, 440, 9\n",
+        "VOLUME -1\n", "VOLUME 256\n", "VOLUME 1.5\n"};
+    for (const char* source : bad) {
+        bool rejected = false;
+        ql32::Interpreter strict({}, {}, {}, {}, {}, {}, {}, 42, {}, {}, {}, {}, music);
+        std::ostringstream sink;
+        try { strict.execute(source, sink); } catch (const std::exception&) { rejected = true; }
+        require(rejected, source);
+    }
+    bool unavailable = false;
+    ql32::Interpreter noAudio;
+    try { std::ostringstream sink; noAudio.execute("BEEP 5, 440\n", sink); }
+    catch (const std::exception& error) {
+        unavailable = std::string(error.what()).find("audio") != std::string::npos;
+    }
+    require(unavailable, "BEEP without an audio service must report it clearly");
 }
 } // namespace
 
@@ -159,6 +279,9 @@ int main() {
     try {
         testVtxParserAndRenderer();
         testMusicBasicCommands();
+        testDacFormatAndTone();
+        testWaveforms();
+        testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';
         return 1;

@@ -1,10 +1,13 @@
 #include "ql32/platform/olimex_vga/music.hpp"
 
+#include "ql32/music/dac_format.hpp"
+#include "ql32/music/tone.hpp"
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_player.hpp"
 
 #include <Arduino.h>
 #include <driver/i2s.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -20,6 +23,10 @@ namespace {
 constexpr i2s_port_t OutputPort = I2S_NUM_0;
 constexpr std::size_t SamplesPerBlock = 256;
 constexpr std::size_t MaximumFileBytes = music::VtxSong::MaximumFileBytes;
+constexpr std::uint32_t TestToneHz = 1000;
+constexpr std::uint32_t UnderrunGapUs = 40000; // DMA ring holds 4 x 11.6 ms
+constexpr std::uint32_t DiagnosticIntervalBlocks = 86; // about one second
+constexpr std::uint32_t DiagnosticLastBlock = DiagnosticIntervalBlocks * 10;
 
 void failIfEspError(esp_err_t error, const char* operation) {
     if (error != ESP_OK)
@@ -51,6 +58,8 @@ struct MusicService::Impl {
     SemaphoreHandle_t mutex = nullptr;
     TaskHandle_t worker = nullptr;
     std::unique_ptr<music::VtxPlayer> player;
+    music::ToneGenerator tone; // BEEP and MUSIC TEST; mixed over any player
+    std::uint8_t outputVolume = music::DefaultVolume;
     runtime::MusicSessionId owner = 0;
     runtime::MusicPlaybackState playbackState = runtime::MusicPlaybackState::Stopped;
     bool driverInstalled = false;
@@ -67,7 +76,9 @@ struct MusicService::Impl {
             config.sample_rate = music::VtxPlayer::DefaultSampleRate;
             config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
             config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
-            config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+            // The built-in DAC takes the upper byte of each slot directly; the
+            // I2S one-bit MSB delay of STAND_I2S would shift the data.
+            config.communication_format = I2S_COMM_FORMAT_STAND_MSB;
             config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
             config.dma_buf_count = 4;
             config.dma_buf_len = SamplesPerBlock;
@@ -82,7 +93,7 @@ struct MusicService::Impl {
                            "GPIO25 DAC setup");
         }
         if (!worker) {
-            if (xTaskCreatePinnedToCore(&Impl::taskEntry, "ql32_music", 4096, this,
+            if (xTaskCreatePinnedToCore(&Impl::taskEntry, "ql32_music", 6144, this,
                     3, &worker, tskNO_AFFINITY) != pdPASS) {
                 worker = nullptr;
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -102,17 +113,27 @@ struct MusicService::Impl {
         std::uint32_t submittedBlocks = 0;
         bool startErrorLogged = false;
         bool writeErrorLogged = false;
-        for (;;) {
-            lock();
-            const bool renderAudio = player &&
-                playbackState == runtime::MusicPlaybackState::Playing;
+        std::int64_t lastWriteDoneUs = 0;
+        std::uint32_t maxGapUs = 0;
+        std::uint32_t lateBlocks = 0;
+        int blockMin = std::numeric_limits<int>::max();
+        int blockMax = std::numeric_limits<int>::min();
+        for (;;) {            lock();
+            const bool renderAudio = playbackState == runtime::MusicPlaybackState::Playing &&
+                (player || tone.active());
             if (renderAudio) {
-                player->render(pcm.data(), pcm.size());
-                if (!player->playing()) {
-                    player.reset();
+                pcm.fill(0);
+                if (player) {
+                    player->render(pcm.data(), pcm.size());
+                    if (!player->playing()) player.reset();
+                }
+                if (tone.active()) tone.mixInto(pcm.data(), pcm.size());
+                if (!player && !tone.active()) {
                     owner = 0;
                     playbackState = runtime::MusicPlaybackState::Stopped;
                 }
+                const std::uint8_t level = outputVolume;
+                for (auto& sample : pcm) sample = music::applyVolume(sample, level);
             } else {
                 pcm.fill(0);
             }
@@ -126,6 +147,11 @@ struct MusicService::Impl {
                 }
                 firstBlockLogged = false;
                 submittedBlocks = 0;
+                lastWriteDoneUs = 0;
+                maxGapUs = 0;
+                lateBlocks = 0;
+                blockMin = std::numeric_limits<int>::max();
+                blockMax = std::numeric_limits<int>::min();
                 startErrorLogged = false;
                 writeErrorLogged = false;
                 (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -154,8 +180,7 @@ struct MusicService::Impl {
             }
 
             for (std::size_t i = 0; i < SamplesPerBlock; ++i) {
-                const std::uint16_t value = static_cast<std::uint16_t>(
-                    (static_cast<std::int32_t>(pcm[i]) + 32768) >> 8) << 8;
+                const std::uint16_t value = music::pcmToDac16(pcm[i]);
                 // The right DAC channel is GPIO25; duplicate mono PCM into
                 // both I2S slots and enable only that DAC channel.
                 dac[i * 2] = value;
@@ -169,6 +194,16 @@ struct MusicService::Impl {
             }
             const esp_err_t writeResult = i2s_write(OutputPort, dac.data(),
                 sizeof(dac), &written, portMAX_DELAY);
+            const std::int64_t now = esp_timer_get_time();
+            if (lastWriteDoneUs != 0) {
+                const std::uint32_t gap = static_cast<std::uint32_t>(now - lastWriteDoneUs);
+                maxGapUs = std::max(maxGapUs, gap);
+                if (gap > UnderrunGapUs) ++lateBlocks;
+            }
+            lastWriteDoneUs = now;
+            const auto limits = std::minmax_element(pcm.begin(), pcm.end());
+            blockMin = std::min<int>(blockMin, *limits.first);
+            blockMax = std::max<int>(blockMax, *limits.second);
             if (writeResult == ESP_OK && written == sizeof(dac)) {
                 if (blockNumber <= 3) {
                     Serial.printf("music: I2S0 accepted block %u (%u bytes)\n",
@@ -181,6 +216,17 @@ struct MusicService::Impl {
                     static_cast<int>(writeResult), static_cast<unsigned>(written),
                     static_cast<unsigned>(sizeof(dac)));
                 writeErrorLogged = true;
+            }
+            if (blockNumber % DiagnosticIntervalBlocks == 0 && blockNumber <= DiagnosticLastBlock) {
+                Serial.printf("music: blocks=%u pcm=%d..%d dac=0x%04x..0x%04x maxGap=%uus late=%u stack=%u\n",
+                    static_cast<unsigned>(blockNumber), blockMin, blockMax,
+                    static_cast<unsigned>(music::pcmToDac16(static_cast<std::int16_t>(blockMin))),
+                    static_cast<unsigned>(music::pcmToDac16(static_cast<std::int16_t>(blockMax))),
+                    static_cast<unsigned>(maxGapUs), static_cast<unsigned>(lateBlocks),
+                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+                blockMin = std::numeric_limits<int>::max();
+                blockMax = std::numeric_limits<int>::min();
+                maxGapUs = 0;
             }
         }
     }
@@ -220,10 +266,60 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                                     "music: audio output is owned by another session");
     }
     impl_->player = std::move(newPlayer);
+    impl_->tone.stop();
     impl_->owner = session;
     impl_->playbackState = runtime::MusicPlaybackState::Playing;
     if (impl_->worker) xTaskNotifyGive(impl_->worker);
     impl_->unlock();
+}
+
+void MusicService::testTone(runtime::MusicSessionId session) {
+    impl_->ensureOutput();
+    impl_->lock();
+    if (impl_->owner != 0 && impl_->owner != session) {
+        impl_->unlock();
+        throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
+                                    "music: audio output is owned by another session");
+    }
+    impl_->player.reset();
+    impl_->tone.start(TestToneHz, 0, music::VtxPlayer::DefaultSampleRate,
+                      music::Waveform::Sine, 6000);
+    impl_->owner = session;
+    impl_->playbackState = runtime::MusicPlaybackState::Playing;
+    if (impl_->worker) xTaskNotifyGive(impl_->worker);
+    impl_->unlock();
+    Serial.println("music: 1 kHz test tone active on GPIO25; use MUSIC STOP to end");
+}
+
+void MusicService::beep(runtime::MusicSessionId session, std::uint32_t durationMs,
+                        std::uint32_t pitchHz, runtime::ToneWaveform waveform) {
+    impl_->ensureOutput();
+    impl_->lock();
+    if (impl_->owner != 0 && impl_->owner != session) {
+        impl_->unlock();
+        throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
+                                    "audio output is owned by another session");
+    }
+    constexpr std::uint32_t Rate = music::VtxPlayer::DefaultSampleRate;
+    impl_->tone.start(pitchHz, static_cast<std::uint64_t>(durationMs) * Rate / 1000 + 1,
+                      Rate, static_cast<music::Waveform>(waveform));
+    impl_->owner = session;
+    if (!impl_->player) impl_->playbackState = runtime::MusicPlaybackState::Playing;
+    if (impl_->worker) xTaskNotifyGive(impl_->worker);
+    impl_->unlock();
+}
+
+void MusicService::setVolume(std::uint8_t volume) {
+    impl_->lock();
+    impl_->outputVolume = volume;
+    impl_->unlock();
+}
+
+std::uint8_t MusicService::volume() const noexcept {
+    impl_->lock();
+    const std::uint8_t result = impl_->outputVolume;
+    impl_->unlock();
+    return result;
 }
 
 void MusicService::stop(runtime::MusicSessionId session) {
@@ -234,6 +330,7 @@ void MusicService::stop(runtime::MusicSessionId session) {
                                     "music: audio output is owned by another session");
     }
     impl_->player.reset();
+    impl_->tone.stop();
     impl_->owner = 0;
     impl_->playbackState = runtime::MusicPlaybackState::Stopped;
     impl_->unlock();
@@ -241,7 +338,7 @@ void MusicService::stop(runtime::MusicSessionId session) {
 
 void MusicService::pause(runtime::MusicSessionId session) {
     impl_->lock();
-    if (impl_->owner != session || !impl_->player) {
+    if (impl_->owner != session || (!impl_->player && !impl_->tone.active())) {
         impl_->unlock();
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
                                     "music: this session does not own a playing stream");
@@ -252,7 +349,7 @@ void MusicService::pause(runtime::MusicSessionId session) {
 
 void MusicService::resume(runtime::MusicSessionId session) {
     impl_->lock();
-    if (impl_->owner != session || !impl_->player) {
+    if (impl_->owner != session || (!impl_->player && !impl_->tone.active())) {
         impl_->unlock();
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
                                     "music: this session does not own a paused stream");
@@ -273,6 +370,7 @@ void MusicService::stopSession(runtime::MusicSessionId session) noexcept {
     impl_->lock();
     if (impl_->owner == session) {
         impl_->player.reset();
+        impl_->tone.stop();
         impl_->owner = 0;
         impl_->playbackState = runtime::MusicPlaybackState::Stopped;
     }

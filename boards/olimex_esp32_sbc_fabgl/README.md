@@ -94,6 +94,11 @@ MUSIC RESUME
 MUSIC STOP
 ```
 
+`BEEP ms, hz [, waveform]` and `VOLUME 0..255` (default 128) use the same
+GPIO25 output; see QL32-LANG-001. `MUSIC TEST` plays a 1 kHz sine until
+`MUSIC STOP`. Sound was verified by ear on 2026-11-20 (see
+`docs/test-results/olimex-sound-2026-11-20.md`).
+
 The same command uses an `FFS:/` path in the SPIFFS profile. `MUSIC`
 commands are QL/32-specific. This profile accepts VTX files up to 64 KiB with
 register streams up to 96 KiB; SQT, STC, AY containers, other sound chips, and

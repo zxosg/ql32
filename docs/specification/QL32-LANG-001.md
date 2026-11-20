@@ -701,6 +701,21 @@ the scheduler continues running other tasks. The delay must be numeric and in
 yields until the next scheduler turn. A timed wait appears as `WAITING_TIME`.
 The millisecond unit follows Annex32's `PAUSE` reference; task-local scheduling
 and the accepted range are QL/32-specific ([Annex32 PAUSE](https://www.cicciocb.com/annex32help/V1.518/start.htm)).
+`BEEP duration, pitch [, waveform]` plays a tone and suspends only the calling
+task for `duration` milliseconds (`WAITING_TIME`, like `PAUSE`). `duration` is an
+integer `1..600000`, `pitch` an integer Hz value `20..10000`. `waveform` is
+optional (default `"SQUARE"`): a case-insensitive string `"SQUARE"`, `"SINE"`,
+`"TRIANGLE"`, `"SAW"`/`"SAWTOOTH"`/`"/|"` (rising) or `"SAWDOWN"`/`"|\\"`
+(falling), or a number `0..4` in that order. Negative, fractional, or
+out-of-range values raise a runtime error. `VOLUME level` sets the global output
+level for `BEEP` and `MUSIC` (integer `0..255`, default `128`; not per session,
+and not persistent across reboot). A tone from the session that owns the audio
+output mixes with its `MUSIC`; another session gets `ResourceBusy`. Without an
+audio service (Linux host, boards lacking the `Audio` capability) both commands
+raise "audio service unavailable". These commands are QL/32-specific: the
+SMSQ/E `BEEP duration, pitch [, pitch2, grad_x, grad_y, wrap, fuzzy, random]`
+form uses QL sound-chip units and a different signature, and QL/32 does not
+claim compatibility with it.
 `TASKRESULT id` prints all available properties. In expressions,
 `TASKRESULT(id, selector)` returns one property selected by `KTaskResultStatus`,
 `KTaskResultChannels`, `KTaskResultErrorCode`, `KTaskResultErrorDetail`,
