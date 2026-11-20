@@ -1,10 +1,16 @@
 #pragma once
 
 #include "ql32/graphics/frame_presenter.hpp"
+#include "ql32/platform/olimex_vga/present_budget.hpp"
+#include "ql32/platform/olimex_vga/present_stats.hpp"
 #include "ql32/platform/olimex_vga/psram_dma_scanout.hpp"
 
 #include <array>
 #include <vector>
+
+#if !defined(QL32_OLIMEX_PRESENT_BYTES_PER_FRAME)
+#define QL32_OLIMEX_PRESENT_BYTES_PER_FRAME 0
+#endif
 
 namespace ql32::platform::olimex_vga {
 
@@ -24,7 +30,23 @@ public:
                            graphics::Rect region,
                            const RowProvider& rowProvider) override;
 
+    // Bytes of PSRAM the presenter may write per video frame; 0 is unlimited.
+    void setFrameByteBudget(std::uint32_t bytes) noexcept { budget_.setLimit(bytes); }
+    std::uint32_t frameByteBudget() const noexcept { return budget_.limit(); }
+
+#if defined(QL32_OLIMEX_PRESENT_PROFILE)
+    // Diagnostic only: accumulated until the user requests a snapshot.
+    const PresentStats& stats() const noexcept { return stats_; }
+    void reportStats() const;
+    void resetStats() noexcept { stats_ = {}; }
+#endif
+
 private:
+    PresentBudget budget_{QL32_OLIMEX_PRESENT_BYTES_PER_FRAME};
+    void throttle(std::uint32_t rowBytes, std::uint32_t& waits, std::uint32_t& waitedUs);
+#if defined(QL32_OLIMEX_PRESENT_PROFILE)
+    PresentStats stats_;
+#endif
     bool presentRegion(std::uint32_t width, std::uint32_t height,
                        const std::array<graphics::RgbColor, 256>& palette,
                        graphics::Rect region, const RowProvider& rowProvider);

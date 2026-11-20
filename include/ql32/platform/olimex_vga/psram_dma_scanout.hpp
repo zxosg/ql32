@@ -61,6 +61,7 @@ public:
 #endif
     }
     void reportStatus() const;
+    std::uint32_t frameCount() const noexcept { return frameCount_; }
     bool stagePaletteRotation(std::int32_t amount) noexcept;
     bool stagePalette(const Palette::Entries& entries) noexcept;
     FramebufferView* beginFrameUpdate() noexcept;

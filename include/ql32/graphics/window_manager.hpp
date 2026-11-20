@@ -246,6 +246,8 @@ private:
     static void validate(TaskViewport viewport);
     Rect screenBounds(const Entry& entry) const;
     Rect clipToTask(const Entry& entry, Rect screenBounds) const;
+    Rect screenBounds(const Entry& entry, const TaskViewport& viewport) const;
+    Rect clipToViewport(const TaskViewport& viewport, Rect screenBounds) const;
 
     std::uint32_t screenWidth_;
     std::uint32_t screenHeight_;

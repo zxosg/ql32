@@ -396,6 +396,9 @@ protected:
 fabgl::VGAController display;
 #if defined(QL32_OLIMEX_DMA_TEST_SCANOUT) || defined(QL32_OLIMEX_DMA_DISPLAY)
 ql32::platform::olimex_vga::PsramDmaScanout psramDmaScanout;
+#if defined(QL32_OLIMEX_PRESENT_PROFILE)
+ql32::platform::olimex_vga::PsramFramePresenter* psramPresenterDiag = nullptr;
+#endif
 #endif
 fabgl::Canvas canvas(&display);
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
@@ -741,6 +744,23 @@ void submitInputLine() {
         // The user requests one snapshot after the test to avoid adding UART
         // output to the measured scanout and REPL workload.
         psramDmaScanout.reportStatus();
+#endif
+#if defined(QL32_OLIMEX_DMA_DISPLAY) && defined(QL32_OLIMEX_PRESENT_PROFILE)
+    } else if (submittedLine == "PRESDIAG") {
+        // Snapshot of presenter counters; PRESRESET zeroes them between runs.
+        if (psramPresenterDiag) psramPresenterDiag->reportStats();
+    } else if (submittedLine.rfind("PRESBUDGET", 0) == 0) {
+        // PRESBUDGET <bytes per video frame>; 0 disables the throttle.
+        if (psramPresenterDiag) {
+            const auto value = std::atol(submittedLine.c_str() + 10);
+            psramPresenterDiag->setFrameByteBudget(
+                value > 0 ? static_cast<std::uint32_t>(value) : 0u);
+            Serial.printf("QL32 present budget=%u bytes/frame\n",
+                          static_cast<unsigned>(psramPresenterDiag->frameByteBudget()));
+        }
+    } else if (submittedLine == "PRESRESET") {
+        if (psramPresenterDiag) psramPresenterDiag->resetStats();
+        Serial.println("QL32 present stats reset");
 #endif
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
@@ -1640,6 +1660,9 @@ void setup() {
     screenConsole.begin(screenWidth, screenHeight);
     auto framePresenter = std::make_shared<ql32::platform::olimex_vga::PsramFramePresenter>(
         psramDmaScanout);
+#if defined(QL32_OLIMEX_PRESENT_PROFILE)
+    psramPresenterDiag = framePresenter.get();
+#endif
 #else
     screenConsole.begin(static_cast<std::uint32_t>(canvas.getWidth()),
                         static_cast<std::uint32_t>(canvas.getHeight()));
