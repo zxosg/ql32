@@ -1,9 +1,10 @@
 # QL/32 project handoff
 
-Use this file to continue work across Codex chats. Read it together with
-[`AGENTS.md`](AGENTS.md) before changing the project. GitHub `main` and the
-specifications are the project record; refresh this handoff after meaningful
-implementation or hardware-acceptance changes.
+Use this file to continue work as any coding agent or human contributor. Read
+it together with [`AGENTS.md`](AGENTS.md) before changing the project. The
+specifications and dated reports in `docs/test-results` are the project
+record; refresh this handoff after meaningful implementation or
+hardware-acceptance changes. Last refreshed 2026-11-20.
 
 ## Project and architecture
 
@@ -15,16 +16,78 @@ VM, runtime, system, and UI layers independent of board libraries. Session
 resources belong to their BASIC session, and UI waits suspend only that
 session.
 
-## Repository state reviewed
+## Repository state (2026-11-20)
 
-Reviewed 2026-11-15: branch `main` is at `5997aff` (2026-11-14). The working
-tree contains uncommitted QIMG, palette, profile-introspection, `TILE` and
-`MENABLE` implementation, tests, examples, and documentation changes. Inspect
-`git status` before staging or committing; do not discard these changes. The
-latest Olimex WROVER/PSRAM build succeeded. CYD and Tenstar builds were not
-revalidated in this session because required PlatformIO packages were not
-cached and network access was unavailable. No claim is made that local `main`
-matches GitHub; check the remote before syncing.
+Local `main` is at `add03ee`. Work since then lives on **unmerged, unpushed**
+local branches; check `git branch -vv` and the remote before syncing:
+
+| Branch (worktree) | Head | Content |
+| --- | --- | --- |
+| `jan-pal-olimex-sound-audit` | `b7850ab` | Olimex sound fix and `BEEP`/`VOLUME` (`9985427`), stale-test fixes (`49887c0`), hardware-verification notes (`b7850ab`). Native Linux ctest 82/82. |
+| `jan-pal-automatic-potato` | `3d54fbc` | Olimex 640x480 present telemetry, split timers, budget and IRAM diagnostic envs, reports (`6e31b27`, `79b3815`, `3d54fbc`). Based on `main`, not on the sound branch. |
+| `jan-pal-handoff-refresh` | this branch | Documentation refresh, based on the sound branch. |
+
+A user music patch (modified `music.hpp`, `music.cpp`, `interpreter.cpp`,
+`bytecode.hpp`, `music_tests.cpp` and related files) may exist **uncommitted in
+the main checkout** (`/home/osg/GitHub/QL32`); it overlaps the sound branch.
+Inspect `git status` there and do not discard it; expect to reconcile it with
+`9985427` when merging.
+
+### Built, host-tested, hardware-verified
+
+| Item | Built | Host-tested | Hardware-verified |
+| --- | --- | --- | --- |
+| Olimex sound fix: I2S `STAND_MSB`, ADC2 readback removed | yes | `dac_format`/tone tests | yes, by ear, incl. `MUSIC TEST` sine and Bosconia1.vtx under attractor load (see [report](docs/test-results/olimex-sound-2026-11-20.md)); DMA 640x480 and long-run playback not verified |
+| `BEEP ms,hz[,waveform]`, `VOLUME 0..255` (QL/32-specific, default 128) | yes | yes (`music_tests`, VM tests) | yes, by ear: 5 waveforms, VOLUME 32/128/255, `BEEP` under attractor (clean tone, stable picture, 0 late blocks) |
+| Stale scheduler/channel/hardware tests fixed | n/a | ctest 82/82 on the sound branch (re-run 2026-11-20) | n/a |
+| Olimex 640x480 present telemetry, split/budget/IRAM envs | yes | `ql32_olimex_present_stats_tests` (on the VGA branch) | yes, counters and pictures; see [the investigation](docs/plans/olimex-vga-640x480-dma-investigation.md) |
+
+`BEEP`/`VOLUME` are specified in
+[QL32-LANG-001](docs/specification/QL32-LANG-001.md) (updated on the sound
+branch), the Olimex [board README](boards/olimex_esp32_sbc_fabgl/README.md) and
+the language reference; they make no SMSQ/E compatibility claim.
+
+### Olimex 640x480 VGA findings (branch `jan-pal-automatic-potato`)
+
+Hardware-verified with the owner present; reports are on that branch
+(`git show jan-pal-automatic-potato:docs/test-results/<file>`):
+
+- Presentation is the cost on standard placement (full 640x480 present about
+  4.4 s; row composition is the larger share).
+- Split-core placement presents about 30x faster but has 14-16% late refills
+  idle, about 62-67% CPU-only and about 46% under the attractor, versus 0 on
+  standard placement; the picture flickers.
+- The per-frame byte budget and IRAM refill placement did not help.
+- Leading hypothesis: PSRAM data reads plus cross-core bus contention.
+  Proposed step 6: bulk/prefetch PSRAM reads into internal RAM; otherwise keep
+  standard placement for 640x480.
+- The standard `..._640x480_present_profile` is the stable board firmware for
+  this work. The PSRAM-DMA scanout stays parked/experimental; FabGL is the
+  qualified path. Details: [investigation notes](docs/plans/olimex-vga-640x480-dma-investigation.md).
+
+## Olimex PlatformIO environments
+
+- **Stable / qualified:** `olimex_esp32_sbc_fabgl_psram` (FabGL, WROVER with
+  PSRAM) is the default firmware for the board. `olimex_esp32_sbc_fabgl` is the
+  non-PSRAM base profile. Use these unless a task says otherwise.
+- **Experimental `*_psram_dma_*`:** custom PSRAM-framebuffer scanout with an
+  internal DMA line ring, extending the PSRAM env. Families:
+  `..._psram_dma_test*` (synthetic scanout/pattern tests, packed4, ring and
+  size variants), `..._dma_framebuffer_benchmark*`, `..._psram_dma_display*`
+  (runtime QL/32 on the DMA scanout: 320x200 default, `400x300`, `640x400`,
+  `640x480` packed4, `*_profile` with `DMADIAG`, `*_split_cores_test` and
+  `ring160` variants) and `..._dynamic_mode_test`.
+- **Present profile (VGA branch only):**
+  `olimex_esp32_sbc_fabgl_psram_dma_display_640x480_present_profile` adds
+  `PRESRESET`/`PRESDIAG` presenter counters to the standard 120-row ring with
+  BASIC, ISR and refill on core 1. It is the **stable standard 640x480
+  diagnostic profile** and the one to reflash after any experiment.
+- **Split / budget / IRAM (VGA branch only), all diagnostic and flickering:**
+  `..._640x480_present_split_cores_test` (BASIC on core 0, ISR/refill on
+  core 1), `..._present_split_budget_test` (adds `PRESBUDGET <bytes/frame>`)
+  and `..._present_split_iram_test` (refill hot path in IRAM).
+- Flash the application partition only for experiments; FFS and SDC contents
+  must stay untouched. Prefer the `esp32_2432s028_spiffs` profile for CYD.
 
 The latest implementation includes:
 
@@ -117,11 +180,10 @@ checks passed; VGA visual confirmation is pending. See
 `docs/test-results/startup-window-lifetime-2026-11-15.md`.
 On 2026-11-20 the native Linux build (`cmake --preset linux`, then
 `cmake --build build/linux` and `ctest --test-dir build/linux`; there is no
-`linux` test preset) passed 82/82 after three stale tests (scheduler raise ids,
-channel routing, hardware UART) were updated for program-owned channels and
-per-interpreter graphics session ids. `BEEP`/`VOLUME` were added (QL/32-specific,
-global volume, default 128); their host tests pass and the build succeeds, but
-on 2026-11-20 the owner verified by ear on the Olimex: all five waveforms, VOLUME 32/128/255, and BEEP under a running attractor task (clean tone, stable picture, 0 late blocks).
+`linux` test preset) passed 82/82 on the sound branch after three stale tests
+(scheduler raise ids, channel routing, hardware UART) were updated for
+program-owned channels and per-interpreter graphics session ids. `BEEP` and
+`VOLUME` are summarized in the state table above.
 On 2026-11-08 the suite passed (65/65).
 The scheduler pager assertion was stale: its expected text used lowercase
 `Enter=page`, while the current prompt is `Enter=Page, L=Line, Q=Quit`. The test
@@ -230,52 +292,33 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 
 ## Next work
 
-### Hardware session update (2026-11-17)
+### Olimex VGA / sound (2026-11-20)
 
-The 640x400 and 640x480 runtime DMA telemetry profiles build; idle captures
-reported zero late refills, IRQ errors, and active-slot overwrites. Stress
-profiles at both sizes showed stable moving gradients by owner observation, but
-produced no serial telemetry. The 640x480 runtime now accumulates counters in
-memory and the diagnostic profile exposes `DMADIAG` to print one snapshot
-after a test. The command was verified over serial and reported no late
-refills, IRQ errors, or active-slot overwrites. It was reflashed, booted, and
-visually checked: full 640x480 allocation and printed graphics/text were
-correct. The board is left on this runtime profile. The Mandelbrot/worker
-contention results and raw serial captures are in
-`docs/test-results/olimex-mandelbrot-worker-starvation-2026-11-17.md`.
-The owner reports that full-screen REPL/BASIC feels about one tenth as fast as
-320x200. Two split-core 640x480 probes moved the Arduino loop to core 0; the
-second also pinned the EOF interrupt and refill worker to core 1. CPU-only
-BASIC took 14.562/14.670 s, but the second profile had 1,457 late refills in
-9,345 EOF events, whole-console flashing, and an unstable image during the
-attractor. A 160-row ring on the same split-core setup was worse even before
-starting attractor: 8,781 late refills in 38,451 events. The standard 120-row
-profile was restored and returned to zero late refills in 15,904 events.
-The standard profile then ran the attractor across two snapshots separated by
-nearly 4 minutes 53 seconds, with zero late refills across 286,600 EOF events.
-This points to a core-placement or shared memory-contention effect; PSRAM bus
-stalls are not directly instrumented.
-Further core pinning or ring-depth increases alone are not the next step; bound
-and isolate drawing/presentation work, then verify refill deadlines under full
-load before another split-core trial. MUSIC implementation is complete. Olimex sound output works as of 2026-11-20
-(clean `MUSIC TEST` sine and Bosconia1.vtx, also under attractor plus
-Mandelbrot load; uncommitted, DMA 640x480 and long-run playback unverified);
-see `docs/test-results/olimex-sound-2026-11-20.md`. See
-`docs/test-results/olimex-dma-split-core-performance-2026-11-17.md`.
-The owner-present visual replay found the standard 640x480 attractor stable but
-nearly still; the finite draw-only test opened a second channel-2 console and
-caused slight flashing before it was stopped by reflashing. The owner confirmed
-the post-flash screen stable/readable. See
-`docs/test-results/olimex-vga-replay-640x480-2026-11-17.md`.
+The 2026-11-17 DMA investigation notes and the 2026-11-20 present-telemetry
+findings are in
+[`docs/plans/olimex-vga-640x480-dma-investigation.md`](docs/plans/olimex-vga-640x480-dma-investigation.md).
+Summary: keep the standard placement for 640x480; the split-core path is
+faster but misses refill deadlines. Next step is step 6 (bulk/prefetch PSRAM
+reads into internal RAM). MUSIC and `BEEP`/`VOLUME` sound output works on the
+Olimex (sound branch, unmerged; the reconciliation with any uncommitted music
+patch in the main checkout is open). DMA 640x480 sound and long-run playback
+are unverified. Merge decisions for the three local branches are pending.
 
-1. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The Olimex
+1. **Merge and reconcile branches:** `jan-pal-olimex-sound-audit` and
+   `jan-pal-automatic-potato` are unmerged and unpushed. Reconcile the sound
+   branch with any uncommitted music patch in the main checkout, merge, re-run
+   ctest, then push when the owner approves.
+2. **Olimex 640x480 step 6:** test bulk/prefetch PSRAM reads into internal RAM
+   for the refill path; otherwise keep standard placement for 640x480. See
+   the investigation notes linked above.
+3. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The Olimex
    serial port was accessible with host-device permissions on 2026-11-16; the
    latest high-resolution allocation guard passed serial rollback checks and
    the owner confirmed stable VGA recovery. The latest
    Olimex QIMG, TILE, and MENABLE checks passed on 2026-11-15; LILYGO was not
    tested in this round. Tenstar Wi-Fi remains unverified. Other not-run items
    are recorded in the board reports.
-2. **Language, UI, and image candidates:** define scope before implementing
+4. **Language, UI, and image candidates:** define scope before implementing
    string splitting, indirect procedure calls, network channels, or cascading
    menus. `LOADIMAGE` now reads QIMG v2 with an embedded 16-color RGB palette;
    v1 compatibility is not required before release. The Python debugger has an
@@ -283,12 +326,12 @@ the post-flash screen stable/readable. See
    QIMG v2 passed on Olimex; launch the desktop GUI with its dependencies
    installed and exercise image conversion. See
    `docs/plans/bitmap-format-study.md`.
-3. **System profile accuracy:** build ID currently reports `unknown`; validate
+5. **System profile accuracy:** build ID currently reports `unknown`; validate
    capability flags against exact board builds, including LilyGo.
-4. **Shared display-buffer design:** define task ownership, overlap, visibility,
+6. **Shared display-buffer design:** define task ownership, overlap, visibility,
    and mode-change semantics before implementation. Retained per-session
    windows remain the default.
-5. **Parked graphics work:** the custom PSRAM-DMA scanout loses sync on some
+7. **Parked graphics work:** the custom PSRAM-DMA scanout loses sync on some
    high-transition patterns; keep FabGL as the qualified path. The optimized
    framebuffer primitives are not yet the backing store for BASIC drawing,
    and the full Phase 6 benchmark matrix remains open. The `GUPDATE SKIP,1`
@@ -336,9 +379,10 @@ the post-flash screen stable/readable. See
   bar, mode switching, and cleanup. See
   [QL32-API-001](docs/specification/QL32-API-001.md) for command behavior.
 
-## Starting a new chat
+## Starting a new session
 
-After pulling the repository, ask the new chat to read `PROJECT-HANDOFF.md`
-and `AGENTS.md`, inspect the current GitHub/local status, and continue the
-first unfinished item under “Next work”. Update this file when that item or
-milestone state changes.
+Read `PROJECT-HANDOFF.md` and `AGENTS.md`, inspect local branch and remote
+status (`git branch -vv`, `git worktree list`, and `git status` in the main
+checkout for the uncommitted music patch), and continue the first unfinished
+item under “Next work”. Update this file when that item or milestone state
+changes.
