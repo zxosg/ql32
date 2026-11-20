@@ -4,6 +4,7 @@
 #include "ql32/platform/olimex_vga/palette.hpp"
 #include "ql32/platform/olimex_vga/refill_window.hpp"
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 
@@ -222,6 +223,28 @@ void testPacked4ShiftedRowEncoderMatchesScalar() {
     }
 }
 
+void testPacked4AlignedRowEncoderMatchesReference() {
+    using namespace ql32::platform::olimex_vga;
+    std::array<std::uint16_t, 256> pairLut{};
+    for (std::uint32_t key = 0; key < pairLut.size(); ++key)
+        pairLut[key] = static_cast<std::uint16_t>(
+            ((key * 29u) & 0xffu) | (((key * 7u + 3u) & 0xffu) << 8));
+
+    for (const std::size_t width : {8u, 16u, 320u, 640u, 20u}) {
+        alignas(4) std::array<std::uint8_t, 640 / 2> source{};
+        for (std::size_t i = 0; i < source.size(); ++i)
+            source[i] = static_cast<std::uint8_t>((i * 37u) ^ (i << 3));
+        alignas(4) std::array<std::uint8_t, 640> expected{};
+        alignas(4) std::array<std::uint8_t, 640> actual{};
+        encodePacked4ShiftedRow(source.data(), expected.data(), width, 0, pairLut.data());
+        const auto written = encodePacked4AlignedRow(source.data(), actual.data(),
+                                                     width, pairLut.data());
+        require(written == width / 8 * 8, "aligned encoder reports whole groups");
+        require(std::equal(expected.begin(), expected.begin() + written, actual.begin()),
+                "aligned word encoder must match the reference row encoder");
+    }
+}
+
 void testLinesAndBitmapCopies() {
     using namespace ql32::platform::olimex_vga;
     std::array<std::uint8_t, 24> rgbStorage{};
@@ -391,6 +414,7 @@ int main() {
     testPacked4TriangleFillMatchesPixelWrites();
     testDmaPixelOrderPermutation();
     testPacked4ShiftedRowEncoderMatchesScalar();
+    testPacked4AlignedRowEncoderMatchesReference();
     testLinesAndBitmapCopies();
     testPaletteOperationsAndStagedSwap();
     testRefillWindowDropsObsoleteRows();

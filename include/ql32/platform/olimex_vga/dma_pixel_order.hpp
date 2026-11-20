@@ -81,4 +81,31 @@ inline void encodePacked4ShiftedRow(const std::uint8_t* source,
     }
 }
 
+// Encode whole eight-pixel groups of an unshifted packed-4 row into the VGA
+// byte order using 32-bit loads and stores. source and output must be 4-byte
+// aligned. Returns the number of pixels written (pixelCount rounded down to a
+// multiple of eight). Byte-wise stores through memcpy were measured at about
+// 60 cycles per group on the ESP32 (separate byte stores, a memw each and the
+// loop bound reloaded); word stores remove that overhead.
+using AliasedWord = std::uint32_t __attribute__((may_alias));
+
+inline std::size_t encodePacked4AlignedRow(const std::uint8_t* source,
+                                           std::uint8_t* output,
+                                           std::size_t pixelCount,
+                                           const std::uint16_t* pairOutputLut) noexcept {
+    const std::size_t groups = pixelCount / 8;
+    const auto* in = reinterpret_cast<const AliasedWord*>(source);
+    auto* out = reinterpret_cast<AliasedWord*>(output);
+    for (std::size_t group = 0; group < groups; ++group) {
+        const std::uint32_t packed = in[group];
+        const std::uint32_t pair1 = pairOutputLut[(packed >> 8) & 0xffu];
+        const std::uint32_t pair0 = pairOutputLut[packed & 0xffu];
+        const std::uint32_t pair3 = pairOutputLut[packed >> 24];
+        const std::uint32_t pair2 = pairOutputLut[(packed >> 16) & 0xffu];
+        out[group * 2] = pair1 | (pair0 << 16);
+        out[group * 2 + 1] = pair3 | (pair2 << 16);
+    }
+    return groups * 8;
+}
+
 } // namespace ql32::platform::olimex_vga

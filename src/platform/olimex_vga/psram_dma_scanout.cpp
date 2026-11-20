@@ -887,25 +887,8 @@ void QL32_REFILL_HOT PsramDmaScanout::encodePacked4Row(const std::uint8_t* sourc
     // Precompute the pair conversion so a byte of PSRAM becomes one aligned
     // 16-bit output write. Emit each eight-pixel group in the VGA's physical
     // order directly, avoiding a second pass over the DMA line.
-    std::uint32_t x = 0;
-    for (; x + 8 <= width_; x += 8) {
-        const auto sourceByte = x / 2;
-        // PSRAM framebuffers are aligned and supported packed row strides are
-        // multiples of four. One aligned load fetches the four source bytes
-        // together rather than issuing four separate PSRAM byte accesses.
-        std::uint32_t packed;
-        const auto* aligned = static_cast<const std::uint8_t*>(
-            __builtin_assume_aligned(source + sourceByte, 4));
-        std::memcpy(&packed, aligned, sizeof(packed));
-        const auto pair1 = packed4PairOutputLut_[(packed >> 8) & 0xffu];
-        const auto pair0 = packed4PairOutputLut_[packed & 0xffu];
-        const auto pair3 = packed4PairOutputLut_[packed >> 24];
-        const auto pair2 = packed4PairOutputLut_[(packed >> 16) & 0xffu];
-        std::memcpy(output + x, &pair1, sizeof(pair1));
-        std::memcpy(output + x + 2, &pair0, sizeof(pair0));
-        std::memcpy(output + x + 4, &pair3, sizeof(pair3));
-        std::memcpy(output + x + 6, &pair2, sizeof(pair2));
-    }
+    std::uint32_t x = static_cast<std::uint32_t>(
+        encodePacked4AlignedRow(source, output, width_, packed4PairOutputLut_));
     for (; x < width_; x += 2) {
         const auto packed = source[x / 2];
         output[x] = pixelOutputLut_[packed >> 4];
@@ -973,3 +956,74 @@ void PsramDmaScanout::reportStatus() const {
 }
 
 } // namespace ql32::platform::olimex_vga
+
+#if defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
+namespace ql32::platform::olimex_vga {
+
+void PsramDmaScanout::runEncoderBenchmark() const {
+    if (kFramebufferFormat != PixelFormat::Indexed4 || !framebuffer_.pixels) {
+        Serial.println("ENCBENCH: packed-4 framebuffer required");
+        return;
+    }
+    constexpr std::uint32_t kBatch = 8;
+    constexpr std::uint32_t kBatches = 128;
+    constexpr std::uint32_t kRows = kBatch * kBatches;
+    auto* scratch = dmaAlloc(width_);
+    alignas(4) static std::uint8_t cache[1024];
+    const auto rowBytes = (static_cast<std::size_t>(width_) + 1) / 2;
+    if (!scratch || rowBytes > sizeof(cache)) {
+        Serial.println("ENCBENCH: allocation failed");
+        return;
+    }
+    portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+    const auto rowAt = [this](std::uint32_t index) {
+        // Stride through the whole frame so the PSRAM cache cannot hold it.
+        return framebuffer_.pixels + static_cast<std::size_t>((index * 7u) % height_) *
+            framebuffer_.stride;
+    };
+    enum Piece { kMicros, kCopy, kEncodeInternal, kEncodePsram, kCopyEncode, kCopySequential, kPieceCount };
+    std::uint64_t cycles[kPieceCount]{};
+    std::uint32_t sink = 0;
+    for (int piece = 0; piece < kPieceCount; ++piece) {
+        for (std::uint32_t batch = 0; batch < kBatches; ++batch) {
+            const auto base = batch * kBatch;
+            portENTER_CRITICAL(&mux);
+            const auto start = ESP.getCycleCount();
+            for (std::uint32_t i = 0; i < kBatch; ++i) {
+                const auto* source = rowAt(base + i);
+                switch (piece) {
+                case kMicros: sink += static_cast<std::uint32_t>(micros()); break;
+                case kCopy: std::memcpy(cache, source, rowBytes); break;
+                case kEncodeInternal: encodePacked4Row(cache, scratch); break;
+                case kEncodePsram: encodePacked4Row(source, scratch); break;
+                case kCopyEncode:
+                    std::memcpy(cache, source, rowBytes);
+                    encodePacked4Row(cache, scratch);
+                    break;
+                case kCopySequential:
+                    std::memcpy(cache, framebuffer_.pixels +
+                        static_cast<std::size_t>((base + i) % height_) *
+                        framebuffer_.stride, rowBytes);
+                    break;
+                }
+            }
+            cycles[piece] += static_cast<std::uint32_t>(ESP.getCycleCount() - start);
+            portEXIT_CRITICAL(&mux);
+            if (piece == kEncodeInternal) std::memcpy(cache, rowAt(base), rowBytes);
+        }
+    }
+    heap_caps_free(scratch);
+    const auto mhz = static_cast<double>(ESP.getCpuFreqMHz());
+    const char* names[kPieceCount] = {"micros()", "psram->dram copy", "encode from dram",
+                                      "encode from psram", "copy+encode", "copy sequential"};
+    Serial.printf("ENCBENCH rows=%u cpu-mhz=%.0f width=%u sink=%u\n", kRows, mhz,
+                  static_cast<unsigned>(width_), sink);
+    for (int piece = 0; piece < kPieceCount; ++piece) {
+        const double perRow = static_cast<double>(cycles[piece]) / kRows;
+        Serial.printf("ENCBENCH %-18s cycles/row=%.0f us/row=%.2f\n", names[piece],
+                      perRow, perRow / mhz);
+    }
+}
+
+} // namespace ql32::platform::olimex_vga
+#endif

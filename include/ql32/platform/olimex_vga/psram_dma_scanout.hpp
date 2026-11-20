@@ -61,6 +61,11 @@ public:
 #endif
     }
     void reportStatus() const;
+#if defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
+    // Times the pieces of the packed-4 row refill inside short critical
+    // sections so ISRs and the refill worker cannot preempt the measurement.
+    void runEncoderBenchmark() const;
+#endif
     std::uint32_t frameCount() const noexcept { return frameCount_; }
     bool stagePaletteRotation(std::int32_t amount) noexcept;
     bool stagePalette(const Palette::Entries& entries) noexcept;

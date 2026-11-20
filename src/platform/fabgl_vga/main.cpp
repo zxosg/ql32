@@ -745,6 +745,10 @@ void submitInputLine() {
         // output to the measured scanout and REPL workload.
         psramDmaScanout.reportStatus();
 #endif
+#if defined(QL32_OLIMEX_DMA_DISPLAY) && defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
+    } else if (submittedLine == "ENCBENCH") {
+        psramDmaScanout.runEncoderBenchmark();
+#endif
 #if defined(QL32_OLIMEX_DMA_DISPLAY) && defined(QL32_OLIMEX_PRESENT_PROFILE)
     } else if (submittedLine == "PRESDIAG") {
         // Snapshot of presenter counters; PRESRESET zeroes them between runs.
