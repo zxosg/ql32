@@ -21,6 +21,14 @@
 #include <cstring>
 #include <limits>
 
+// Experimental: keep the row refill code in IRAM so core-1 refills do not take
+// instruction-cache misses on the flash/PSRAM bus shared with the other core.
+#if defined(QL32_OLIMEX_DMA_REFILL_IRAM_TEST)
+#define QL32_REFILL_HOT IRAM_ATTR
+#else
+#define QL32_REFILL_HOT
+#endif
+
 namespace ql32::platform::olimex_vga {
 namespace {
 
@@ -682,7 +690,7 @@ void IRAM_ATTR PsramDmaScanout::handleDmaInterrupt() {
     if (higherPriorityTaskWoken) portYIELD_FROM_ISR();
 }
 
-void PsramDmaScanout::refillWorker(void* argument) {
+void QL32_REFILL_HOT PsramDmaScanout::refillWorker(void* argument) {
     auto* self = static_cast<PsramDmaScanout*>(argument);
     for (;;) {
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -714,7 +722,7 @@ void PsramDmaScanout::psramStressWorker(void* argument) {
     vTaskSuspend(nullptr);
 }
 
-void PsramDmaScanout::refillCompletedRows() {
+void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
     if (!kEnableLiveRefill) return;
     if (!haveCompletedSequence_) return;
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
@@ -757,7 +765,7 @@ void PsramDmaScanout::refillCompletedRows() {
 #endif
 }
 
-void PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
+void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
     const auto targetSequence = consumedSequence + ringRows_;
     const auto targetRow = targetSequence % height_;
     if (targetRow == 0) {
@@ -863,7 +871,7 @@ void PsramDmaScanout::rebuildPixelOutputLut() {
     }
 }
 
-void PsramDmaScanout::encodePacked4Row(const std::uint8_t* source,
+void QL32_REFILL_HOT PsramDmaScanout::encodePacked4Row(const std::uint8_t* source,
                                       std::uint8_t* output) const {
     // Each packed source byte already contains a pair of palette indices.
     // Precompute the pair conversion so a byte of PSRAM becomes one aligned
