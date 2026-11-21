@@ -1028,6 +1028,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         state.pendingUiRequest.reset();
         state.pendingUiBuilderHandle = 0;
     }
+    constexpr std::size_t PrintLineBudgetCost = 48;
     std::size_t instructionsExecuted = 0;
     while (pc < code.size()) {
         if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
@@ -3594,6 +3595,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             else if (state.printChannel == 1) state.printChannelColumn = 0;
             finishPrintBatch();
             state.printChannel = 1;
+            // A finished output line costs far more wall time than a plain
+            // instruction (text scroll and display update), so charge it to
+            // the slice budget to keep PRINT-heavy sessions from starving others.
+            instructionsExecuted += PrintLineBudgetCost;
             break;
         case Op::PrintCommit:
             finishPrintBatch();

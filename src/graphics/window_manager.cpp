@@ -375,10 +375,27 @@ void IndexedCanvas::copyPixelsTo(std::uint32_t y, std::uint32_t x,
             destination[0] = static_cast<ColorIndex>(source[index >> 1u] >> 4u);
         return;
     }
-    case PixelDepth::One:
-        for (std::uint32_t pixel = 0; pixel < width; ++pixel)
-            destination[pixel] = readPixel(sourceIndex + pixel);
+    case PixelDepth::One: {
+        auto index = sourceIndex;
+        auto remaining = width;
+        while (remaining != 0 && (index & 7u) != 0) {
+            *destination++ = readPixel(index++);
+            --remaining;
+        }
+        while (remaining >= 8) {
+            const auto bits = source[index >> 3u];
+            for (unsigned bit = 0; bit < 8; ++bit)
+                destination[bit] = static_cast<ColorIndex>((bits >> (7u - bit)) & 1u);
+            destination += 8;
+            index += 8;
+            remaining -= 8;
+        }
+        while (remaining != 0) {
+            *destination++ = readPixel(index++);
+            --remaining;
+        }
         return;
+    }
     }
 }
 
@@ -1135,7 +1152,11 @@ void WindowManager::validate(TaskViewport viewport) {
 }
 
 Rect WindowManager::screenBounds(const Entry& entry) const {
-    const auto viewport = taskViewport(entry.owner);
+    return screenBounds(entry, taskViewport(entry.owner));
+}
+
+Rect WindowManager::screenBounds(const Entry& entry,
+                                 const TaskViewport& viewport) const {
     const auto x = static_cast<std::int64_t>(viewport.originX) +
                    viewport.offsetX + entry.bounds.x;
     const auto y = static_cast<std::int64_t>(viewport.originY) +
@@ -1150,7 +1171,10 @@ Rect WindowManager::screenBounds(const Entry& entry) const {
 }
 
 Rect WindowManager::clipToTask(const Entry& entry, Rect bounds) const {
-    const auto viewport = taskViewport(entry.owner);
+    return clipToViewport(taskViewport(entry.owner), bounds);
+}
+
+Rect WindowManager::clipToViewport(const TaskViewport& viewport, Rect bounds) const {
     const auto left = std::max<std::int64_t>({0, bounds.x, viewport.originX});
     const auto top = std::max<std::int64_t>({0, bounds.y, viewport.originY});
     const auto right = std::min<std::int64_t>({
@@ -1220,8 +1244,9 @@ void WindowManager::composeRegionRowInto(std::uint32_t y, std::uint32_t x,
     const auto right = x + width;
     for (const auto& entry : windows_) {
         if (!entry.visible) continue;
-        const auto bounds = screenBounds(entry);
-        const Rect visible = clipToTask(entry, bounds);
+        const auto viewport = taskViewport(entry.owner);
+        const auto bounds = screenBounds(entry, viewport);
+        const Rect visible = clipToViewport(viewport, bounds);
         if (visible.width == 0 || visible.height == 0 ||
             y < static_cast<std::uint32_t>(visible.y) ||
             y >= static_cast<std::uint32_t>(visible.y) + visible.height)

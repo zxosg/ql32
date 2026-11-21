@@ -226,22 +226,34 @@ public:
         const auto textRow = localY / consoleCharacterHeight;
         const auto glyphRow = localY % consoleCharacterHeight;
         const std::string* line = textRow < lines_.size() ? &lines_[textRow] : nullptr;
-        for (std::uint32_t i = 0; i < pixels.size(); ++i) {
-            const auto x = xOrigin + i;
-            if (x < static_cast<std::uint32_t>(bounds_.x) ||
-                x >= static_cast<std::uint32_t>(bounds_.x) + bounds_.width) continue;
-            bool foreground = false;
-            const auto localX = x - static_cast<std::uint32_t>(bounds_.x);
-            const auto column = localX / consoleCharacterWidth;
-            const auto glyphColumn = localX % consoleCharacterWidth;
-            if (line && glyphRow < 7 && column < line->size() && glyphColumn < 5) {
+        const auto left = static_cast<std::uint32_t>(bounds_.x);
+        const auto right = left + bounds_.width;
+        const std::uint32_t first = std::max(xOrigin, left);
+        const std::uint32_t last = std::min<std::uint32_t>(xOrigin + pixels.size(), right);
+        if (first >= last) return;
+        // Walk cell by cell: one glyph lookup per character column instead of
+        // per pixel, and no per-pixel division.
+        auto localX = first - left;
+        auto column = localX / consoleCharacterWidth;
+        auto glyphColumn = localX % consoleCharacterWidth;
+        auto i = first - xOrigin;
+        const auto end = last - xOrigin;
+        while (i < end) {
+            std::uint8_t columns[consoleCharacterWidth] = {};
+            if (line && glyphRow < 7 && column < line->size()) {
                 const auto glyph = ql32::graphics::classicGlyphColumns((*line)[column]);
-                foreground = (glyph[glyphColumn] & (1u << glyphRow)) != 0;
+                for (std::uint32_t g = 0; g < 5 && g < consoleCharacterWidth; ++g)
+                    columns[g] = (glyph[g] & (1u << glyphRow)) ? 1 : 0;
             }
             const bool caretCell = inputLineActive_ && caretVisible_ &&
                 textRow == caretRow_ && column == caretColumn_;
-            pixels[i] = caretCell ? (foreground ? paper_ : ink_)
-                                  : (foreground ? ink_ : paper_);
+            for (; glyphColumn < consoleCharacterWidth && i < end; ++glyphColumn, ++i) {
+                const bool foreground = columns[glyphColumn] != 0;
+                pixels[i] = caretCell ? (foreground ? paper_ : ink_)
+                                      : (foreground ? ink_ : paper_);
+            }
+            glyphColumn = 0;
+            ++column;
         }
     }
 
@@ -396,6 +408,9 @@ protected:
 fabgl::VGAController display;
 #if defined(QL32_OLIMEX_DMA_TEST_SCANOUT) || defined(QL32_OLIMEX_DMA_DISPLAY)
 ql32::platform::olimex_vga::PsramDmaScanout psramDmaScanout;
+#if defined(QL32_OLIMEX_PRESENT_PROFILE)
+ql32::platform::olimex_vga::PsramFramePresenter* psramPresenterDiag = nullptr;
+#endif
 #endif
 fabgl::Canvas canvas(&display);
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
@@ -741,6 +756,76 @@ void submitInputLine() {
         // The user requests one snapshot after the test to avoid adding UART
         // output to the measured scanout and REPL workload.
         psramDmaScanout.reportStatus();
+#endif
+#if defined(QL32_GRAPHICS_PROFILE)
+    } else if (submittedLine == "COALDIAG") {
+        if (graphics) {
+            const auto& c = graphics->coalesceStats();
+            Serial.printf("QL32 coalesce: requests=%llu, deferred=%llu, presented=%llu, present-us=%llu\n",
+                          static_cast<unsigned long long>(c.requests),
+                          static_cast<unsigned long long>(c.deferred),
+                          static_cast<unsigned long long>(c.presented),
+                          static_cast<unsigned long long>(c.presentUs));
+            graphics->resetCoalesceStats();
+        }
+    } else if (submittedLine.rfind("COALRATE", 0) == 0) {
+        unsigned minUs = 0, ratio = 0;
+        std::sscanf(submittedLine.c_str() + 8, "%u %u", &minUs, &ratio);
+        if (graphics) graphics->setPresentCoalescing(minUs, ratio,
+            [] { return static_cast<std::uint64_t>(micros()); });
+#endif
+#if defined(QL32_OLIMEX_DMA_DISPLAY) && defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
+    } else if (submittedLine == "ENCBENCH") {
+        psramDmaScanout.runEncoderBenchmark();
+#endif
+#if defined(QL32_OLIMEX_DMA_DISPLAY) && defined(QL32_OLIMEX_PRESENT_PROFILE)
+    } else if (submittedLine == "PRESDIAG") {
+        // Snapshot of presenter counters; PRESRESET zeroes them between runs.
+        if (psramPresenterDiag) psramPresenterDiag->reportStats();
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+        if (graphics) {
+            const auto& c = graphics->coalesceStats();
+            Serial.printf("QL32 present coalesce: requests=%llu, deferred=%llu, presented=%llu, present-us=%llu, pending=%d\n",
+                          static_cast<unsigned long long>(c.requests),
+                          static_cast<unsigned long long>(c.deferred),
+                          static_cast<unsigned long long>(c.presented),
+                          static_cast<unsigned long long>(c.presentUs),
+                          graphics->hasPendingPresentation() ? 1 : 0);
+        }
+#endif
+    } else if (submittedLine.rfind("PRESBUDGET", 0) == 0) {
+        // PRESBUDGET <bytes per video frame>; 0 disables the throttle.
+        if (psramPresenterDiag) {
+            const auto value = std::atol(submittedLine.c_str() + 10);
+            psramPresenterDiag->setFrameByteBudget(
+                value > 0 ? static_cast<std::uint32_t>(value) : 0u);
+            Serial.printf("QL32 present budget=%u bytes/frame\n",
+                          static_cast<unsigned>(psramPresenterDiag->frameByteBudget()));
+        }
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+    } else if (submittedLine.rfind("PRESRATE", 0) == 0) {
+        // PRESRATE <min interval us> <cost ratio>; "PRESRATE 0 0" disables.
+        unsigned minUs = 0, ratio = 0;
+        std::sscanf(submittedLine.c_str() + 8, "%u %u", &minUs, &ratio);
+        if (graphics) {
+            graphics->setPresentCoalescing(minUs, ratio,
+                [] { return static_cast<std::uint64_t>(micros()); });
+            Serial.printf("QL32 present rate min-us=%u cost-ratio=%u\n", minUs, ratio);
+        }
+#endif
+    } else if (submittedLine.rfind("PRESWRITE", 0) == 0) {
+        // PRESWRITE 0|1: per-byte (0) or chunked bulk (1) presenter row writes.
+        if (psramPresenterDiag) {
+            psramPresenterDiag->setChunkedWrite(std::atoi(submittedLine.c_str() + 9) != 0);
+            Serial.printf("QL32 present chunked-write=%d\n",
+                          psramPresenterDiag->chunkedWrite() ? 1 : 0);
+        }
+    } else if (submittedLine == "PRESRESET") {
+        if (psramPresenterDiag) psramPresenterDiag->resetStats();
+#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+        if (graphics) graphics->resetCoalesceStats();
+#endif
+        Serial.println("QL32 present stats reset");
 #endif
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
@@ -1640,6 +1725,9 @@ void setup() {
     screenConsole.begin(screenWidth, screenHeight);
     auto framePresenter = std::make_shared<ql32::platform::olimex_vga::PsramFramePresenter>(
         psramDmaScanout);
+#if defined(QL32_OLIMEX_PRESENT_PROFILE)
+    psramPresenterDiag = framePresenter.get();
+#endif
 #else
     screenConsole.begin(static_cast<std::uint32_t>(canvas.getWidth()),
                         static_cast<std::uint32_t>(canvas.getHeight()));
@@ -1659,6 +1747,14 @@ void setup() {
 #else
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         screenWidth, screenHeight, framePresenter);
+#endif
+#if defined(QL32_OLIMEX_PRESENT_COALESCE) || \
+    (defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL) && !defined(QL32_OLIMEX_DMA_DISPLAY))
+    // FabGL modes: console output from one task must not starve the others
+    // with synchronous presents. Default: at most ~25 presents/s and presenting never takes more than
+    // half of the VM's time (cost ratio 1). Tunable at runtime with PRESRATE.
+    graphics->setPresentCoalescing(40000, 1,
+        [] { return static_cast<std::uint64_t>(micros()); });
 #endif
     graphics->setDefaultWindowBounds(0,
         {0, static_cast<std::int32_t>(screenHeight - consoleHeight), screenWidth, consoleHeight});
@@ -2008,6 +2104,10 @@ void loop() {
         }
     }
     advanceScheduler();
+#if defined(QL32_OLIMEX_PRESENT_COALESCE) || \
+    (defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL) && !defined(QL32_OLIMEX_DMA_DISPLAY))
+    if (graphics) graphics->pollPendingPresentation();
+#endif
     refreshInputCaretBlink();
     delay(1);
 #endif

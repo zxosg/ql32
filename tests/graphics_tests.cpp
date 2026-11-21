@@ -737,6 +737,52 @@ void testWindowedGraphicsUpdateBatching() {
             "GUPDATE AUTO did not restore default automatic presentation");
 }
 
+void testWindowedGraphicsCoalescesPresentationsByTimeAndCost() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter);
+    std::uint64_t now = 1000;
+    graphics.setPresentCoalescing(500, 0, [&now] { return now; });
+    graphics.circle(1, {1, 1}, 0);
+    require(presenter->presentCount == 1, "first request must present at once");
+    now += 100;
+    graphics.circle(1, {3, 3}, 0);
+    graphics.circle(1, {5, 5}, 0);
+    require(presenter->presentCount == 1 && graphics.hasPendingPresentation(),
+            "requests inside the interval must be merged, not presented");
+    graphics.pollPendingPresentation();
+    require(presenter->presentCount == 1, "poll must respect the interval");
+    now += 500;
+    graphics.pollPendingPresentation();
+    require(presenter->presentCount == 2 && !graphics.hasPendingPresentation() &&
+                presenter->lastFrame.pixels[5 * 10 + 5] == 7,
+            "poll after the interval must publish the latest merged state");
+    require(graphics.coalesceStats().requests == 3 &&
+                graphics.coalesceStats().deferred == 2 &&
+                graphics.coalesceStats().presented == 2,
+            "coalescing counters");
+    now += 600;
+    graphics.circle(1, {7, 7}, 0);
+    graphics.circle(1, {8, 8}, 0);
+    graphics.flushPendingPresentation();
+    require(presenter->presentCount == 4,
+            "flush must publish pending output immediately");
+    require(!graphics.hasPendingPresentation(), "flush must clear pending output");
+    now += 10000;
+    graphics.setUpdateMode(1, UpdateMode::Off);
+    graphics.circle(1, {4, 4}, 0);
+    const auto before = presenter->presentCount;
+    graphics.update(1);
+    graphics.update(1);
+    require(presenter->presentCount <= before + 1 &&
+                graphics.coalesceStats().deferred >= 3,
+            "explicit GUPDATE must obey the rate limit");
+    graphics.flushPendingPresentation();
+    graphics.setPresentCoalescing(0, 0, {});
+    graphics.setUpdateMode(1, UpdateMode::Auto);
+    graphics.circle(1, {2, 2}, 0);
+    require(!graphics.hasPendingPresentation(), "disabled coalescing must not defer");
+}
+
 void testWindowedGraphicsSkipsAutomaticPresentations() {
     auto presenter = std::make_shared<CapturingPresenter>();
     WindowedService graphics(10, 10, presenter);
@@ -2427,6 +2473,7 @@ int main() {
     testUiInteractionResetsGraphicsUpdateStateAndKeepsIt();
     testWindowedGraphicsUpdateBatching();
     testWindowedGraphicsSkipsAutomaticPresentations();
+    testWindowedGraphicsCoalescesPresentationsByTimeAndCost();
     testWindowedGraphicsResetUpdateStatePresentsAndDisablesSkip();
     testPresentationBatchCoalescesResetAndPageUpdate();
     testPresentationBatchPreservesConcurrentDrawingAcrossResize();

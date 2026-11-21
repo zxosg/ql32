@@ -21,6 +21,14 @@
 #include <cstring>
 #include <limits>
 
+// Experimental: keep the row refill code in IRAM so core-1 refills do not take
+// instruction-cache misses on the flash/PSRAM bus shared with the other core.
+#if defined(QL32_OLIMEX_DMA_REFILL_IRAM_TEST)
+#define QL32_REFILL_HOT IRAM_ATTR
+#else
+#define QL32_REFILL_HOT
+#endif
+
 namespace ql32::platform::olimex_vga {
 namespace {
 
@@ -682,7 +690,7 @@ void IRAM_ATTR PsramDmaScanout::handleDmaInterrupt() {
     if (higherPriorityTaskWoken) portYIELD_FROM_ISR();
 }
 
-void PsramDmaScanout::refillWorker(void* argument) {
+void QL32_REFILL_HOT PsramDmaScanout::refillWorker(void* argument) {
     auto* self = static_cast<PsramDmaScanout*>(argument);
     for (;;) {
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -714,7 +722,7 @@ void PsramDmaScanout::psramStressWorker(void* argument) {
     vTaskSuspend(nullptr);
 }
 
-void PsramDmaScanout::refillCompletedRows() {
+void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
     if (!kEnableLiveRefill) return;
     if (!haveCompletedSequence_) return;
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
@@ -751,12 +759,13 @@ void PsramDmaScanout::refillCompletedRows() {
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     const auto elapsed = static_cast<std::uint32_t>(micros() - started);
     ++refillBatchCount_;
+    refillBatchTotalMicros_ = refillBatchTotalMicros_ + elapsed;
     if (batchRows > refillBatchMaxRows_) refillBatchMaxRows_ = batchRows;
     if (elapsed > refillBatchMaxMicros_) refillBatchMaxMicros_ = elapsed;
 #endif
 }
 
-void PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
+void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
     const auto targetSequence = consumedSequence + ringRows_;
     const auto targetRow = targetSequence % height_;
     if (targetRow == 0) {
@@ -830,6 +839,16 @@ void PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
     }
 #endif
     if (kFramebufferFormat == PixelFormat::Indexed4 && horizontalShift == 0) {
+#if defined(QL32_OLIMEX_DMA_REFILL_BULK_COPY_TEST)
+        // Pull the whole source row out of PSRAM with one bulk copy so the
+        // encoder reads internal RAM only. Single refill task, so static.
+        alignas(4) static std::uint8_t rowCache[1024];
+        const auto rowBytes = (static_cast<std::size_t>(width_) + 1) / 2;
+        if (rowBytes <= sizeof(rowCache)) {
+            std::memcpy(rowCache, source, rowBytes);
+            source = rowCache;
+        }
+#endif
         encodePacked4Row(source, out);
         markRowReady();
         return;
@@ -862,21 +881,19 @@ void PsramDmaScanout::rebuildPixelOutputLut() {
     }
 }
 
-void PsramDmaScanout::encodePacked4Row(const std::uint8_t* source,
+void QL32_REFILL_HOT PsramDmaScanout::encodePacked4Row(const std::uint8_t* source,
                                       std::uint8_t* output) const {
     // Each packed source byte already contains a pair of palette indices.
     // Precompute the pair conversion so a byte of PSRAM becomes one aligned
     // 16-bit output write. Emit each eight-pixel group in the VGA's physical
     // order directly, avoiding a second pass over the DMA line.
+#if defined(QL32_OLIMEX_LEGACY_ENCODER)
+    // A/B only: the pre-e7f8780 byte-store encoder.
     std::uint32_t x = 0;
     for (; x + 8 <= width_; x += 8) {
-        const auto sourceByte = x / 2;
-        // PSRAM framebuffers are aligned and supported packed row strides are
-        // multiples of four. One aligned load fetches the four source bytes
-        // together rather than issuing four separate PSRAM byte accesses.
         std::uint32_t packed;
         const auto* aligned = static_cast<const std::uint8_t*>(
-            __builtin_assume_aligned(source + sourceByte, 4));
+            __builtin_assume_aligned(source + x / 2, 4));
         std::memcpy(&packed, aligned, sizeof(packed));
         const auto pair1 = packed4PairOutputLut_[(packed >> 8) & 0xffu];
         const auto pair0 = packed4PairOutputLut_[packed & 0xffu];
@@ -887,6 +904,10 @@ void PsramDmaScanout::encodePacked4Row(const std::uint8_t* source,
         std::memcpy(output + x + 4, &pair3, sizeof(pair3));
         std::memcpy(output + x + 6, &pair2, sizeof(pair2));
     }
+#else
+    std::uint32_t x = static_cast<std::uint32_t>(
+        encodePacked4AlignedRow(source, output, width_, packed4PairOutputLut_));
+#endif
     for (; x < width_; x += 2) {
         const auto packed = source[x / 2];
         output[x] = pixelOutputLut_[packed >> 4];
@@ -915,7 +936,7 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(unexpectedInterruptMask_));
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
-    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u\n",
+    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u, refill-total-us=%u\n",
                   static_cast<unsigned>(frameCount_),
                   static_cast<unsigned>(haveCompletedSequence_ ? completedSequence_ + 1 : 0),
                   static_cast<unsigned>(eofEventCount_),
@@ -934,7 +955,8 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(refillActiveSlotOverwriteCount_),
                   static_cast<unsigned>(refillBatchMaxRows_),
                   static_cast<unsigned>(refillBacklogMaxRows_),
-                  static_cast<unsigned>(refillObsoleteRowsSkipped_));
+                  static_cast<unsigned>(refillObsoleteRowsSkipped_),
+                  static_cast<unsigned>(refillBatchTotalMicros_));
 #else
     Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u\n",
                   static_cast<unsigned>(frameCount_),
@@ -953,3 +975,74 @@ void PsramDmaScanout::reportStatus() const {
 }
 
 } // namespace ql32::platform::olimex_vga
+
+#if defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
+namespace ql32::platform::olimex_vga {
+
+void PsramDmaScanout::runEncoderBenchmark() const {
+    if (kFramebufferFormat != PixelFormat::Indexed4 || !framebuffer_.pixels) {
+        Serial.println("ENCBENCH: packed-4 framebuffer required");
+        return;
+    }
+    constexpr std::uint32_t kBatch = 8;
+    constexpr std::uint32_t kBatches = 128;
+    constexpr std::uint32_t kRows = kBatch * kBatches;
+    auto* scratch = dmaAlloc(width_);
+    alignas(4) static std::uint8_t cache[1024];
+    const auto rowBytes = (static_cast<std::size_t>(width_) + 1) / 2;
+    if (!scratch || rowBytes > sizeof(cache)) {
+        Serial.println("ENCBENCH: allocation failed");
+        return;
+    }
+    portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+    const auto rowAt = [this](std::uint32_t index) {
+        // Stride through the whole frame so the PSRAM cache cannot hold it.
+        return framebuffer_.pixels + static_cast<std::size_t>((index * 7u) % height_) *
+            framebuffer_.stride;
+    };
+    enum Piece { kMicros, kCopy, kEncodeInternal, kEncodePsram, kCopyEncode, kCopySequential, kPieceCount };
+    std::uint64_t cycles[kPieceCount]{};
+    std::uint32_t sink = 0;
+    for (int piece = 0; piece < kPieceCount; ++piece) {
+        for (std::uint32_t batch = 0; batch < kBatches; ++batch) {
+            const auto base = batch * kBatch;
+            portENTER_CRITICAL(&mux);
+            const auto start = ESP.getCycleCount();
+            for (std::uint32_t i = 0; i < kBatch; ++i) {
+                const auto* source = rowAt(base + i);
+                switch (piece) {
+                case kMicros: sink += static_cast<std::uint32_t>(micros()); break;
+                case kCopy: std::memcpy(cache, source, rowBytes); break;
+                case kEncodeInternal: encodePacked4Row(cache, scratch); break;
+                case kEncodePsram: encodePacked4Row(source, scratch); break;
+                case kCopyEncode:
+                    std::memcpy(cache, source, rowBytes);
+                    encodePacked4Row(cache, scratch);
+                    break;
+                case kCopySequential:
+                    std::memcpy(cache, framebuffer_.pixels +
+                        static_cast<std::size_t>((base + i) % height_) *
+                        framebuffer_.stride, rowBytes);
+                    break;
+                }
+            }
+            cycles[piece] += static_cast<std::uint32_t>(ESP.getCycleCount() - start);
+            portEXIT_CRITICAL(&mux);
+            if (piece == kEncodeInternal) std::memcpy(cache, rowAt(base), rowBytes);
+        }
+    }
+    heap_caps_free(scratch);
+    const auto mhz = static_cast<double>(ESP.getCpuFreqMHz());
+    const char* names[kPieceCount] = {"micros()", "psram->dram copy", "encode from dram",
+                                      "encode from psram", "copy+encode", "copy sequential"};
+    Serial.printf("ENCBENCH rows=%u cpu-mhz=%.0f width=%u sink=%u\n", kRows, mhz,
+                  static_cast<unsigned>(width_), sink);
+    for (int piece = 0; piece < kPieceCount; ++piece) {
+        const double perRow = static_cast<double>(cycles[piece]) / kRows;
+        Serial.printf("ENCBENCH %-18s cycles/row=%.0f us/row=%.2f\n", names[piece],
+                      perRow, perRow / mhz);
+    }
+}
+
+} // namespace ql32::platform::olimex_vga
+#endif

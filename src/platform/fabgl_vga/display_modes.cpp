@@ -1,4 +1,7 @@
 #include "ql32/platform/fabgl_vga/display_modes.hpp"
+#include "ql32/platform/fabgl_vga/mode_memory.hpp"
+
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <array>
@@ -107,6 +110,22 @@ runtime::DisplayMode DisplayModes::setMode(std::uint32_t id,
         ? kDoubleBufferedOption : 0;
     const auto next = static_cast<std::size_t>(id);
     const auto previous = current_;
+    // Only the no-PSRAM build aborts inside FabGL; PSRAM builds see FabGL's
+    // double-buffer/viewport placement and are checked after allocation below.
+    if (next != previous && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
+        const auto freeDma = static_cast<std::uint32_t>(
+            heap_caps_get_free_size(MALLOC_CAP_DMA));
+        const auto currentBytes = vgaModeBytes(
+            static_cast<std::uint32_t>(std::max(0, canvas_.getWidth())),
+            static_cast<std::uint32_t>(std::max(0, canvas_.getHeight())));
+        if (!vgaModeFitsMemory(presets[next].width, presets[next].height,
+                               currentBytes, freeDma))
+            throw std::runtime_error(
+                std::string("not enough memory for VGA mode ") +
+                presets[next].name + ": needs " +
+                std::to_string(vgaModeBytes(presets[next].width, presets[next].height)) +
+                " bytes, " + std::to_string(freeDma) + " free");
+    }
     const auto previousOptions = currentOptions_;
     if (next != previous || options != previousOptions) {
         try {

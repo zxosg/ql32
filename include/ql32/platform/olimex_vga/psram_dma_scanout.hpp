@@ -61,6 +61,12 @@ public:
 #endif
     }
     void reportStatus() const;
+#if defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
+    // Times the pieces of the packed-4 row refill inside short critical
+    // sections so ISRs and the refill worker cannot preempt the measurement.
+    void runEncoderBenchmark() const;
+#endif
+    std::uint32_t frameCount() const noexcept { return frameCount_; }
     bool stagePaletteRotation(std::int32_t amount) noexcept;
     bool stagePalette(const Palette::Entries& entries) noexcept;
     FramebufferView* beginFrameUpdate() noexcept;
@@ -73,7 +79,12 @@ private:
     static constexpr std::size_t kFramebufferCount = 3;
     // Keep ring sizes as divisors of each frame height so descriptor slots
     // restart at the same phase on every frame.
-#if defined(QL32_OLIMEX_DMA_TEST_MODE_640X480) && defined(QL32_OLIMEX_DMA_RING160_TEST)
+#if defined(QL32_OLIMEX_DMA_TEST_MODE_640X480) && defined(QL32_OLIMEX_DMA_RING160_GROUP20_TEST)
+    // Diagnostic: 160-row ring refilled in 20-row batches so one stall costs
+    // fewer rows and lead stays at 140 rows (160 * 640 B in internal DMA RAM).
+    static constexpr std::size_t kLineRingCount = 160;
+    static constexpr std::size_t kRefillGroupSize = 20;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X480) && defined(QL32_OLIMEX_DMA_RING160_TEST)
     // Four 40-row groups provide 120 rows of lead in the 480-line mode.
     static constexpr std::size_t kLineRingCount = 160;
     static constexpr std::size_t kRefillGroupSize = 40;
@@ -177,6 +188,7 @@ private:
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     volatile std::uint32_t refillBatchCount_ = 0;
     volatile std::uint32_t refillBatchMaxMicros_ = 0;
+    volatile std::uint32_t refillBatchTotalMicros_ = 0;
     volatile std::uint32_t refillBacklogMaxRows_ = 0;
     volatile std::uint32_t refillBatchMaxRows_ = 0;
     volatile std::uint32_t refillObsoleteRowsSkipped_ = 0;

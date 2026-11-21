@@ -628,6 +628,7 @@ void WindowedService::flushTextOutputBatches(SessionId session) {
         batch = textOutputBatches_.erase(batch);
         presentRegion(dirty);
     }
+    flushPendingPresentation();
 }
 
 void WindowedService::beginPresentationBatch(SessionId session) {
@@ -790,6 +791,11 @@ void WindowedService::resetUpdateState(SessionId session) {
 void WindowedService::update(SessionId session) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
     if (skipPresentationRequest()) return;
+    if (coalescingEnabled() && presenter_ && presentationBatchDepth_ == 0) {
+        Rect whole{0, 0, manager_.screenWidth(), manager_.screenHeight()};
+        if (takeCoalescedRegion(whole)) presentRegionNow(whole);
+        return;
+    }
     present();
 }
 
@@ -964,6 +970,7 @@ void WindowedService::present() {
         presentationBatchDirty_ = {};
         return;
     }
+    pendingDirty_ = {};
     frame_.palette = palette_;
     const auto width = manager_.screenWidth();
     const auto height = manager_.screenHeight();
@@ -998,9 +1005,67 @@ void WindowedService::presentRegion(Rect region) {
         return;
     }
     if (skipPresentationRequest()) return;
+    if (coalescingEnabled() && !takeCoalescedRegion(region)) return;
+    presentRegionNow(region);
+}
+
+// Merges the request into the pending rectangle. Returns false while the rate
+// limit defers it; otherwise region becomes the merged rectangle to present.
+bool WindowedService::takeCoalescedRegion(Rect& region) {
+    ++coalesceStats_.requests;
+    pendingDirty_ = unite(pendingDirty_, region);
+    if (coalesceClockUs_() < nextPresentAllowedUs_) {
+        ++coalesceStats_.deferred;
+        return false;
+    }
+    region = pendingDirty_;
+    pendingDirty_ = {};
+    return true;
+}
+
+void WindowedService::setPresentCoalescing(
+    std::uint32_t minIntervalUs, std::uint32_t costRatio,
+    std::function<std::uint64_t()> clockUs) {
+    flushPendingPresentation();
+    coalesceMinIntervalUs_ = minIntervalUs;
+    coalesceCostRatio_ = costRatio;
+    coalesceClockUs_ = std::move(clockUs);
+    nextPresentAllowedUs_ = 0;
+}
+
+void WindowedService::pollPendingPresentation() {
+    if (!hasPendingPresentation() || !coalescingEnabled()) return;
+    if (presentationBatchDepth_ != 0) return;
+    if (coalesceClockUs_() < nextPresentAllowedUs_) return;
+    flushPendingPresentation();
+}
+
+void WindowedService::flushPendingPresentation() {
+    if (!hasPendingPresentation()) return;
+    auto region = intersect(pendingDirty_,
+        {0, 0, manager_.screenWidth(), manager_.screenHeight()});
+    pendingDirty_ = {};
+    if (region.width == 0 || region.height == 0 || !presenter_) return;
+    presentRegionNow(region);
+}
+
+void WindowedService::presentRegionNow(Rect region) {
+    const auto startUs = coalescingEnabled() ? coalesceClockUs_() : 0;
     frame_.palette = palette_;
     const auto width = manager_.screenWidth();
     const auto height = manager_.screenHeight();
+    const struct Finish {
+        WindowedService& self; std::uint64_t startUs;
+        ~Finish() {
+            if (!self.coalescingEnabled()) return;
+            const auto endUs = self.coalesceClockUs_();
+            const auto cost = endUs - startUs;
+            ++self.coalesceStats_.presented;
+            self.coalesceStats_.presentUs += cost;
+            self.nextPresentAllowedUs_ = endUs + std::max<std::uint64_t>(
+                self.coalesceMinIntervalUs_, cost * self.coalesceCostRatio_);
+        }
+    } finish{*this, static_cast<std::uint64_t>(startUs)};
     if (presenter_->presentRowsRegion(width, height, frame_.palette, region,
             [this, region](std::uint32_t y, std::vector<ColorIndex>& row) {
                 composeDisplayRegionRow(y,

@@ -3,6 +3,7 @@
 #include "ql32/runtime/display_mode.hpp"
 
 #include <cstddef>
+#include <string>
 
 namespace ql32::platform::olimex_vga {
 
@@ -59,7 +60,10 @@ public:
 
     runtime::DisplayMode setMode(std::uint32_t id,
                                  std::uint32_t options) override {
-        if (id != kModeId) throw std::invalid_argument("unsupported Olimex DMA mode id");
+        if (id != kModeId)
+            throw std::invalid_argument(
+                "mode " + std::to_string(id) + " is unavailable on this fixed-mode build; only mode " +
+                std::to_string(kModeId) + " (" + kModeName + ") is supported");
         if (options != 0) throw std::invalid_argument("Olimex DMA mode options are unsupported");
         return {kModeName, kModeWidth, kModeHeight, kModeRefresh, kModeId, 0};
     }

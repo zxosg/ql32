@@ -324,6 +324,24 @@ Olimex (sound branch, unmerged; the reconciliation with any uncommitted music
 patch in the main checkout is open). DMA 640x480 sound and long-run playback
 are unverified. Merge decisions for the three local branches are pending.
 
+### Hardware session update (2026-11-21): VGA speed steps 5-7 and final mode matrix
+
+Split-core (VM on core 0) and present coalescing were measured and parked: the split
+placement lost sync (26.7% late refills at 640x480) and coalescing did not change VM
+requests. The aligned encoder (28 us/row refill), cheaper console compose and a chunked
+present row write are now unconditional in all PSRAM-DMA envs; PSRAM store traffic was not
+the bottleneck (refill uses ~80% of core 1). Standard placement is the supported
+640x400/640x480 path: 640x480 about 100 present requests/30 s, 0.50 s full present;
+640x400 about 104, 0.38 s; zero late refills, stable. FabGL modes 0-2 (`graphics_profile`)
+scan out from internal DMA RAM; MODE 2 needs a fresh heap. The no-PSRAM profile now refuses
+MODE 1/2 with a BASIC error instead of abort(). Multi-task stress (attractor+PRINT+churn+loop)
+ran without errors or heap drift; the standard placement is unfair under load and FabGL
+modes show ~1 fps for the attractor only when a PRINT task is running (console presents
+dominate). Next: coalesce console presents on the FabGL presenter. See
+`docs/test-results/olimex-final-mode-matrix-stress-2026-11-21.md`, the present-traffic,
+split-vm-core0, present-coalescing and encoder-isolation reports.
+
+
 1. **Merge and reconcile branches:** `jan-pal-olimex-sound-audit` and
    `jan-pal-automatic-potato` are unmerged and unpushed. Reconcile the sound
    branch with any uncommitted music patch in the main checkout, merge, re-run
@@ -406,3 +424,10 @@ status (`git branch -vv`, `git worktree list`, and `git status` in the main
 checkout for the uncommitted music patch), and continue the first unfinished
 item under “Next work”. Update this file when that item or milestone state
 changes.
+
+## 2026-11-21 follow-up: PRINT starvation fix
+
+- PRINT lines are charged 48 instructions to the VM slice budget (`src/vm/interpreter.cpp`); MODE 0 attractor + PRINT 28.2 s -> 12.6 s per 20 frames, MODE 2 + 3 workers fair (see `docs/test-results/olimex-final-mode-matrix-stress-2026-11-21.md`).
+- FabGL Olimex builds enable `WindowedService` present coalescing; `COALDIAG`/`COALRATE` exist in `graphics_profile`.
+- Fixed-mode DMA envs now give a clear "mode N is unavailable" error instead of "unsupported Olimex DMA mode id".
+- OPEN: the board is NOT on the standard `present_profile` (last flashed: `graphics_profile`; serial went silent). Reflash it, confirm the picture, check `MODE 0,0` text, and re-run the 640x480/640x400 stress mix.

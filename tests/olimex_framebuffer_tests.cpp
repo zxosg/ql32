@@ -1,9 +1,11 @@
+#include "ql32/platform/fabgl_vga/mode_memory.hpp"
 #include "ql32/platform/olimex_vga/framebuffer.hpp"
 #include "ql32/platform/olimex_vga/color_mapping.hpp"
 #include "ql32/platform/olimex_vga/dma_pixel_order.hpp"
 #include "ql32/platform/olimex_vga/palette.hpp"
 #include "ql32/platform/olimex_vga/refill_window.hpp"
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 
@@ -86,6 +88,35 @@ void testMappedRowWrites() {
     require(rgbStorage[0] == 0 && rgbStorage[1] == (mapping[1] & 0x3Fu) &&
             rgbStorage[2] == (mapping[2] & 0x3Fu) && rgbStorage[3] == 0,
             "RGB mapped row wrote incorrect values or crossed its range");
+}
+
+void testChunkedMappedRowMatchesPerByte() {
+    using namespace ql32::platform::olimex_vga;
+    std::array<std::uint8_t, 256> mapping{};
+    for (std::uint32_t i = 0; i < mapping.size(); ++i)
+        mapping[i] = static_cast<std::uint8_t>((i * 7u + 3u) & 0xFFu);
+    constexpr std::uint32_t width = 700;
+    std::vector<std::uint8_t> indices(width);
+    for (std::uint32_t i = 0; i < width; ++i) indices[i] = static_cast<std::uint8_t>(i * 13u);
+    for (std::uint32_t x : {0u, 1u, 2u, 5u})
+        for (std::uint32_t count : {0u, 1u, 2u, 3u, 255u, 256u, 257u, 600u, 695u}) {
+            if (x + count > width) continue;
+            std::vector<std::uint8_t> a(width / 2, 0x5A), b(width / 2, 0x5A);
+            FramebufferView fa{a.data(), width, 1, width / 2, PixelFormat::Indexed4};
+            FramebufferView fb{b.data(), width, 1, width / 2, PixelFormat::Indexed4};
+            require(writeMappedRow(fa, x, 0, indices.data(), count, mapping.data()) ==
+                    writeMappedRowChunked(fb, x, 0, indices.data(), count, mapping.data()),
+                    "chunked row result differs");
+            require(a == b, "chunked row bytes differ from per-byte writer");
+        }
+}
+
+void testVgaModeMemoryPreflight() {
+    using namespace ql32::platform::fabgl_vga;
+    // Measured: no-PSRAM mode 0 has 25-45 KB free
+    require(!vgaModeFitsMemory(320, 240, 320 * 200, 45440), "320x240 must be refused without PSRAM");
+    require(!vgaModeFitsMemory(400, 300, 320 * 200, 45176), "400x300 must be refused without PSRAM");
+    require(vgaModeFitsMemory(320, 200, 400 * 300, 0), "shrinking is always allowed");
 }
 
 void testRegionSynchronization() {
@@ -219,6 +250,28 @@ void testPacked4ShiftedRowEncoderMatchesScalar() {
                                 pairLut.data());
         require(actual == expected,
                 "packed4 shifted row encoder must match scalar output and DMA pixel order");
+    }
+}
+
+void testPacked4AlignedRowEncoderMatchesReference() {
+    using namespace ql32::platform::olimex_vga;
+    std::array<std::uint16_t, 256> pairLut{};
+    for (std::uint32_t key = 0; key < pairLut.size(); ++key)
+        pairLut[key] = static_cast<std::uint16_t>(
+            ((key * 29u) & 0xffu) | (((key * 7u + 3u) & 0xffu) << 8));
+
+    for (const std::size_t width : {8u, 16u, 320u, 640u, 20u}) {
+        alignas(4) std::array<std::uint8_t, 640 / 2> source{};
+        for (std::size_t i = 0; i < source.size(); ++i)
+            source[i] = static_cast<std::uint8_t>((i * 37u) ^ (i << 3));
+        alignas(4) std::array<std::uint8_t, 640> expected{};
+        alignas(4) std::array<std::uint8_t, 640> actual{};
+        encodePacked4ShiftedRow(source.data(), expected.data(), width, 0, pairLut.data());
+        const auto written = encodePacked4AlignedRow(source.data(), actual.data(),
+                                                     width, pairLut.data());
+        require(written == width / 8 * 8, "aligned encoder reports whole groups");
+        require(std::equal(expected.begin(), expected.begin() + written, actual.begin()),
+                "aligned word encoder must match the reference row encoder");
     }
 }
 
@@ -386,11 +439,14 @@ int main() {
     testRgb222ClippingAndOverlap();
     testPacked4OddWidthAndOverlap();
     testMappedRowWrites();
+    testChunkedMappedRowMatchesPerByte();
+    testVgaModeMemoryPreflight();
     testRegionSynchronization();
     testIncrementalTripleBufferRepair();
     testPacked4TriangleFillMatchesPixelWrites();
     testDmaPixelOrderPermutation();
     testPacked4ShiftedRowEncoderMatchesScalar();
+    testPacked4AlignedRowEncoderMatchesReference();
     testLinesAndBitmapCopies();
     testPaletteOperationsAndStagedSwap();
     testRefillWindowDropsObsoleteRows();
