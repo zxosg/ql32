@@ -1847,6 +1847,19 @@ void testTouchWindowResolvesToItsBASICChannel() {
             "touch target window did not resolve to its BASIC channel handle");
 }
 
+void testDefaultCanvasIsSizedToTaskViewport() {
+    using namespace ql32::graphics;
+    WindowedService graphics(8, 6, std::make_shared<CapturingPresenter>());
+    graphics.setTaskViewport(55, {0, 0, 4, 3});
+    const auto window = graphics.windowForSession(55);
+    const auto& canvas = graphics.windowManager().canvas(window);
+    require(canvas.width() == 4 && canvas.height() == 3,
+            "default canvas should match the task viewport, not the full screen");
+    const auto full = graphics.windowForSession(56);
+    require(graphics.windowManager().canvas(full).width() == 8,
+            "a task without a viewport should keep a full-screen canvas");
+}
+
 void testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
@@ -2441,6 +2454,7 @@ int main() {
     testTaskViewportTranslatesAndClipsOwnedWindows();
     testTouchHitTestingUsesTopmostVisibleClippedWindow();
     testTouchWindowResolvesToItsBASICChannel();
+    testDefaultCanvasIsSizedToTaskViewport();
     testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin();
     testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
     testFailedCanvasResizePreservesAllWindows();

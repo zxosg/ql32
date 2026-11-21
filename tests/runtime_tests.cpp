@@ -1077,6 +1077,22 @@ void testFreeLeavesUnavailableMetricsAsEmptyCsvFields() {
             "FREE() did not preserve CSV positions for unavailable metrics");
 }
 
+void testDimRejectsArrayLargerThanLargestFreeBlock() {
+    auto memory = std::make_shared<RecordingMemoryService>();
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, memory);
+    std::ostringstream output;
+    interpreter.execute("DIM small(100)\nPRINT \"ok\"\n", output);
+    require(output.str() == "ok\n", "DIM within the largest free block failed");
+    bool rejected = false;
+    try {
+        interpreter.execute("DIM big(5000)\n", output);
+    } catch (const std::exception& error) {
+        rejected = std::string(error.what()).find("array exceeds available memory") !=
+            std::string::npos;
+    }
+    require(rejected, "DIM larger than the largest free block was not rejected");
+}
+
 void testEmergencyReserveCanBeReleasedAndRestored() {
     FreeOnlyMemoryService memory;
     require(memory.emergencyReserveHeld(),
@@ -1395,6 +1411,7 @@ int main() {
         testPauseDurationRoundsUpAndResumes();
         testFreeReturnsAllMetricsWithoutSelector();
         testFreeLeavesUnavailableMetricsAsEmptyCsvFields();
+        testDimRejectsArrayLargerThanLargestFreeBlock();
         testEmergencyReserveCanBeReleasedAndRestored();
         testProgramNumericPrecisionOption();
         testCpuFrequencyOption();

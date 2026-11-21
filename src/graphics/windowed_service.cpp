@@ -89,8 +89,12 @@ WindowId WindowedService::ensureWindow(SessionId session, ChannelId channel) {
     discardFrozenWindows();
     discardPresentationBuffer();
     const auto defaultBounds = defaultWindowBounds_.find(channel);
+    // Without an explicit default, size the canvas to the task's viewport so a
+    // tiled worker never allocates (then shrinks) a full-screen buffer.
+    const auto viewport = manager_.taskViewport(session);
     const auto bounds = defaultBounds != defaultWindowBounds_.end() ? defaultBounds->second :
-        Rect{0, 0, manager_.screenWidth(), manager_.screenHeight()};
+        Rect{0, 0, std::max(1u, std::min(viewport.canvasWidth, manager_.screenWidth())),
+             std::max(1u, std::min(viewport.canvasHeight, manager_.screenHeight()))};
     const auto id = manager_.create(session, bounds,
                                    PixelDepth::Four);
     sessionWindows_.emplace(key, id);

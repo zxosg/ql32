@@ -38,8 +38,8 @@ void testConnectionLifecycle() {
             "unavailable access point should report Failed");
 
     network.disconnectWifi();
-    require(WiFi.disconnectCalls == 1 && WiFi.erasedCredentials && !WiFi.turnedOff,
-            "disconnect should erase driver credentials without powering down Wi-Fi");
+    require(WiFi.disconnectCalls == 1 && WiFi.erasedCredentials && WiFi.turnedOff,
+            "disconnect should erase credentials and power down Wi-Fi to free heap");
     require(network.wifiStatus().state == ql32::runtime::WifiState::Disconnected,
             "explicit disconnect should report Disconnected");
 }
