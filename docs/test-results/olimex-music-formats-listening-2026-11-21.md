@@ -27,6 +27,8 @@ Serial: late=0 and maxGap ~11.6 ms for every item.
 ## Not done
 - VTX LyraII9, SQT Zabreh, YM BITOFF2/led1 not heard on the final build.
 - BEEP/VOLUME 32/128/255 recheck.
-- VGA-attractor load test (attractor.bas not on the card).
 - olivierh59500/ym-player review (license not yet checked).
 - YM peaks reach the clip limit; the cause is unconfirmed (digi-drums vs mix gain).
+
+## VGA load test (added)
+`FFS:/attractor.bas` was loaded and run while VTX z00m_unreal played. The owner reported the attractor animating and the music clean (no dropouts). Serial music diagnostics were not logged after RUN, so late/maxGap under load are unconfirmed; the result is by ear only.
