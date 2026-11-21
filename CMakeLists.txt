@@ -18,6 +18,8 @@ add_library(ql32_portable
   src/music/lh5.cpp
   src/music/vtx.cpp
   src/music/vtx_player.cpp
+  src/music/ym.cpp
+  src/music/ym_player.cpp
   src/language/interpreter.cpp
   src/graphics/bitmap.cpp
   src/graphics/font.cpp
@@ -130,6 +132,7 @@ if(QL32_BUILD_TESTS)
   add_test(NAME ql32_runtime_tests COMMAND ql32_runtime_tests)
   add_executable(ql32_music_tests tests/music_tests.cpp)
   target_link_libraries(ql32_music_tests PRIVATE ql32_host)
+  target_compile_definitions(ql32_music_tests PRIVATE QL32_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples")
   add_test(NAME ql32_music_tests COMMAND ql32_music_tests)
   add_executable(ql32_scheduler_tests tests/scheduler_tests.cpp)
   target_link_libraries(ql32_scheduler_tests PRIVATE ql32_host)

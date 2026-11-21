@@ -234,7 +234,7 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 `MUSIC WAV "path"` streams PCM WAV (wav.hpp). Built (Linux, olimex psram env) and
 host-tested (ctest 82/82). NOT hardware-verified: SD reads now occur in the audio
 task, so check maxGap/late blocks and listen under VGA load before relying on it.
-Second cut (PT3, full VTX, SQT, Atari ST YM incl. SID/sync-buzzer) not started.
+Second cut in progress (owner order: PT3 + full VTX, then SQT, then YM): YM (YM2/3/3b/5/6 with SID, sinus-SID, digi-drum, sync-buzzer, LHA) is implemented and host-tested on examples/music/ym (25/26 decode; YMT1 unsupported) but NOT heard on hardware and effect timbre is unverified against a reference. PT3, SQT, full VTX not started.
 
 ## Next work
 

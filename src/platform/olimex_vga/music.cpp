@@ -5,6 +5,7 @@
 #include "ql32/music/tone.hpp"
 #include "ql32/music/wav.hpp"
 #include "ql32/music/vtx_source.hpp"
+#include "ql32/music/song_loader.hpp"
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_player.hpp"
 
@@ -25,7 +26,7 @@ namespace ql32::platform::olimex_vga {
 namespace {
 constexpr i2s_port_t OutputPort = I2S_NUM_0;
 constexpr std::size_t SamplesPerBlock = 256;
-constexpr std::size_t MaximumFileBytes = music::VtxSong::MaximumFileBytes;
+constexpr std::size_t MaximumFileBytes = music::maximumSongFileBytes();
 constexpr std::uint32_t TestToneHz = 1000;
 constexpr std::uint32_t UnderrunGapUs = 40000; // DMA ring holds 4 x 11.6 ms
 constexpr std::uint32_t DiagnosticIntervalBlocks = 86; // about one second
@@ -242,7 +243,7 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
     const std::uint64_t byteCount = source->size();
     if (byteCount == 0 || byteCount > MaximumFileBytes)
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
-                                    "music: VTX file is empty or exceeds 64 KiB");
+                                    "music: song file is empty or too large");
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(byteCount));
     std::size_t offset = 0;
     while (offset < bytes.size()) {
@@ -253,8 +254,7 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                                         "music: short read while loading VTX file");
         offset += received;
     }
-    startMusic(session, std::make_unique<music::VtxSource>(
-        music::VtxSong::parse(std::move(bytes))));
+    startMusic(session, music::openSong(std::move(bytes)));
 }
 
 void MusicService::playWav(runtime::MusicSessionId session, const std::string& path) {

@@ -766,6 +766,13 @@ and `ERRX$` returns contextual detail for the current task error. Error code 0
 means no error; positive codes are stable QL/32 codes, with no SMSQ/E numeric
 compatibility claim.
 
+`MUSIC PLAY "path"` selects the decoder from file content: VTX, or Atari ST / Amstrad
+YM (QL/32-specific player; LHA-wrapped `-lh5-`/`-lh0-` level-0 or raw). YM2!, YM3!,
+YM3b, YM5! and YM6! are supported, including YM5/YM6 effects: SID voice, digi-drum
+(8-bit unsigned/signed or 4-bit), sync-buzzer, and sinus-SID (approximation: 16-step
+sine amplitude shape). Not supported: YMT1/YMT2 trackers, MIX, Mad Max YM2 digi-drums.
+The whole song is decoded into RAM (up to 1.5 MiB unpacked, so large songs need PSRAM).
+
 `MUSIC WAV "path"` (QL/32-specific, not SMSQ/E) streams an uncompressed PCM WAV
 file from storage without loading it into RAM (2 KiB read buffer). Supported:
 8-bit unsigned or 16-bit signed, mono or stereo (averaged to mono), 4000-48000 Hz

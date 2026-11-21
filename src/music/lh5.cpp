@@ -176,7 +176,7 @@ bool decodeLh5(const std::uint8_t* input, std::size_t inputSize,
                std::size_t outputSize, std::vector<std::uint8_t>& output,
                const char** error) {
     if (error) *error = "invalid LH5 stream";
-    if ((!input && inputSize != 0) || outputSize > 1024u * 1024u) {
+    if ((!input && inputSize != 0) || outputSize > 1536u * 1024u) {
         if (error) *error = "LH5 data exceeds the supported output limit";
         return false;
     }

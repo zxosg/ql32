@@ -2,6 +2,7 @@
 #include "ql32/music/ay38912.hpp"
 #include "ql32/music/dac_format.hpp"
 #include "ql32/music/mixer.hpp"
+#include "ql32/music/song_loader.hpp"
 #include "ql32/music/tone.hpp"
 #include "ql32/music/wav.hpp"
 #include "ql32/music/vtx.hpp"
@@ -9,6 +10,8 @@
 #include "ql32/runtime/music.hpp"
 
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
@@ -391,6 +394,109 @@ void testWavStreaming() {
     catch (const std::runtime_error&) { rejected = true; }
     require(rejected, "compressed WAV was accepted");
 }
+
+std::vector<std::uint8_t> be32v(std::uint32_t v) {
+    return {static_cast<std::uint8_t>(v >> 24), static_cast<std::uint8_t>(v >> 16),
+            static_cast<std::uint8_t>(v >> 8), static_cast<std::uint8_t>(v)};
+}
+
+std::vector<std::uint8_t> syntheticYm6(std::size_t frames, std::uint8_t effectRegs[3],
+                                       bool withDrum) {
+    std::vector<std::uint8_t> b = {'Y', 'M', '6', '!', 'L', 'e', 'O', 'n', 'A', 'r', 'D', '!'};
+    auto app = [&](const std::vector<std::uint8_t>& v) { b.insert(b.end(), v.begin(), v.end()); };
+    app(be32v(static_cast<std::uint32_t>(frames)));
+    app(be32v(0)); // not planar
+    app({0, static_cast<std::uint8_t>(withDrum ? 1 : 0)});
+    app(be32v(2000000)); app({0, 50}); app(be32v(0)); app({0, 0});
+    if (withDrum) { app(be32v(4)); app({255, 255, 0, 0}); }
+    for (const char* s : {"t", "a", "c"}) { b.push_back(s[0]); b.push_back(0); }
+    for (std::size_t f = 0; f < frames; ++f) {
+        std::uint8_t r[16] = {};
+        r[0] = 100; r[7] = 0x3e; r[8] = withDrum ? 0 : 15; r[13] = 0xff;
+        r[1] = effectRegs[0]; r[6] = effectRegs[1]; r[14] = effectRegs[2];
+        for (auto v : r) b.push_back(v);
+    }
+    return b;
+}
+
+std::size_t countLevels(const std::vector<std::int16_t>& pcm) {
+    std::size_t changes = 0;
+    for (std::size_t i = 1; i < pcm.size(); ++i) if (pcm[i] != pcm[i - 1]) ++changes;
+    return changes;
+}
+
+void testYm() {
+    using namespace ql32::music;
+    // YM3 planar: 3 frames, tone on A.
+    std::vector<std::uint8_t> ym3 = {'Y', 'M', '3', '!'};
+    for (int reg = 0; reg < 14; ++reg)
+        for (int f = 0; f < 3; ++f) ym3.push_back(reg == 8 ? 15 : (reg == 7 ? 0x3e : (reg == 0 ? 80 : 0)));
+    auto song = YmSong::parse(ym3);
+    require(song.frameCount() == 3 && song.registers(1)[0] == 80 && song.registers(2)[8] == 15,
+            "YM3 planar decode failed");
+    YmSource plain(YmSong::parse(ym3));
+    std::array<std::int16_t, 512> pcm{};
+    plain.render(pcm.data(), pcm.size());
+    require(*std::max_element(pcm.begin(), pcm.end()) > 1000, "YM3 produced no tone");
+
+    // YM6 effects: a plain tone vs SID voice (control 0x10 = SID on voice A, r6 prediv 4, r14 count 5).
+    std::uint8_t none[3] = {0, 0, 0}, sid[3] = {0x10, 0x20, 5}, buzz[3] = {0xf0 & 0xd0, 0x20, 5};
+    auto render = [&](std::vector<std::uint8_t> bytes) {
+        YmSource s(YmSong::parse(std::move(bytes)));
+        std::vector<std::int16_t> out(4000);
+        s.render(out.data(), out.size());
+        return out;
+    };
+    const auto plainTone = render(syntheticYm6(10, none, false));
+    const auto sidTone = render(syntheticYm6(10, sid, false));
+    require(sidTone != plainTone, "SID effect did not alter the voice amplitude");
+    const auto buzzTone = render(syntheticYm6(10, buzz, false));
+    require(!buzzTone.empty(), "sync-buzzer render failed");
+    // Digi-drum 1: control 0x50 = drum effect on voice A.
+    std::uint8_t drumRegs[3] = {0x50, 0xe0, 1};
+    const auto drumTone = render(syntheticYm6(10, drumRegs, true));
+    require(drumTone != plainTone && drumTone[0] == 127 * 128 / 3,
+            "digi-drum did not replace the voice");
+
+    bool rejected = false;
+    try { YmSong::parse(std::vector<std::uint8_t>{'Y', 'M', '2', '!', 1, 2, 3, 4, 5, 6}); }
+    catch (const std::runtime_error&) { rejected = true; }
+    require(rejected, "unsupported YM variant was accepted");
+    require(openSong(ym3) != nullptr, "song loader did not pick YM");
+    (void)countLevels;
+}
+
+std::vector<std::uint8_t> readFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+void testExampleYmFiles() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path(QL32_EXAMPLES_DIR) / "music" / "ym";
+    if (!fs::exists(root)) return;
+    std::size_t decoded = 0, unsupported = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        if (!entry.is_regular_file()) continue;
+        auto bytes = readFile(entry.path());
+        try {
+            auto source = ql32::music::openSong(std::move(bytes));
+            std::array<std::int16_t, 4096> block{};
+            std::int16_t peak = 0;
+            for (int i = 0; i < 20; ++i) {
+                source->render(block.data(), block.size());
+                for (auto v : block) peak = std::max<std::int16_t>(peak, v);
+            }
+            require(peak > 100, ("example YM is silent: " + entry.path().string()).c_str());
+            ++decoded;
+        } catch (const std::runtime_error& e) {
+            std::cerr << "note: " << entry.path().filename() << ": " << e.what() << "\n";
+            ++unsupported;
+        }
+    }
+    std::cerr << "example YM files decoded=" << decoded << " unsupported=" << unsupported << "\n";
+    require(decoded >= 24 && unsupported <= 1, "example YM files failed to decode");
+}
 } // namespace
 
 int main() {
@@ -401,6 +507,8 @@ int main() {
         testWaveforms();
         testMixer();
         testWavStreaming();
+        testYm();
+        testExampleYmFiles();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';

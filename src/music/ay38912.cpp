@@ -24,6 +24,8 @@ void Ay38912::reset(std::uint32_t clockHz, std::uint32_t sampleRate) noexcept {
     clockHz_ = clockHz ? clockHz : 1773400;
     sampleRate_ = sampleRate ? sampleRate : 22050;
     registers_.fill(0);
+    levelOverride_.fill(-1);
+    direct_.fill(false);
     tonePhase_.fill(0);
     toneStep_.fill(0);
     noisePhase_ = 0;
@@ -59,8 +61,9 @@ void Ay38912::restartEnvelope(std::uint8_t shape) noexcept {
     envelopePhase_ = 0;
 }
 
-void Ay38912::writeRegisters(const std::array<std::uint8_t, 14>& registers) noexcept {
-    if ((registers[13] & 0x0f) != (registers_[13] & 0x0f))
+void Ay38912::writeRegisters(const std::array<std::uint8_t, 14>& registers,
+                             bool forceEnvelopeRestart) noexcept {
+    if (forceEnvelopeRestart || (registers[13] & 0x0f) != (registers_[13] & 0x0f))
         restartEnvelope(registers[13]);
     registers_ = registers;
     updateSteps();
@@ -97,12 +100,18 @@ std::int16_t Ay38912::renderSample() noexcept {
     const std::uint8_t mixer = registers_[7];
     for (unsigned channel = 0; channel < 3; ++channel) {
         tonePhase_[channel] += toneStep_[channel];
+        if (direct_[channel]) {
+            mixed += directValue_[channel];
+            continue;
+        }
         const bool tone = (mixer & (1u << channel)) != 0 ||
                           (tonePhase_[channel] & 0x80000000u) == 0;
         const bool noise = (mixer & (1u << (channel + 3))) != 0 ||
                            (noiseLfsr_ & 1u) != 0;
         const std::uint8_t volume = registers_[8 + channel];
-        const std::uint8_t level = (volume & 0x10) != 0 ? envelopeLevel_ : volume & 0x0f;
+        const std::uint8_t level = levelOverride_[channel] >= 0
+            ? static_cast<std::uint8_t>(levelOverride_[channel] & 0x0f)
+            : ((volume & 0x10) != 0 ? envelopeLevel_ : volume & 0x0f);
         const std::int32_t amplitude = Amplitude[level];
         if (amplitude != 0)
             mixed += (tone && noise ? amplitude : 0) - amplitude / 2;
