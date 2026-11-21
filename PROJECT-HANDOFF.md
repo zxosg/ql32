@@ -16,54 +16,94 @@ VM, runtime, system, and UI layers independent of board libraries. Session
 resources belong to their BASIC session, and UI waits suspend only that
 session.
 
-## Repository state (2026-11-20)
+## Repository state (2026-11-21)
 
-Local `main` is at `add03ee`. Work since then lives on **unmerged, unpushed**
-local branches; check `git branch -vv` and the remote before syncing:
-
-| Branch (worktree) | Head | Content |
-| --- | --- | --- |
-| `jan-pal-olimex-sound-audit` | `b7850ab` | Olimex sound fix and `BEEP`/`VOLUME` (`9985427`), stale-test fixes (`49887c0`), hardware-verification notes (`b7850ab`). Native Linux ctest 82/82. |
-| `jan-pal-automatic-potato` | `3d54fbc` | Olimex 640x480 present telemetry, split timers, budget and IRAM diagnostic envs, reports (`6e31b27`, `79b3815`, `3d54fbc`). Based on `main`, not on the sound branch. |
-| `jan-pal-handoff-refresh` | this branch | Documentation refresh, based on the sound branch. |
+`origin/main` and local `main` are at `add03ee`. Everything below is on the
+local, **unpushed** integration branch `jan-pal-branch-integration`, which
+merges these local branches (merge order; all clean except doc conflicts):
+`jan-pal-olimex-sound-audit` (sound, YM/AY/PT3/VTX/SQT/WAV, `BEEP`/`VOLUME`,
+stale-test fixes), `jan-pal-handoff-refresh`, `jan-pal-basic-file-seek`,
+`jan-pal-cyd-memory-audit`, `jan-pal-automatic-potato` (Olimex VGA work).
+`jan-pal-fix-ctest-failures` duplicates the sound branch's `49887c0` and was
+skipped. The source branches still exist unchanged. Check the remote before
+pushing.
 
 A user music patch (modified `music.hpp`, `music.cpp`, `interpreter.cpp`,
-`bytecode.hpp`, `music_tests.cpp` and related files) may exist **uncommitted in
-the main checkout** (`/home/osg/GitHub/QL32`); it overlaps the sound branch.
-Inspect `git status` there and do not discard it; expect to reconcile it with
-`9985427` when merging.
+`bytecode.hpp`, `music_tests.cpp`) may exist **uncommitted in the main
+checkout** (`/home/osg/GitHub/QL32`). It overlaps files the sound work
+rewrote; reconcile by hand and do not discard it.
+
+Native Linux: `cmake --preset linux`, `cmake --build build/linux`,
+`ctest --test-dir build/linux` (there is no `linux` test preset) passes
+83/83 on the integration branch.
+
+Terms below: **built** = firmware/host target compiles; **host-tested** =
+covered by Linux CTest (fakes, no board); **hardware-verified** = observed on
+a board with the owner present.
 
 ### Built, host-tested, hardware-verified
 
 | Item | Built | Host-tested | Hardware-verified |
 | --- | --- | --- | --- |
-| Olimex sound fix: I2S `STAND_MSB`, ADC2 readback removed | yes | `dac_format`/tone tests | yes, by ear, incl. `MUSIC TEST` sine and Bosconia1.vtx under attractor load (see [report](docs/test-results/olimex-sound-2026-11-20.md)); DMA 640x480 and long-run playback not verified |
-| `BEEP ms,hz[,waveform]`, `VOLUME 0..255` (QL/32-specific, default 128) | yes | yes (`music_tests`, VM tests) | yes, by ear: 5 waveforms, VOLUME 32/128/255, `BEEP` under attractor (clean tone, stable picture, 0 late blocks) |
-| Stale scheduler/channel/hardware tests fixed | n/a | ctest 82/82 on the sound branch (re-run 2026-11-20) | n/a |
-| Olimex 640x480 present telemetry, split/budget/IRAM envs | yes | `ql32_olimex_present_stats_tests` (on the VGA branch) | yes, counters and pictures; see [the investigation](docs/plans/olimex-vga-640x480-dma-investigation.md) |
+| Olimex DAC output fix (I2S `STAND_MSB`) | yes | `dac_format`/tone tests | yes, by ear ([report](docs/test-results/olimex-sound-2026-11-20.md)); DMA 640x480 sound and long-run playback not verified |
+| `BEEP ms,hz[,waveform]`, `VOLUME 0..255` (QL/32-specific, default 128; not SMSQ/E-compatible) | yes | yes | yes, by ear: 5 waveforms, VOLUME 32/128/255, under attractor load |
+| `MUSIC WAV` (QL/32-specific streaming PCM) | yes | yes | yes: vacation, theme streamed, late=0, maxGap ~11.6 ms |
+| PT3, VTX (256 KiB/512 KiB limits), SQT players (QL/32-specific) | yes | yes (example modules audible and loop) | yes, by ear: PT3 Melancholy/TheDome/Peculiar/Walker, VTX z00m_unreal/Bosconia1/LyraII9, SQT Enigma/Zabreh |
+| AY core fixes: envelope rate, standard relative volume table, VTX R13=0xFF "not written", unipolar mix with DC blocker, ultrasonic-period averaging | yes | yes (`testAyUltrasonicTone`) | yes, by ear (listening report) |
+| YM2/3/3b/5/6 (incl. LHA) with SID, digi-drum, sync-buzzer | yes | yes (`testYmEffects`) | yes, by ear: ZYNAPS1, buzz, jess2, rapido1, ND-Loader, ND-Toxygene, VirtualEscape1/2, BITOFF2, led1 |
+| YM sinus-SID (approximation) and YM2 Mad Max drums | yes | synthetic only | **no** (no example files; Mad Max drum samples not embedded, muted unless `YmSong::setDrumBank`) |
+| YMT1/YMT2/MIX1 | no | no | no; stage 6 skipped by owner decision |
+| File `#ch AT`, `FPOS`, `FLEN`, `OPEN(.., "UPDATE")` (QL/32-specific) | yes (Linux, ESP32 adapters) | yes, against fake filesystems | **no** (CYD FFS/SD untouched) |
+| CYD memory phase A: `DIM` rejects arrays above the largest free heap block, task canvas sized to the task viewport, Wi-Fi disconnect powers the radio down | yes | yes (`runtime_tests`, `graphics_tests`, `esp32_network_tests`) | **no** (no CYD run after the change) |
+| PRINT slice charge (48 instructions per finished PRINT line), FabGL present coalescing, clear fixed-mode "mode N is unavailable" error, no-PSRAM mode preflight | yes | yes (`testPrintLinesAreChargedToSliceBudget`, `testVgaModeMemoryPreflight`, fixed-mode tests) | yes for fps/stress on `graphics_profile` and the `MODE 0,0` message on the 640x480 profile; see below |
+| Olimex 640x480/640x400 present telemetry and experiment envs | yes | `ql32_olimex_present_stats_tests` and others | yes, counters and pictures |
 
-`BEEP`/`VOLUME` are specified in
-[QL32-LANG-001](docs/specification/QL32-LANG-001.md) (updated on the sound
-branch), the Olimex [board README](boards/olimex_esp32_sbc_fabgl/README.md) and
-the language reference; they make no SMSQ/E compatibility claim.
+`BEEP`/`VOLUME` and the music formats are specified in
+[QL32-LANG-001](docs/specification/QL32-LANG-001.md), the Olimex
+[board README](boards/olimex_esp32_sbc_fabgl/README.md) and the language
+reference. SMSQ/E has its own `BEEP` with different parameters; QL/32's is
+QL/32-specific. The sound work used vitamin-caig/zxtune (LGPL) and
+arnaud-carre/StSound (MIT) as behavioral references only; no code was copied.
 
-### Olimex 640x480 VGA findings (branch `jan-pal-automatic-potato`)
+### Olimex VGA findings (2026-11-17 to 2026-11-21)
 
-Hardware-verified with the owner present; reports are on that branch
-(`git show jan-pal-automatic-potato:docs/test-results/<file>`):
+Hardware-verified with the owner present; reports are under
+`docs/test-results/olimex-*-2026-11-2*.md`. Summary:
 
-- Presentation is the cost on standard placement (full 640x480 present about
-  4.4 s; row composition is the larger share).
-- Split-core placement presents about 30x faster but has 14-16% late refills
-  idle, about 62-67% CPU-only and about 46% under the attractor, versus 0 on
-  standard placement; the picture flickers.
-- The per-frame byte budget and IRAM refill placement did not help.
-- Leading hypothesis: PSRAM data reads plus cross-core bus contention.
-  Proposed step 6: bulk/prefetch PSRAM reads into internal RAM; otherwise keep
-  standard placement for 640x480.
-- The standard `..._640x480_present_profile` is the stable board firmware for
-  this work. The PSRAM-DMA scanout stays parked/experimental; FabGL is the
-  qualified path. Details: [investigation notes](docs/plans/olimex-vga-640x480-dma-investigation.md).
+- Presentation, not scanout, is the cost on standard placement: full 640x480
+  present about 0.50 s (640x400 about 0.38 s) after the aligned encoder, cheaper
+  console compose and chunked row write; about 85-100 present requests per
+  30 s. Late refills: 0.
+- Rejected speed experiments (parked, diagnostic envs only): split-core
+  placement (VM on core 0; lost sync, 14-27% late refills, flicker), present
+  coalescing on the DMA path (no effect on VM requests), per-frame byte budget,
+  IRAM refill placement, small-batch and bulk-copy refill variants (no gain).
+  PSRAM store traffic was not the bottleneck (refill uses about 80% of core 1).
+- Standard placement (`..._640x480_present_profile`, `..._640x400_present_profile`)
+  is the supported 640x400/640x480 path. The custom PSRAM-DMA scanout stays
+  experimental; FabGL is the qualified path.
+- Mode matrix: FabGL MODE 0-2 (320x200/320x240/400x300, `graphics_profile` or
+  `_psram` envs) scan out from internal DMA RAM; MODE 2 needs a fresh heap
+  (after other tasks it fails gracefully with "allocation incomplete" and
+  rolls back). The no-PSRAM build refuses MODE 1/2 with a BASIC error. The
+  fixed-mode 640x400/640x480 builds accept only their own mode id.
+- Standard-profile "about 1 fps": an attractor alone presents about 3 times per
+  second with a 0.4 s full present, so about 1 fps is the measured baseline;
+  with the 4-task stress it drops to about 0.4 fps and the standard placement is
+  unfair under load. Not a regression. Workers like `examples/stress/*.bas`
+  never exit: `KILL` them or reset the board to regain the prompt.
+- Scheduler fairness: PRINT lines are charged 48 instructions to the VM slice
+  budget; MODE 0 attractor + PRINT 28.2 s -> 12.6 s per 20 frames, MODE 2 stress
+  mix fair. The standard 640x480/640x400 stress mix was re-run before the fix
+  (slow, no errors, late 0, heap flat); only the `MODE 0,0` message was re-checked
+  after it. Fixed-mode builds are unaffected by present coalescing.
+- Multi-task stress (3-4 min): no watchdog, brownout, out-of-memory or heap
+  drift; late refills 0.
+- amiga500-esp32 review ([note](docs/test-results/olimex-amiga500-esp32-review-2026-11-21.md),
+  read-only, MIT, SPI TFT not VGA): nothing to import. The only candidate is a
+  per-row dirty compare inside full presents, to be A/B tested with `PRESDIAG`
+  counters; it may cost more PSRAM bandwidth than it saves.
+- Details: [investigation notes](docs/plans/olimex-vga-640x480-dma-investigation.md).
 
 ## Olimex PlatformIO environments
 
@@ -180,7 +220,7 @@ checks passed; VGA visual confirmation is pending. See
 `docs/test-results/startup-window-lifetime-2026-11-15.md`.
 On 2026-11-20 the native Linux build (`cmake --preset linux`, then
 `cmake --build build/linux` and `ctest --test-dir build/linux`; there is no
-`linux` test preset) passed 82/82 on the sound branch after three stale tests
+`linux` test preset) passed 82/82 on the sound branch (83/83 on the integration branch) after three stale tests
 (scheduler raise ids, channel routing, hardware UART) were updated for
 program-owned channels and per-interpreter graphics session ids. `BEEP` and
 `VOLUME` are summarized in the state table above.
@@ -231,7 +271,6 @@ passed 64/64 on 2026-11-06.
   `ChannelMode::Update` in Linux, Arduino SD, ESP-IDF SD, and drive-router
   adapters. Status: built and host-tested only (`ql32_channel_tests`,
   `ql32_esp32_channels_tests`); not hardware-verified (CYD FFS/SD untouched).
-  Pre-existing failures unrelated to this: scheduler, channel binding, hardware tests.
 
 ## Milestone and hardware status
 
@@ -302,61 +341,48 @@ See [QL32-SRS-001](docs/specification/QL32-SRS-001.md),
 [QL32-PLAT-001](docs/specification/QL32-PLAT-001.md), and
 [QL32-NET-001](docs/specification/QL32-NET-001.md) for acceptance details.
 
-## Sound first cut: mixer and MUSIC WAV (2026-11)
+## Sound (2026-11)
 
 `music::Mixer` (include/ql32/music/mixer.hpp) sums a Music and an Effect slot;
-`MUSIC WAV "path"` streams PCM WAV (wav.hpp). Built (Linux, olimex psram env) and
-host-tested (ctest 82/82). NOT hardware-verified: SD reads now occur in the audio
-task, so check maxGap/late blocks and listen under VGA load before relying on it.
-Second cut in progress (owner order: PT3 + full VTX, then SQT, then YM): YM (YM2/3/3b/5/6 with SID, sinus-SID, digi-drum, sync-buzzer, LHA) is implemented and host-tested on examples/music/ym (25/26 decode; YMT1 unsupported) but NOT heard on hardware and effect timbre is unverified against a reference. PT3 (13 example modules, TurboSound unsupported) is implemented, host-tested (ctest 82/82; synthetic module, every example is audible and reaches its loop point) and built for olimex psram, but NOT heard on hardware. SQT (5 example modules, all audible and loop) and the raised VTX limits (256 KiB file / 512 KiB registers, ragged stream length tolerated) are implemented and host-tested but NOT heard on hardware. YM effects were audited against StSound (MIT, behavior only) and fixed on 2026-11-21 (YM5 slot decoding, SID rate, buzzer shape, YM2 Mad Max mapping; docs/plans/ym-effects-plan.md): host-tested only, effect listening pending. YM transcoding for SRAM-only boards is held until the owner confirms (needs a StorageService binary write handle); YM on PSRAM boards plays from RAM unpacked, hardware verification pending.
+`MUSIC WAV`, `MUSIC PLAY` (VTX, YM, PT3, SQT, detected from content), `MUSIC TEST`,
+`BEEP` and `VOLUME` run on the Olimex I2S DAC (GPIO25); all are QL/32-specific.
+Status per format is in the state table above and in
+[the listening report](docs/test-results/olimex-music-formats-listening-2026-11-21.md).
+Limits: PT3 has no TurboSound; VTX stereo is mixed to mono; YM songs are held
+unpacked in RAM (PSRAM boards only; transcoding for SRAM-only boards waits on a
+StorageService binary write handle and owner approval); YMT1/YMT2/MIX1 unsupported.
+YM effects were audited against StSound and fixed ([plan](docs/plans/ym-effects-plan.md)):
+stages 1-5 done, stage 6 (YMT/MIX) skipped by user decision. Heard on hardware:
+SID, digi-drums (YM5/YM6) and sync-buzzer. **Unverified:** sinus-SID (StSound has no
+equivalent, 16-step approximation kept) and YM2 Mad Max drums (no sample data, no
+example file). Serial under music-only load: late=0, maxGap about 11.6 ms; late/maxGap
+under VGA load were not logged (by ear only: attractor plus VTX clean).
 
 ## Next work
 
-### Olimex VGA / sound (2026-11-20)
-
-The 2026-11-17 DMA investigation notes and the 2026-11-20 present-telemetry
-findings are in
-[`docs/plans/olimex-vga-640x480-dma-investigation.md`](docs/plans/olimex-vga-640x480-dma-investigation.md).
-Summary: keep the standard placement for 640x480; the split-core path is
-faster but misses refill deadlines. Next step is step 6 (bulk/prefetch PSRAM
-reads into internal RAM). MUSIC and `BEEP`/`VOLUME` sound output works on the
-Olimex (sound branch, unmerged; the reconciliation with any uncommitted music
-patch in the main checkout is open). DMA 640x480 sound and long-run playback
-are unverified. Merge decisions for the three local branches are pending.
-
-### Hardware session update (2026-11-21): VGA speed steps 5-7 and final mode matrix
-
-Split-core (VM on core 0) and present coalescing were measured and parked: the split
-placement lost sync (26.7% late refills at 640x480) and coalescing did not change VM
-requests. The aligned encoder (28 us/row refill), cheaper console compose and a chunked
-present row write are now unconditional in all PSRAM-DMA envs; PSRAM store traffic was not
-the bottleneck (refill uses ~80% of core 1). Standard placement is the supported
-640x400/640x480 path: 640x480 about 100 present requests/30 s, 0.50 s full present;
-640x400 about 104, 0.38 s; zero late refills, stable. FabGL modes 0-2 (`graphics_profile`)
-scan out from internal DMA RAM; MODE 2 needs a fresh heap. The no-PSRAM profile now refuses
-MODE 1/2 with a BASIC error instead of abort(). Multi-task stress (attractor+PRINT+churn+loop)
-ran without errors or heap drift; the standard placement is unfair under load and FabGL
-modes show ~1 fps for the attractor only when a PRINT task is running (console presents
-dominate). Next: coalesce console presents on the FabGL presenter. See
-`docs/test-results/olimex-final-mode-matrix-stress-2026-11-21.md`, the present-traffic,
-split-vm-core0, present-coalescing and encoder-isolation reports.
-
-
-1. **Merge and reconcile branches:** `jan-pal-olimex-sound-audit` and
-   `jan-pal-automatic-potato` are unmerged and unpushed. Reconcile the sound
-   branch with any uncommitted music patch in the main checkout, merge, re-run
-   ctest, then push when the owner approves.
-2. **Olimex 640x480 step 6:** test bulk/prefetch PSRAM reads into internal RAM
-   for the refill path; otherwise keep standard placement for 640x480. See
-   the investigation notes linked above.
-3. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The Olimex
+1. **Review and push:** the integration branch `jan-pal-branch-integration` is
+   local only. Reconcile the owner's uncommitted music patch in the main
+   checkout with it by hand, then push when the owner approves. Re-run the
+   Linux ctest (83/83) after any reconciliation.
+2. **Hardware verification of host-only work:** flash the CYD
+   (`esp32_2432s028_spiffs`) and test file `AT`/`FPOS`/`FLEN`/`UPDATE` on FFS and
+   SD, and the CYD memory phase A changes (`DIM` preflight, task canvas size,
+   Wi-Fi power-down) including heap checkpoints. Verify sinus-SID and YM2 Mad Max
+   drums only if suitable files exist; log late/maxGap during VGA load.
+3. **Olimex VGA:** reflash the board to the standard
+   `..._640x480_present_profile` and confirm the picture, then re-run the
+   640x480/640x400 stress mix with the PRINT slice charge. Optional experiments:
+   per-row dirty compare in full presents (see the amiga500 review), console
+   present coalescing for the standard placement. Keep standard placement for
+   640x400/640x480; DMA 640x480 sound and long-run playback are unverified.
+4. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The Olimex
    serial port was accessible with host-device permissions on 2026-11-16; the
    latest high-resolution allocation guard passed serial rollback checks and
    the owner confirmed stable VGA recovery. The latest
    Olimex QIMG, TILE, and MENABLE checks passed on 2026-11-15; LILYGO was not
    tested in this round. Tenstar Wi-Fi remains unverified. Other not-run items
    are recorded in the board reports.
-4. **Language, UI, and image candidates:** define scope before implementing
+5. **Language, UI, and image candidates:** define scope before implementing
    string splitting, indirect procedure calls, network channels, or cascading
    menus. `LOADIMAGE` now reads QIMG v2 with an embedded 16-color RGB palette;
    v1 compatibility is not required before release. The Python debugger has an
@@ -364,12 +390,12 @@ split-vm-core0, present-coalescing and encoder-isolation reports.
    QIMG v2 passed on Olimex; launch the desktop GUI with its dependencies
    installed and exercise image conversion. See
    `docs/plans/bitmap-format-study.md`.
-5. **System profile accuracy:** build ID currently reports `unknown`; validate
+6. **System profile accuracy:** build ID currently reports `unknown`; validate
    capability flags against exact board builds, including LilyGo.
-6. **Shared display-buffer design:** define task ownership, overlap, visibility,
+7. **Shared display-buffer design:** define task ownership, overlap, visibility,
    and mode-change semantics before implementation. Retained per-session
    windows remain the default.
-7. **Parked graphics work:** the custom PSRAM-DMA scanout loses sync on some
+8. **Parked graphics work:** the custom PSRAM-DMA scanout loses sync on some
    high-transition patterns; keep FabGL as the qualified path. The optimized
    framebuffer primitives are not yet the backing store for BASIC drawing,
    and the full Phase 6 benchmark matrix remains open. The `GUPDATE SKIP,1`
@@ -424,10 +450,3 @@ status (`git branch -vv`, `git worktree list`, and `git status` in the main
 checkout for the uncommitted music patch), and continue the first unfinished
 item under “Next work”. Update this file when that item or milestone state
 changes.
-
-## 2026-11-21 follow-up: PRINT starvation fix
-
-- PRINT lines are charged 48 instructions to the VM slice budget (`src/vm/interpreter.cpp`); MODE 0 attractor + PRINT 28.2 s -> 12.6 s per 20 frames, MODE 2 + 3 workers fair (see `docs/test-results/olimex-final-mode-matrix-stress-2026-11-21.md`).
-- FabGL Olimex builds enable `WindowedService` present coalescing; `COALDIAG`/`COALRATE` exist in `graphics_profile`.
-- Fixed-mode DMA envs now give a clear "mode N is unavailable" error instead of "unsupported Olimex DMA mode id".
-- OPEN: the board is NOT on the standard `present_profile` (last flashed: `graphics_profile`; serial went silent). Reflash it, confirm the picture, check `MODE 0,0` text, and re-run the 640x480/640x400 stress mix.
