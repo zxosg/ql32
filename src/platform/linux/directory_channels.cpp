@@ -29,6 +29,10 @@ bool isWithin(const std::filesystem::path& root,
     return true;
 }
 
+bool canRead(runtime::ChannelMode mode) {
+    return mode == runtime::ChannelMode::Read || mode == runtime::ChannelMode::Update;
+}
+
 } // namespace
 
 DirectoryChannels::DirectoryChannels(std::filesystem::path root) {
@@ -37,6 +41,14 @@ DirectoryChannels::DirectoryChannels(std::filesystem::path root) {
     if (error || !std::filesystem::is_directory(root_))
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "channel root must be an existing directory");
+}
+
+void DirectoryChannels::beginWrite(OpenChannel& opened) {
+    if (opened.mode != runtime::ChannelMode::Update) return;
+    // A shared read/write stream needs a positioning call between a read and a write.
+    opened.file.clear();
+    const auto current = opened.file.tellg();
+    if (current >= 0) opened.file.seekp(current);
 }
 
 std::filesystem::path DirectoryChannels::resolve(const std::string& path,
@@ -53,7 +65,8 @@ std::filesystem::path DirectoryChannels::resolve(const std::string& path,
 
     const auto candidate = root_ / relative;
     std::error_code error;
-    const auto resolved = mode == runtime::ChannelMode::Read
+    const auto resolved = mode == runtime::ChannelMode::Read ||
+                          mode == runtime::ChannelMode::Update
         ? std::filesystem::canonical(candidate, error)
         : std::filesystem::weakly_canonical(candidate, error);
     if (error) fail(candidate, error);
@@ -72,9 +85,10 @@ runtime::ChannelId DirectoryChannels::open(runtime::SessionId session,
     case runtime::ChannelMode::Read: flags |= std::ios::in; break;
     case runtime::ChannelMode::Write: flags |= std::ios::out | std::ios::trunc; break;
     case runtime::ChannelMode::Append: flags |= std::ios::out | std::ios::app; break;
+    case runtime::ChannelMode::Update: flags |= std::ios::in | std::ios::out; break;
     }
 
-    OpenChannel opened{session, mode, {}};
+    OpenChannel opened{session, mode, resolved, {}};
     opened.file.open(resolved, flags);
     if (!opened.file) {
         std::error_code error(errno, std::generic_category());
@@ -101,7 +115,7 @@ std::optional<std::string> DirectoryChannels::readLine(runtime::SessionId sessio
                                                        runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for reading");
     std::string line;
@@ -115,7 +129,7 @@ std::string DirectoryChannels::readBytes(runtime::SessionId session,
                                          std::size_t count) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     std::string bytes(count, '\0');
     opened.file.read(bytes.data(), static_cast<std::streamsize>(count));
@@ -131,6 +145,7 @@ void DirectoryChannels::writeBytes(runtime::SessionId session,
     OpenChannel& opened = owned(session, channel);
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for writing");
+    beginWrite(opened);
     opened.file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     opened.file.flush();
     if (!opened.file) throw ServiceError(ServiceErrorCode::IoError, "channel write failed");
@@ -148,14 +163,41 @@ void DirectoryChannels::seek(runtime::SessionId session, runtime::ChannelId chan
     opened.file.clear();
     const auto position = static_cast<std::streamoff>(offset);
     if (opened.mode == runtime::ChannelMode::Read) opened.file.seekg(position);
-    else opened.file.seekp(position);
+    else if (opened.mode == runtime::ChannelMode::Update) {
+        opened.file.seekg(position);
+        opened.file.seekp(position);
+    } else opened.file.seekp(position);
     if (!opened.file) throw ServiceError(ServiceErrorCode::IoError, "channel seek failed");
+}
+
+std::uint64_t DirectoryChannels::position(runtime::SessionId session,
+                                          runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Append)
+        throw ServiceError(ServiceErrorCode::InvalidHandle,
+                           "append channels do not report a position");
+    opened.file.clear();
+    const auto current = canRead(opened.mode) ? opened.file.tellg() : opened.file.tellp();
+    if (current < 0) throw ServiceError(ServiceErrorCode::IoError, "channel position failed");
+    return static_cast<std::uint64_t>(current);
+}
+
+std::uint64_t DirectoryChannels::length(runtime::SessionId session,
+                                        runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    opened.file.flush();
+    std::error_code error;
+    const auto size = std::filesystem::file_size(opened.path, error);
+    if (error) throw ServiceError(ServiceErrorCode::IoError, "channel length failed");
+    return static_cast<std::uint64_t>(size);
 }
 
 bool DirectoryChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for reading");
     const auto next = opened.file.peek();
@@ -171,6 +213,7 @@ void DirectoryChannels::write(runtime::SessionId session, runtime::ChannelId cha
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for writing");
+    beginWrite(opened);
     opened.file.write(text.data(), static_cast<std::streamsize>(text.size()));
     opened.file.flush();
     if (!opened.file)

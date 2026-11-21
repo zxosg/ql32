@@ -47,7 +47,8 @@ enum class ServiceErrorCode {
     IoError,
     Unavailable,
     InvalidHandle,
-    ResourceBusy
+    ResourceBusy,
+    OutOfRange
 };
 
 inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
@@ -59,6 +60,7 @@ inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
     case ServiceErrorCode::Unavailable: return ErrorCode::ServiceUnavailable;
     case ServiceErrorCode::InvalidHandle: return ErrorCode::InvalidHandle;
     case ServiceErrorCode::ResourceBusy: return ErrorCode::ResourceBusy;
+    case ServiceErrorCode::OutOfRange: return ErrorCode::OutOfRange;
     }
     return ErrorCode::GeneralFailure;
 }

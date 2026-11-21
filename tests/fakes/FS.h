@@ -23,6 +23,7 @@ public:
     explicit operator bool() const { return valid_; }
     bool isDirectory() const { return directory_; }
     std::size_t size() const;
+    std::size_t position() const { return cursor_; }
     int available() const;
     int read();
     std::size_t read(std::uint8_t* buffer, std::size_t length);

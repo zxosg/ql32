@@ -20,8 +20,9 @@ ChannelMode parseMode(std::string mode) {
     if (mode == "READ") return ChannelMode::Read;
     if (mode == "WRITE") return ChannelMode::Write;
     if (mode == "APPEND") return ChannelMode::Append;
+    if (mode == "UPDATE") return ChannelMode::Update;
     throw ServiceError(ServiceErrorCode::InvalidPath,
-                       "OPEN mode must be READ, WRITE, or APPEND");
+                       "OPEN mode must be READ, WRITE, APPEND, or UPDATE");
 }
 
 } // namespace
@@ -270,6 +271,18 @@ void ChannelRegistry::seek(SessionId session, ChannelId channel,
     const Endpoint opened = endpoint(session, channel);
     if (opened.type != ChannelType::File) unsupported("seeking");
     files_->seek(session, opened.backend, offset);
+}
+
+std::uint64_t ChannelRegistry::position(SessionId session, ChannelId channel) {
+    const Endpoint opened = endpoint(session, channel);
+    if (opened.type != ChannelType::File) unsupported("position queries");
+    return files_->position(session, opened.backend);
+}
+
+std::uint64_t ChannelRegistry::length(SessionId session, ChannelId channel) {
+    const Endpoint opened = endpoint(session, channel);
+    if (opened.type != ChannelType::File) unsupported("length queries");
+    return files_->length(session, opened.backend);
 }
 
 bool ChannelRegistry::atEnd(SessionId session, ChannelId channel) {

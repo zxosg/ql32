@@ -1023,6 +1023,25 @@ EOF. Configured serial hardware channels support asynchronous line reads as
 specified in [QL32-HW-001](QL32-HW-001.md); the legacy zero-argument serial
 output endpoint and null channels do not support input.
 
+Random access uses `#channel AT offset` (QL/32-specific; no SMSQ/E
+compatibility is claimed). `offset` is a zero-based absolute byte position,
+a nonnegative integer from 0 through the file length. `FPOS(channel)` returns
+the current byte position and `FLEN(channel)` returns the file length. Relative
+and from-end positioning use arithmetic: `#c AT FPOS(c) + 10`,
+`#c AT FLEN(c) - 4`. Seeking exactly to the length leaves the channel at EOF;
+`AT` clears EOF state. An offset beyond the length raises error 5 (no
+clamping); a non-integer or negative offset raises error 5 and a non-numeric
+operand raises error 4. A closed or invalid handle raises error 14. Append
+channels and non-file channels cannot seek or report position (append channels
+raise error 14, other endpoints error 13). `FPOS`/`FLEN` on a closed handle
+raise error 14.
+
+`OPEN(path, "UPDATE")` opens an existing file for reading and writing without
+truncation (error 10 if missing; it never creates a file). It starts at
+position 0 and shares one position for reads and writes. A write may overwrite
+existing bytes or extend the file at its end; because `AT` cannot move past the
+length, the file never has a gap. `READ`, `WRITE`, and `APPEND` are unchanged.
+
 Exact binary transfers use channel-context forms:
 
 ```basic
@@ -1034,8 +1053,8 @@ Exact binary transfers use channel-context forms:
 that many bytes from the start of the string buffer. Counts are limited to
 8192 bytes per operation. Linux directory and ESP32 SD file adapters support
 these operations. Strings preserve NUL and arbitrary byte sequences for binary
-I/O, but text operations such as slicing and printing assume UTF-8. The BASIC
-syntax for seeking within a channel is not specified here.
+I/O, but text operations such as slicing and printing assume UTF-8. Seeking
+within a channel is specified above (`#channel AT offset`).
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
 

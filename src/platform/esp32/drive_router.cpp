@@ -135,6 +135,18 @@ void DriveRouterChannels::seek(runtime::SessionId session, runtime::ChannelId ch
     routed.service->seek(session, routed.channel, offset);
 }
 
+std::uint64_t DriveRouterChannels::position(runtime::SessionId session,
+        runtime::ChannelId channel) {
+    const auto routed = lookup(session, channel);
+    return routed.service->position(session, routed.channel);
+}
+
+std::uint64_t DriveRouterChannels::length(runtime::SessionId session,
+        runtime::ChannelId channel) {
+    const auto routed = lookup(session, channel);
+    return routed.service->length(session, routed.channel);
+}
+
 bool DriveRouterChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     const auto routed = lookup(session, channel);
     return routed.service->atEnd(session, routed.channel);

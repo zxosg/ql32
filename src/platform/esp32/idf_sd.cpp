@@ -26,6 +26,10 @@ namespace {
 using runtime::ServiceError;
 using runtime::ServiceErrorCode;
 
+bool canRead(runtime::ChannelMode mode) {
+    return mode == runtime::ChannelMode::Read || mode == runtime::ChannelMode::Update;
+}
+
 std::string errorText(const char* operation) {
     return std::string(operation) + ": " + std::strerror(errno);
 }
@@ -428,9 +432,11 @@ runtime::ChannelId IdfSdChannels::open(runtime::SessionId session, const std::st
     int flags = O_RDONLY;
     if (mode == runtime::ChannelMode::Write) flags = O_WRONLY | O_CREAT | O_TRUNC;
     if (mode == runtime::ChannelMode::Append) flags = O_WRONLY | O_CREAT | O_APPEND;
+    if (mode == runtime::ChannelMode::Update) flags = O_RDWR;
     const int descriptor = ::open(fullPath.c_str(), flags, 0666);
     if (descriptor < 0) {
-        if (errno == ENOENT && mode == runtime::ChannelMode::Read)
+        if (errno == ENOENT && (mode == runtime::ChannelMode::Read ||
+                                mode == runtime::ChannelMode::Update))
             throw ServiceError(ServiceErrorCode::NotFound, "channel: cannot open file: " + path);
         throw ServiceError(ServiceErrorCode::IoError, errorText("channel open"));
     }
@@ -454,7 +460,7 @@ std::optional<std::string> IdfSdChannels::readLine(runtime::SessionId session,
                                                     runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     std::string line;
     char character = 0;
@@ -471,7 +477,7 @@ std::string IdfSdChannels::readBytes(runtime::SessionId session, runtime::Channe
                                      std::size_t count) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     std::string bytes(count, '\0');
     std::size_t offset = 0;
@@ -515,10 +521,30 @@ void IdfSdChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
         throw ServiceError(ServiceErrorCode::IoError, errorText("channel seek"));
 }
 
+std::uint64_t IdfSdChannels::position(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Append)
+        throw ServiceError(ServiceErrorCode::InvalidHandle,
+                           "append channels do not report a position");
+    const auto current = ::lseek(opened.descriptor, 0, SEEK_CUR);
+    if (current < 0) throw ServiceError(ServiceErrorCode::IoError, errorText("channel position"));
+    return static_cast<std::uint64_t>(current);
+}
+
+std::uint64_t IdfSdChannels::length(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    struct stat status {};
+    if (::fstat(opened.descriptor, &status) != 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("channel length"));
+    return static_cast<std::uint64_t>(status.st_size);
+}
+
 bool IdfSdChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     const auto current = ::lseek(opened.descriptor, 0, SEEK_CUR);
     const auto end = ::lseek(opened.descriptor, 0, SEEK_END);

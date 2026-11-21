@@ -24,7 +24,7 @@ inline constexpr std::size_t maximumHardwareTransferBytes = 4096;
 using SessionId = std::uint64_t;
 using ChannelId = std::uint64_t;
 
-enum class ChannelMode { Read, Write, Append };
+enum class ChannelMode { Read, Write, Append, Update };
 
 enum class ChannelType { Console, Window, File, Serial, Network, Null, Hardware, Touch };
 
@@ -85,8 +85,9 @@ public:
         if (mode == "READ") fileMode = ChannelMode::Read;
         else if (mode == "WRITE") fileMode = ChannelMode::Write;
         else if (mode == "APPEND") fileMode = ChannelMode::Append;
+        else if (mode == "UPDATE") fileMode = ChannelMode::Update;
         else throw ServiceError(ServiceErrorCode::InvalidPath,
-                                "OPEN mode must be READ, WRITE, or APPEND");
+                                "OPEN mode must be READ, WRITE, APPEND, or UPDATE");
         return open(session, parameters[0], fileMode);
     }
     virtual ChannelId openTypedDevice(SessionId session, ChannelDevice device,
@@ -124,13 +125,20 @@ public:
     virtual bool isHardwareChannel(SessionId, ChannelId) const { return false; }
     // Binary transfers preserve every byte, including NUL and invalid UTF-8.
     // Seek positions are zero-based absolute offsets and are supported only
-    // by seekable endpoints.
+    // by seekable endpoints. position() and length() report the current
+    // offset and total size in bytes of a file endpoint.
     virtual std::string readBytes(SessionId session, ChannelId channel,
                                   std::size_t count) = 0;
     virtual void writeBytes(SessionId session, ChannelId channel,
                              std::string_view bytes) = 0;
     virtual void seek(SessionId session, ChannelId channel,
                       std::uint64_t offset) = 0;
+    virtual std::uint64_t position(SessionId, ChannelId) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "channel position is unavailable");
+    }
+    virtual std::uint64_t length(SessionId, ChannelId) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "channel length is unavailable");
+    }
     virtual bool atEnd(SessionId session, ChannelId channel) = 0;
     virtual void write(SessionId session, ChannelId channel,
                        const std::string& text) = 0;
@@ -207,6 +215,8 @@ public:
     void writeBytes(SessionId session, ChannelId channel,
                     std::string_view bytes) override;
     void seek(SessionId session, ChannelId channel, std::uint64_t offset) override;
+    std::uint64_t position(SessionId session, ChannelId channel) override;
+    std::uint64_t length(SessionId session, ChannelId channel) override;
     bool atEnd(SessionId session, ChannelId channel) override;
     void write(SessionId session, ChannelId channel,
                const std::string& text) override;

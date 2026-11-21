@@ -2960,6 +2960,16 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } catch (const runtime::ServiceError& error) {
                         pushValue(-static_cast<double>(error.languageCode()));
                     }
+                } else if (instruction.name == "FPOS" || instruction.name == "FLEN") {
+                    if (!channels_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "channel service unavailable");
+                    const auto fileChannel = resolveChannel(channelArgument(0));
+                    if (fileChannel <= 1)
+                        runtimeError(instruction, "selected channel is not a file");
+                    pushValue(static_cast<double>(instruction.name == "FPOS"
+                        ? channels_->position(session_id_, fileChannel)
+                        : channels_->length(session_id_, fileChannel)));
                 } else if (instruction.name == "READ$") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -3689,11 +3699,16 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             const double offset = numeric(pop(), instruction);
             const double channel = numeric(pop(), instruction);
             if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
-                channel > 9007199254740991.0 || !std::isfinite(offset) ||
-                std::trunc(offset) != offset || offset < 0 || offset > 9007199254740991.0)
-                runtimeError(instruction, "channel and offset must be nonnegative integers");
-            channels_->seek(session_id_, resolveChannel(static_cast<runtime::ChannelId>(channel)),
-                            static_cast<std::uint64_t>(offset));
+                channel > 9007199254740991.0)
+                runtimeError(instruction, "invalid channel handle");
+            if (!std::isfinite(offset) || std::trunc(offset) != offset || offset < 0 ||
+                offset > 9007199254740991.0)
+                runtimeError(instruction, "channel offset out of range: must be a nonnegative integer");
+            const auto target = resolveChannel(static_cast<runtime::ChannelId>(channel));
+            if (static_cast<std::uint64_t>(offset) > channels_->length(session_id_, target))
+                throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfRange,
+                                            "channel offset is beyond the end of the file");
+            channels_->seek(session_id_, target, static_cast<std::uint64_t>(offset));
             break;
         }
         case Op::ChannelRead: {
