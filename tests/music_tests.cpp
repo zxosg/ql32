@@ -163,6 +163,40 @@ void testVtxParserAndRenderer() {
     require(changed, "AY tone generator produced a constant signal");
 }
 
+void testAyEnvelopeRate() {
+    ql32::music::Ay38912 ay;
+    ay.reset(1773400, 22050);
+    std::array<std::uint8_t, 14> registers{};
+    registers[7] = 0x3f;
+    registers[8] = 0x10;
+    registers[11] = 100;
+    registers[13] = 8;
+    ay.writeRegisters(registers, true);
+    // Datasheet: one 16-step ramp lasts 256 * period / clock = 14.4 ms = ~318 samples.
+    std::size_t zero = 0;
+    std::int16_t first = 0, restartedPeak = 0;
+    for (std::size_t i = 0; i < 700; ++i) {
+        const auto sample = ay.renderSample();
+        if (i == 0) first = sample;
+        if (zero == 0 && sample == 0) zero = i;
+        if (i > 340) restartedPeak = std::max(restartedPeak, sample);
+    }
+    require(zero > 270 && zero < 340, "AY envelope ramp time is wrong");
+    require(first > 0 && restartedPeak == first, "AY sawtooth envelope does not restart at full level");
+
+    // Every one of the 16 volume steps must be distinct and at most about 5 dB apart.
+    std::int16_t previous = 0;
+    for (std::uint8_t volume = 1; volume < 16; ++volume) {
+        registers[8] = volume;
+        registers[13] = 0;
+        ay.writeRegisters(registers);
+        const auto level = ay.renderSample();
+        require(level > previous, "AY volume steps are not strictly increasing");
+        if (volume > 1) require(level * 10 < previous * 18, "AY volume step is coarser than 5 dB");
+        previous = level;
+    }
+}
+
 void testMusicBasicCommands() {
     auto music = std::make_shared<FakeMusic>();
     ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 42, {}, {}, {}, {}, music);
@@ -457,7 +491,7 @@ void testYm() {
     // Digi-drum 1: control 0x50 = drum effect on voice A.
     std::uint8_t drumRegs[3] = {0x50, 0xe0, 1};
     const auto drumTone = render(syntheticYm6(10, drumRegs, true));
-    require(drumTone != plainTone && drumTone[0] == 127 * 128 / 3,
+    require(drumTone != plainTone && drumTone[0] == 127 * 128 / 2,
             "digi-drum did not replace the voice");
 
     bool rejected = false;
@@ -643,6 +677,7 @@ void testSqtRejectsGarbage() {
 int main() {
     try {
         testVtxParserAndRenderer();
+        testAyEnvelopeRate();
         testMusicBasicCommands();
         testDacFormatAndTone();
         testWaveforms();

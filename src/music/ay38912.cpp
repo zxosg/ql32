@@ -5,9 +5,16 @@
 
 namespace ql32::music {
 namespace {
+// The chip is evaluated at kOversample times the output rate and box-filtered, which
+// removes most of the aliasing of high tone/noise rates at the 22.05 kHz output rate.
+constexpr std::uint32_t kOversample = 4;
+// Relative AY-3-8910 DAC levels (about 3 dB per step) from the commonly published
+// measurements, scaled to 32767. The previous table was far too loud at mid levels and
+// saturated levels 13..15. Behaviour cross-checked against zxtune's AYM device
+// (vitamin-caig/zxtune, LGPL-3.0; used as a behavioural reference only, no code copied).
 constexpr std::array<std::int16_t, 16> Amplitude{{
-    0, 836, 1212, 1773, 2619, 3875, 5397, 7796,
-    11355, 16616, 23156, 27755, 31132, 32767, 32767, 32767
+    0, 324, 475, 691, 1006, 1491, 2113, 3519,
+    4148, 6717, 9575, 12216, 16338, 20819, 26400, 32767
 }};
 std::uint32_t phaseStep(std::uint32_t clock, std::uint32_t sampleRate,
                         std::uint32_t divider, std::uint32_t period) noexcept {
@@ -22,7 +29,7 @@ std::uint32_t phaseStep(std::uint32_t clock, std::uint32_t sampleRate,
 
 void Ay38912::reset(std::uint32_t clockHz, std::uint32_t sampleRate) noexcept {
     clockHz_ = clockHz ? clockHz : 1773400;
-    sampleRate_ = sampleRate ? sampleRate : 22050;
+    sampleRate_ = (sampleRate ? sampleRate : 22050) * kOversample;
     registers_.fill(0);
     levelOverride_.fill(-1);
     direct_.fill(false);
@@ -46,10 +53,12 @@ void Ay38912::updateSteps() noexcept {
         toneStep_[channel] = phaseStep(clockHz_, sampleRate_, 16, period);
     }
     const std::uint32_t noisePeriod = std::max<std::uint32_t>(registers_[6] & 0x1f, 1);
-    noiseStep_ = phaseStep(clockHz_, sampleRate_, 16, noisePeriod);
+    // Noise and envelope events fire on phase bit 31 (half a phase cycle), so the
+    // divider is doubled: LFSR shift = clock/(16*NP), envelope step = clock/(16*EP).
+    noiseStep_ = phaseStep(clockHz_, sampleRate_, 32, noisePeriod);
     const std::uint32_t envelopePeriod =
         std::max<std::uint32_t>(registers_[11] | (registers_[12] << 8), 1);
-    envelopeRateStep_ = phaseStep(clockHz_, sampleRate_, 256, envelopePeriod);
+    envelopeRateStep_ = phaseStep(clockHz_, sampleRate_, 32, envelopePeriod);
 }
 
 void Ay38912::restartEnvelope(std::uint8_t shape) noexcept {
@@ -70,6 +79,12 @@ void Ay38912::writeRegisters(const std::array<std::uint8_t, 14>& registers,
 }
 
 std::int16_t Ay38912::renderSample() noexcept {
+    std::int32_t sum = 0;
+    for (std::uint32_t i = 0; i < kOversample; ++i) sum += renderTick();
+    return static_cast<std::int16_t>(sum / static_cast<std::int32_t>(kOversample));
+}
+
+std::int16_t Ay38912::renderTick() noexcept {
     noisePhase_ += noiseStep_;
     if ((noisePhase_ & 0x80000000u) != 0) {
         noisePhase_ &= 0x7fffffffu;
@@ -93,6 +108,7 @@ std::int16_t Ay38912::renderSample() noexcept {
         } else {
             if ((envelopeShape_ & 0x02) != 0) envelopeShape_ ^= 0x04;
             envelopeStep_ = 0;
+            envelopeLevel_ = (envelopeShape_ & 0x04) != 0 ? 0 : 15;
         }
     }
 
@@ -116,7 +132,8 @@ std::int16_t Ay38912::renderSample() noexcept {
         if (amplitude != 0)
             mixed += (tone && noise ? amplitude : 0) - amplitude / 2;
     }
-    return static_cast<std::int16_t>(mixed / 3);
+    // Three full voices peak at about +-24.5k, so the mix cannot clip.
+    return static_cast<std::int16_t>(mixed / 2);
 }
 
 } // namespace ql32::music

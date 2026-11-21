@@ -23,6 +23,7 @@ public:
 private:
     void restartEnvelope(std::uint8_t shape) noexcept;
     void updateSteps() noexcept;
+    std::int16_t renderTick() noexcept;
     std::uint32_t clockHz_ = 1773400;
     std::uint32_t sampleRate_ = 22050;
     std::array<std::uint8_t, 14> registers_{};
