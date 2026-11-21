@@ -39,7 +39,7 @@ constexpr PixelFormat kFramebufferFormat = PixelFormat::Rgb222;
 #endif
 constexpr std::size_t kPsramStressBytes = 64 * 1024;
 constexpr int kRefillTaskStackBytes = 4096;
-constexpr int kStressTaskStackBytes = 3072;
+constexpr int kStressTaskStackBytes = 4096;
 #if defined(QL32_OLIMEX_DMA_DISPLAY_DIAGNOSTIC) || \
     defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_TEST_PIXEL_EDGES) || \
@@ -130,11 +130,25 @@ FramebufferView* PsramDmaScanout::beginFrameUpdate(PixelRect damage) noexcept {
     // The framebuffer is the live scanout surface; any number of producers
     // may write it. Neighbouring packed-4 nibbles are protected by
     // storePackedNibble, and the refill worker never takes a lock.
-    return framebufferSlots_[0].valid() ? &framebufferSlots_[0] : nullptr;
+    activeWriters_.fetch_add(1, std::memory_order_acq_rel);
+    if (stopRequested_.load(std::memory_order_acquire) ||
+        !framebufferSlots_[0].valid()) {
+        leaveWriter();
+        return nullptr;
+    }
+    return &framebufferSlots_[0];
+}
+
+void PsramDmaScanout::leaveWriter() noexcept {
+    auto count = activeWriters_.load(std::memory_order_acquire);
+    while (count != 0 && !activeWriters_.compare_exchange_weak(
+               count, count - 1, std::memory_order_acq_rel)) {}
 }
 
 bool PsramDmaScanout::publishFrameUpdate(FramebufferView* frame) noexcept {
-    return frame && frame->pixels == framebufferSlots_[0].pixels;
+    if (!frame || frame->pixels != framebufferSlots_[0].pixels) return false;
+    leaveWriter();
+    return true;
 }
 
 bool PsramDmaScanout::publishFrameUpdate(FramebufferView* frame,
@@ -142,7 +156,9 @@ bool PsramDmaScanout::publishFrameUpdate(FramebufferView* frame,
     return publishFrameUpdate(frame);
 }
 
-void PsramDmaScanout::cancelFrameUpdate(FramebufferView*) noexcept {}
+void PsramDmaScanout::cancelFrameUpdate(FramebufferView* frame) noexcept {
+    if (frame) leaveWriter();
+}
 #else
     portENTER_CRITICAL(&frameMux_);
     if (stagingFrameIndex_ >= 0) {
@@ -428,6 +444,23 @@ bool PsramDmaScanout::end() {
 }
 
 void PsramDmaScanout::releaseAllocatedBuffers() noexcept {
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+    // Let producers that already hold the framebuffer finish; new ones are
+    // refused once stop is requested. If one never returns, leak the 60 KB
+    // rather than free memory it may still write.
+    bool leakFramebuffer = false;
+    for (int waited = 0; activeWriters_.load(std::memory_order_acquire) != 0; ++waited) {
+        if (waited >= 200) {
+            leakFramebuffer = true;
+            Serial.println("PSRAM VGA scanout: framebuffer writer still active; framebuffer kept allocated");
+            break;
+        }
+        vTaskDelay(1);
+    }
+    if (leakFramebuffer) {
+        framebufferSlots_[0] = {};
+    }
+#endif
     for (auto& slot : framebufferSlots_) {
         heap_caps_free(slot.pixels);
         slot = {};
@@ -720,6 +753,52 @@ void QL32_REFILL_HOT PsramDmaScanout::refillWorker(void* argument) {
     vTaskSuspend(nullptr);
 }
 
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+// Diagnostic single-framebuffer producer, run from the PSRAM stress task so it
+// shares its stop handshake. Patterns: 1 checkerboard, 2 gradient,
+// 3 random pixels, 4 continuous full-screen fill, 5 vertical scroll.
+void PsramDmaScanout::stressWritePattern() {
+#if defined(QL32_SF_STRESS_PATTERN)
+    auto* fb = beginFrameUpdate();
+    if (!fb) return;
+    static std::uint32_t phase = 0;
+    static std::uint32_t rng = 0x12345678u;
+    ++phase;
+#if QL32_SF_STRESS_PATTERN == 1
+    for (std::uint32_t y = 0; y < fb->height; ++y)
+        std::memset(fb->pixels + y * fb->stride, ((y + phase) & 1u) ? 0x40 : 0x04,
+                    fb->stride);
+#elif QL32_SF_STRESS_PATTERN == 2
+    {
+        std::uint8_t row[200];
+        for (std::uint32_t i = 0; i < fb->stride; ++i) {
+            const auto x = (i * 2u + phase) % fb->width;
+            row[i] = static_cast<std::uint8_t>(((x * 16u / fb->width) << 4) |
+                                               (((x + 1u) * 16u / fb->width) & 0x0Fu));
+        }
+        for (std::uint32_t y = 0; y < fb->height; ++y)
+            std::memcpy(fb->pixels + y * fb->stride, row, fb->stride);
+    }
+#elif QL32_SF_STRESS_PATTERN == 3
+    for (int i = 0; i < 4000; ++i) {
+        rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+        (void)writePixel(*fb, rng % fb->width, (rng >> 12) % fb->height,
+                         static_cast<std::uint8_t>(rng >> 24));
+    }
+#elif QL32_SF_STRESS_PATTERN == 4
+    clear(*fb, static_cast<std::uint8_t>(phase & 15u));
+#elif QL32_SF_STRESS_PATTERN == 5
+    if (phase == 1)
+        for (std::uint32_t y = 0; y < fb->height; ++y)
+            fillRect(*fb, 0, y, fb->width, 1, static_cast<std::uint8_t>((y / 8u) & 15u));
+    scrollVertical(*fb, 1, static_cast<std::uint8_t>((phase / 8u) & 15u));
+#endif
+    ++writerPassCount_;
+    (void)publishFrameUpdate(fb);
+#endif
+}
+#endif
+
 void PsramDmaScanout::psramStressWorker(void* argument) {
     auto* self = static_cast<PsramDmaScanout*>(argument);
     auto* bytes = static_cast<volatile std::uint8_t*>(self->psramStress_);
@@ -734,6 +813,9 @@ void PsramDmaScanout::psramStressWorker(void* argument) {
         }
         self->stressChecksum_ = checksum;
         self->stressBytesWritten_ += kPsramStressBytes;
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+        self->stressWritePattern();
+#endif
         ++round;
         vTaskDelay(1);
     }
@@ -992,6 +1074,13 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(frameCloneCount_),
                   static_cast<unsigned>(frameCloneBytes_),
                   static_cast<unsigned>(pendingFrameReuseCount_));
+#endif
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+    Serial.printf("PSRAM VGA single-fb: writer-passes=%u, active-writers=%u, free-internal=%u, free-psram=%u\n",
+                  static_cast<unsigned>(writerPassCount_),
+                  static_cast<unsigned>(activeWriters_.load()),
+                  static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                  static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
 #endif
 }
 

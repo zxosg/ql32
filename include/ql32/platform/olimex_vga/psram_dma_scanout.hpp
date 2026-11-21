@@ -165,6 +165,14 @@ private:
     PixelRect pendingFrameDamage_{};
     PixelRect stagingFrameDamage_{};
     portMUX_TYPE frameMux_ = portMUX_INITIALIZER_UNLOCKED;
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+    // Producers between beginFrameUpdate and publish/cancel. Buffers are not
+    // freed while this is non-zero, so a write racing end() stays in bounds.
+    std::atomic<std::uint32_t> activeWriters_{0};
+    volatile std::uint32_t writerPassCount_ = 0;
+    void leaveWriter() noexcept;
+    void stressWritePattern();
+#endif
     std::uint8_t* lineRing_ = nullptr;
     std::uint8_t* horizontalBlank_ = nullptr;
     std::uint8_t* verticalBlank_ = nullptr;

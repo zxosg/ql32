@@ -2076,10 +2076,19 @@ void loop() {
         (void)psramDmaScanout.stagePaletteRotation(1);
     }
 #endif
+#if defined(QL32_SF_STATUS_PERIOD_MS)
+    // Soak: periodic snapshots (the counters are cumulative).
+    static std::uint32_t lastStatus = millis();
+    if (millis() - lastStatus >= QL32_SF_STATUS_PERIOD_MS) {
+        lastStatus = millis();
+        psramDmaScanout.reportStatus();
+    }
+#else
     if (!statusReported && millis() - statusStart >= 30000) {
         statusReported = true;
         psramDmaScanout.reportStatus();
     }
+#endif
     delay(1);
 #else
 #if defined(QL32_OLIMEX_DMA_DISPLAY) && \
