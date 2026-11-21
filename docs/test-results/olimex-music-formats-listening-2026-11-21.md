@@ -41,3 +41,6 @@ The repository has no LICENSE file; the README badge says BSD-2-Clause and the p
 `FFS:/attractor.bas` was loaded and run while VTX z00m_unreal played. The owner reported the attractor animating and the music clean (no dropouts). Serial music diagnostics were not logged after RUN, so late/maxGap under load are unconfirmed; the result is by ear only.
 
 Note: `attractor.bas` has no exit and blocks the REPL (serial commands are ignored). The board had to be reset with the EN button, and it re-enumerated as `/dev/ttyUSB0`. Music diagnostics were not logged during the attractor run, so late/maxGap under VGA load remain unconfirmed.
+
+## YM reference: arnaud-carre/StSound
+StSound (the original YM replayer, which ym-player ports) is MIT licensed (LICENSE file present). It is the preferred behavioral reference for the YM path (SID voice, sinus-SID, digi-drums, sync-buzzer, Mad Max YM2, YMT1). Not yet compared in code. Implement independently and cite it in comments and docs.
