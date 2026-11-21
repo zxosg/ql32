@@ -149,6 +149,17 @@ that the newly published MODE fixes are currently installed on the board.
 Keep FabGL as the default; further scanout changes require separate,
 telemetry-backed testing.
 
+## Olimex single-framebuffer mode (2026-11-21)
+
+`QL32_OLIMEX_SINGLE_FRAMEBUFFER` (env `..._psram_dma_display_400x300_single_fb`,
+plus `_single_fb_status` with `DMADIAG` and a `_test_400x300_single_fb`
+diagnostic) uses one 60 KB PSRAM framebuffer drawn directly and scanned
+continuously; tearing is allowed, no publish/clone/stale repair. Packed-4
+nibble RMW is serialised by `packed4_rmw.hpp`. Short hardware runs showed 0
+late refills; soak/cancel loops are open. 320x200/320x240 are the planned
+next adopters; 640x400/480 are exceptions. See
+[results](docs/test-results/olimex-single-framebuffer-2026-11-21.md).
+
 ## Olimex PlatformIO environments
 
 - **Stable / qualified:** `olimex_esp32_sbc_fabgl_psram` (FabGL, WROVER with

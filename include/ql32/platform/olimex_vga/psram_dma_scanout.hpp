@@ -76,7 +76,14 @@ public:
     void cancelFrameUpdate(FramebufferView* frame) noexcept;
 
 private:
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+    // Retro mode: one persistent PSRAM framebuffer that graphics writes
+    // directly and the refill worker scans continuously. Tearing is allowed;
+    // no staging, publication, cloning or stale-region repair exists.
+    static constexpr std::size_t kFramebufferCount = 1;
+#else
     static constexpr std::size_t kFramebufferCount = 3;
+#endif
     // Keep ring sizes as divisors of each frame height so descriptor slots
     // restart at the same phase on every frame.
 #if defined(QL32_OLIMEX_DMA_TEST_MODE_640X480) && defined(QL32_OLIMEX_DMA_RING160_GROUP20_TEST)

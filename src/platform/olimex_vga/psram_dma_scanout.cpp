@@ -126,6 +126,24 @@ FramebufferView* PsramDmaScanout::beginFrameUpdate(PixelRect damage) noexcept {
     if (damage.empty() || damage.x > width_ || damage.y > height_ ||
         damage.width > width_ - damage.x || damage.height > height_ - damage.y)
         return nullptr;
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+    // The framebuffer is the live scanout surface; any number of producers
+    // may write it. Neighbouring packed-4 nibbles are protected by
+    // storePackedNibble, and the refill worker never takes a lock.
+    return framebufferSlots_[0].valid() ? &framebufferSlots_[0] : nullptr;
+}
+
+bool PsramDmaScanout::publishFrameUpdate(FramebufferView* frame) noexcept {
+    return frame && frame->pixels == framebufferSlots_[0].pixels;
+}
+
+bool PsramDmaScanout::publishFrameUpdate(FramebufferView* frame,
+                                         PixelRect) noexcept {
+    return publishFrameUpdate(frame);
+}
+
+void PsramDmaScanout::cancelFrameUpdate(FramebufferView*) noexcept {}
+#else
     portENTER_CRITICAL(&frameMux_);
     if (stagingFrameIndex_ >= 0) {
         portEXIT_CRITICAL(&frameMux_);
@@ -219,6 +237,7 @@ void PsramDmaScanout::cancelFrameUpdate(FramebufferView* frame) noexcept {
     }
     portEXIT_CRITICAL(&frameMux_);
 }
+#endif
 
 bool PsramDmaScanout::configureGeometry(std::uint32_t width,
                                         std::uint32_t height) noexcept {
@@ -768,6 +787,7 @@ void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
 void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
     const auto targetSequence = consumedSequence + ringRows_;
     const auto targetRow = targetSequence % height_;
+#if !defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
     if (targetRow == 0) {
         portENTER_CRITICAL(&frameMux_);
         if (pendingFrameIndex_ >= 0) {
@@ -787,6 +807,7 @@ void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) 
         }
         portEXIT_CRITICAL(&frameMux_);
     }
+#endif
     if (targetRow == 0 && palette_.applyAtFrameBoundary()) {
         rebuildPixelOutputLut();
         ++paletteApplyCount_;

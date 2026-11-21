@@ -9,6 +9,8 @@
 #include <cstring>
 #include <limits>
 
+#include "ql32/platform/olimex_vga/packed4_rmw.hpp"
+
 namespace ql32::platform::olimex_vga {
 
 // Describes CPU-addressable logical pixels. It contains no display-library,
@@ -130,11 +132,7 @@ inline bool writePixel(FramebufferView framebuffer, std::uint32_t x,
     if (framebuffer.format == PixelFormat::Rgb222) {
         row[x] = value & 0x3Fu;
     } else {
-        auto& packed = row[x / 2];
-        if (x & 1u)
-            packed = static_cast<std::uint8_t>((packed & 0xF0u) | (value & 0x0Fu));
-        else
-            packed = static_cast<std::uint8_t>((packed & 0x0Fu) | ((value & 0x0Fu) << 4));
+        storePackedNibble(&row[x / 2], !(x & 1u), value);
     }
     return true;
 }
@@ -158,9 +156,7 @@ inline bool writeMappedRow(FramebufferView framebuffer, std::uint32_t x,
 
     std::uint32_t i = 0;
     if ((x & 1u) && count != 0) {
-        auto& packed = row[x / 2];
-        packed = static_cast<std::uint8_t>((packed & 0xF0u) |
-                                           (indexMap[indices[i++]] & 0x0Fu));
+        storePackedNibble(&row[x / 2], false, indexMap[indices[i++]]);
         ++x;
         --count;
     }
@@ -172,11 +168,7 @@ inline bool writeMappedRow(FramebufferView framebuffer, std::uint32_t x,
         i += 2;
         count -= 2;
     }
-    if (count != 0) {
-        auto& packed = row[x / 2];
-        packed = static_cast<std::uint8_t>((packed & 0x0Fu) |
-                                           ((indexMap[indices[i]] & 0x0Fu) << 4));
-    }
+    if (count != 0) storePackedNibble(&row[x / 2], true, indexMap[indices[i]]);
     return true;
 }
 
@@ -195,9 +187,7 @@ inline bool writeMappedRowChunked(FramebufferView framebuffer, std::uint32_t x,
     auto* row = framebuffer.pixels + static_cast<std::size_t>(y) * framebuffer.stride;
     std::uint32_t i = 0;
     if ((x & 1u) && count != 0) {
-        auto& packed = row[x / 2];
-        packed = static_cast<std::uint8_t>((packed & 0xF0u) |
-                                           (indexMap[indices[i++]] & 0x0Fu));
+        storePackedNibble(&row[x / 2], false, indexMap[indices[i++]]);
         ++x;
         --count;
     }
@@ -212,11 +202,7 @@ inline bool writeMappedRowChunked(FramebufferView framebuffer, std::uint32_t x,
         x += pairs * 2;
         count -= pairs * 2;
     }
-    if (count != 0) {
-        auto& packed = row[x / 2];
-        packed = static_cast<std::uint8_t>((packed & 0x0Fu) |
-                                           ((indexMap[indices[i]] & 0x0Fu) << 4));
-    }
+    if (count != 0) storePackedNibble(&row[x / 2], true, indexMap[indices[i]]);
     return true;
 }
 
@@ -246,9 +232,7 @@ inline bool copyRegion(const FramebufferView& source, FramebufferView destinatio
         auto column = x;
         auto remaining = width;
         if ((column & 1u) && remaining != 0) {
-            auto& target = output[column / 2];
-            target = static_cast<std::uint8_t>((target & 0xF0u) |
-                                               (input[column / 2] & 0x0Fu));
+            storePackedNibble(&output[column / 2], false, input[column / 2] & 0x0Fu);
             ++column;
             --remaining;
         }
@@ -260,9 +244,7 @@ inline bool copyRegion(const FramebufferView& source, FramebufferView destinatio
             remaining -= pairedPixels;
         }
         if (remaining != 0) {
-            auto& target = output[column / 2];
-            target = static_cast<std::uint8_t>((target & 0x0Fu) |
-                                               (input[column / 2] & 0xF0u));
+            storePackedNibble(&output[column / 2], true, input[column / 2] >> 4);
         }
     }
     return true;
@@ -306,8 +288,7 @@ inline void fillRect(FramebufferView framebuffer, std::int32_t x,
         auto* row = framebuffer.pixels + static_cast<std::size_t>(rowIndex) * framebuffer.stride;
         auto column = left;
         if (column & 1u) {
-            auto& edge = row[column / 2];
-            edge = static_cast<std::uint8_t>((edge & 0xF0u) | value);
+            storePackedNibble(&row[column / 2], false, value);
             ++column;
         }
         const auto pairedPixels = (right - column) / 2;
@@ -315,10 +296,7 @@ inline void fillRect(FramebufferView framebuffer, std::int32_t x,
             std::memset(row + column / 2, repeated, pairedPixels);
             column += pairedPixels * 2;
         }
-        if (column < right) {
-            auto& edge = row[column / 2];
-            edge = static_cast<std::uint8_t>((edge & 0x0Fu) | (value << 4));
-        }
+        if (column < right) storePackedNibble(&row[column / 2], true, value);
     }
 }
 
@@ -460,11 +438,7 @@ inline void copyBitmapOpaque(FramebufferView destination,
             const auto value = (sourceX & 1)
                 ? static_cast<std::uint8_t>(in[sourceX / 2] & 0x0Fu)
                 : static_cast<std::uint8_t>(in[sourceX / 2] >> 4);
-            auto& packed = out[destinationX / 2];
-            if (destinationX & 1)
-                packed = static_cast<std::uint8_t>((packed & 0xF0u) | value);
-            else
-                packed = static_cast<std::uint8_t>((packed & 0x0Fu) | (value << 4));
+            storePackedNibble(&out[destinationX / 2], !(destinationX & 1), value);
         }
     }
 }
@@ -516,14 +490,14 @@ inline void copyBitmapTransparent(FramebufferView destination,
                 static_cast<std::size_t>(sy + row) * source.stride + sx / 2;
             for (std::size_t column = 0; column < rowBytes; ++column) {
                 const auto value = in[column];
-                auto result = out[column];
                 const auto high = static_cast<std::uint8_t>(value >> 4);
                 const auto low = static_cast<std::uint8_t>(value & 0x0Fu);
-                if (high != key)
-                    result = static_cast<std::uint8_t>((result & 0x0Fu) | (high << 4));
-                if (low != key)
-                    result = static_cast<std::uint8_t>((result & 0xF0u) | low);
-                out[column] = result;
+                if (high != key && low != key) {
+                    out[column] = value;
+                    continue;
+                }
+                if (high != key) storePackedNibble(&out[column], true, high);
+                if (low != key) storePackedNibble(&out[column], false, low);
             }
         }
         return;
@@ -540,11 +514,7 @@ inline void copyBitmapTransparent(FramebufferView destination,
                 ? static_cast<std::uint8_t>(in[sourceX / 2] & 0x0Fu)
                 : static_cast<std::uint8_t>(in[sourceX / 2] >> 4);
             if (value == key) continue;
-            auto& packed = out[destinationX / 2];
-            if (destinationX & 1)
-                packed = static_cast<std::uint8_t>((packed & 0xF0u) | value);
-            else
-                packed = static_cast<std::uint8_t>((packed & 0x0Fu) | (value << 4));
+            storePackedNibble(&out[destinationX / 2], !(destinationX & 1), value);
         }
     }
 }
@@ -587,11 +557,8 @@ inline void copyFramebufferToBitmap(const FramebufferView& source,
             const auto value = readPixel(source,
                 static_cast<std::uint32_t>(sx + column),
                 static_cast<std::uint32_t>(sy + row));
-            auto& packed = out[static_cast<std::size_t>(dx + column) / 2];
-            if ((dx + column) & 1)
-                packed = static_cast<std::uint8_t>((packed & 0xF0u) | value);
-            else
-                packed = static_cast<std::uint8_t>((packed & 0x0Fu) | (value << 4));
+            storePackedNibble(&out[static_cast<std::size_t>(dx + column) / 2],
+                              !((dx + column) & 1), value);
         }
     }
 }
