@@ -20,6 +20,8 @@ add_library(ql32_portable
   src/music/vtx_player.cpp
   src/music/ym.cpp
   src/music/ym_player.cpp
+  src/music/pt3.cpp
+  src/music/pt3_tables.cpp
   src/language/interpreter.cpp
   src/graphics/bitmap.cpp
   src/graphics/font.cpp

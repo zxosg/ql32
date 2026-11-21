@@ -3,6 +3,7 @@
 #include "ql32/music/dac_format.hpp"
 #include "ql32/music/mixer.hpp"
 #include "ql32/music/song_loader.hpp"
+#include "ql32/music/pt3.hpp"
 #include "ql32/music/tone.hpp"
 #include "ql32/music/wav.hpp"
 #include "ql32/music/vtx.hpp"
@@ -497,6 +498,92 @@ void testExampleYmFiles() {
     std::cerr << "example YM files decoded=" << decoded << " unsupported=" << unsupported << "\n";
     require(decoded >= 24 && unsupported <= 1, "example YM files failed to decode");
 }
+
+std::vector<std::uint8_t> makePt3(std::uint8_t note) {
+    std::vector<std::uint8_t> m(0x200, 0);
+    const char* text = "ProTracker 3.6 compilation of test";
+    for (std::size_t i = 0; text[i]; ++i) m[i] = static_cast<std::uint8_t>(text[i]);
+    const auto put16 = [&m](std::size_t at, unsigned v) { m[at] = v & 255; m[at + 1] = v >> 8; };
+    m[0x63] = 0; m[0x64] = 3; m[0x65] = 1; m[0x66] = 0;
+    put16(0x67, 0x120);
+    put16(0x69 + 2, 0x140);   // sample 1
+    put16(0xa9, 0x150);       // ornament 0
+    m[0xc9] = 0; m[0xca] = 0xff;
+    put16(0x120, 0x160); put16(0x122, 0x170); put16(0x124, 0x170);
+    m[0x140] = 0; m[0x141] = 1; m[0x142] = 0; m[0x143] = 0x0f; put16(0x144, 0);
+    m[0x150] = 0; m[0x151] = 1; m[0x152] = 0;
+    const std::uint8_t a[] = {0xb1, 32, static_cast<std::uint8_t>(0x50 + note), 0};
+    const std::uint8_t b[] = {0xb1, 32, 0xc0, 0};
+    for (std::size_t i = 0; i < sizeof a; ++i) m[0x160 + i] = a[i];
+    for (std::size_t i = 0; i < sizeof b; ++i) m[0x170 + i] = b[i];
+    return m;
+}
+
+void testPt3() {
+    using namespace ql32::music;
+    auto bytes = makePt3(36);
+    require(Pt3Module::looksLikePt3(bytes.data(), bytes.size()), "PT3 header not recognised");
+    const auto module = Pt3Module::parse(bytes);
+    require(module.version() == 6, "PT3 version not parsed");
+    Pt3Engine engine(module);
+    bool shape = false;
+    const auto regs = engine.tick(shape);
+    const auto period = module.notePeriod(36);
+    require(regs[0] == (period & 255) && regs[1] == (period >> 8), "PT3 channel A period wrong");
+    require(regs[8] == 15, "PT3 channel A amplitude wrong");
+    require(regs[9] == 0 && regs[10] == 0 && !shape, "PT3 silent channels wrong");
+    // Note off on A is absent so the tone keeps sounding through the row.
+    Pt3Source source(Pt3Module::parse(makePt3(48)));
+    std::array<std::int16_t, 4096> block{};
+    std::int16_t peak = 0;
+    for (int i = 0; i < 10; ++i) {
+        source.render(block.data(), block.size());
+        for (auto v : block) peak = std::max<std::int16_t>(peak, v);
+    }
+    require(peak > 500, "PT3 render is silent");
+    require(source.playing(), "PT3 stopped unexpectedly");
+    require(openSong(makePt3(40)) != nullptr, "song loader did not pick PT3");
+
+    auto bad = makePt3(36);
+    bad[0x65] = 0;
+    bool threw = false;
+    try { (void)Pt3Module::parse(bad); } catch (const std::runtime_error&) { threw = true; }
+    require(threw, "PT3 with no positions accepted");
+    // Truncated pattern data must stop the player, not run forever.
+    auto cut = makePt3(36);
+    cut[0x170] = 0x01; cut[0x171] = 0x01;   // unterminated parameter command row
+    cut.resize(0x172);
+    Pt3Source broken(Pt3Module::parse(cut));
+    for (int i = 0; i < 20; ++i) broken.render(block.data(), block.size());
+}
+
+void testExamplePt3Files() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path(QL32_EXAMPLES_DIR) / "music" / "pt3";
+    if (!fs::exists(root)) return;
+    std::size_t decoded = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        if (!entry.is_regular_file()) continue;
+        auto source = ql32::music::openSong(readFile(entry.path()));
+        std::array<std::int16_t, 4096> block{};
+        std::int16_t peak = 0;
+        for (int i = 0; i < 40; ++i) {
+            source->render(block.data(), block.size());
+            for (auto v : block) peak = std::max<std::int16_t>(peak, v);
+        }
+        require(peak > 100, ("example PT3 is silent: " + entry.path().string()).c_str());
+        // A correctly synchronised pattern parser reaches the song end within 30 minutes.
+        const auto module = ql32::music::Pt3Module::parse(readFile(entry.path()));
+        ql32::music::Pt3Engine engine(module);
+        bool shape = false;
+        for (int t = 0; t < 50 * 1800 && engine.loopCount() == 0 && !engine.failed(); ++t) engine.tick(shape);
+        require(!engine.failed() && engine.loopCount() > 0,
+                ("example PT3 never loops: " + entry.path().string()).c_str());
+        ++decoded;
+    }
+    std::cerr << "example PT3 files decoded=" << decoded << "\n";
+    require(decoded >= 10, "example PT3 files failed to decode");
+}
 } // namespace
 
 int main() {
@@ -509,6 +596,8 @@ int main() {
         testWavStreaming();
         testYm();
         testExampleYmFiles();
+        testPt3();
+        testExamplePt3Files();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';

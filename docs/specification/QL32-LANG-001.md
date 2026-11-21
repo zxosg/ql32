@@ -773,6 +773,13 @@ YM3b, YM5! and YM6! are supported, including YM5/YM6 effects: SID voice, digi-dr
 sine amplitude shape). Not supported: YMT1/YMT2 trackers, MIX, Mad Max YM2 digi-drums.
 The whole song is decoded into RAM (up to 1.5 MiB unpacked, so large songs need PSRAM).
 
+PT3 (QL/32-specific player of ProTracker 3 / Vortex Tracker II modules, version
+0-9, any of the four tone tables). One AY chip at 1.7734 MHz, 50 Hz player tick,
+modules up to 64 KiB held in RAM. The song loops to its loop position until
+stopped. Not supported: TurboSound (second module / `02TS` footer; the extra data
+is ignored). Note and volume tables are factual numeric data; the player logic is
+an independent implementation. The file type is detected from content.
+
 `MUSIC WAV "path"` (QL/32-specific, not SMSQ/E) streams an uncompressed PCM WAV
 file from storage without loading it into RAM (2 KiB read buffer). Supported:
 8-bit unsigned or 16-bit signed, mono or stereo (averaged to mono), 4000-48000 Hz
