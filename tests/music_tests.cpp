@@ -164,6 +164,26 @@ void testVtxParserAndRenderer() {
     require(changed, "AY tone generator produced a constant signal");
 }
 
+void testAyUltrasonicTone() {
+    // Tone period 1 (about 111 kHz) must not alias into an audible whistle: the output is a
+    // constant level (half the square), not a toggling signal.
+    ql32::music::Ay38912 ay;
+    ay.reset(1773400, 22050);
+    std::array<std::uint8_t, 14> registers{};
+    registers[0] = 1;
+    registers[7] = 0x38;
+    registers[8] = 15;
+    ay.writeRegisters(registers, true);
+    int maxStep = 0;
+    std::int16_t previous = ay.renderSample();
+    for (int i = 1; i < 200; ++i) {
+        const auto sample = ay.renderSample();
+        maxStep = std::max(maxStep, std::abs(sample - previous));
+        previous = sample;
+    }
+    require(maxStep < 200, "AY ultrasonic tone aliased into the audio band");
+}
+
 void testAyEnvelopeRate() {
     ql32::music::Ay38912 ay;
     ay.reset(1773400, 22050);
@@ -810,6 +830,7 @@ void testSqtRejectsGarbage() {
 int main() {
     try {
         testVtxParserAndRenderer();
+        testAyUltrasonicTone();
         testAyEnvelopeRate();
         testMusicBasicCommands();
         testDacFormatAndTone();

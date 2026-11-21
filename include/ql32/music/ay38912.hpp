@@ -43,6 +43,7 @@ private:
     std::int32_t dcLevel_ = 0;
     std::array<std::int8_t, 3> levelOverride_{{-1, -1, -1}};
     std::array<bool, 3> direct_{};
+    std::array<bool, 3> ultrasonic_{};
     std::array<std::int16_t, 3> directValue_{};
 };
 

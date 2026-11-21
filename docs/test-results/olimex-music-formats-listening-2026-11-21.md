@@ -44,3 +44,25 @@ Note: `attractor.bas` has no exit and blocks the REPL (serial commands are ignor
 
 ## YM reference: arnaud-carre/StSound
 StSound (the original YM replayer, which ym-player ports) is MIT licensed (LICENSE file present). It is the preferred behavioral reference for the YM path (SID voice, sinus-SID, digi-drums, sync-buzzer, Mad Max YM2, YMT1). Not yet compared in code. Implement independently and cite it in comments and docs.
+
+## YM effects listening (owner present, Olimex PSRAM env)
+
+Built: `olimex_esp32_sbc_fabgl_psram`, commit `377d998` plus the ultrasonic-tone fix below.
+Host-tested: ctest 82/82 (new `testAyUltrasonicTone`). Hardware serial: maxGap ≈ 11.6 ms, late=0 on all tracks.
+
+| Track | Effect | Result |
+| --- | --- | --- |
+| buzz.ym | YM5 digi-drums | OK, drums clear, better than before |
+| jess2.ym | YM5 digi-drums | OK |
+| rapido1.ym | YM5 SID | OK |
+| ND-Loader.ym | YM6 SID + buzzer | OK |
+| ND-Toxygene.ym | YM6 SID | SID correct; ringing at a fixed frequency between notes (before fix) |
+| VirtualEscape1/2 | YM6 SID | OK |
+| ZYNAPS1.YM (control) | YM2 | OK, cleaner after fix |
+
+Ringing root cause: songs use tone period 0..2 (about 55-111 kHz) as a "DC" trick. The 4x-oversampled
+core aliased those into a fixed audible whistle. Fix: periods whose frequency exceeds a quarter of the
+oversampled rate output the mean of the square (half level) instead of aliasing. After the fix the
+owner confirmed the ringing is gone (ND-Toxygene) and ZYNAPS1 is cleaner. Reference behavior: real chip
+toggles inaudibly there (StSound/zxtune used for behavior only). Sinus-SID and Mad Max drums remain
+unverified on hardware (no example files).

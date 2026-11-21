@@ -35,6 +35,7 @@ void Ay38912::reset(std::uint32_t clockHz, std::uint32_t sampleRate) noexcept {
     direct_.fill(false);
     tonePhase_.fill(0);
     toneStep_.fill(0);
+    ultrasonic_.fill(false);
     noisePhase_ = 0;
     envelopePhase_ = 0;
     noiseLfsr_ = 0x1ffff;
@@ -52,6 +53,8 @@ void Ay38912::updateSteps() noexcept {
             registers_[channel * 2] |
             ((registers_[channel * 2 + 1] & 0x0f) << 8), 1);
         toneStep_[channel] = phaseStep(clockHz_, sampleRate_, 16, period);
+        ultrasonic_[channel] = static_cast<std::uint64_t>(clockHz_) >=
+                               static_cast<std::uint64_t>(sampleRate_) * 4 * period;
     }
     const std::uint32_t noisePeriod = std::max<std::uint32_t>(registers_[6] & 0x1f, 1);
     // Noise and envelope events fire on phase bit 31 (half a phase cycle), so the
@@ -127,7 +130,11 @@ std::int32_t Ay38912::renderTick() noexcept {
             mixed += directValue_[channel];
             continue;
         }
-        const bool tone = (mixer & (1u << channel)) != 0 ||
+        // Tones above a quarter of the oversampled rate cannot be represented and would alias
+        // into a fixed audible whistle (songs use period 0..2 as a "DC" trick). A real chip
+        // toggles there at an inaudible rate, so output the mean of the square, half level.
+        const bool ultrasonic = ultrasonic_[channel];
+        const bool tone = (mixer & (1u << channel)) != 0 || ultrasonic ||
                           (tonePhase_[channel] & 0x80000000u) == 0;
         const bool noise = (mixer & (1u << (channel + 3))) != 0 ||
                            (noiseLfsr_ & 1u) != 0;
@@ -137,7 +144,9 @@ std::int32_t Ay38912::renderTick() noexcept {
             : ((volume & 0x10) != 0 ? envelopeLevel_ : volume & 0x0f);
         const std::int32_t amplitude = Amplitude[level];
         if (amplitude != 0)
-            mixed += tone && noise ? amplitude : 0;
+            mixed += tone && noise
+                ? ((mixer & (1u << channel)) == 0 && ultrasonic ? amplitude / 2 : amplitude)
+                : 0;
     }
     return mixed;
 }
