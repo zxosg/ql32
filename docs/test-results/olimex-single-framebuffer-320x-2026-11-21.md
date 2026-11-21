@@ -100,3 +100,19 @@ single-fb ring macros are compile-time.
 
 ## Recommendation
 Ready to push for both modes as opt-in envs; default env unchanged.
+
+## Phase 2: runtime-switchable single-framebuffer build
+
+Env `olimex_esp32_sbc_fabgl_psram_dma_display_single_fb_multimode` (and `_status`) combines
+`QL32_OLIMEX_SINGLE_FRAMEBUFFER` with the existing `QL32_OLIMEX_DMA_DYNAMIC_MODE_TEST`
+switcher. It boots in 400x300; `MODE 0/1/2` selects 320x200 / 320x240 / 400x300 by
+stopping scanout, freeing the framebuffer and restarting with that mode's own ring/group.
+`MODE 3/4` are rejected ("unsupported Olimex DMA mode id").
+
+- Built: yes (`_status` env). Host-tested: yes (CTest 87/87, new single-fb switchable-list test).
+- Verified on hardware (automated serial run, no VGA observation yet): 24 switches
+  (0/1/2/1/0/2 x4) with CLS + CIRCLE after each; DMA heap before allocation stayed
+  free~203400 / largest=98292 across all switches; final DMADIAG: 506 frames,
+  late-refills=0, spurious-IRQ=0, active-writers=0. MODE 3/4 rejected, prompt still responsive.
+- Not yet done: owner VGA observation, per-mode stress/soak on this build (deferred to the
+  end of all phases per owner request).

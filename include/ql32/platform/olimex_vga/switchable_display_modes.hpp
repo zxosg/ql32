@@ -48,12 +48,20 @@ public:
     }
 
 private:
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
+    // The single-framebuffer retro family stops at 400x300; 640-wide timing
+    // cannot be met on this path.
+    inline static const std::array<runtime::DisplayMode, 3> kModes{{
+#else
     inline static const std::array<runtime::DisplayMode, 5> kModes{{
+#endif
         {"320x200", 320, 200, 70, 0, 0},
         {"320x240", 320, 240, 60, 1, 0},
         {"400x300", 400, 300, 60, 2, 0},
+#if !defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER)
         {"640x400", 640, 400, 70, 3, 0},
         {"640x480", 640, 480, 60, 4, 0},
+#endif
     }};
     std::uint32_t current_;
     Apply apply_;

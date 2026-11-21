@@ -422,6 +422,7 @@ void applyDmaDisplayMode(std::uint32_t requested, std::uint32_t previous) {
         {400, 300, VGA_400x300_60Hz}, {640, 400, VGA_640x400_70Hz},
         {640, 480, VGA_640x480_60Hz},
     }};
+    // Ids outside the build's mode list are never requested by the service.
     const auto start = [&](std::uint32_t id) {
         const auto& preset = presets.at(id);
         return psramDmaScanout.configureGeometry(preset.width, preset.height) &&
