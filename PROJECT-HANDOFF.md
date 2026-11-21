@@ -258,6 +258,23 @@ caused slight flashing before it was stopped by reflashing. The owner confirmed
 the post-flash screen stable/readable. See
 `docs/test-results/olimex-vga-replay-640x480-2026-11-17.md`.
 
+### Hardware session update (2026-11-21): VGA speed steps 5-7 and final mode matrix
+
+Split-core (VM on core 0) and present coalescing were measured and parked: the split
+placement lost sync (26.7% late refills at 640x480) and coalescing did not change VM
+requests. The aligned encoder (28 us/row refill), cheaper console compose and a chunked
+present row write are now unconditional in all PSRAM-DMA envs; PSRAM store traffic was not
+the bottleneck (refill uses ~80% of core 1). Standard placement is the supported
+640x400/640x480 path: 640x480 about 100 present requests/30 s, 0.50 s full present;
+640x400 about 104, 0.38 s; zero late refills, stable. FabGL modes 0-2 (`graphics_profile`)
+scan out from internal DMA RAM; MODE 2 needs a fresh heap. The no-PSRAM profile now refuses
+MODE 1/2 with a BASIC error instead of abort(). Multi-task stress (attractor+PRINT+churn+loop)
+ran without errors or heap drift; the standard placement is unfair under load and FabGL
+modes show ~1 fps for the attractor only when a PRINT task is running (console presents
+dominate). Next: coalesce console presents on the FabGL presenter. See
+`docs/test-results/olimex-final-mode-matrix-stress-2026-11-21.md`, the present-traffic,
+split-vm-core0, present-coalescing and encoder-isolation reports.
+
 1. **Board acceptance:** repeat broader Olimex/LILYGO acceptance. The Olimex
    serial port was accessible with host-device permissions on 2026-11-16; the
    latest high-resolution allocation guard passed serial rollback checks and

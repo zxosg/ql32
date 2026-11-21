@@ -1,3 +1,4 @@
+#include "ql32/platform/fabgl_vga/mode_memory.hpp"
 #include "ql32/platform/olimex_vga/framebuffer.hpp"
 #include "ql32/platform/olimex_vga/color_mapping.hpp"
 #include "ql32/platform/olimex_vga/dma_pixel_order.hpp"
@@ -108,6 +109,14 @@ void testChunkedMappedRowMatchesPerByte() {
                     "chunked row result differs");
             require(a == b, "chunked row bytes differ from per-byte writer");
         }
+}
+
+void testVgaModeMemoryPreflight() {
+    using namespace ql32::platform::fabgl_vga;
+    // Measured: no-PSRAM mode 0 has 25-45 KB free
+    require(!vgaModeFitsMemory(320, 240, 320 * 200, 45440), "320x240 must be refused without PSRAM");
+    require(!vgaModeFitsMemory(400, 300, 320 * 200, 45176), "400x300 must be refused without PSRAM");
+    require(vgaModeFitsMemory(320, 200, 400 * 300, 0), "shrinking is always allowed");
 }
 
 void testRegionSynchronization() {
@@ -431,6 +440,7 @@ int main() {
     testPacked4OddWidthAndOverlap();
     testMappedRowWrites();
     testChunkedMappedRowMatchesPerByte();
+    testVgaModeMemoryPreflight();
     testRegionSynchronization();
     testIncrementalTripleBufferRepair();
     testPacked4TriangleFillMatchesPixelWrites();
