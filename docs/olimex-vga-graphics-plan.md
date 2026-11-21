@@ -10,6 +10,15 @@ FabGL and ESP-IDF types.
 
 ## Current checkpoint
 
+- MODE reliability investigation (2026-11-21): the plain qualified PSRAM
+  FabGL profile reproduces a 320x240-to-320x200 shrink failure from stale
+  coalesced console damage, and a runtime double-buffer request can corrupt
+  FabGL's heap when its viewport allocation is partial. Coalesced damage is
+  now clipped to the current screen. Growth/buffering changes preflight both
+  framebuffer bytes and actual internal DMA row-pool capacity, including
+  FabGL's per-block free-space reserve and scanout bookkeeping. PSRAM does
+  not provide extra DMA framebuffer capacity. Presets 0-4 remain exposed,
+  memory permitting; no modelines, core placement or DMA ring depths changed.
 - `olimex_esp32_sbc_fabgl_psram_dma_test` is the isolated scanout experiment;
   normal Olimex profiles still start FabGL.
 - The experiment currently uses a 320x200 PSRAM source, a 100-row internal DMA

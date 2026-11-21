@@ -117,6 +117,22 @@ void testVgaModeMemoryPreflight() {
     require(!vgaModeFitsMemory(320, 240, 320 * 200, 45440), "320x240 must be refused without PSRAM");
     require(!vgaModeFitsMemory(400, 300, 320 * 200, 45176), "400x300 must be refused without PSRAM");
     require(vgaModeFitsMemory(320, 200, 400 * 300, 0), "shrinking is always allowed");
+    require(!vgaModeFitsMemory(320, 200, 320 * 200, 30000, true),
+            "same-mode double buffering must account for the second framebuffer");
+    require(!vgaModeFitsMemory(400, 300, 320 * 200, 70000),
+            "free PSRAM cannot compensate for insufficient internal DMA RAM");
+    require(vgaModeFitsMemory(320, 200, 320 * 200 * 2, 0),
+            "disabling double buffering must reclaim both current buffers");
+    const auto exactFree = 320u * 200u + kVgaModeMemoryReserve;
+    require(vgaModeFitsMemory(320, 200, 320 * 200, exactFree, true) &&
+                !vgaModeFitsMemory(320, 200, 320 * 200, exactFree - 1, true),
+            "double-buffer preflight reserve threshold is incorrect");
+    require(vgaAllocatableRows(320, 400, 106484) == 204 &&
+                vgaAllocatableRows(320, 400, 40000) == 0,
+            "row-pool probe must exclude FabGL's per-block reserve");
+    require(vgaAllocatableRows(320, 10, kVgaModeMemoryReserve + 3200) == 10 &&
+                vgaAllocatableRows(320, 10, kVgaModeMemoryReserve + 3199) == 9,
+            "row-pool probe threshold or remaining-row limit is incorrect");
 }
 
 void testRegionSynchronization() {

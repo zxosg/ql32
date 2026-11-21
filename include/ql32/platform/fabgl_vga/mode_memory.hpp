@@ -4,12 +4,10 @@
 
 namespace ql32::platform::fabgl_vga {
 
-// FabGL allocates one byte per pixel from DMA-capable internal RAM and calls
-// abort() when it cannot. The previous viewport is released first, so it counts
-// as available. The 40 KB reserve (descriptors, task stacks, heap fragmentation)
-// is empirical and used only for the no-PSRAM build (about 25-45 KB free in
-// mode 0), which must refuse 320x240 and 400x300. PSRAM builds place FabGL
-// buffers differently and are not preflighted.
+// FabGL's VGAController uses internal DMA RAM even on PSRAM builds. A partial
+// double-buffer allocation can corrupt its row-pointer array before returning.
+// The previous viewport is released first; the empirical 40 KB reserve covers
+// descriptors, task stacks and fragmentation, not framebuffer pixels.
 constexpr std::uint32_t kVgaModeMemoryReserve = 40u * 1024u;
 
 constexpr std::uint32_t vgaModeBytes(std::uint32_t width, std::uint32_t height) noexcept {
@@ -18,11 +16,22 @@ constexpr std::uint32_t vgaModeBytes(std::uint32_t width, std::uint32_t height) 
 
 constexpr bool vgaModeFitsMemory(std::uint32_t width, std::uint32_t height,
                                  std::uint32_t currentBytes,
-                                 std::uint32_t freeDmaBytes) noexcept {
-    const std::uint32_t needed = vgaModeBytes(width, height);
+                                 std::uint32_t freeDmaBytes,
+                                 bool doubleBuffered = false) noexcept {
+    const std::uint64_t needed = static_cast<std::uint64_t>(width) * height *
+                                (doubleBuffered ? 2u : 1u);
     // Shrinking or staying the same size reuses memory already held.
     if (needed <= currentBytes) return true;
-    return freeDmaBytes + currentBytes >= needed + kVgaModeMemoryReserve;
+    return static_cast<std::uint64_t>(freeDmaBytes) + currentBytes >=
+           needed + kVgaModeMemoryReserve;
+}
+
+constexpr std::uint32_t vgaAllocatableRows(std::uint32_t width,
+                                          std::uint32_t remainingRows,
+                                          std::uint32_t largestDmaBlock) noexcept {
+    if (width == 0 || largestDmaBlock <= kVgaModeMemoryReserve) return 0;
+    const auto rows = (largestDmaBlock - kVgaModeMemoryReserve) / width;
+    return rows < remainingRows ? rows : remainingRows;
 }
 
 } // namespace ql32::platform::fabgl_vga

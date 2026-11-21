@@ -1018,7 +1018,8 @@ bool WindowedService::takeCoalescedRegion(Rect& region) {
         ++coalesceStats_.deferred;
         return false;
     }
-    region = pendingDirty_;
+    region = intersect(pendingDirty_,
+        {0, 0, manager_.screenWidth(), manager_.screenHeight()});
     pendingDirty_ = {};
     return true;
 }

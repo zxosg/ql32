@@ -353,6 +353,13 @@ if(QL32_BUILD_TESTS)
   target_include_directories(ql32_fabgl_graphics_tests PRIVATE tests/fakes include)
   target_compile_features(ql32_fabgl_graphics_tests PRIVATE cxx_std_20)
   add_test(NAME ql32_fabgl_graphics_tests COMMAND ql32_fabgl_graphics_tests)
+  add_executable(ql32_fabgl_display_modes_tests
+    tests/fabgl_display_modes_tests.cpp
+    src/platform/fabgl_vga/display_modes.cpp
+  )
+  target_include_directories(ql32_fabgl_display_modes_tests PRIVATE tests/fakes include)
+  target_compile_features(ql32_fabgl_display_modes_tests PRIVATE cxx_std_17)
+  add_test(NAME ql32_fabgl_display_modes_tests COMMAND ql32_fabgl_display_modes_tests)
   add_executable(ql32_fabgl_presenter_tests
     tests/fabgl_presenter_tests.cpp
     src/platform/fabgl_vga/frame_presenter.cpp

@@ -1,0 +1,759 @@
+PSRAM total: 4192123
+PSRAM free: 4192123
+Internal free: 230264
+PS/2 keyboard detected on port 0
+QL/32 Olimex ESP32-SBC-FabGL bring-up ready
+Uptime ms: 1491
+Wall clock unsynchronized
+FFS storage ready
+SDC storage ready
+SDC:/startup.bas not found
+Running FFS:/startup.bas
+QL/32 BASIC
+Version 0.1.0
+Free memory total: 4208899
+Largest free block: 4063220
+Free fragments: 13
+BASIC REPL ready (USB serial and PS/2 keyboard)
+> 
+REQUEST: serial_probe = OPEN(2)
+serial_probe = OPEN(2)> serial_probe = OPEN(2)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223483,4063220
+> 
+REQUEST: @QL32DBG/1	101	tasks.list
+
+@QL32DBG/1	101	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223475,4063220
+> 
+REQUEST: @QL32DBG/1	102	tasks.list
+
+@QL32DBG/1	102	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208587,4063220
+> 
+REQUEST: @QL32DBG/1	103	tasks.list
+
+@QL32DBG/1	103	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208587,4063220
+> 
+REQUEST: @QL32DBG/1	104	tasks.list
+
+@QL32DBG/1	104	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223291,4063220
+> 
+REQUEST: @QL32DBG/1	105	tasks.list
+
+@QL32DBG/1	105	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223291,4063220
+> 
+REQUEST: @QL32DBG/1	106	tasks.list
+
+@QL32DBG/1	106	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208599,4063220
+> 
+REQUEST: @QL32DBG/1	107	tasks.list
+
+@QL32DBG/1	107	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208603,4063220
+> 
+REQUEST: @QL32DBG/1	108	tasks.list
+
+@QL32DBG/1	108	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223291,4063220
+> 
+REQUEST: @QL32DBG/1	109	tasks.list
+
+@QL32DBG/1	109	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223291,4063220
+> 
+REQUEST: @QL32DBG/1	110	tasks.list
+
+@QL32DBG/1	110	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208595,4063220
+> 
+REQUEST: @QL32DBG/1	111	tasks.list
+
+@QL32DBG/1	111	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 1":RECT 0,0,320,216:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208599,4063220
+> 
+REQUEST: @QL32DBG/1	112	tasks.list
+
+@QL32DBG/1	112	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"idle MODE 0":RECT 0,0,320,176:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223291,4063220
+> 
+REQUEST: @QL32DBG/1	113	tasks.list
+
+@QL32DBG/1	113	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,1
+MODE 0,1> MODE 0,1
+BASIC session 1 VM error: not enough contiguous DMA memory for VGA mode 320x200: largest block 106484, framebuffer 128000, scanout overhead 23280, reserve 40960; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222783,4063220
+> 
+REQUEST: @QL32DBG/1	114	tasks.list
+
+@QL32DBG/1	114	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 1,1
+MODE 1,1> MODE 1,1
+BASIC session 1 VM error: not enough contiguous DMA memory for VGA mode 320x240: largest block 106484, framebuffer 153600, scanout overhead 27344, reserve 40960; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222767,4063220
+> 
+REQUEST: @QL32DBG/1	115	tasks.list
+
+@QL32DBG/1	115	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 2,0
+MODE 2,0> MODE 2,0
+BASIC session 1 VM error: not enough contiguous DMA memory for VGA mode 400x300: largest block 106484, framebuffer 120000, scanout overhead 17520, reserve 40960; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222767,4063220
+> 
+REQUEST: @QL32DBG/1	116	tasks.list
+
+@QL32DBG/1	116	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 2,1
+MODE 2,1> MODE 2,1
+BASIC session 1 VM error: not enough memory for VGA mode 400x300: needs 240000 framebuffer bytes plus 40960 reserve, 130616 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222247,4063220
+> 
+REQUEST: @QL32DBG/1	117	tasks.list
+
+@QL32DBG/1	117	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 3,0
+MODE 3,0> MODE 3,0
+BASIC session 1 VM error: not enough memory for VGA mode 640x400: needs 256000 framebuffer bytes plus 40960 reserve, 130096 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222767,4063220
+> 
+REQUEST: @QL32DBG/1	118	tasks.list
+
+@QL32DBG/1	118	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 3,1
+MODE 3,1> MODE 3,1
+BASIC session 1 VM error: not enough memory for VGA mode 640x400: needs 512000 framebuffer bytes plus 40960 reserve, 130616 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222767,4063220
+> 
+REQUEST: @QL32DBG/1	119	tasks.list
+
+@QL32DBG/1	119	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 4,0
+MODE 4,0> MODE 4,0
+BASIC session 1 VM error: not enough memory for VGA mode 640x480: needs 307200 framebuffer bytes plus 40960 reserve, 130616 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222767,4063220
+> 
+REQUEST: @QL32DBG/1	120	tasks.list
+
+@QL32DBG/1	120	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 4,1
+MODE 4,1> MODE 4,1
+BASIC session 1 VM error: 640x480 double buffering is unavailable on this VGA target; use option 0; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222871,4063220
+> 
+REQUEST: @QL32DBG/1	121	tasks.list
+
+@QL32DBG/1	121	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 5,0
+MODE 5,0> MODE 5,0
+BASIC session 1 VM error: unsupported VGA display mode id: 5; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222939,4063220
+> 
+REQUEST: @QL32DBG/1	122	tasks.list
+
+@QL32DBG/1	122	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,2
+MODE 0,2> MODE 0,2
+BASIC session 1 VM error: unsupported VGA display option bits; use 0 (single) or 1 (double); supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222879,4063220
+> 
+REQUEST: @QL32DBG/1	123	tasks.list
+
+@QL32DBG/1	123	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4222891,4063220
+> 
+REQUEST: @QL32DBG/1	124	tasks.list
+
+@QL32DBG/1	124	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MUSIC PLAY "SDC:/Bosconia1.vtx"
+MUSIC PLAY "SDC:/Bosconia1.vtx"> MUSIC PLAY "SDC:/Bosconia1.vtx"
+> music: first PCM block range 4668..16447; submitting to I2S0
+music: submitting I2S0 block 1
+music: I2S0 accepted block 1 (1024 bytes)
+music: submitting I2S0 block 2
+music: I2S0 accepted block 2 (1024 bytes)
+music: submitting I2S0 block 3
+music: I2S0 accepted block 3 (1024 bytes)
+music: blocks=86 pcm=-11059..16447 dac=0x5400..0xc000 maxGap=11630us late=0 stack=2332
+music: blocks=172 pcm=-12112..16447 dac=0x5000..0xc000 maxGap=11618us late=0 stack=2332
+music: blocks=258 pcm=-10672..16447 dac=0x5600..0xc000 maxGap=11618us late=0 stack=2332
+m
+REQUEST: TASK "FFS:/st-print.bas"
+usic: blocks=344 pcm=-12620..16447 dac=0x4e00..0xc000 maxGap=11617us late=0 stack=2236
+TASK "FFS:/st-print.bas"> TASK "FFS:/st-print.bas"
+Started task 2
+> music: blocks=430 pcm=-9882..16447 dac=0x5900..0xc000 maxGap=11695us late=0 stack=2236
+PROG|print|100|4086131
+music: blocks=516 pcm=-11436..16447 dac=0x5300..0xc000 maxGap=11632us late=0 stack=2236
+PROG|print|200|4086131
+music: blocks=602 pcm=-11579..16447 dac=0x5200..0xc000 maxGap=116
+REQUEST: TASK "FFS:/st-churn.bas"
+40us late=0 stack=2236
+TASK "FFS:/st-churn.bas"> TASK "FFS:/st-churn.bas"
+Started task 3
+> music: blocks=688 pcm=-11328..16447 dac=0x5300..0xc000 maxGap=11677us late=0 stack=2236
+PROG|print|300|4064787
+music: blocks=774 pcm=-10358..16447 dac=0x5700..0xc000 maxGap=11666us late=0 stack=2236
+music: blocks=860 pcm=-11627..16447 dac=0x5200..0xc000 maxGap=11631us late=0 stack=2236
+
+REQUEST: TASK "FFS:/st-loop.bas"
+TASK "FFS:/st-loop.bas"> TASK "FFS:/st-loop.bas"
+Started task 4
+> PROG|print|400|4054563
+PROG|print|500|4054651
+PROG|churn|10|4054651|51
+
+REQUEST: TASK "FFS:/attractor.bas"
+TASK "FFS:/attractor.bas"> TASK "FFS:/attractor.bas"
+Started task 5
+> PROG|print|600|4000691
+PROG|loop|2|4000779
+
+REQUEST: @QL32DBG/1	125	tasks.list
+
+@QL32DBG/1	125	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|700|4000691
+P
+REQUEST: MODE 1,0
+ROG|churn|20|4000875|51
+MODE 1,0> MODE 1,0
+BASIC session 1 VM error: not enough contiguous DMA memory for VGA mode 320x240: largest block 106484, framebuffer 76800, scanout overhead 14336, reserve 40960; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|800|4000327
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3994691,3932148
+> PROG|print|900|4000023
+
+REQUEST: @QL32DBG/1	126	tasks.list
+
+@QL32DBG/1	126	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|4|4000023
+PROG|print|1000|3999943
+
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> PROG|churn|30|4000503|51
+PROG|print|1100|4000423
+
+REQUEST: CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+> PROG|print|1200|4000511
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995027,3932148
+> PROG|loop|6|4000463
+PROG|churn|40|4000459|51
+PROG|print|1300|4000459
+
+REQUEST: @QL32DBG/1	127	tasks.list
+
+@QL32DBG/1	127	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> PROG|print|1400|4000407
+
+REQUEST: CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+> PROG|print|1500|4000423
+PROG|loop|8|4000511
+PROG|churn|50|4000515|51
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995039,3932148
+> PROG|print|1600|4000379
+
+REQUEST: @QL32DBG/1	128	tasks.list
+
+@QL32DBG/1	128	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|1700|4000371
+
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+BASIC session 1 VM error: not enough contiguous DMA memory for VGA mode 320x240: largest block 106484, framebuffer 76800, scanout overhead 14336, reserve 40960; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|loop|10|3999895
+PROG|print|1800|3999807
+PROG|churn|60|3999895|51
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995131,3932148
+> PROG|print|1900|4000471
+
+REQUEST: @QL32DBG/1	129	tasks.list
+
+@QL32DBG/1	129	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|2000|4000471
+
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+BASIC session 1 VM error: not enough contiguous DMA memory for VGA mode 320x240: largest block 106484, framebuffer 76800, scanout overhead 14336, reserve 40960; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|loop|12|4000407
+PROG|churn|70|4000407|51
+PROG|print|2100|4000311
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995111,3932148
+> P
+REQUEST: @QL32DBG/1	130	tasks.list
+ROG|print|2200|4000467
+
+@QL32DBG/1	130	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> PROG|print|2300|4000411
+PROG|loop|14|4000507
+PROG|churn|80|4000507|51
+
+REQUEST: CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+> PROG|print|2400|4000423
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995007,3932148
+> PROG|print|2500|4000455
+
+REQUEST: @QL32DBG/1	131	tasks.list
+
+@QL32DBG/1	131	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|2600|4000367
+PROG|loop|16|4000455
+PROG|churn|90|4000459|51
+
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> PROG|print|2700|3999891
+
+REQUEST: CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"loaded MODE 0":RECT 0,0,320,176:GUPDATE
+> PROG|print|2800|3999995
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995039,3932148
+> PROG|churn|100|4000467|51
+PROG|print|2900|4000283
+PROG|loop|18|4000451
+
+REQUEST: @QL32DBG/1	132	tasks.list
+
+@QL32DBG/1	132	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|3000|4000375
+
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+BASIC session 1 VM error: not enough contiguous DMA memory for VGA mode 320x240: largest block 106484, framebuffer 76800, scanout overhead 14336, reserve 40960; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995307,3932148
+> PROG|print|3100|4000467
+PROG|churn|110|4000559|51
+PROG|loop|20|4000559
+
+REQUEST: @QL32DBG/1	133	tasks.list
+
+@QL32DBG/1	133	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|3200|4000447
+
+REQUEST: MODE 0,1
+MODE 0,1> MODE 0,1
+BASIC session 1 VM error: not enough memory for VGA mode 320x200: needs 128000 framebuffer bytes plus 40960 reserve, 59924 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|3300|4000295
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995131,3932148
+> PROG|print|3400|4000459
+PROG|churn|120|4000559|51
+
+REQUEST: @QL32DBG/1	134	tasks.list
+PROG|loop|22|4000551
+
+@QL32DBG/1	134	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|3500|4000467
+
+REQUEST: MODE 1,1
+MODE 1,1> MODE 1,1
+BASIC session 1 VM error: not enough memory for VGA mode 320x240: needs 153600 framebuffer bytes plus 40960 reserve, 59592 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|3600|4000319
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995079,3932148
+> PROG|churn|130|4000639|51
+PROG|print|3700|4000463
+
+REQUEST: @QL32DBG/1	135	tasks.list
+
+@QL32DBG/1	135	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|24|4000551
+PROG|print|3800|4000463
+
+REQUEST: MODE 2,0
+MODE 2,0> MODE 2,0
+BASIC session 1 VM error: not enough memory for VGA mode 400x300: needs 120000 framebuffer bytes plus 40960 reserve, 59936 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|3900|4000327
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995123,3932148
+> PROG|churn|140|4000555|51
+P
+REQUEST: @QL32DBG/1	136	tasks.list
+ROG|print|4000|4000467
+
+@QL32DBG/1	136	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|26|4000559
+
+REQUEST: MODE 2,1
+MODE 2,1> MODE 2,1
+BASIC session 1 VM error: not enough memory for VGA mode 400x300: needs 240000 framebuffer bytes plus 40960 reserve, 59936 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|4100|4000403
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3994595,3932148
+> PROG|print|4200|3999939
+PROG|churn|150|4000027|51
+
+REQUEST: @QL32DBG/1	137	tasks.list
+
+@QL32DBG/1	137	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|28|4000027
+PROG|print|4300|4000027
+
+REQUEST: MODE 3,0
+MODE 3,0> MODE 3,0
+BASIC session 1 VM error: not enough memory for VGA mode 640x400: needs 256000 framebuffer bytes plus 40960 reserve, 59924 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|4400|4000415
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995127,3932148
+> PROG|churn|160|4000559|51
+PROG|print|4500|4000471
+
+REQUEST: @QL32DBG/1	138	tasks.list
+
+@QL32DBG/1	138	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|30|4000559
+PROG|print|4600|4000471
+
+REQUEST: MODE 3,1
+MODE 3,1> MODE 3,1
+BASIC session 1 VM error: not enough memory for VGA mode 640x400: needs 512000 framebuffer bytes plus 40960 reserve, 59924 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|4700|4000327
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995131,3932148
+> PROG|churn|170|4000559|51
+PROG|print|4800|4000471
+
+REQUEST: @QL32DBG/1	139	tasks.list
+
+@QL32DBG/1	139	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|32|4000559
+P
+REQUEST: MODE 4,0
+ROG|print|4900|4000471
+MODE 4,0> MODE 4,0
+BASIC session 1 VM error: not enough memory for VGA mode 640x480: needs 307200 framebuffer bytes plus 40960 reserve, 60024 free DMA bytes and 64000 reclaimable; PSRAM cannot supply scanout; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995123,3932148
+> PROG|print|5000|4000459
+PROG|churn|180|4000643|51
+
+REQUEST: @QL32DBG/1	140	tasks.list
+
+@QL32DBG/1	140	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|5100|4000467
+PROG|loop|34|4000555
+
+REQUEST: MODE 4,1
+MODE 4,1> MODE 4,1
+BASIC session 1 VM error: 640x480 double buffering is unavailable on this VGA target; use option 0; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|5200|4000647
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995219,3932148
+> PROG|churn|190|4000635|51
+PROG|print|5300|4000555
+
+REQUEST: @QL32DBG/1	141	tasks.list
+
+@QL32DBG/1	141	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|print|5400|4000555
+PROG|loop|36|4000643
+
+REQUEST: MODE 5,0
+MODE 5,0> MODE 5,0
+BASIC session 1 VM error: unsupported VGA display mode id: 5; supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|5500|4000671
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995263,3932148
+> PROG|churn|200|4000703|51
+PROG|print|5600|4000627
+
+REQUEST: @QL32DBG/1	142	tasks.list
+
+@QL32DBG/1	142	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|38|4000727
+PROG|print|5700|4000635
+
+REQUEST: MODE 0,2
+MODE 0,2> MODE 0,2
+BASIC session 1 VM error: unsupported VGA display option bits; use 0 (single) or 1 (double); supported modes (internal DMA memory permitting): 0 (320x200), 1 (320x240), 2 (400x300), 3 (640x400), 4 (640x480)
+> PROG|print|5800|4000571
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995223,3932148
+> PROG|churn|210|4000643|51
+P
+REQUEST: @QL32DBG/1	143	tasks.list
+ROG|print|5900|4000567
+
+@QL32DBG/1	143	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|loop|40|4000655
+
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,3995131,3932148
+> PROG|print|6000|4000563
+
+REQUEST: @QL32DBG/1	144	tasks.list
+
+@QL32DBG/1	144	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"RUNNABLE","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> PROG|churn|220|4000659|51
+PROG|print|6100|4000571
+
+REQUEST: KILL 2
+KILL 2> KILL 2
+Killed task 2
+> PROG|loop|42|4037871
+
+REQUEST: KILL 3
+KILL 3> KILL 3
+Killed task 3
+> 
+REQUEST: KILL 4
+KILL 4> KILL 4
+Killed task 4
+> 
+REQUEST: KILL 5
+KILL 5> KILL 5
+Killed task 5
+> 
+REQUEST: MUSIC STOP
+MUSIC STOP> MUSIC STOP
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: CLS:INK 7:TEXT 8,8,"recovery MODE 0":RECT 0,0,320,176:GUPDATE
+CLS:INK 7:TEXT 8,8,"recovery MODE 0":RECT 0,0,320,176:GUPDATE> CLS:INK 7:TEXT 8,8,"recovery MODE 0":RECT 0,0,320,176:GUPDATE
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4210083,4063220
+> 
+REQUEST: @QL32DBG/1	145	tasks.list
+
+@QL32DBG/1	145	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4210079,4063220
+> 
+REQUEST: @QL32DBG/1	146	tasks.list
+
+@QL32DBG/1	146	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":200,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"CANCELLED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":0,"canvas_height":0,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+> 

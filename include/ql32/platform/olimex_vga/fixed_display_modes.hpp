@@ -55,7 +55,8 @@ public:
         if (matches) {
             return {kModeName, kModeWidth, kModeHeight, kModeRefresh, kModeId, 0};
         }
-        throw std::invalid_argument("unsupported Olimex DMA mode: " + std::string(name));
+        throw std::invalid_argument("unsupported Olimex DMA mode: " + std::string(name) +
+                                    supportedModeDescription());
     }
 
     runtime::DisplayMode setMode(std::uint32_t id,
@@ -64,8 +65,16 @@ public:
             throw std::invalid_argument(
                 "mode " + std::to_string(id) + " is unavailable on this fixed-mode build; only mode " +
                 std::to_string(kModeId) + " (" + kModeName + ") is supported");
-        if (options != 0) throw std::invalid_argument("Olimex DMA mode options are unsupported");
+        if (options != 0)
+            throw std::invalid_argument("Olimex DMA mode options are unsupported; use option 0" +
+                                        supportedModeDescription());
         return {kModeName, kModeWidth, kModeHeight, kModeRefresh, kModeId, 0};
+    }
+
+private:
+    static std::string supportedModeDescription() {
+        return "; only mode " + std::to_string(kModeId) + " (" + kModeName +
+               ") is supported on this fixed-mode build";
     }
 };
 

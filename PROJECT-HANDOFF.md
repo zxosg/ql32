@@ -4,7 +4,7 @@ Use this file to continue work as any coding agent or human contributor. Read
 it together with [`AGENTS.md`](AGENTS.md) before changing the project. The
 specifications and dated reports in `docs/test-results` are the project
 record; refresh this handoff after meaningful implementation or
-hardware-acceptance changes. Last refreshed 2026-11-20.
+hardware-acceptance changes. Last refreshed 2026-11-21.
 
 ## Project and architecture
 
@@ -18,15 +18,17 @@ session.
 
 ## Repository state (2026-11-21)
 
-`origin/main` and local `main` are at `add03ee`. Everything below is on the
-local, **unpushed** integration branch `jan-pal-branch-integration`, which
-merges these local branches (merge order; all clean except doc conflicts):
+The MODE reliability investigation fetched `origin/main` at `289f0c8`.
+The previously local integration is now included there; the MODE fixes are
+on a separate local, unpushed feature branch. The integration branch
+`jan-pal-branch-integration` merged these branches (merge order; all clean
+except doc conflicts):
 `jan-pal-olimex-sound-audit` (sound, YM/AY/PT3/VTX/SQT/WAV, `BEEP`/`VOLUME`,
 stale-test fixes), `jan-pal-handoff-refresh`, `jan-pal-basic-file-seek`,
 `jan-pal-cyd-memory-audit`, `jan-pal-automatic-potato` (Olimex VGA work).
 `jan-pal-fix-ctest-failures` duplicates the sound branch's `49887c0` and was
-skipped. The source branches still exist unchanged. Check the remote before
-pushing.
+skipped. Check Git and the remote rather than assuming the source branches
+or this historical integration state are unchanged.
 
 A user music patch (modified `music.hpp`, `music.cpp`, `interpreter.cpp`,
 `bytecode.hpp`, `music_tests.cpp`) may exist **uncommitted in the main
@@ -35,7 +37,8 @@ rewrote; reconcile by hand and do not discard it.
 
 Native Linux: `cmake --preset linux`, `cmake --build build/linux`,
 `ctest --test-dir build/linux` (there is no `linux` test preset) passes
-83/83 on the integration branch.
+83/83 on the main baseline and 84/84 on the MODE reliability feature branch,
+including the new FabGL display-mode adapter regression target.
 
 Terms below: **built** = firmware/host target compiles; **host-tested** =
 covered by Linux CTest (fakes, no board); **hardware-verified** = observed on
@@ -70,6 +73,24 @@ arnaud-carre/StSound (MIT) as behavioral references only; no code was copied.
 Hardware-verified with the owner present; reports are under
 `docs/test-results/olimex-*-2026-11-2*.md`. Summary:
 
+- MODE reliability follow-up on the qualified plain PSRAM build: FabGL
+  actually exposes presets 0-4, not just 0-2; this does not promise that
+  their internal DMA framebuffers fit. Normal startup on the tested board
+  supports single-buffer modes 0/1, while 2-4 lack allocation capacity.
+  Free PSRAM is not usable for FabGL DMA scanout. Runtime `MODE 0,1`
+  reproduced heap corruption from partial double-buffer row allocation.
+  Growth/option changes now probe complete internal row-pool allocation
+  after releasing the old viewport, with rollback on refusal; rollback
+  failure is explicitly reported. Shrinking 1 -> 0 previously failed with
+  "composed region exceeds VGA canvas geometry" because console callbacks
+  merged old deferred damage; coalescing now clips merged damage to the
+  current display. Owner confirmed distinct, stable 320x200 and 320x240
+  labeled pictures and a usable final MODE 0 recovery prompt. Final serial
+  matrix: 41 attempts with matching state/geometry checkpoints; MODE 1
+  additionally refuses internal-memory allocation with music plus four
+  workers active, leaving MODE 0 and workers intact. Workers/audio stopped,
+  serial released. No timing, ring-depth or core-pinning changes. See the
+  [MODE reliability report](docs/test-results/olimex-vga-mode-reliability-2026-11-21.md).
 - Presentation, not scanout, is the cost on standard placement: full 640x480
   present about 0.50 s (640x400 about 0.38 s) after the aligned encoder, cheaper
   console compose and chunked row write; about 85-100 present requests per

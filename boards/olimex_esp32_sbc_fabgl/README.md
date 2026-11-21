@@ -25,6 +25,47 @@ pio run -e olimex_esp32_sbc_fabgl_psram -t upload
 pio device monitor -b 115200
 ```
 
+## Selecting VGA modes
+
+Use `olimex_esp32_sbc_fabgl_psram` for the qualified FabGL path. Its BASIC
+presets are 0=320x200, 1=320x240, 2=400x300, 3=640x400 and 4=640x480.
+These are requested geometries, **not a guarantee that the framebuffer fits**.
+FabGL's scanout buffers require internal DMA RAM even when several megabytes
+of PSRAM are free. On the tested board with normal startup services, modes
+0 and 1 with option 0 fit; modes 2-4 do not. A different heap or build can
+change allocation capacity.
+With music plus four stress workers active, even mode 1 was explicitly refused
+while mode 0 and the workers remained operational. See the
+[MODE reliability report](../../docs/test-results/olimex-vga-mode-reliability-2026-11-21.md).
+
+```basic
+MODE 1,0
+PRINT MODE(0),MODE(1)
+MODE 0,0
+```
+
+The second argument is 0 for single buffering or 1 for double buffering.
+Omitting it preserves the current option. Double buffering needs two internal
+framebuffers; runtime switching may refuse it even when a dedicated
+double-buffer test profile can allocate its initial buffers before services
+start. MODE 4 with option 1 is explicitly unavailable. Allocation preflight
+now checks complete row-pool capacity before letting FabGL reconfigure larger
+buffers; failures report internal-memory constraints and restore the previous
+mode. Repeated requests and shrinking from mode 1 to mode 0 are supported.
+
+The experimental fixed DMA profiles are different builds:
+`..._psram_dma_display_640x400_present_profile` accepts only `MODE 3,0`, and
+`..._psram_dma_display_640x480_present_profile` accepts only `MODE 4,0`.
+Rejections of modes 0-2 there are intentional. Those profiles are not the
+qualified default and do not provide live switching to FabGL modes.
+
+Music playback alone does not identify the firmware: both paths support
+audio. `PRINT MODE(0),MODE(1)` reports the active mode and buffering option,
+not the PlatformIO environment. The current build identifier may be
+`unknown`, and the display string in `SYSINFO$(3)` is static; do not use it
+as proof of the active geometry or exact firmware. Keep the environment used
+to flash the board in the hardware test record.
+
 For the target-local PSRAM-to-DMA color-bar scanout experiment, build the
 separate test image:
 

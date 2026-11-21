@@ -2320,6 +2320,39 @@ void testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure() {
             "active session did not recreate its window at the new display size");
 }
 
+void testDisplayShrinkClipsDeferredConsoleDamage() {
+    class GeometryCheckingPresenter final : public ql32::graphics::FramePresenter {
+    public:
+        void present(const ql32::graphics::Frame&) override {}
+        bool presentRowsRegion(std::uint32_t width, std::uint32_t height,
+                               const std::array<RgbColor, 256>&, Rect region,
+                               const RowProvider&) override {
+            require(region.x >= 0 && region.y >= 0 &&
+                        static_cast<std::uint64_t>(region.x) + region.width <= width &&
+                        static_cast<std::uint64_t>(region.y) + region.height <= height,
+                    "deferred damage exceeds the resized display");
+            return true;
+        }
+    };
+    auto presenter = std::make_shared<GeometryCheckingPresenter>();
+    WindowedService graphics(10, 12, presenter);
+    graphics.setDefaultWindowBounds(0, {0, 10, 10, 2});
+    std::uint64_t now = 0;
+    graphics.setPresentCoalescing(500, 0, [&now] { return now; });
+    graphics.invalidateSystemRegion({0, 10, 10, 2});
+    now = 100;
+    graphics.invalidateSystemRegion({0, 10, 10, 2});
+    require(graphics.hasPendingPresentation(), "console damage was not deferred");
+    graphics.setConsoleBoundsCallback([&](Rect bounds) {
+        graphics.invalidateSystemRegion(bounds);
+    });
+    now = 1000;
+    require(graphics.setDisplaySize(10, 10), "display shrink failed");
+    require(graphics.displaySize() == std::pair<std::uint32_t, std::uint32_t>{10, 10} &&
+                !graphics.hasPendingPresentation(),
+            "display shrink left stale geometry or deferred damage");
+}
+
 void testSystemInfoFunctionsUseInjectedPortableProfile() {
     ql32::runtime::SystemInfoProfile profile;
     profile.values = {"0.1.0", "test-build", "test-board",
@@ -2517,6 +2550,7 @@ int main() {
     testFailedPrintFlushesItsPartialOutputBatch();
     testDisplayGeometryChangeResizesDefaultWindowsAndPresents();
     testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure();
+    testDisplayShrinkClipsDeferredConsoleDamage();
     testSystemInfoFunctionsUseInjectedPortableProfile();
     testSystemInfoRejectsInvalidSelector();
     testSupervisorTileCommandUsesGraphicsWindowManager();

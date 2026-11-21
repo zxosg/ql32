@@ -1,0 +1,212 @@
+PSRAM total: 4192123
+PSRAM free: 4192123
+Internal free: 230264
+PS/2 keyboard detected on port 0
+QL/32 Olimex ESP32-SBC-FabGL bring-up ready
+Uptime ms: 1483
+Wall clock unsynchronized
+FFS storage ready
+SDC storage ready
+SDC:/startup.bas not found
+Running FFS:/startup.bas
+QL/32 BASIC
+Version 0.1.0
+Free memory total: 4208899
+Largest free block: 4063220
+Free fragments: 13
+BASIC REPL ready (USB serial and PS/2 keyboard)
+> 
+REQUEST: serial_probe = OPEN(2)
+serial_probe = OPEN(2)> serial_probe = OPEN(2)
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: MODE 2,0
+MODE 2,0> MODE 2,0
+BASIC session 1 VM error: VGA framebuffer allocation incomplete for 400x300: allocated 400x226, required 400x300
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4207851,4063220
+> 
+REQUEST: MODE 3,0
+MODE 3,0> MODE 3,0
+BASIC session 1 VM error: VGA framebuffer allocation incomplete for 640x400: allocated 640x145, required 640x400
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208387,4063220
+> 
+REQUEST: MODE 4,0
+MODE 4,0> MODE 4,0
+BASIC session 1 VM error: VGA framebuffer allocation incomplete for 640x480: allocated 640x142, required 640x480
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208375,4063220
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+BASIC session 1 VM error: composed region exceeds VGA canvas geometry
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|1,0,4208459,4063220
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+BASIC session 1 VM error: composed region exceeds VGA canvas geometry
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+BASIC session 1 VM error: composed region exceeds VGA canvas geometry
+> 
+REQUEST: GUPDATE 0
+GUPDATE 0> GUPDATE 0
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1)
+ACTIVE|0,0
+> 
+REQUEST: GUPDATE 1
+GUPDATE 1> GUPDATE 1
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: GUPDATE 0
+GUPDATE 0> GUPDATE 0
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 
+REQUEST: GUPDATE 1
+GUPDATE 1> GUPDATE 1
+> 
+REQUEST: MODE 0,1
+MODE 0,1> MODE 0,1
+CORRUPT HEAP: Bad tail at 0x4009c634. Expected 0xbaad5678 got 0x3ffd6060
+
+assert failed: multi_heap_free multi_heap_poisoning.c:259 (head != NULL)
+
+
+Backtrace: 0x40088275:0x3ffb35d0 0x40094125:0x3ffb35f0 0x4009a6d5:0x3ffb3610 0x4009a2d1:0x3ffb3740 0x40088861:0x3ffb3760 0x4014c506:0x3ffb3780 0x4014c908:0x3ffb37a0 0x4014c973:0x3ffb37c0 0x4014d4d1:0x3ffb37e0 0x4014d78d:0x3ffb3800 0x4014cbb2:0x3ffb3830 0x40110aeb:0x3ffb3890 0x40113795:0x3ffb38b0 0x400f6f99:0x3ffb3a50 0x401479d9:0x3ffb4120 0x40119fc5:0x3ffb41d0 0x40157b3d:0x3ffb4290
+
+
+
+
+ELF file SHA256: e776bfbf10e26514
+
+Rebooting...
+PSRAM total: 4192123
+PSRAM free: 4192123
+Internal free: 230264
+PS/2 keyboard detected on port 0
+QL/32 Olimex ESP32-SBC-FabGL bring-up ready
+Uptime ms: 1488
+Wall clock unsynchronized
+FFS storage ready
+SDC storage ready
+SDC:/startup.bas not found
+Running FFS:/startup.bas
+QL/32 BASIC
+Version 0.1.0
+Free memory total: 4208899
+Largest free block: 4063220
+Free fragments: 13
+BASIC REPL ready (USB serial and PS/2 keyboard)
+> 
+REQUEST: MODE 1,1
+MODE 1,1> MODE 1,1
+BASIC session 1 VM error: VGA framebuffer allocation incomplete for 320x240: allocated 320x127, required 320x240
+> 
+REQUEST: MODE 2,1
+MODE 2,1> MODE 2,1
+BASIC session 1 VM error: VGA framebuffer allocation incomplete for 400x300: allocated 400x95, required 400x300
+> 
+REQUEST: PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)> PRINT #serial_probe,"ACTIVE|";MODE(0);",";MODE(1);",";FREE(0);",";FREE(1)
+ACTIVE|0,0,4223475,4063220
+> 
+REQUEST: MODE 1,0
+MODE 1,0> MODE 1,0
+Display mode set to 320x240 (320x240); window contents preserved where possible.
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+BASIC session 1 VM error: composed region exceeds VGA canvas geometry
+> PSRAM total: 4192123
+PSRAM free: 4192123
+Internal free: 230264
+PS/2 keyboard detected on port 0
+QL/32 Olimex ESP32-SBC-FabGL bring-up ready
+Uptime ms: 1486
+Wall clock unsynchronized
+FFS storage ready
+SDC storage ready
+SDC:/startup.bas not found
+Running FFS:/startup.bas
+QL/32 BASIC
+Version 0.1.0
+Free memory total: 4208899
+Largest free block: 4063220
+Free fragments: 13
+BASIC REPL ready (USB serial and PS/2 keyboard)
+> 
+REQUEST: MODE 0,1
+MODE 0,1> MODE 0,1
+CORRUPT HEAP: Bad tail at 0x4009c638. Expected 0xbaad5678 got 0x3ffd6060
+
+assert failed: multi_heap_free multi_heap_poisoning.c:259 (head != NULL)
+
+
+Backtrace: 0x40088275:0x3ffb35d0 0x40094125:0x3ffb35f0 0x4009a6d5:0x3ffb3610 0x4009a2d1:0x3ffb3740 0x40088861:0x3ffb3760 0x4014c506:0x3ffb3780 0x4014c908:0x3ffb37a0 0x4014c973:0x3ffb37c0 0x4014d4d1:0x3ffb37e0 0x4014d78d:0x3ffb3800 0x4014cbb2:0x3ffb3830 0x40110aeb:0x3ffb3890 0x40113795:0x3ffb38b0 0x400f6f99:0x3ffb3a50 0x401479d9:0x3ffb4120 0x40119fc5:0x3ffb41d0 0x40157b3d:0x3ffb4290
+
+
+
+
+ELF file SHA256: e776bfbf10e26514
+
+Rebooting...
+PSRAM total: 4192123
+PSRAM free: 4192123
+Internal free: 230264
+PS/2 keyboard detected on port 0
+QL/32 Olimex ESP32-SBC-FabGL bring-up ready
+Uptime ms: 1485
+Wall clock unsynchronized
+FFS storage ready
+SDC storage ready
+SDC:/startup.bas not found
+Running FFS:/startup.bas
+QL/32 BASIC
+Version 0.1.0
+Free memory total: 4208899
+Largest free block: 4063220
+Free fragments: 13
+BASIC REPL ready (USB serial and PS/2 keyboard)
+> 
+REQUEST: MODE 0,0
+MODE 0,0> MODE 0,0
+Display mode set to 320x200 (320x200); window contents preserved where possible.
+> 

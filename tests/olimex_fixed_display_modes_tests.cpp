@@ -35,6 +35,18 @@ int main() {
     assert(rejected);
     rejected = false;
     try { modes.setMode(FixedDisplayModes::kModeId, 1); }
-    catch (const std::invalid_argument&) { rejected = true; }
+    catch (const std::invalid_argument& error) {
+        rejected = true;
+        assert(std::string(error.what()).find("use option 0") != std::string::npos);
+        assert(std::string(error.what()).find(FixedDisplayModes::kModeName) != std::string::npos);
+    }
+    assert(rejected);
+    rejected = false;
+    try { modes.setMode("unavailable"); }
+    catch (const std::invalid_argument& error) {
+        rejected = true;
+        assert(std::string(error.what()).find(FixedDisplayModes::kModeName) != std::string::npos);
+        assert(std::string(error.what()).find("fixed-mode build") != std::string::npos);
+    }
     assert(rejected);
 }
