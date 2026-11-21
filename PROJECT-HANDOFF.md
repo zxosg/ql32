@@ -155,8 +155,11 @@ telemetry-backed testing.
 plus `_single_fb_status` with `DMADIAG` and a `_test_400x300_single_fb`
 diagnostic) uses one 60 KB PSRAM framebuffer drawn directly and scanned
 continuously; tearing is allowed, no publish/clone/stale repair. Packed-4
-nibble RMW is serialised by `packed4_rmw.hpp`. Short hardware runs showed 0
-late refills; soak/cancel loops are open. 320x200/320x240 are the planned
+nibble RMW is serialised by `packed4_rmw.hpp`. Hardware (ring150, refill
+profile): five stress patterns, an 11 min soak, a 40x RUN/Ctrl-C loop and BASIC
+palette animation all showed 0 late refills; a presenter write racing `end()`
+is guarded by an active-writer count. Not verified: soaks beyond 11 min and a
+REPL hang on very long input lines. 320x200/320x240 are the planned
 next adopters; 640x400/480 are exceptions. See
 [results](docs/test-results/olimex-single-framebuffer-2026-11-21.md).
 
