@@ -29,6 +29,12 @@ public:
     static constexpr std::uint32_t kModeHeight = 300;
     static constexpr std::uint16_t kModeRefresh = 60;
     static constexpr std::uint32_t kModeId = 2;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_320X240)
+    static constexpr char kModeName[] = "320x240";
+    static constexpr std::uint32_t kModeWidth = 320;
+    static constexpr std::uint32_t kModeHeight = 240;
+    static constexpr std::uint16_t kModeRefresh = 60;
+    static constexpr std::uint32_t kModeId = 1;
 #else
     static constexpr char kModeName[] = "320x200";
     static constexpr std::uint32_t kModeWidth = 320;

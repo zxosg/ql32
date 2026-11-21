@@ -12,6 +12,8 @@ int main() {
     constexpr unsigned expectedId = 3;
 #elif defined(QL32_OLIMEX_DMA_TEST_MODE_400X300)
     constexpr unsigned expectedId = 2;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_320X240)
+    constexpr unsigned expectedId = 1;
 #else
     constexpr unsigned expectedId = 0;
 #endif
