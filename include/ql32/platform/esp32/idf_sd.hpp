@@ -84,6 +84,8 @@ public:
                     std::string_view bytes) override;
     void seek(runtime::SessionId session, runtime::ChannelId channel,
               std::uint64_t offset) override;
+    std::uint64_t position(runtime::SessionId session, runtime::ChannelId channel) override;
+    std::uint64_t length(runtime::SessionId session, runtime::ChannelId channel) override;
     bool atEnd(runtime::SessionId session, runtime::ChannelId channel) override;
     void write(runtime::SessionId session, runtime::ChannelId channel,
                const std::string& text) override;

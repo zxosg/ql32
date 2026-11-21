@@ -271,6 +271,151 @@ void testBinaryChannelRandomAccess() {
     std::filesystem::remove_all(root);
 }
 
+int failureCode(const std::shared_ptr<ql32::runtime::ChannelService>& channels,
+                const std::string& source) {
+    ql32::Interpreter interpreter({}, channels);
+    std::ostringstream sink;
+    try {
+        interpreter.execute(source, sink);
+    } catch (const std::exception& error) {
+        if (const auto* typed = dynamic_cast<const ql32::runtime::Error*>(&error))
+            return static_cast<int>(typed->code());
+        if (const auto* service = dynamic_cast<const ql32::runtime::ServiceError*>(&error))
+            return static_cast<int>(service->languageCode());
+        return static_cast<int>(ql32::runtime::errorCodeFor(error));
+    }
+    return 0;
+}
+
+std::string executeFailure(const std::shared_ptr<ql32::runtime::ChannelService>& channels,
+                           const std::string& source) {
+    ql32::Interpreter interpreter({}, channels);
+    std::ostringstream sink;
+    try {
+        interpreter.execute(source, sink);
+    } catch (const std::exception& error) {
+        return error.what();
+    }
+    return {};
+}
+
+void testChannelAtSeek() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-at-seek-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        {
+            std::ofstream seed(root / "lines.txt", std::ios::binary);
+            seed << "alpha\nbeta\ngamma\n";
+        }
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        ql32::Interpreter interpreter({}, channels);
+        std::ostringstream output;
+        interpreter.execute(
+            "ch = OPEN(\"lines.txt\", \"READ\")\n"
+            "PRINT READ$(ch)\n"
+            "#ch AT 0\n"
+            "PRINT READ$(ch)\n"
+            "#ch AT 6\n"
+            "PRINT READ$(ch)\n"
+            "#ch AT 17\n"
+            "PRINT EOF(ch)\n"
+            "PRINT FPOS(ch)\n"
+            "PRINT FLEN(ch)\n"
+            "#ch AT 11 + 0\n"
+            "PRINT EOF(ch)\n"
+            "PRINT READ$(ch)\n"
+            "CLOSE ch\n", output);
+        require(output.str() == "alpha\nalpha\nbeta\n1\n17\n17\n0\ngamma\n",
+                "AT did not reposition a read channel or reset EOF");
+
+        interpreter.execute(
+            "w = OPEN(\"w.bin\", \"WRITE\")\n"
+            "WRITE w, \"abcdef\"\n"
+            "#w AT 0\n"
+            "WRITE w, \"X\"\n"
+            "CLOSE w\n", output);
+        std::ifstream written(root / "w.bin", std::ios::binary);
+        const std::string contents{std::istreambuf_iterator<char>(written), {}};
+        require(contents == "X\ncdef\n", "AT did not reposition a write channel");
+
+        const std::string openAppend = "a = OPEN(\"app.txt\", \"APPEND\")\n";
+        const std::string openRead = "a = OPEN(\"lines.txt\", \"READ\")\n";
+        require(failureCode(channels, openAppend + "#a AT 0\n") == 14,
+                "AT accepted an append channel");
+        require(failureCode(channels, openRead + "#a AT -1\n") == 5,
+                "AT accepted a negative offset");
+        require(failureCode(channels, openRead + "#a AT 1.5\n") == 5,
+                "AT accepted a fractional offset");
+        require(failureCode(channels, openRead + "#a AT \"x\"\n") == 4,
+                "AT accepted a string offset");
+        require(failureCode(channels, "#99 AT 0\n") == 14,
+                "AT accepted an invalid handle");
+        require(!executeFailure(channels, "#1 AT 0\n").empty(),
+                "AT accepted the console channel");
+        require(executeFailure(channels, openRead + "#a AT 17\n").empty(),
+                "AT rejected an offset equal to the file length");
+        require(failureCode(channels, openRead + "#a AT 18\n") == 5,
+                "AT accepted an offset beyond the end of the file");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
+void testUpdateMode() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-update-mode-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        {
+            std::ofstream seed(root / "data.bin", std::ios::binary);
+            seed << "0123456789";
+        }
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        ql32::Interpreter interpreter({}, channels);
+        std::ostringstream output;
+        interpreter.execute(
+            "u = OPEN(\"data.bin\", \"UPDATE\")\n"
+            "PRINT FPOS(u)\n"
+            "PRINT FLEN(u)\n"
+            "#u AT 2\n"
+            "#u OUT 3, \"abc\"\n"
+            "PRINT FPOS(u)\n"
+            "#u AT 0\n"
+            "#u IN 6, head$\n"
+            "PRINT head$\n"
+            "#u AT FLEN(u)\n"
+            "#u OUT 2, \"XY\"\n"
+            "PRINT FLEN(u)\n"
+            "CLOSE u\n", output);
+        require(output.str() == "0\n10\n5\n01abc5\n12\n", "UPDATE mode read/write failed");
+        std::ifstream result(root / "data.bin", std::ios::binary);
+        const std::string contents{std::istreambuf_iterator<char>(result), {}};
+        require(contents == "01abc56789XY", "UPDATE mode did not preserve or extend contents");
+        require(!executeFailure(channels, "OPEN(\"missing.bin\", \"UPDATE\")\n").empty(),
+                "UPDATE created a missing file");
+        require(!std::filesystem::exists(root / "missing.bin"),
+                "UPDATE created a missing file");
+        require(!executeFailure(channels,
+                    "u = OPEN(\"data.bin\", \"UPDATE\")\n#u AT 13\n").empty(),
+                "UPDATE allowed seeking beyond the end");
+        require(!executeFailure(channels, "PRINT FPOS(99)\n").empty() &&
+                !executeFailure(channels, "PRINT FLEN(1)\n").empty() &&
+                !executeFailure(channels, "PRINT FLEN(\"x\")\n").empty(),
+                "FPOS/FLEN accepted an invalid channel");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testInputLineAndSessionResume() {
     auto ui = std::make_shared<ql32::ui::QueuedService>();
     ql32::Interpreter interpreter({}, {}, ui);
@@ -422,6 +567,8 @@ int main() {
         testBasicChannelCalls();
         testWindowDeviceChannel();
         testBinaryChannelRandomAccess();
+        testChannelAtSeek();
+        testUpdateMode();
         testInputLineAndSessionResume();
         testDefaultAndRoutedOutputChannels();
         testChannelBindingSnapshotsEndpoint();

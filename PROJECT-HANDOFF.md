@@ -152,6 +152,18 @@ passed 64/64 on 2026-11-06.
   [ADR-002](docs/decisions/ADR-002-language-profile.md) and
   [QL32-LANG-001](docs/specification/QL32-LANG-001.md).
 
+## File random access
+
+- `#ch AT offset` is the only seek syntax (absolute, zero-based; no SEEK
+  statement). `FPOS(ch)`/`FLEN(ch)` return position/length; relative and
+  from-end positioning use arithmetic. `OPEN(path, "UPDATE")` is read/write,
+  non-truncating, existing file only. Offsets beyond length raise error 5.
+- Implemented via `ChannelService::position()/length()` and
+  `ChannelMode::Update` in Linux, Arduino SD, ESP-IDF SD, and drive-router
+  adapters. Status: built and host-tested only (`ql32_channel_tests`,
+  `ql32_esp32_channels_tests`); not hardware-verified (CYD FFS/SD untouched).
+  Pre-existing failures unrelated to this: scheduler, channel binding, hardware tests.
+
 ## Milestone and hardware status
 
 - Use the target-by-target matrix and ranked open work in

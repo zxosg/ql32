@@ -11,6 +11,10 @@ namespace {
 using runtime::ServiceError;
 using runtime::ServiceErrorCode;
 
+bool canRead(runtime::ChannelMode mode) {
+    return mode == runtime::ChannelMode::Read || mode == runtime::ChannelMode::Update;
+}
+
 } // namespace
 
 SdChannels::~SdChannels() {
@@ -82,10 +86,12 @@ runtime::ChannelId SdChannels::open(runtime::SessionId session,
     case runtime::ChannelMode::Read: flags = FILE_READ; break;
     case runtime::ChannelMode::Write: flags = FILE_WRITE; break;
     case runtime::ChannelMode::Append: flags = FILE_APPEND; break;
+    case runtime::ChannelMode::Update: flags = "r+"; break;
     }
     fs::File file = filesystem_.open(resolved.c_str(), flags);
     if (!file)
-        throw ServiceError(mode == runtime::ChannelMode::Read
+        throw ServiceError(mode == runtime::ChannelMode::Read ||
+                           mode == runtime::ChannelMode::Update
                                ? ServiceErrorCode::NotFound
                                : ServiceErrorCode::IoError,
                            "channel: cannot open file: " + path);
@@ -115,7 +121,7 @@ std::optional<std::string> SdChannels::readLine(runtime::SessionId session,
                                                runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for reading");
 
@@ -135,7 +141,7 @@ std::string SdChannels::readBytes(runtime::SessionId session,
                                   runtime::ChannelId channel, std::size_t count) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     std::string bytes(count, '\0');
     const std::size_t received = opened.file.read(
@@ -158,6 +164,22 @@ void SdChannels::writeBytes(runtime::SessionId session, runtime::ChannelId chann
         throw ServiceError(ServiceErrorCode::IoError, "channel write failed");
 }
 
+std::uint64_t SdChannels::position(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Append)
+        throw ServiceError(ServiceErrorCode::InvalidHandle,
+                           "append channels do not report a position");
+    return opened.file.position();
+}
+
+std::uint64_t SdChannels::length(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    opened.file.flush();
+    return opened.file.size();
+}
+
 void SdChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
                      std::uint64_t offset) {
     std::lock_guard lock(mutex_);
@@ -173,7 +195,7 @@ void SdChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
 bool SdChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for reading");
     return opened.file.available() == 0;

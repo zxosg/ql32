@@ -118,7 +118,7 @@ constexpr std::string_view builtinFunctions[] = {
     "STR$", "VAL", "EVAL", "EVAL$",
     "BAND", "BOR", "BXOR", "BNOT", "ROL", "ROR", "SRA", "SRL", "SLA", "SLL",
     "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
-    "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
+    "EOF", "FPOS", "FLEN", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
     "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$", "GX", "GY",
@@ -286,6 +286,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "DEALLOC") return {1, false};
     if (instruction.name == "POKE_W" || instruction.name == "POKE_L") return {2, false};
     if (instruction.name == "READ$") return {1, true};
+    if (instruction.name == "FPOS" || instruction.name == "FLEN") return {1, true};
     if (instruction.name == "EOF") return {0, true};
     if (instruction.name == "WRITE") return {2, false};
     if (instruction.name == "CLOSE") return {1, false};
