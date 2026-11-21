@@ -29,13 +29,17 @@ case "$target" in
     cd "$repo_dir"
     exec pio run -e olimex_esp32_sbc_fabgl_psram
     ;;
+  olimex-retro)
+    cd "$repo_dir"
+    exec pio run -e olimex_esp32_sbc_retro
+    ;;
   cyd)
     cd "$repo_dir"
     exec pio run -e esp32_2432s028
     ;;
   *)
     printf '%s\n' \
-      'Usage: tools/build-target.sh {linux|mac|vga32|olimex|olimex-psram|cyd}' \
+      'Usage: tools/build-target.sh {linux|mac|vga32|olimex|olimex-psram|olimex-retro|cyd}' \
       '' \
       'Build one named target:' \
       '  linux  CMake host executable and CTest binaries (does not run tests)' \
@@ -43,6 +47,7 @@ case "$target" in
       '  vga32  LILYGO FabGL VGA32 firmware' \
       '  olimex Olimex ESP32-SBC-FabGL firmware' \
       '  olimex-psram Olimex ESP32-SBC-FabGL firmware with WROVER PSRAM' \
+      '  olimex-retro Olimex WROVER default: single-framebuffer MODE 0/1/2' \
       '  cyd    ESP32-2432S028 CYD firmware' >&2
     exit 2
     ;;

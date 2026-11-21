@@ -177,9 +177,17 @@ next adopters; 640x400/480 are exceptions. See
 
 ## Olimex PlatformIO environments
 
-- **Stable / qualified:** `olimex_esp32_sbc_fabgl_psram` (FabGL, WROVER with
-  PSRAM) is the default firmware for the board. `olimex_esp32_sbc_fabgl` is the
-  non-PSRAM base profile. Use these unless a task says otherwise.
+- **Default (owner-approved 2026-11-21):** `olimex_esp32_sbc_retro` (and
+  `olimex_esp32_sbc_retro_status` with `DMADIAG`) is the default WROVER/PSRAM
+  firmware: single-framebuffer packed4 retro modes with runtime `MODE 0/1/2` =
+  320x200 / 320x240 / 400x300 (boots 400x300; MODE 3/4 rejected; 16-entry
+  RGB222 palette). It is in `default_envs`.
+- **FabGL (separate build, cannot coexist in one image):**
+  `olimex_esp32_sbc_fabgl_psram` is the qualified FabGL WROVER firmware and the
+  route to 640x400/640x480 and the FabGL fallback. Flash it explicitly with
+  `pio run -e olimex_esp32_sbc_fabgl_psram -t upload`; flash the retro default
+  with `pio run -e olimex_esp32_sbc_retro -t upload`.
+  `olimex_esp32_sbc_fabgl` is the non-PSRAM base profile.
 - **Experimental `*_psram_dma_*`:** custom PSRAM-framebuffer scanout with an
   internal DMA line ring, extending the PSRAM env. Families:
   `..._psram_dma_test*` (synthetic scanout/pattern tests, packed4, ring and

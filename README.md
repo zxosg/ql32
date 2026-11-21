@@ -176,6 +176,17 @@ pio run -e olimex_esp32_sbc_fabgl -t upload
 pio run -e esp32_2432s028_spiffs -t upload
 ```
 
+Olimex ESP32-SBC-FabGL with a WROVER/PSRAM module has two separate images
+(the FabGL and PSRAM-scanout backends cannot share one build; flash one):
+
+```bash
+pio run -e olimex_esp32_sbc_retro -t upload       # default: MODE 0/1/2 = 320x200, 320x240, 400x300 (single framebuffer, boots 400x300)
+pio run -e olimex_esp32_sbc_fabgl_psram -t upload # FabGL: MODE 640x400/640x480 and FabGL fallback
+```
+
+The retro image offers 16 simultaneous palette colours (RGB222) per mode and
+rejects MODE 3/4 (640x400/640x480); use the FabGL image for those.
+
 ### Serial file transfer
 
 The monitor accepts `RECV "SDC:/path"` and `SEND "SDC:/path"` (use
