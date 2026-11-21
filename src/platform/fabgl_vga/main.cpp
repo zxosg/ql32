@@ -226,22 +226,34 @@ public:
         const auto textRow = localY / consoleCharacterHeight;
         const auto glyphRow = localY % consoleCharacterHeight;
         const std::string* line = textRow < lines_.size() ? &lines_[textRow] : nullptr;
-        for (std::uint32_t i = 0; i < pixels.size(); ++i) {
-            const auto x = xOrigin + i;
-            if (x < static_cast<std::uint32_t>(bounds_.x) ||
-                x >= static_cast<std::uint32_t>(bounds_.x) + bounds_.width) continue;
-            bool foreground = false;
-            const auto localX = x - static_cast<std::uint32_t>(bounds_.x);
-            const auto column = localX / consoleCharacterWidth;
-            const auto glyphColumn = localX % consoleCharacterWidth;
-            if (line && glyphRow < 7 && column < line->size() && glyphColumn < 5) {
+        const auto left = static_cast<std::uint32_t>(bounds_.x);
+        const auto right = left + bounds_.width;
+        const std::uint32_t first = std::max(xOrigin, left);
+        const std::uint32_t last = std::min<std::uint32_t>(xOrigin + pixels.size(), right);
+        if (first >= last) return;
+        // Walk cell by cell: one glyph lookup per character column instead of
+        // per pixel, and no per-pixel division.
+        auto localX = first - left;
+        auto column = localX / consoleCharacterWidth;
+        auto glyphColumn = localX % consoleCharacterWidth;
+        auto i = first - xOrigin;
+        const auto end = last - xOrigin;
+        while (i < end) {
+            std::uint8_t columns[consoleCharacterWidth] = {};
+            if (line && glyphRow < 7 && column < line->size()) {
                 const auto glyph = ql32::graphics::classicGlyphColumns((*line)[column]);
-                foreground = (glyph[glyphColumn] & (1u << glyphRow)) != 0;
+                for (std::uint32_t g = 0; g < 5 && g < consoleCharacterWidth; ++g)
+                    columns[g] = (glyph[g] & (1u << glyphRow)) ? 1 : 0;
             }
             const bool caretCell = inputLineActive_ && caretVisible_ &&
                 textRow == caretRow_ && column == caretColumn_;
-            pixels[i] = caretCell ? (foreground ? paper_ : ink_)
-                                  : (foreground ? ink_ : paper_);
+            for (; glyphColumn < consoleCharacterWidth && i < end; ++glyphColumn, ++i) {
+                const bool foreground = columns[glyphColumn] != 0;
+                pixels[i] = caretCell ? (foreground ? paper_ : ink_)
+                                      : (foreground ? ink_ : paper_);
+            }
+            glyphColumn = 0;
+            ++column;
         }
     }
 
@@ -784,6 +796,13 @@ void submitInputLine() {
             Serial.printf("QL32 present rate min-us=%u cost-ratio=%u\n", minUs, ratio);
         }
 #endif
+    } else if (submittedLine.rfind("PRESWRITE", 0) == 0) {
+        // PRESWRITE 0|1: per-byte (0) or chunked bulk (1) presenter row writes.
+        if (psramPresenterDiag) {
+            psramPresenterDiag->setChunkedWrite(std::atoi(submittedLine.c_str() + 9) != 0);
+            Serial.printf("QL32 present chunked-write=%d\n",
+                          psramPresenterDiag->chunkedWrite() ? 1 : 0);
+        }
     } else if (submittedLine == "PRESRESET") {
         if (psramPresenterDiag) psramPresenterDiag->resetStats();
 #if defined(QL32_OLIMEX_PRESENT_COALESCE)

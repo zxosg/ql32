@@ -37,6 +37,10 @@ public:
 #if defined(QL32_OLIMEX_PRESENT_PROFILE)
     // Diagnostic only: accumulated until the user requests a snapshot.
     const PresentStats& stats() const noexcept { return stats_; }
+    // A/B switch for the row writer: bulk chunked stores (default) or the
+    // original per-byte writeMappedRow.
+    void setChunkedWrite(bool enabled) noexcept { chunkedWrite_ = enabled; }
+    bool chunkedWrite() const noexcept { return chunkedWrite_; }
     void reportStats() const;
     void resetStats() noexcept { stats_ = {}; }
 #endif
@@ -59,6 +63,7 @@ private:
     std::array<graphics::RgbColor, 256> cachedPalette_{};
     std::array<std::uint8_t, 256> indexMap_{};
     bool paletteCacheValid_ = false;
+    bool chunkedWrite_ = true;
 };
 
 } // namespace ql32::platform::olimex_vga

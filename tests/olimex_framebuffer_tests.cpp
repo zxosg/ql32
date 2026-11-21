@@ -89,6 +89,27 @@ void testMappedRowWrites() {
             "RGB mapped row wrote incorrect values or crossed its range");
 }
 
+void testChunkedMappedRowMatchesPerByte() {
+    using namespace ql32::platform::olimex_vga;
+    std::array<std::uint8_t, 256> mapping{};
+    for (std::uint32_t i = 0; i < mapping.size(); ++i)
+        mapping[i] = static_cast<std::uint8_t>((i * 7u + 3u) & 0xFFu);
+    constexpr std::uint32_t width = 700;
+    std::vector<std::uint8_t> indices(width);
+    for (std::uint32_t i = 0; i < width; ++i) indices[i] = static_cast<std::uint8_t>(i * 13u);
+    for (std::uint32_t x : {0u, 1u, 2u, 5u})
+        for (std::uint32_t count : {0u, 1u, 2u, 3u, 255u, 256u, 257u, 600u, 695u}) {
+            if (x + count > width) continue;
+            std::vector<std::uint8_t> a(width / 2, 0x5A), b(width / 2, 0x5A);
+            FramebufferView fa{a.data(), width, 1, width / 2, PixelFormat::Indexed4};
+            FramebufferView fb{b.data(), width, 1, width / 2, PixelFormat::Indexed4};
+            require(writeMappedRow(fa, x, 0, indices.data(), count, mapping.data()) ==
+                    writeMappedRowChunked(fb, x, 0, indices.data(), count, mapping.data()),
+                    "chunked row result differs");
+            require(a == b, "chunked row bytes differ from per-byte writer");
+        }
+}
+
 void testRegionSynchronization() {
     using namespace ql32::platform::olimex_vga;
     constexpr std::uint32_t width = 7;
@@ -409,6 +430,7 @@ int main() {
     testRgb222ClippingAndOverlap();
     testPacked4OddWidthAndOverlap();
     testMappedRowWrites();
+    testChunkedMappedRowMatchesPerByte();
     testRegionSynchronization();
     testIncrementalTripleBufferRepair();
     testPacked4TriangleFillMatchesPixelWrites();

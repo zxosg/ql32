@@ -124,7 +124,7 @@ bool PsramFramePresenter::presentRegion(
             if (row_.size() != region.width)
                 throw std::invalid_argument("PSRAM presenter row has the wrong width");
             const auto r1 = QL32_PRESENT_NOW();
-            (void)writeMappedRow(*frame,
+            (void)(chunkedWrite_ ? writeMappedRowChunked : writeMappedRow)(*frame,
                 static_cast<std::uint32_t>(region.x), y, row_.data(),
                 region.width, indexMap_.data());
             providerUs += r1 - r0;

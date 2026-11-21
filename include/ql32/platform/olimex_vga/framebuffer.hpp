@@ -180,6 +180,46 @@ inline bool writeMappedRow(FramebufferView framebuffer, std::uint32_t x,
     return true;
 }
 
+// Same result as writeMappedRow, but the packed pairs are built in a small
+// internal-RAM chunk and stored to the framebuffer with one memcpy. On PSRAM
+// this replaces one byte store (each with a cache-bug memw) per output byte
+// with word-aligned bulk stores.
+inline bool writeMappedRowChunked(FramebufferView framebuffer, std::uint32_t x,
+                                  std::uint32_t y, const std::uint8_t* indices,
+                                  std::uint32_t count,
+                                  const std::uint8_t* indexMap) noexcept {
+    if (framebuffer.format != PixelFormat::Indexed4 || !framebuffer.valid() ||
+        !indices || !indexMap || y >= framebuffer.height ||
+        x > framebuffer.width || count > framebuffer.width - x)
+        return writeMappedRow(framebuffer, x, y, indices, count, indexMap);
+    auto* row = framebuffer.pixels + static_cast<std::size_t>(y) * framebuffer.stride;
+    std::uint32_t i = 0;
+    if ((x & 1u) && count != 0) {
+        auto& packed = row[x / 2];
+        packed = static_cast<std::uint8_t>((packed & 0xF0u) |
+                                           (indexMap[indices[i++]] & 0x0Fu));
+        ++x;
+        --count;
+    }
+    std::uint8_t chunk[128];
+    while (count >= 2) {
+        const std::uint32_t pairs = std::min<std::uint32_t>(count / 2, sizeof(chunk));
+        for (std::uint32_t p = 0; p < pairs; ++p, i += 2)
+            chunk[p] = static_cast<std::uint8_t>(
+                ((indexMap[indices[i]] & 0x0Fu) << 4) |
+                 (indexMap[indices[i + 1]] & 0x0Fu));
+        std::memcpy(row + x / 2, chunk, pairs);
+        x += pairs * 2;
+        count -= pairs * 2;
+    }
+    if (count != 0) {
+        auto& packed = row[x / 2];
+        packed = static_cast<std::uint8_t>((packed & 0x0Fu) |
+                                           ((indexMap[indices[i]] & 0x0Fu) << 4));
+    }
+    return true;
+}
+
 // Synchronize a pixel rectangle between distinct framebuffers of the same
 // format. Packed-4 edges preserve the untouched neighboring nibble.
 inline bool copyRegion(const FramebufferView& source, FramebufferView destination,
