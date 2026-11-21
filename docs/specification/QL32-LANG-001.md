@@ -780,6 +780,17 @@ stopped. Not supported: TurboSound (second module / `02TS` footer; the extra dat
 is ignored). Note and volume tables are factual numeric data; the player logic is
 an independent implementation. The file type is detected from content.
 
+SQT (QL/32-specific player of SQ-Tracker modules, up to 64 KiB, one AY chip at
+1.7734 MHz, 50 Hz tick, loops to the module loop position). SQT has no signature:
+it is recognised by the fixed pointer-table geometry (98-byte samples, 34-byte
+ornaments), checked after VTX, YM and PT3. Player logic is an independent
+implementation; the note table is shared numeric data.
+
+VTX: files up to 256 KiB and register streams up to 512 KiB are accepted (about
+10 minutes at 50 Hz); a stream length that is not a multiple of 14 is truncated to
+whole frames. Stereo mode bits are parsed but the DAC output is mono, so all
+three voices are mixed equally.
+
 `MUSIC WAV "path"` (QL/32-specific, not SMSQ/E) streams an uncompressed PCM WAV
 file from storage without loading it into RAM (2 KiB read buffer). Supported:
 8-bit unsigned or 16-bit signed, mono or stereo (averaged to mono), 4000-48000 Hz

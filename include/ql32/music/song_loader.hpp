@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ql32/music/pt3.hpp"
+#include "ql32/music/sqt.hpp"
 #include "ql32/music/vtx_source.hpp"
 #include "ql32/music/ym_player.hpp"
 
@@ -17,14 +18,16 @@ inline std::unique_ptr<AudioSource> openSong(std::vector<std::uint8_t> bytes) {
     if (bytes.size() >= 2 && ((bytes[0] == 'a' && bytes[1] == 'y') ||
                               (bytes[0] == 'y' && bytes[1] == 'm'))) {
         if (bytes.size() > VtxSong::MaximumFileBytes)
-            throw std::runtime_error("VTX file exceeds 64 KiB");
+            throw std::runtime_error("VTX file exceeds 256 KiB");
         return std::make_unique<VtxSource>(VtxSong::parse(std::move(bytes)));
     }
     if (YmSong::looksLikeYm(bytes.data(), bytes.size()))
         return std::make_unique<YmSource>(YmSong::parse(std::move(bytes)));
     if (Pt3Module::looksLikePt3(bytes.data(), bytes.size()))
         return std::make_unique<Pt3Source>(Pt3Module::parse(std::move(bytes)));
-    throw std::runtime_error("unrecognised music file (supported: VTX, YM, PT3)");
+    if (SqtModule::looksLikeSqt(bytes.data(), bytes.size()))
+        return std::make_unique<SqtSource>(SqtModule::parse(std::move(bytes)));
+    throw std::runtime_error("unrecognised music file (supported: VTX, YM, PT3, SQT)");
 }
 
 } // namespace ql32::music

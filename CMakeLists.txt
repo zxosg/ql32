@@ -22,6 +22,7 @@ add_library(ql32_portable
   src/music/ym_player.cpp
   src/music/pt3.cpp
   src/music/pt3_tables.cpp
+  src/music/sqt.cpp
   src/language/interpreter.cpp
   src/graphics/bitmap.cpp
   src/graphics/font.cpp

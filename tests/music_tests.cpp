@@ -4,6 +4,7 @@
 #include "ql32/music/mixer.hpp"
 #include "ql32/music/song_loader.hpp"
 #include "ql32/music/pt3.hpp"
+#include "ql32/music/sqt.hpp"
 #include "ql32/music/tone.hpp"
 #include "ql32/music/wav.hpp"
 #include "ql32/music/vtx.hpp"
@@ -584,6 +585,59 @@ void testExamplePt3Files() {
     std::cerr << "example PT3 files decoded=" << decoded << "\n";
     require(decoded >= 10, "example PT3 files failed to decode");
 }
+
+void testExampleSqtFiles() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path(QL32_EXAMPLES_DIR) / "music" / "sqt";
+    if (!fs::exists(root)) return;
+    std::size_t decoded = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        if (!entry.is_regular_file()) continue;
+        const auto bytes = readFile(entry.path());
+        require(ql32::music::SqtModule::looksLikeSqt(bytes.data(), bytes.size()),
+                ("SQT not recognised: " + entry.path().string()).c_str());
+        auto source = ql32::music::openSong(bytes);
+        std::array<std::int16_t, 4096> block{};
+        std::int16_t peak = 0;
+        for (int i = 0; i < 40; ++i) {
+            source->render(block.data(), block.size());
+            for (auto v : block) peak = std::max<std::int16_t>(peak, v);
+        }
+        require(peak > 100, ("example SQT is silent: " + entry.path().string()).c_str());
+        const auto module = ql32::music::SqtModule::parse(bytes);
+        ql32::music::SqtEngine engine(module);
+        bool shape = false;
+        for (int t = 0; t < 50 * 1800 && engine.loopCount() == 0; ++t) engine.tick(shape);
+        require(engine.loopCount() > 0, ("example SQT never loops: " + entry.path().string()).c_str());
+        ++decoded;
+    }
+    std::cerr << "example SQT files decoded=" << decoded << "\n";
+    require(decoded >= 5, "example SQT files failed to decode");
+}
+
+void testVtxLongAndRaggedStreams() {
+    using namespace ql32::music;
+    // A 2-frame stream with one stray trailing byte is accepted as 2 frames.
+    const std::vector<std::uint8_t> raw(29, 7);
+    std::vector<std::uint8_t> file = {'a', 'y', 0, 0xff, 0xff, 0x34, 0x6c, 0x1b, 0x00, 50, 0, 0, 29, 0, 0, 0};
+    for (int i = 0; i < 5; ++i) file.push_back(0);
+    // Stored-method LHA data is not available here, so only the size gates are checked.
+    bool threw = false;
+    try { (void)VtxSong::parse(file); } catch (const std::runtime_error&) { threw = true; }
+    require(threw, "VTX without a data stream accepted");
+    require(VtxSong::MaximumFileBytes >= 256 * 1024 && VtxSong::MaximumRegisterBytes >= 512 * 1024,
+            "VTX limits not raised");
+    require(maximumSongFileBytes() >= VtxSong::MaximumFileBytes, "loader limit below VTX limit");
+}
+
+void testSqtRejectsGarbage() {
+    std::vector<std::uint8_t> junk(300);
+    for (std::size_t i = 0; i < junk.size(); ++i) junk[i] = static_cast<std::uint8_t>(i * 37 + 11);
+    require(!ql32::music::SqtModule::looksLikeSqt(junk.data(), junk.size()), "garbage accepted as SQT");
+    bool threw = false;
+    try { (void)ql32::music::openSong(junk); } catch (const std::runtime_error&) { threw = true; }
+    require(threw, "garbage accepted by song loader");
+}
 } // namespace
 
 int main() {
@@ -598,6 +652,9 @@ int main() {
         testExampleYmFiles();
         testPt3();
         testExamplePt3Files();
+        testExampleSqtFiles();
+        testSqtRejectsGarbage();
+        testVtxLongAndRaggedStreams();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';
