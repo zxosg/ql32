@@ -18,9 +18,11 @@ session.
 
 ## Repository state (2026-11-21)
 
-The MODE reliability investigation fetched `origin/main` at `289f0c8`.
-The previously local integration is now included there; the MODE fixes are
-on a separate local, unpushed feature branch. The integration branch
+The previously local integration reached `origin/main` at `289f0c8`.
+The owner approved publishing the MODE fixes (`c562551`), followed by the
+videoram analysis (`6377b41`, cherry-picked from `76a932f`), and this handoff
+refresh as a fast-forward to `origin/main`. Check the live remote tip before
+continuing. The integration branch
 `jan-pal-branch-integration` merged these branches (merge order; all clean
 except doc conflicts):
 `jan-pal-olimex-sound-audit` (sound, YM/AY/PT3/VTX/SQT/WAV, `BEEP`/`VOLUME`,
@@ -37,8 +39,9 @@ rewrote; reconcile by hand and do not discard it.
 
 Native Linux: `cmake --preset linux`, `cmake --build build/linux`,
 `ctest --test-dir build/linux` (there is no `linux` test preset) passes
-83/83 on the main baseline and 84/84 on the MODE reliability feature branch,
-including the new FabGL display-mode adapter regression target.
+83/83 at the `289f0c8` baseline and 84/84 with the MODE fixes, including the
+new FabGL display-mode adapter regression target. The subsequent videoram
+analysis and publication handoff changes are documentation-only.
 
 Terms below: **built** = firmware/host target compiles; **host-tested** =
 covered by Linux CTest (fakes, no board); **hardware-verified** = observed on
@@ -125,6 +128,26 @@ Hardware-verified with the owner present; reports are under
   per-row dirty compare inside full presents, to be A/B tested with `PRESDIAG`
   counters; it may cost more PSRAM bandwidth than it saves.
 - Details: [investigation notes](docs/plans/olimex-vga-640x480-dma-investigation.md).
+
+### Videoram scanout follow-up (2026-11-21)
+
+The [design analysis](docs/plans/videoram-scanout-design.md) compares shared
+videoram with the existing PSRAM-to-internal-DMA-ring implementation; no
+runtime code, pinning, refill priority or timing was changed. The
+[hardware report](docs/test-results/videoram-scanout-analysis-2026-11-21.md)
+records built diagnostic profiles and owner-observed short runs: static
+400x300 was stable, and active packed-4 400x300 had stable palette cycling
+with zero late refills under PSRAM stress. The base 640x400 packed-4 run had
+about 14% late refills and localized marker flicker; the gradient looked
+stable but lacked usable refill telemetry. Neither result qualifies general
+shared-videoram runtime use or production 640x400 scanout.
+
+The experiment restored qualified PSRAM FabGL, with a responsive REPL and
+owner-confirmed stable picture, and released serial. That restoration was
+built from the videoram branch's pre-MODE-fix baseline; it does not establish
+that the newly published MODE fixes are currently installed on the board.
+Keep FabGL as the default; further scanout changes require separate,
+telemetry-backed testing.
 
 ## Olimex PlatformIO environments
 
