@@ -23,8 +23,8 @@ struct VtxMetadata {
 
 class VtxSong {
 public:
-    static constexpr std::size_t MaximumFileBytes = 64 * 1024;
-    static constexpr std::size_t MaximumRegisterBytes = 96 * 1024;
+    static constexpr std::size_t MaximumFileBytes = 256 * 1024;
+    static constexpr std::size_t MaximumRegisterBytes = 512 * 1024;
 
     static VtxSong parse(const std::uint8_t* bytes, std::size_t size);
     static VtxSong parse(std::vector<std::uint8_t> bytes) {

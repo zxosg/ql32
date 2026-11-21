@@ -28,7 +28,7 @@ std::string readString(const std::uint8_t* bytes, std::size_t size,
 
 VtxSong VtxSong::parse(const std::uint8_t* bytes, std::size_t size) {
     if (!bytes || size < 20 || size > MaximumFileBytes)
-        throw std::runtime_error("VTX file size is invalid or exceeds 64 KiB");
+        throw std::runtime_error("VTX file size is invalid or exceeds 256 KiB");
     const std::string_view signature(reinterpret_cast<const char*>(bytes), 2);
     if (signature != "ay" && signature != "ym")
         throw std::runtime_error("file is not a VTX AY/YM stream");
@@ -39,10 +39,11 @@ VtxSong VtxSong::parse(const std::uint8_t* bytes, std::size_t size) {
     song.metadata_.loopFrame = le16(bytes + 3);
     song.metadata_.chipClockHz = le32(bytes + 5);
     song.metadata_.playerHz = bytes[9];
-    const std::uint32_t declaredRegisterBytes = le32(bytes + 12);
+    // Some encoders write a stream length that is not a whole number of frames.
+    const std::uint32_t decodeBytes = le32(bytes + 12);
+    std::uint32_t declaredRegisterBytes = decodeBytes;
     if (song.metadata_.chipClockHz == 0 || song.metadata_.playerHz == 0 ||
-        declaredRegisterBytes == 0 || declaredRegisterBytes > MaximumRegisterBytes ||
-        declaredRegisterBytes % 14 != 0)
+        declaredRegisterBytes < 14 || declaredRegisterBytes > MaximumRegisterBytes)
         throw std::runtime_error("VTX register stream header is invalid");
     // Parse the five consecutive NUL-terminated metadata fields without
     // retaining a cursor allocation on the embedded target.
@@ -69,15 +70,16 @@ VtxSong VtxSong::parse(const std::uint8_t* bytes, std::size_t size) {
             throw std::runtime_error("VTX LHA member header length is invalid");
         const std::uint32_t packedSize = le32(compressed + 7);
         const std::uint32_t unpackedSize = le32(compressed + 11);
-        if (unpackedSize != declaredRegisterBytes ||
+        if (unpackedSize != decodeBytes ||
             packedSize > compressedSize - headerSize)
             throw std::runtime_error("VTX LHA member sizes do not match the VTX header");
         compressed += headerSize;
         compressedSize = packedSize;
     }
 
+    declaredRegisterBytes -= declaredRegisterBytes % 14;
     const char* decodeError = nullptr;
-    if (!decodeLh5(compressed, compressedSize, declaredRegisterBytes,
+    if (!decodeLh5(compressed, compressedSize, decodeBytes,
                    song.registers_, &decodeError))
         throw std::runtime_error(decodeError ? decodeError : "VTX LHA5 decode failed");
     song.frameCount_ = declaredRegisterBytes / 14;
