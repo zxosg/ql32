@@ -3124,6 +3124,15 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 elements *= length;
                 lengths[i] = length;
             }
+            // Fail cleanly before a contiguous allocation that cannot fit,
+            // instead of exhausting the heap and unwinding through bad_alloc.
+            if (memory_) {
+                if (const auto info = memory_->fragmentationInfo()) {
+                    if (static_cast<std::uint64_t>(elements) * sizeof(Value) >
+                        info->largestFreeBlockBytes)
+                        runtimeError(instruction, "array exceeds available memory");
+                }
+            }
             RuntimeArray array;
             array.lengths = std::move(lengths);
             if (!instruction.name.empty() && instruction.name.back() == '$')

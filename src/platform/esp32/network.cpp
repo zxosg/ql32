@@ -13,7 +13,8 @@ void WifiNetworkService::connectWifi(const std::string& ssid,
 
 void WifiNetworkService::disconnectWifi() {
     connectionRequested_ = false;
-    WiFi.disconnect(false, true);
+    // Power the radio down so the driver's heap is returned to BASIC programs.
+    WiFi.disconnect(true, true);
 }
 
 runtime::WifiStatus WifiNetworkService::wifiStatus() const {
