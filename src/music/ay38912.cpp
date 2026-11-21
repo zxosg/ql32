@@ -42,6 +42,7 @@ void Ay38912::reset(std::uint32_t clockHz, std::uint32_t sampleRate) noexcept {
     envelopeShape_ = 0;
     envelopeLevel_ = 15;
     envelopeHolding_ = false;
+    dcLevel_ = 0;
     updateSteps();
 }
 
@@ -81,10 +82,16 @@ void Ay38912::writeRegisters(const std::array<std::uint8_t, 14>& registers,
 std::int16_t Ay38912::renderSample() noexcept {
     std::int32_t sum = 0;
     for (std::uint32_t i = 0; i < kOversample; ++i) sum += renderTick();
-    return static_cast<std::int16_t>(sum / static_cast<std::int32_t>(kOversample));
+    const std::int32_t level = sum / static_cast<std::int32_t>(kOversample);
+    // The chip output is unipolar (a gated level, not a +-level square). The line DAC is AC
+    // coupled, so remove the running mean (~7 Hz corner). This keeps the envelope's own
+    // sawtooth/triangle component audible, which a bipolar square-times-level mix loses.
+    const std::int32_t out = level - dcLevel_;
+    dcLevel_ += out / 512;
+    return static_cast<std::int16_t>(std::clamp<std::int32_t>(out, -32768, 32767));
 }
 
-std::int16_t Ay38912::renderTick() noexcept {
+std::int32_t Ay38912::renderTick() noexcept {
     noisePhase_ += noiseStep_;
     if ((noisePhase_ & 0x80000000u) != 0) {
         noisePhase_ &= 0x7fffffffu;
@@ -130,10 +137,9 @@ std::int16_t Ay38912::renderTick() noexcept {
             : ((volume & 0x10) != 0 ? envelopeLevel_ : volume & 0x0f);
         const std::int32_t amplitude = Amplitude[level];
         if (amplitude != 0)
-            mixed += (tone && noise ? amplitude : 0) - amplitude / 2;
+            mixed += tone && noise ? amplitude : 0;
     }
-    // Three full voices peak at about +-24.5k, so the mix cannot clip.
-    return static_cast<std::int16_t>(mixed / 2);
+    return mixed;
 }
 
 } // namespace ql32::music

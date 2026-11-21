@@ -23,7 +23,7 @@ public:
 private:
     void restartEnvelope(std::uint8_t shape) noexcept;
     void updateSteps() noexcept;
-    std::int16_t renderTick() noexcept;
+    std::int32_t renderTick() noexcept;
     std::uint32_t clockHz_ = 1773400;
     std::uint32_t sampleRate_ = 22050;
     std::array<std::uint8_t, 14> registers_{};
@@ -38,6 +38,7 @@ private:
     std::uint8_t envelopeShape_ = 0;
     std::uint8_t envelopeLevel_ = 0;
     bool envelopeHolding_ = false;
+    std::int32_t dcLevel_ = 0;
     std::array<std::int8_t, 3> levelOverride_{{-1, -1, -1}};
     std::array<bool, 3> direct_{};
     std::array<std::int16_t, 3> directValue_{};

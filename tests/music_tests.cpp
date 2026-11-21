@@ -173,20 +173,23 @@ void testAyEnvelopeRate() {
     registers[13] = 8;
     ay.writeRegisters(registers, true);
     // Datasheet: one 16-step ramp lasts 256 * period / clock = 14.4 ms = ~318 samples.
-    std::size_t zero = 0;
-    std::int16_t first = 0, restartedPeak = 0;
-    for (std::size_t i = 0; i < 700; ++i) {
+    // A sawtooth envelope restarts at full level, which shows up as a large upward jump.
+    std::array<std::size_t, 2> jumps{};
+    std::size_t found = 0;
+    std::int16_t previousSample = ay.renderSample();
+    for (std::size_t i = 1; i < 800 && found < 2; ++i) {
         const auto sample = ay.renderSample();
-        if (i == 0) first = sample;
-        if (zero == 0 && sample == 0) zero = i;
-        if (i > 340) restartedPeak = std::max(restartedPeak, sample);
+        if (sample - previousSample > 4000 && (found == 0 || i - jumps[found - 1] > 5)) jumps[found++] = i;
+        previousSample = sample;
     }
-    require(zero > 270 && zero < 340, "AY envelope ramp time is wrong");
-    require(first > 0 && restartedPeak == first, "AY sawtooth envelope does not restart at full level");
+    require(found == 2, "AY sawtooth envelope never restarted");
+    require(jumps[0] > 290 && jumps[0] < 350, "AY envelope ramp time is wrong");
+    require(jumps[1] - jumps[0] > 300 && jumps[1] - jumps[0] < 340, "AY envelope period is not constant");
 
     // Every one of the 16 volume steps must be distinct and at most about 5 dB apart.
     std::int16_t previous = 0;
     for (std::uint8_t volume = 1; volume < 16; ++volume) {
+        ay.reset(1773400, 22050);
         registers[8] = volume;
         registers[13] = 0;
         ay.writeRegisters(registers);
@@ -491,7 +494,7 @@ void testYm() {
     // Digi-drum 1: control 0x50 = drum effect on voice A.
     std::uint8_t drumRegs[3] = {0x50, 0xe0, 1};
     const auto drumTone = render(syntheticYm6(10, drumRegs, true));
-    require(drumTone != plainTone && drumTone[0] == 127 * 128 / 2,
+    require(drumTone != plainTone && drumTone[0] == 127 * 128,
             "digi-drum did not replace the voice");
 
     bool rejected = false;
@@ -620,6 +623,36 @@ void testExamplePt3Files() {
     require(decoded >= 10, "example PT3 files failed to decode");
 }
 
+// VTX dumps store R13 = 0xFF for "shape not written"; that must neither restart nor
+// change the envelope shape (z00m_unreal.vtx uses hardware-envelope bass).
+void testVtxEnvelopeShapeKept() {
+    namespace fs = std::filesystem;
+    const fs::path file = fs::path(QL32_EXAMPLES_DIR) / "music" / "z00m_unreal.vtx";
+    if (!fs::exists(file)) return;
+    const auto bytes = readFile(file);
+    auto song = ql32::music::VtxSong::parse(bytes);
+    ql32::music::VtxPlayer player(ql32::music::VtxSong::parse(bytes), 22050);
+    ql32::music::Ay38912 reference;
+    reference.reset(song.metadata().chipClockHz, 22050);
+    std::uint8_t shape = 0;
+    std::uint64_t accumulator = 0;
+    std::size_t frame = 0;
+    auto load = [&] {
+        auto regs = song.registers(frame);
+        const bool written = regs[13] != 0xff;
+        if (written) shape = regs[13]; else regs[13] = shape;
+        reference.writeRegisters(regs, written);
+    };
+    load();
+    std::array<std::int16_t, 1> out{};
+    for (std::size_t i = 0; i < 22050 * 20; ++i) {
+        player.render(out.data(), 1);
+        require(out[0] == reference.renderSample(), "VTX R13=0xFF handling diverged from the AY reference");
+        accumulator += song.metadata().playerHz;
+        if (accumulator >= 22050) { accumulator -= 22050; ++frame; load(); }
+    }
+}
+
 void testExampleSqtFiles() {
     namespace fs = std::filesystem;
     const fs::path root = fs::path(QL32_EXAMPLES_DIR) / "music" / "sqt";
@@ -688,6 +721,7 @@ int main() {
         testPt3();
         testExamplePt3Files();
         testExampleSqtFiles();
+        testVtxEnvelopeShapeKept();
         testSqtRejectsGarbage();
         testVtxLongAndRaggedStreams();
         testBeepAndVolumeCommands();

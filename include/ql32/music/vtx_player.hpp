@@ -30,6 +30,7 @@ private:
     std::size_t framePosition_ = 0;
     bool playing_ = true;
     bool paused_ = false;
+    std::uint8_t lastShape_ = 0;
 };
 
 } // namespace ql32::music

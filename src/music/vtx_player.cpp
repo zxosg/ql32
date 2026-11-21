@@ -15,7 +15,13 @@ void VtxPlayer::loadFrame(std::size_t frame) noexcept {
         playing_ = false;
         return;
     }
-    ay_.writeRegisters(song_.registers(frame));
+    auto registers = song_.registers(frame);
+    // R13 = 0xFF marks "envelope shape not written this frame"; any other value is a write
+    // that retriggers the envelope, even when it equals the previous shape.
+    const bool shapeWritten = registers[13] != 0xff;
+    if (shapeWritten) lastShape_ = registers[13];
+    else registers[13] = lastShape_;
+    ay_.writeRegisters(registers, shapeWritten);
     framePosition_ = frame;
 }
 
