@@ -9,6 +9,7 @@
 #include "ql32/music/wav.hpp"
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_player.hpp"
+#include "ql32/music/ym_player.hpp"
 #include "ql32/runtime/music.hpp"
 
 #include <array>
@@ -505,6 +506,105 @@ void testYm() {
     (void)countLevels;
 }
 
+// Behavior checks derived from the arnaud-carre/StSound reference (MIT, behavior only).
+std::vector<std::uint8_t> syntheticYm56(const char* format, std::size_t frames,
+                                        const std::array<std::uint8_t, 16>& regs, bool withDrum) {
+    std::vector<std::uint8_t> b = {static_cast<std::uint8_t>(format[0]), static_cast<std::uint8_t>(format[1]),
+                                   static_cast<std::uint8_t>(format[2]), '!',
+                                   'L', 'e', 'O', 'n', 'A', 'r', 'D', '!'};
+    auto app = [&](const std::vector<std::uint8_t>& v) { b.insert(b.end(), v.begin(), v.end()); };
+    app(be32v(static_cast<std::uint32_t>(frames)));
+    app(be32v(0));
+    app({0, static_cast<std::uint8_t>(withDrum ? 1 : 0)});
+    app(be32v(2000000)); app({0, 50}); app(be32v(0)); app({0, 0});
+    if (withDrum) { app(be32v(4)); app({255, 255, 0, 0}); }
+    for (const char* s : {"t", "a", "c"}) { b.push_back(s[0]); b.push_back(0); }
+    for (std::size_t f = 0; f < frames; ++f) b.insert(b.end(), regs.begin(), regs.end());
+    return b;
+}
+
+std::vector<std::int16_t> renderYm(std::vector<std::uint8_t> bytes, std::size_t count,
+                                   const std::vector<std::vector<std::int16_t>>* bank = nullptr) {
+    auto song = ql32::music::YmSong::parse(std::move(bytes));
+    if (bank) song.setDrumBank(*bank);
+    ql32::music::YmPlayer player(std::move(song));
+    std::vector<std::int16_t> out(count);
+    player.render(out.data(), out.size());
+    return out;
+}
+
+std::int16_t peakAfter(const std::vector<std::int16_t>& pcm, std::size_t from) {
+    std::int16_t peak = 0;
+    for (std::size_t i = from; i < pcm.size(); ++i) peak = std::max<std::int16_t>(peak, static_cast<std::int16_t>(std::abs(pcm[i])));
+    return peak;
+}
+
+void testYmEffects() {
+    using namespace ql32::music;
+    // SID: tone and noise off (constant high), voice A at volume 15 gated by a ~61 Hz timer.
+    // The gate flips once per timer tick, so the square wave has half the timer frequency.
+    std::array<std::uint8_t, 16> sid{};
+    sid[7] = 0x3f; sid[8] = 15; sid[13] = 0xff;
+    sid[1] = 0x10; sid[6] = 0xe0; sid[14] = 200;
+    const auto sidPcm = renderYm(syntheticYm56("YM6!", 200, sid, false), 44100);
+    std::size_t edges = 0;
+    for (std::size_t i = 1; i < sidPcm.size(); ++i)
+        if (sidPcm[i] - sidPcm[i - 1] > 4000) ++edges;
+    // 2457600 / (200 * 200) = 61.44 Hz ticks -> about 30.7 rising edges per second.
+    require(edges >= 56 && edges <= 66, "SID gate rate is not half the timer rate");
+
+    // YM5 has no effect type bits: slot 1 control 0x10 is a digi-drum, but in YM6 it is a SID voice.
+    std::array<std::uint8_t, 16> slot1{};
+    slot1[7] = 0x3e; slot1[0] = 100; slot1[13] = 0xff;
+    slot1[3] = 0x10; slot1[8] = 0xe0; slot1[15] = 1;
+    const auto ym5Drum = renderYm(syntheticYm56("YM5!", 10, slot1, true), 400);
+    const auto ym6Sid = renderYm(syntheticYm56("YM6!", 10, slot1, true), 400);
+    require(ym5Drum[0] == 127 * 128, "YM5 slot 1 did not start a digi-drum");
+    require(ym6Sid[0] != 127 * 128, "YM6 type bits were ignored");
+
+    // Sync-buzzer: the envelope shape comes from the voice volume nibble and restarts on every
+    // timer tick, so a fast envelope keeps re-ramping; without the effect it decays to silence.
+    std::array<std::uint8_t, 16> buzz{};
+    buzz[7] = 0x3f; buzz[8] = 0x18; buzz[13] = 0xff; buzz[11] = 20; buzz[12] = 0;
+    auto plainBuzz = buzz;
+    buzz[1] = 0xd0; buzz[6] = 0xe0; buzz[14] = 20;
+    const auto withBuzzer = renderYm(syntheticYm56("YM6!", 100, buzz, false), 44100);
+    const auto withoutBuzzer = renderYm(syntheticYm56("YM6!", 100, plainBuzz, false), 44100);
+    require(peakAfter(withBuzzer, 22050) > 1000, "sync-buzzer did not keep restarting the envelope");
+    require(peakAfter(withoutBuzzer, 22050) * 10 < peakAfter(withBuzzer, 22050), "reference without buzzer should be much quieter");
+
+    // YM2 (Mad Max): a register 13 write means shape 10 with register 12 forced to 0.
+    auto ym2 = [](std::uint8_t r10, std::uint8_t r12, std::uint8_t r13, std::uint8_t r8 = 0x10) {
+        std::vector<std::uint8_t> b = {'Y', 'M', '2', '!'};
+        for (int reg = 0; reg < 14; ++reg) {
+            std::uint8_t v = 0;
+            if (reg == 0) v = 100;
+            if (reg == 7) v = 0x3b;
+            if (reg == 8) v = r8;
+            if (reg == 10) v = r10;
+            if (reg == 11) v = 0x10;
+            if (reg == 12) v = r12;
+            if (reg == 13) v = r13;
+            for (int f = 0; f < 100; ++f) b.push_back(v);
+        }
+        return b;
+    };
+    std::vector<std::uint8_t> ym3 = {'Y', 'M', '3', '!'};
+    for (int reg = 0; reg < 14; ++reg) {
+        std::uint8_t v = reg == 0 ? 100 : reg == 7 ? 0x3b : reg == 8 ? 0x10 : reg == 11 ? 0x10 : reg == 13 ? 10 : 0;
+        for (int f = 0; f < 100; ++f) ym3.push_back(v);
+    }
+    require(renderYm(ym2(0, 7, 5), 8000) == renderYm(ym3, 8000), "YM2 buzzer was not mapped to shape 10 / R12=0");
+
+    // YM2 Mad Max digi-drum: register 10 bit 7 selects a sample played on voice C at
+    // (MFP clock / 4) / register 12; without a bank the voice is muted (no built-in samples).
+    const std::vector<std::vector<std::int16_t>> bank = {{12800, 12800, -12800, -12800}};
+    const auto muted = renderYm(ym2(0x80, 100, 0xff, 0), 16000);
+    require(peakAfter(muted, 12000) < 50, "Mad Max drum without a bank should mute voice C");
+    const auto drum = renderYm(ym2(0x80, 100, 0xff, 0), 4000, &bank);
+    require(drum[0] == 12800, "Mad Max digi-drum did not play from the bank");
+}
+
 std::vector<std::uint8_t> readFile(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
@@ -717,6 +817,7 @@ int main() {
         testMixer();
         testWavStreaming();
         testYm();
+        testYmEffects();
         testExampleYmFiles();
         testPt3();
         testExamplePt3Files();

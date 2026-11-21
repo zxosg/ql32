@@ -770,7 +770,16 @@ compatibility claim.
 YM (QL/32-specific player; LHA-wrapped `-lh5-`/`-lh0-` level-0 or raw). YM2!, YM3!,
 YM3b, YM5! and YM6! are supported, including YM5/YM6 effects: SID voice, digi-drum
 (8-bit unsigned/signed or 4-bit), sync-buzzer, and sinus-SID (approximation: 16-step
-sine amplitude shape). Not supported: YMT1/YMT2 trackers, MIX, Mad Max YM2 digi-drums.
+sine amplitude shape, QL/32-specific). Effect decoding follows the behavior of
+arnaud-carre/StSound (MIT, behavioral reference only, independent code): YM5 slot 0 is
+always a SID voice and slot 1 a digi-drum (no type bits); YM6 uses the type bits; a SID
+gate or sync-buzzer is clocked by the MFP timer (2457600 Hz / (prescaler x count)), a SID
+square lasts two timer ticks, and the sync-buzzer restarts the envelope on each tick with
+the shape taken from the voice volume nibble. YM2 follows the Mad Max conventions:
+any register 13 write means shape 10 with register 12 forced to 0, and register 10 bit 7
+selects a digi-drum on voice C at (MFP/4)/register 12. The Mad Max drum samples are NOT
+built in (licensing unclear), so those drums are muted unless a bank is supplied with
+`YmSong::setDrumBank`. Not supported: YMT1/YMT2 trackers and MIX.
 The whole song is decoded into RAM (up to 1.5 MiB unpacked, so large songs need PSRAM).
 
 PT3 (QL/32-specific player of ProTracker 3 / Vortex Tracker II modules, version

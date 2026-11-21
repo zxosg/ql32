@@ -12,7 +12,10 @@ namespace ql32::music {
 
 // Plays a YmSong through the AY core and interprets the YM5/YM6 effect bits
 // (SID voice, sinus SID, digi-drum, sync-buzzer). The MFP timer clock is
-// 2457600 Hz. Sinus-SID uses a 16-step sine amplitude shape (approximation).
+// 2457600 Hz. Effect decoding follows the arnaud-carre/StSound behavior (MIT, reference
+// only, independent code): YM5 slot 0 is SID and slot 1 a digi-drum; YM6 uses type bits;
+// YM2 uses the Mad Max register conventions. Sinus-SID (not implemented by StSound) uses a
+// 16-step sine amplitude shape and is QL/32-specific.
 class YmPlayer {
 public:
     static constexpr std::uint32_t DefaultSampleRate = 22050;
@@ -35,6 +38,7 @@ private:
     };
     void loadFrame(std::size_t frame) noexcept;
     void startEffect(unsigned slot, const std::array<std::uint8_t, 16>& r) noexcept;
+    void startDrum(unsigned voice, std::size_t number, std::uint32_t sampleHz) noexcept;
     void tickEffects() noexcept;
 
     YmSong song_;
@@ -44,6 +48,12 @@ private:
     std::array<std::uint8_t, 16> last_{};
     std::uint64_t frameAccumulator_ = 0;
     std::size_t frame_ = 0;
+    std::uint32_t buzzerPhase_ = 0;
+    std::uint32_t buzzerStep_ = 0;
+    std::uint8_t buzzerShape_ = 0;
+    unsigned buzzerVoice_ = 0;
+    bool ym5_ = false;
+    bool ym2_ = false;
     bool playing_ = true;
 };
 

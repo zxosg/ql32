@@ -1,6 +1,6 @@
 # YM effects plan (2026-11-21, plan only, awaiting user approval)
 
-Status: **proposed. Nothing implemented, no board use.** QL/32-specific behavior unless a reference is cited.
+Status: **approved by the user, stages 1-5 (stage 6 skipped).** Host work done (see "Progress"); hardware listening pending the board being free. QL/32-specific behavior unless a reference is cited.
 
 ## Current state (verified in code, `src/music/ym.cpp`, `ym_player.cpp`)
 - Parsed: YM2!, YM3!, YM3b (register dumps), YM5!, YM6! (with digi-drum samples). Rejected: YM4, MIX1, YMT1/YMT2.
@@ -39,3 +39,10 @@ In `tests/music_tests.cpp` plus tiny synthetic YM fixtures built in code: period
 1. Approve stages 1-5 in this order (audit first)?
 2. Is YMT1/YMT2/MIX1 (stage 6) wanted, and when?
 3. Which files should be the SID/digi-drum listening set?
+
+## Progress (2026-11-21, host-tested only; not heard on hardware)
+- Stage 1 audit against StSound found: (a) YM5 files decoded with YM6 type bits, so a YM5 digi-drum in slot 1 was played as a SID voice (jess2/buzz carry 3 drums and 1333 slot-1 effects); (b) the SID gate flipped twice per timer tick instead of once (square at 2x the correct frequency); (c) sync-buzzer ignored the shape in the voice volume nibble; (d) SID phase was restarted every frame; (e) YM2 register 13 was written as a raw shape instead of the Mad Max shape 10 with R12=0; (f) no YM2 Mad Max drum path.
+- Stages 2-4 fixed (a)-(d) in `ym_player.cpp`; stage 5 implemented (e)-(f) except the sample data: StSound's `digidrum.cpp` (about 40 samples, 135 KB source with an older BSD-style header, original Mad Max sample provenance unclear) is not embedded and no test file uses Mad Max drums, so they stay muted unless `YmSong::setDrumBank` is used.
+- Sinus-SID: StSound itself does not implement it, so the QL/32 16-step approximation stays; no example file uses it.
+- Tests: `testYmEffects` in `tests/music_tests.cpp` (SID rate, YM5 vs YM6 decoding, buzzer shape, YM2 Mad Max mapping, drum bank). ctest 82/82.
+- Listening set (local copies only, not committed; StSound's `YmSampleFiles` have per-tune authorship and unclear redistribution terms): jess2.ym and buzz.ym (YM5 drums), rapido1.ym (YM5 SID), ND-Loader.ym (YM6 SID + buzzer), ND-Toxygene.ym (YM6 SID), VirtualEscape1/2.ym (YM6 SID), plus ZYNAPS1 (YM2) as a control. YMKNUCK and Union Tcb 2 are tracker/MIX formats (skipped).

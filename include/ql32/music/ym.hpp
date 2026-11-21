@@ -39,6 +39,9 @@ public:
     std::size_t drumCount() const noexcept { return drums_.size(); }
     const std::vector<std::int16_t>& drum(std::size_t index) const { return drums_.at(index); }
     bool hasEffects() const noexcept { return effects_; }
+    // External digi-drum bank (centred 16-bit samples), used by YM2 Mad Max files whose
+    // drums are not stored in the file. No bank is built in; without one those drums are silent.
+    void setDrumBank(std::vector<std::vector<std::int16_t>> drums) { drums_ = std::move(drums); }
 
 private:
     YmMetadata metadata_;

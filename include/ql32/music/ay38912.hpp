@@ -18,6 +18,8 @@ public:
         direct_[voice] = active; directValue_[voice] = value;
     }
     void restartEnvelopeNow() noexcept { restartEnvelope(registers_[13]); }
+    // Sync-buzzer: restart the envelope with an explicit shape without changing register 13.
+    void restartEnvelopeShape(std::uint8_t shape) noexcept { restartEnvelope(shape); }
     std::int16_t renderSample() noexcept;
 
 private:
