@@ -1597,6 +1597,8 @@ void setup() {
 #if defined(QL32_OLIMEX_DMA_TEST_SCANOUT)
 #if defined(QL32_OLIMEX_DMA_TEST_MODE_400X300)
     constexpr auto dmaTestModeline = VGA_400x300_60Hz;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_320X240)
+    constexpr auto dmaTestModeline = QVGA_320x240_60Hz;
 #elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X400)
     constexpr auto dmaTestModeline = VGA_640x400_70Hz;
 #elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X480)
@@ -2036,6 +2038,8 @@ void setup() {
     constexpr auto dmaDisplayModeline = VGA_640x400_70Hz;
 #elif defined(QL32_OLIMEX_DMA_TEST_MODE_400X300)
     constexpr auto dmaDisplayModeline = VGA_400x300_60Hz;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_320X240)
+    constexpr auto dmaDisplayModeline = QVGA_320x240_60Hz;
 #else
     constexpr auto dmaDisplayModeline = VGA_320x200_70Hz;
 #endif

@@ -13,8 +13,9 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
-constexpr std::uint32_t kWidth = 400;
-constexpr std::uint32_t kHeight = 300;
+// Each single-framebuffer geometry (400x300, 320x240, 320x200) runs every test.
+std::uint32_t kWidth = 400;
+std::uint32_t kHeight = 300;
 
 FramebufferView make(std::vector<std::uint8_t>& storage) {
     storage.assign(kWidth / 2 * kHeight, 0);
@@ -79,14 +80,19 @@ void testRowBoundaryDrawing() {
     require(!writePixel(fb, kWidth, 0, 1) && !writePixel(fb, 0, kHeight, 1),
             "out-of-range write accepted");
     clear(fb, 3);
-    require(readPixel(fb, 399, 299) == 3 && readPixel(fb, 0, 0) == 3, "clear");
-    require(fb.storageBytes() == 60000, "single framebuffer is 60,000 bytes");
+    require(readPixel(fb, kWidth - 1, kHeight - 1) == 3 && readPixel(fb, 0, 0) == 3, "clear");
+    require(fb.storageBytes() == kWidth / 2 * kHeight, "packed4 framebuffer size");
 }
 
 } // namespace
 
 int main() {
-    testConcurrentNeighbourNibbles();
-    testConcurrentRectanglesAndRows();
-    testRowBoundaryDrawing();
+    const std::uint32_t modes[][2] = {{400, 300}, {320, 240}, {320, 200}};
+    for (const auto& mode : modes) {
+        kWidth = mode[0];
+        kHeight = mode[1];
+        testConcurrentNeighbourNibbles();
+        testConcurrentRectanglesAndRows();
+        testRowBoundaryDrawing();
+    }
 }

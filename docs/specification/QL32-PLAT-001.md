@@ -209,11 +209,11 @@ current tree hardware-verified.
 
 ## Olimex single-framebuffer retro mode (QL/32-specific, 2026-11-21)
 
-With `QL32_OLIMEX_SINGLE_FRAMEBUFFER` (400x300 indexed-4 on PSRAM-DMA) graphics
-writes one persistent 60,000-byte PSRAM framebuffer directly; the refill worker
+With `QL32_OLIMEX_SINGLE_FRAMEBUFFER` (400x300, 320x240 or 320x200 indexed-4 on PSRAM-DMA, selected per build) graphics
+writes one persistent PSRAM framebuffer (60,000, 38,400 or 32,000 bytes) directly; the refill worker
 scans it continuously into the internal DMA ring. Partial-frame visibility and
 tearing are permitted; drawing never waits for vertical refresh. Palette
 changes apply at the frame boundary. Neighbouring packed-4 pixel updates must
 not be lost; producers serialise only single-byte nibble updates, never the
 refill worker or ISR. Status: built and host-tested; short hardware runs show
-zero late refills. See `docs/test-results/olimex-single-framebuffer-2026-11-21.md`.
+zero late refills. See `docs/test-results/olimex-single-framebuffer-2026-11-21.md` and `...-320x-2026-11-21.md`. Colours are limited to 16 palette entries; MODE is fixed to the build geometry.

@@ -246,3 +246,10 @@ All numeric results are measured for their documented profile/workload.
 Descriptions of tearing under hypothetical direct concurrent writes, DMA
 copy feasibility, and cross-core/cache visibility are design risks or open
 questions unless explicitly identified above as measured.
+
+## Update 2026-11-21: single-framebuffer 320x modes
+
+320x240 (ring 120/group 60) and 320x200 (100/50) run on the single-framebuffer
+path with 0 late refills; see
+`docs/test-results/olimex-single-framebuffer-320x-2026-11-21.md` for results and
+the runtime MODE proposal. 640x400/640x480 remain exceptions.

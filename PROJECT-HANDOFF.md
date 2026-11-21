@@ -149,6 +149,18 @@ that the newly published MODE fixes are currently installed on the board.
 Keep FabGL as the default; further scanout changes require separate,
 telemetry-backed testing.
 
+## Olimex single-framebuffer 320x240 / 320x200 (2026-11-21)
+
+Same flag, envs `..._psram_dma_display_{320x240,320x200}_single_fb[_status]`
+and `..._test_{mode}_sf_{static,checker,gradient,random,fullscreen,scroll}`.
+Geometry 120/60 (320x240) and 100/50 (320x200), no core/IRQ/timing change.
+A diagnostic-only horizontal shift on 320-wide modes caused late refills and is
+now disabled in single-fb. Hardware: all patterns, 11 min soaks and runtime
+BASIC palette animation + 20 cancel cycles gave 0 late refills. MODE stays
+compile-time per env; runtime single-fb family and colour limit analysed in
+`docs/test-results/olimex-single-framebuffer-320x-2026-11-21.md`. Default env
+unchanged; not pushed.
+
 ## Olimex single-framebuffer mode (2026-11-21)
 
 `QL32_OLIMEX_SINGLE_FRAMEBUFFER` (env `..._psram_dma_display_400x300_single_fb`,

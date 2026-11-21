@@ -96,6 +96,20 @@ def main() -> None:
           in config[deeper_split_profile].get("extends", ""),
           "deeper split-core profile must preserve the baseline core placement")
 
+    for mode in ("320x240", "320x200"):
+        sf = f"env:olimex_esp32_sbc_fabgl_psram_dma_display_{mode}_single_fb"
+        check(config.has_section(sf), f"missing [{sf}]")
+        sf_flags = config[sf].get("build_flags", "")
+        check("QL32_OLIMEX_SINGLE_FRAMEBUFFER" in sf_flags,
+              f"{sf} must select the single framebuffer")
+        check("QL32_OLIMEX_DMA_REFILL_CORE1_TEST" in sf_flags,
+              f"{sf} must keep the refill worker on core 1")
+        check(("QL32_OLIMEX_DMA_TEST_MODE_320X240" in sf_flags) == (mode == "320x240"),
+              f"{sf} mode define mismatch")
+    check("QL32_OLIMEX_SINGLE_FRAMEBUFFER" not in
+          config[runtime_env].get("build_flags", ""),
+          "default DMA runtime profile must keep triple buffering")
+
     print("Olimex PlatformIO and FFS partition configuration is valid (512 KiB SPIFFS).")
 
 

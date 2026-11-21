@@ -894,7 +894,10 @@ void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) 
         rebuildPixelOutputLut();
         ++paletteApplyCount_;
     }
-#if defined(QL32_OLIMEX_DMA_TEST_PIXEL_EDGES) || \
+// Single-framebuffer mode scans the live image; the diagnostic horizontal
+// shift (a 320-wide-only test pattern on the slow per-pixel path) never applies.
+#if defined(QL32_OLIMEX_SINGLE_FRAMEBUFFER) || \
+    defined(QL32_OLIMEX_DMA_TEST_PIXEL_EDGES) || \
     defined(QL32_OLIMEX_DMA_TEST_CHECKER) || \
     defined(QL32_OLIMEX_DMA_TEST_HORIZONTAL_BANDS) || \
     defined(QL32_OLIMEX_DMA_TEST_TRIANGLE)

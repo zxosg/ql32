@@ -24,6 +24,9 @@ public:
 #if defined(QL32_OLIMEX_DMA_TEST_MODE_400X300)
     static constexpr std::uint32_t kOutputWidth = 400;
     static constexpr std::uint32_t kOutputHeight = 300;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_320X240)
+    static constexpr std::uint32_t kOutputWidth = 320;
+    static constexpr std::uint32_t kOutputHeight = 240;
 #elif defined(QL32_OLIMEX_DMA_TEST_MODE_640X400)
     static constexpr std::uint32_t kOutputWidth = 640;
     static constexpr std::uint32_t kOutputHeight = 400;
@@ -104,6 +107,11 @@ private:
     // 100 rows divide the 400-line frame and fit the internal DMA heap.
     static constexpr std::size_t kLineRingCount = 100;
     static constexpr std::size_t kRefillGroupSize = 50;
+#elif defined(QL32_OLIMEX_DMA_TEST_MODE_320X240)
+    // A 120-row ring divides the 240-line frame; 60-row groups give the same
+    // ~2 ms refill lead as the 400x300 baseline (60 rows of 31.8 us).
+    static constexpr std::size_t kLineRingCount = 120;
+    static constexpr std::size_t kRefillGroupSize = 60;
 #elif defined(QL32_OLIMEX_DMA_RING150_TEST)
     // A 150-row ring divides a 300-line frame and gives 75 rows of refill lead.
     static constexpr std::size_t kLineRingCount = 150;
