@@ -1,3 +1,4 @@
+#include <string>
 #include "ql32/platform/olimex_vga/fixed_display_modes.hpp"
 
 #include <cassert>
@@ -25,7 +26,12 @@ int main() {
            FixedDisplayModes::kModeHeight);
     bool rejected = false;
     try { modes.setMode((FixedDisplayModes::kModeId + 1) % 5, 0); }
-    catch (const std::invalid_argument&) { rejected = true; }
+    catch (const std::invalid_argument& error) {
+        rejected = true;
+        const std::string message = error.what();
+        assert(message.find("unavailable on this fixed-mode build") != std::string::npos);
+        assert(message.find(FixedDisplayModes::kModeName) != std::string::npos);
+    }
     assert(rejected);
     rejected = false;
     try { modes.setMode(FixedDisplayModes::kModeId, 1); }

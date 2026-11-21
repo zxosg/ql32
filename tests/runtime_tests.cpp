@@ -1363,10 +1363,37 @@ void testDialogMenuBasicCallsSuspendAndResume() {
             "REPL dialog getter did not return the submitted value");
 }
 
+void testPrintLinesAreChargedToSliceBudget() {
+    ql32::Interpreter plain;
+    std::ostringstream plainOutput;
+    int plainSlices = 1;
+    auto status = plain.executeSlice(
+        "FOR i = 1 TO 20\n a = a + 1\nEND FOR i\n", plainOutput, 128);
+    while (status == ql32::ExecutionStatus::Yielded) {
+        ++plainSlices;
+        status = plain.resumeSlice(plainOutput, 128);
+    }
+    ql32::Interpreter printing;
+    std::ostringstream printOutput;
+    int printSlices = 1;
+    status = printing.executeSlice(
+        "FOR i = 1 TO 20\n PRINT \"x\"\nEND FOR i\n", printOutput, 128);
+    while (status == ql32::ExecutionStatus::Yielded) {
+        ++printSlices;
+        status = printing.resumeSlice(printOutput, 128);
+    }
+    require(status == ql32::ExecutionStatus::Completed &&
+                printOutput.str().size() == 40,
+            "budgeted PRINT loop did not complete correctly");
+    require(printSlices >= plainSlices * 3,
+            "PRINT lines were not charged to the slice budget");
+}
+
 } // namespace
 
 int main() {
     try {
+        testPrintLinesAreChargedToSliceBudget();
         testInterpreterSessions();
         testDiagnosticsUseBasicLineNumbers();
         testEmbeddedDataReadRestoreAndEof();

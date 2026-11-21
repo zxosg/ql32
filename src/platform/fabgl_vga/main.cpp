@@ -757,6 +757,23 @@ void submitInputLine() {
         // output to the measured scanout and REPL workload.
         psramDmaScanout.reportStatus();
 #endif
+#if defined(QL32_GRAPHICS_PROFILE)
+    } else if (submittedLine == "COALDIAG") {
+        if (graphics) {
+            const auto& c = graphics->coalesceStats();
+            Serial.printf("QL32 coalesce: requests=%llu, deferred=%llu, presented=%llu, present-us=%llu\n",
+                          static_cast<unsigned long long>(c.requests),
+                          static_cast<unsigned long long>(c.deferred),
+                          static_cast<unsigned long long>(c.presented),
+                          static_cast<unsigned long long>(c.presentUs));
+            graphics->resetCoalesceStats();
+        }
+    } else if (submittedLine.rfind("COALRATE", 0) == 0) {
+        unsigned minUs = 0, ratio = 0;
+        std::sscanf(submittedLine.c_str() + 8, "%u %u", &minUs, &ratio);
+        if (graphics) graphics->setPresentCoalescing(minUs, ratio,
+            [] { return static_cast<std::uint64_t>(micros()); });
+#endif
 #if defined(QL32_OLIMEX_DMA_DISPLAY) && defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     } else if (submittedLine == "ENCBENCH") {
         psramDmaScanout.runEncoderBenchmark();
@@ -1731,8 +1748,10 @@ void setup() {
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         screenWidth, screenHeight, framePresenter);
 #endif
-#if defined(QL32_OLIMEX_PRESENT_COALESCE)
-    // Default: at most ~25 presents/s and presenting never takes more than
+#if defined(QL32_OLIMEX_PRESENT_COALESCE) || \
+    (defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL) && !defined(QL32_OLIMEX_DMA_DISPLAY))
+    // FabGL modes: console output from one task must not starve the others
+    // with synchronous presents. Default: at most ~25 presents/s and presenting never takes more than
     // half of the VM's time (cost ratio 1). Tunable at runtime with PRESRATE.
     graphics->setPresentCoalescing(40000, 1,
         [] { return static_cast<std::uint64_t>(micros()); });
@@ -2085,7 +2104,8 @@ void loop() {
         }
     }
     advanceScheduler();
-#if defined(QL32_OLIMEX_PRESENT_COALESCE)
+#if defined(QL32_OLIMEX_PRESENT_COALESCE) || \
+    (defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL) && !defined(QL32_OLIMEX_DMA_DISPLAY))
     if (graphics) graphics->pollPendingPresentation();
 #endif
     refreshInputCaretBlink();

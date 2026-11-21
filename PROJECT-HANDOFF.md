@@ -349,3 +349,10 @@ After pulling the repository, ask the new chat to read `PROJECT-HANDOFF.md`
 and `AGENTS.md`, inspect the current GitHub/local status, and continue the
 first unfinished item under “Next work”. Update this file when that item or
 milestone state changes.
+
+## 2026-11-21 follow-up: PRINT starvation fix
+
+- PRINT lines are charged 48 instructions to the VM slice budget (`src/vm/interpreter.cpp`); MODE 0 attractor + PRINT 28.2 s -> 12.6 s per 20 frames, MODE 2 + 3 workers fair (see `docs/test-results/olimex-final-mode-matrix-stress-2026-11-21.md`).
+- FabGL Olimex builds enable `WindowedService` present coalescing; `COALDIAG`/`COALRATE` exist in `graphics_profile`.
+- Fixed-mode DMA envs now give a clear "mode N is unavailable" error instead of "unsupported Olimex DMA mode id".
+- OPEN: the board is NOT on the standard `present_profile` (last flashed: `graphics_profile`; serial went silent). Reflash it, confirm the picture, check `MODE 0,0` text, and re-run the 640x480/640x400 stress mix.

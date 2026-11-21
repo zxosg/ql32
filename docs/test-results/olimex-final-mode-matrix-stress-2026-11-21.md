@@ -69,3 +69,24 @@ included (no scripted UI workload). Stress-run picture stability was not separat
 
 ## Final state
 Board left on standard `..._640x480_present_profile`; owner confirmed the picture stable.
+
+## Follow-up: console starvation fix and "0,0" diagnosis (2026-11-21)
+
+**What was wrong.** With a scrolling PRINT task, other sessions were starved. It was not presentation cost: `COALDIAG` showed the existing present coalescing was already effective (2142 of 2436 console presents deferred) and `COALRATE` 0/40 ms/100 ms/200 ms all gave the same MODE 0 time (28.1–28.9 s). The cause is scheduler fairness: slices are 128 *instructions*, and one PRINT line (text write plus console update, ~7 ms) costs far more wall time than one plain instruction.
+
+**Fix (portable, VM).** A finished PRINT line is charged 48 instructions against the slice budget (`PrintLineBudgetCost`, `src/vm/interpreter.cpp`). Host test `testPrintLinesAreChargedToSliceBudget` (`tests/runtime_tests.cpp`). FabGL builds on the Olimex board also now enable the existing `WindowedService` present coalescing (40 ms / cost ratio 1); `graphics_profile` gained `COALDIAG` and `COALRATE`. No extra buffers (CYD memory unaffected).
+
+**fps probe, 20 attractor frames, wall time, `graphics_profile`:**
+
+| Case | Before | After |
+|---|---|---|
+| MODE 0 alone | 4.4 s | not re-run (unchanged path) |
+| MODE 0 + PRINT | 28.2 s | 12.6 s |
+| MODE 1 + PRINT | n/a | 14.0 s |
+| MODE 2 + PRINT | n/a | 21.0 s |
+
+**Stress mix, MODE 2, 120 s (attractor + print + churn + loop):** no errors, heap flat (~3.98 MB PSRAM free); print 6000 lines, churn 220, loop 40 reports. Previously loop/churn managed about 1 report in 240 s on the standard profile and MODE 2 fps was 59.7 s. Fair progress now. (Standard 640x480/640x400 stress not re-run.)
+
+**"0,0" error.** On the fixed-mode DMA envs (`FixedDisplayModes`) `MODE 0,0` / `MODE 3,0` are rejected because only the build's own mode id exists. The old text was the cryptic `unsupported Olimex DMA mode id`. It now reads `mode N is unavailable on this fixed-mode build; only mode M (WxH) is supported` (host-tested in `olimex_fixed_display_modes_tests.cpp`). The standard profile is fixed 640x480, so MODE 0-2 are not available there by design; FabGL modes 0-2 live in the `graphics_profile`/`psram` envs. I could not reproduce the literal "0,0" text on hardware before the board was reclaimed.
+
+**Status.** Built: graphics_profile (flashed). Host-tested: CTest 80/83, only the 3 known failures (scheduler, channel, hardware). Hardware-verified: fps and MODE 2 stress above. **Not done:** reflash of the standard `present_profile`, its picture confirmation, `MODE 0,0` message check on it, and the 640x400/640x480 stress re-run. The board stopped answering on serial during reflash and was handed to the sound session.
