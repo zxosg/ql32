@@ -593,7 +593,11 @@ report that allocator fragmentation metrics are unavailable. Selectors must
 be integer values from 0 through 3. `ql32.inc` defines
 `KFreeTotal`, `KFreeContiguous`, `KFreeFragments`, and `KFreeAllocated` for the selector values.
 Values are platform memory snapshots, not exact counts of memory owned by the
-current BASIC session. The target shell's separate `MEM` command is not
+current BASIC session. QL/32-specific: when a platform sets admission limits,
+starting a task, `MUSIC PLAY`/`BEEP`, or a `MODE` change to a larger display fails
+with an out-of-memory error such as `not enough memory for a new task: need
+14336 bytes free (6144 contiguous), have 9000 free, 4000 largest`, leaving
+running tasks unaffected and the session usable. The target shell's separate `MEM` command is not
 implemented.
 
 ## 8. Immediate mode, commands, and errors

@@ -48,7 +48,8 @@ enum class ServiceErrorCode {
     Unavailable,
     InvalidHandle,
     ResourceBusy,
-    OutOfRange
+    OutOfRange,
+    OutOfMemory
 };
 
 inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
@@ -61,6 +62,7 @@ inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
     case ServiceErrorCode::InvalidHandle: return ErrorCode::InvalidHandle;
     case ServiceErrorCode::ResourceBusy: return ErrorCode::ResourceBusy;
     case ServiceErrorCode::OutOfRange: return ErrorCode::OutOfRange;
+    case ServiceErrorCode::OutOfMemory: return ErrorCode::OutOfMemory;
     }
     return ErrorCode::GeneralFailure;
 }
@@ -165,12 +167,22 @@ public:
         : std::runtime_error(detail.empty() ? errorText(code) : detail),
           code_(code), detail_(std::move(detail)) {}
 
+    // A deliberate admission-control refusal: the heap is still healthy, so the
+    // message is kept and the emergency reserve is not consumed.
+    static Error memoryRefused(std::string message) {
+        Error error(ErrorCode::OutOfMemory, std::move(message));
+        error.refusal_ = true;
+        return error;
+    }
+
     ErrorCode code() const noexcept { return code_; }
     const std::string& detail() const noexcept { return detail_; }
+    bool memoryRefusal() const noexcept { return refusal_; }
 
 private:
     ErrorCode code_;
     std::string detail_;
+    bool refusal_ = false;
 };
 
 inline ErrorCode errorCodeFor(const std::exception& error) {

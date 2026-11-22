@@ -14,6 +14,7 @@ class MemoryService final : public runtime::MemoryService {
 public:
     std::uint64_t freeBytes() const override;
     std::optional<runtime::HeapFragmentationInfo> fragmentationInfo() const override;
+    std::optional<std::uint64_t> minimumFreeBytes() const override;
 };
 
 } // namespace ql32::platform::esp32

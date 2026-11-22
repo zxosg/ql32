@@ -115,6 +115,13 @@ the same `MemoryService` used by BASIC `FREE()` after each rotation:
 | 4 bit | 125,532 | 125,532 | 125,532 | 125,532 | 125,532 |
 | 8 bit | 87,132 | 87,132 | 87,132 | 87,132 | 87,132 |
 
+On the CYD the debug overlay shows `FREE`, `MAX` (largest block) and `MIN` (lowest
+free heap since boot, QL/32-specific). The serial monitor command `HEAP STATS`
+prints `HEAPSTATS|free|largest|min|loopstack|musicstack|musiciostack|failedalloc|lastfail`
+(stack values are FreeRTOS high-water marks in bytes remaining; music stacks
+are 0 until audio has started), and failed heap allocations are logged on the
+serial console as `ALLOCFAIL|size|caps|function|free|largest`. Plain `HEAP` is unchanged.
+
 All values are free heap bytes. The 28,800-byte drop from 1-bit to 4-bit and
 38,400-byte drop from 4-bit to 8-bit match the additional storage for 76,800
 pixels. The depth was selected through the platform-neutral C++ adapter API;

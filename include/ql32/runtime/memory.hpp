@@ -5,6 +5,8 @@
 #include <memory>
 #include <new>
 #include <optional>
+#include <string>
+#include <string_view>
 
 namespace ql32::runtime {
 
@@ -12,6 +14,17 @@ struct HeapFragmentationInfo {
     std::uint64_t largestFreeBlockBytes = 0;
     std::uint64_t freeBlockCount = 0;
     std::uint64_t allocatedBlockCount = 0;
+};
+
+// Minimum memory a platform wants available before it admits new work. Zero
+// fields disable the corresponding check (the default, e.g. on host builds).
+struct AdmissionPolicy {
+    std::uint64_t workerTotalBytes = 0;       // new task: free bytes needed
+    std::uint64_t workerContiguousBytes = 0;  // new task: largest free block needed
+    std::uint64_t musicStartTotalBytes = 0;   // first audio start (task stacks + driver)
+    std::uint64_t musicStartContiguousBytes = 0;
+    std::uint64_t musicPlayTotalBytes = 0;    // loading a song once audio is running
+    bool displayModeGuard = false;            // refuse MODE growth that cannot fit
 };
 
 // Reports memory currently available to the platform runtime. The exact pool
@@ -25,6 +38,46 @@ public:
     virtual std::optional<HeapFragmentationInfo> fragmentationInfo() const {
         return std::nullopt;
     }
+
+    // Returns a message when `totalBytes` free or a `contiguousBytes` block is not
+    // available. Zero skips a check; the block check needs fragmentationInfo().
+    std::optional<std::string> admissionFailure(std::string_view what,
+                                                std::uint64_t totalBytes,
+                                                std::uint64_t contiguousBytes = 0) const {
+        if (totalBytes == 0 && contiguousBytes == 0) return std::nullopt;
+        const std::uint64_t free = freeBytes();
+        const auto info = fragmentationInfo();
+        const bool freeShort = totalBytes != 0 && free < totalBytes;
+        const bool blockShort = contiguousBytes != 0 && info &&
+                                info->largestFreeBlockBytes < contiguousBytes;
+        if (!freeShort && !blockShort) return std::nullopt;
+        std::string message = "not enough memory for " + std::string(what) + ": need " +
+            std::to_string(totalBytes) + " bytes free";
+        if (contiguousBytes != 0)
+            message += " (" + std::to_string(contiguousBytes) + " contiguous)";
+        message += ", have " + std::to_string(free) + " free";
+        if (info) message += ", " + std::to_string(info->largestFreeBlockBytes) + " largest";
+        return message;
+    }
+    // Canvases are 4 bits per pixel and old and new buffers coexist during a resize,
+    // so growing the display needs (newArea - oldArea) / 2 bytes more.
+    std::optional<std::string> displayModeFailure(std::uint64_t oldWidth, std::uint64_t oldHeight,
+                                                  std::uint64_t newWidth, std::uint64_t newHeight,
+                                                  std::string_view modeName) const {
+        if (!admissionPolicy_.displayModeGuard) return std::nullopt;
+        const std::uint64_t oldArea = oldWidth * oldHeight;
+        const std::uint64_t newArea = newWidth * newHeight;
+        if (newArea <= oldArea) return std::nullopt;
+        return admissionFailure("display mode " + std::string(modeName), (newArea - oldArea) / 2);
+    }
+    bool canAdmit(std::uint64_t totalBytes, std::uint64_t contiguousBytes = 0) const {
+        return !admissionFailure("request", totalBytes, contiguousBytes);
+    }
+    // Lowest free heap seen since boot, when the platform tracks it.
+    virtual std::optional<std::uint64_t> minimumFreeBytes() const { return std::nullopt; }
+
+    const AdmissionPolicy& admissionPolicy() const noexcept { return admissionPolicy_; }
+    void setAdmissionPolicy(const AdmissionPolicy& policy) noexcept { admissionPolicy_ = policy; }
 
     // A held heap block keeps memory available for cancellation, error
     // reporting, and storage recovery after user allocations fail. Platforms
@@ -65,6 +118,7 @@ public:
 private:
     std::unique_ptr<std::byte[]> emergencyReserve_;
     std::size_t emergencyReserveBytes_ = 0;
+    AdmissionPolicy admissionPolicy_;
 };
 
 class EmergencyReserveLease {

@@ -195,6 +195,16 @@ public:
     std::uint32_t currentOptions = 0;
 };
 
+class FakeMemory final : public ql32::runtime::MemoryService {
+public:
+    std::uint64_t freeBytes() const override { return free; }
+    std::optional<ql32::runtime::HeapFragmentationInfo> fragmentationInfo() const override {
+        return ql32::runtime::HeapFragmentationInfo{largest, 1, 1};
+    }
+    std::uint64_t free = 100000;
+    std::uint64_t largest = 50000;
+};
+
 class ModeFramePresenter final : public ql32::graphics::FramePresenter {
 public:
     void present(const ql32::graphics::Frame& frame) override {
@@ -1642,6 +1652,80 @@ void testSupervisorCanListAndChangeDisplayMode() {
             "MODE did not retain the requested display option");
 }
 
+void testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.workerTotalBytes = 14000;
+    policy.workerContiguousBytes = 6000;
+    policy.displayModeGuard = true;
+    memory->setAdmissionPolicy(policy);
+    auto presenter = std::make_shared<ModeFramePresenter>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
+    auto displayModes = std::make_shared<TestDisplayModes>();
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.graphics = graphics;
+    services.displayModes = displayModes;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+
+    const auto ok = scheduler.launchWorker("PRINT 1\n", output);
+    require(scheduler.cancel(ok) && scheduler.reap(ok), "admitted worker not reaped");
+
+    memory->free = 13000;
+    std::string message;
+    try { scheduler.launchWorker("PRINT 1\n", output); }
+    catch (const ql32::runtime::Error& e) {
+        require(e.code() == ql32::runtime::ErrorCode::OutOfMemory, "wrong error code");
+        message = e.what();
+    }
+    require(message.find("need 14000 bytes free (6000 contiguous), have 13000 free, "
+                         "50000 largest") != std::string::npos,
+            ("low free memory did not refuse a worker clearly: " + message).c_str());
+    require(scheduler.tasks().empty(), "refused worker left a task behind");
+
+    memory->free = 100000;
+    memory->largest = 5000;
+    bool refused = false;
+    try { scheduler.launch("PRINT 1\n", output); }
+    catch (const ql32::runtime::Error&) { refused = true; }
+    require(refused, "fragmented heap did not refuse a launch");
+
+    memory->largest = 50000;
+    memory->free = 1000;
+    const auto supervisor = scheduler.launchInteractive(output);
+    require(scheduler.submit(supervisor, "MODE 640x480\n") && scheduler.tick(),
+            "MODE not dispatched");
+    const auto info = scheduler.task(supervisor);
+    require(displayModes->current == "320x200" &&
+                (output.str() + info->error + info->errorDetail)
+                        .find("not enough memory for display mode 640x480") !=
+                    std::string::npos,
+            ("MODE growth was not refused when memory is low: " + output.str() +
+             info->error).c_str());
+
+    memory->free = 400000;
+    require(scheduler.submit(supervisor, "MODE 640x480\n") && scheduler.tick() &&
+                displayModes->current == "640x480",
+            "MODE growth was refused despite enough memory");
+    memory->free = 100;
+    require(scheduler.submit(supervisor, "MODE 320x200\n") && scheduler.tick() &&
+                displayModes->current == "320x200",
+            "shrinking MODE was refused");
+}
+
+void testAdmissionDisabledByDefault() {
+    auto memory = std::make_shared<FakeMemory>();
+    memory->free = 1;
+    memory->largest = 1;
+    ql32::vm::Services services;
+    services.memory = memory;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto id = scheduler.launchWorker("PRINT 1\n", output);
+    require(scheduler.cancel(id), "default policy refused a worker");
+}
+
 void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
     auto presenter = std::make_shared<ModeFramePresenter>();
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
@@ -1678,6 +1762,8 @@ void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
 } // namespace
 
 int main() {
+    testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow();
+    testAdmissionDisabledByDefault();
     testRoundRobinSlicesKeepSessionsIndependent();
     testUiWaitDoesNotBlockOtherSessions();
     testOptionalPagerSuspendsOnlyReplAndContinuesTail();
