@@ -250,12 +250,13 @@ struct MusicService::Impl {
                 writeErrorLogged = true;
             }
             if (blockNumber % DiagnosticIntervalBlocks == 0 && blockNumber <= DiagnosticLastBlock) {
-                Serial.printf("music: blocks=%u pcm=%d..%d dac=0x%04x..0x%04x maxGap=%uus late=%u stack=%u\n",
+                Serial.printf("music: blocks=%u pcm=%d..%d dac=0x%04x..0x%04x maxGap=%uus late=%u stack=%u iostack=%u\n",
                     static_cast<unsigned>(blockNumber), blockMin, blockMax,
                     static_cast<unsigned>(music::pcmToDac16(static_cast<std::int16_t>(blockMin))),
                     static_cast<unsigned>(music::pcmToDac16(static_cast<std::int16_t>(blockMax))),
                     static_cast<unsigned>(maxGapUs), static_cast<unsigned>(lateBlocks),
-                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
+                    ioWorker ? static_cast<unsigned>(uxTaskGetStackHighWaterMark(ioWorker)) : 0u);
                 blockMin = std::numeric_limits<int>::max();
                 blockMax = std::numeric_limits<int>::min();
                 maxGapUs = 0;
