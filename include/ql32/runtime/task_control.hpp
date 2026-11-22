@@ -105,6 +105,19 @@ struct DebugSnapshot {
     std::vector<DebugBreakpointInfo> breakpoints;
 };
 
+// Short label for a task's source file: directory and one extension removed;
+// names over 10 characters keep 7 leading and 3 trailing characters around "..".
+inline std::string taskDisplayName(const std::string& path) {
+    std::size_t start = path.find_last_of("/\\:");
+    std::string name = path.substr(start == std::string::npos ? 0 : start + 1);
+    const std::size_t dot = name.find_last_of('.');
+    if (dot != std::string::npos && dot != 0) name.erase(dot);
+    for (char& c : name)
+        if (c < 0x20 || c > 0x7e) c = '?';
+    if (name.size() > 10) name = name.substr(0, 7) + ".." + name.substr(name.size() - 3);
+    return name;
+}
+
 struct ManagedTaskInfo {
     TaskId id = 0;
     TaskState state = TaskState::Runnable;
@@ -123,6 +136,7 @@ struct ManagedTaskInfo {
     std::uint32_t canvasHeight = 0;
     std::int32_t canvasOffsetX = 0;
     std::int32_t canvasOffsetY = 0;
+    std::string name;
 };
 
 // Control surface available to the interactive BASIC supervisor.
@@ -130,7 +144,8 @@ class TaskControlService {
 public:
     virtual ~TaskControlService() = default;
     virtual TaskId startTask(std::string source, std::ostream& output,
-                             TaskId caller, std::uint32_t flags) = 0;
+                             TaskId caller, std::uint32_t flags,
+                             std::string name = {}) = 0;
     virtual bool killTask(TaskId id) = 0;
     virtual bool logon(TaskId id) = 0;
     virtual TaskId logoff() = 0;

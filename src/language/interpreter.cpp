@@ -3878,8 +3878,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             for (const auto& task : tasks) {
                 if (task.state == runtime::TaskState::Cancelled) continue;
                 listing += std::to_string(task.id) + " ";
-                if (task.supervisor) listing += "SUPERVISOR ";
-                else listing += "WORKER ";
+                listing += task.supervisor ? "SUPERVISOR" :
+                    (task.name.empty() ? "(inline)" : task.name);
+                listing += " ";
                 if (task.priority == 0) {
                     if (task.resumePriority == 0) {
                         listing += "P=0 DISABLED (no saved resume priority)";
@@ -4154,6 +4155,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 runtime::taskStateName(found->state)) + "\n";
             detail += "Kind: " + std::string(found->supervisor ? "SUPERVISOR" :
                 (found->interactive ? "WORKER" : "PROGRAM")) + "\n";
+            detail += "File: " + (found->name.empty() ? std::string("(none)") :
+                                  found->name) + "\n";
             detail += "Priority: " + std::to_string(found->priority) + "\n";
             detail += "Resume priority: " + std::to_string(found->resumePriority) + "\n";
             detail += "Open channels: " + std::to_string(found->openChannels) + "\n";

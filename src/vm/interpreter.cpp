@@ -1202,7 +1202,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     }
                     const std::string source = storage_->readText(*path);
                     const runtime::TaskId id = taskControl_->startTask(
-                        source, output, task_id_, flags);
+                        source, output, task_id_, flags, *path);
                     setErrorContext(runtime::ErrorCode::None);
                     if (instruction.expectsValue) {
                         pushValue(static_cast<double>(id));
