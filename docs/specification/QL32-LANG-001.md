@@ -1328,7 +1328,7 @@ mode. Shell form: `MODE [LIST|name|modeId[,options]]`. See
 
 ### 11.8 Shell and debugger commands (not compiled BASIC statements)
 
-=======
+Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `LIST [#ch,] PROC|FN [name]`, `LIST GLOBALS|LOCALS`, `EDIT [n]`, `RENUMBER [start,step]`,
 `DIR`, `CAT`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
 `REBOOT`, `TASKS`, `TASKCHANNELS`, `KILL`, `TASKVIEW`, `WINDOWMODE
 [ISOLATED|SHARED]`, `MODE`, `TASKRESULT`, `LOGON`, `LOGOFF`, `SUSPEND`,
