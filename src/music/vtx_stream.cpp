@@ -5,12 +5,13 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <string_view>
 
 namespace ql32::music {
 namespace {
 constexpr char CachePrefix[] = ".q32v-";
-constexpr std::uint8_t CacheVersion = 1;
+constexpr std::uint8_t CacheVersion = 2;
 constexpr std::size_t KeyHeadBytes = 4096;
 constexpr std::size_t KeyTailBytes = 256;
 
@@ -135,6 +136,173 @@ struct DecodeFailure {
     std::string message;
 };
 
+// Byte-oriented LZ for cache windows: a control byte below 0x80 starts a run of
+// (c + 1) literals; otherwise it is a match of (c & 0x7f) + 3 bytes at a distance
+// of one byte (1..127) or two bytes (0x80 | high, low; up to 0x7fff).
+void lzEncode(const std::uint8_t* in, std::size_t count, std::vector<std::uint8_t>& out) {
+    out.clear();
+    std::uint16_t table[1024];
+    std::fill(std::begin(table), std::end(table), std::uint16_t{0xffff});
+    const auto hashAt = [&](std::size_t i) {
+        const std::uint32_t v = in[i] | (in[i + 1] << 8) | (static_cast<std::uint32_t>(in[i + 2]) << 16);
+        return static_cast<std::size_t>((v * 2654435761u) >> 22);
+    };
+    std::size_t literals = 0;
+    const auto flush = [&](std::size_t end) {
+        while (literals < end) {
+            const std::size_t run = std::min<std::size_t>(128, end - literals);
+            out.push_back(static_cast<std::uint8_t>(run - 1));
+            out.insert(out.end(), in + literals, in + literals + run);
+            literals += run;
+        }
+    };
+    std::size_t i = 0;
+    while (i + 3 <= count) {
+        const std::size_t h = hashAt(i);
+        const std::uint16_t candidate = table[h];
+        table[h] = static_cast<std::uint16_t>(i);
+        if (candidate != 0xffff && i - candidate <= 0x7fff &&
+            in[candidate] == in[i] && in[candidate + 1] == in[i + 1] &&
+            in[candidate + 2] == in[i + 2]) {
+            std::size_t length = 3;
+            while (i + length < count && length < 130 && in[candidate + length] == in[i + length])
+                ++length;
+            flush(i);
+            out.push_back(static_cast<std::uint8_t>(0x80 | (length - 3)));
+            const std::size_t distance = i - candidate;
+            if (distance < 128) {
+                out.push_back(static_cast<std::uint8_t>(distance));
+            } else {
+                out.push_back(static_cast<std::uint8_t>(0x80 | (distance >> 8)));
+                out.push_back(static_cast<std::uint8_t>(distance));
+            }
+            for (std::size_t k = 1; k < length && i + k + 3 <= count; ++k)
+                table[hashAt(i + k)] = static_cast<std::uint16_t>(i + k);
+            i += length;
+            literals = i;
+        } else {
+            ++i;
+        }
+    }
+    flush(count);
+}
+
+bool lzDecode(const std::uint8_t* in, std::size_t inLength, std::uint8_t* out,
+              std::size_t outLength) noexcept {
+    std::size_t ip = 0, op = 0;
+    while (op < outLength) {
+        if (ip >= inLength) return false;
+        const unsigned control = in[ip++];
+        if (control < 0x80) {
+            const std::size_t run = control + 1;
+            if (ip + run > inLength || op + run > outLength) return false;
+            std::memcpy(out + op, in + ip, run);
+            ip += run;
+            op += run;
+        } else {
+            const std::size_t length = (control & 0x7f) + 3;
+            if (ip >= inLength) return false;
+            std::size_t distance = in[ip++];
+            if (distance & 0x80) {
+                if (ip >= inLength) return false;
+                distance = ((distance & 0x7f) << 8) | in[ip++];
+            }
+            if (distance == 0 || distance > op || op + length > outLength) return false;
+            for (std::size_t k = 0; k < length; ++k, ++op) out[op] = out[op - distance];
+        }
+    }
+    return ip == inLength;
+}
+
+// Cuts the source byte stream into windows and writes them as cache blobs. Planar
+// input arrives plane after plane; window-major input is frame-major.
+class WindowEncoder {
+public:
+    WindowEncoder(runtime::TextStreamSink& sink, std::size_t frames, std::size_t planes,
+                  bool windowMajor, std::size_t loopFrame)
+        : sink_(sink), frames_(frames), planes_(planes), windowMajor_(windowMajor),
+          loopWindow_(loopFrame < frames ? loopFrame / VtxPlaneFile::WindowFrames : kNone),
+          position_(VtxPlaneFile::HeaderBytes) {
+        layout_.start[0] = VtxPlaneFile::HeaderBytes;
+        buffer_.reserve(windowMajor ? planes * VtxPlaneFile::WindowFrames : VtxPlaneFile::WindowFrames);
+    }
+
+    void feed(const std::uint8_t* bytes, std::size_t count) {
+        constexpr std::size_t W = VtxPlaneFile::WindowFrames;
+        for (std::size_t n = 0; n < count; ++n) {
+            if (windowMajor_) {
+                buffer_.push_back(bytes[n]);
+                const std::size_t length = std::min(W, frames_ - window_ * W);
+                if (buffer_.size() != length * planes_) continue;
+                std::vector<std::uint8_t> planar(buffer_.size());
+                for (std::size_t f = 0; f < length; ++f)
+                    for (std::size_t p = 0; p < planes_; ++p)
+                        planar[p * length + f] = buffer_[f * planes_ + p];
+                if (window_ == loopWindow_) layout_.loop[0] = position_;
+                writeBlob(planar.data(), planar.size());
+                buffer_.clear();
+                ++window_;
+            } else {
+                if (plane_ >= planes_) return;
+                if (buffer_.empty() && window_ == 0) layout_.start[plane_] = position_;
+                buffer_.push_back(bytes[n]);
+                const std::size_t length = std::min(W, frames_ - window_ * W);
+                if (buffer_.size() != length) continue;
+                if (window_ == loopWindow_) layout_.loop[plane_] = position_;
+                writeBlob(buffer_.data(), length);
+                buffer_.clear();
+                if (++window_ * W >= frames_) {
+                    window_ = 0;
+                    ++plane_;
+                }
+            }
+        }
+    }
+
+    void emit(const void* bytes, std::size_t count) {
+        sink_.write({static_cast<const char*>(bytes), count});
+        position_ += static_cast<std::uint32_t>(count);
+    }
+    void beginDrums() { layout_.drumStart = position_; }
+    void finish() {
+        std::vector<std::uint8_t> trailer;
+        const std::size_t streams = windowMajor_ ? 1 : planes_;
+        trailer.resize(streams * 8 + 4);
+        for (std::size_t s = 0; s < streams; ++s) {
+            put32(trailer.data() + s * 8, layout_.start[s]);
+            put32(trailer.data() + s * 8 + 4, layout_.loop[s]);
+        }
+        put32(trailer.data() + streams * 8, layout_.drumStart);
+        emit(trailer.data(), trailer.size());
+    }
+
+private:
+    static constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+    void writeBlob(const std::uint8_t* raw, std::size_t length) {
+        lzEncode(raw, length, packed_);
+        std::uint8_t code[2];
+        const bool compressed = packed_.size() < length;
+        const std::size_t value = compressed ? packed_.size() : 0x8000;
+        code[0] = static_cast<std::uint8_t>(value);
+        code[1] = static_cast<std::uint8_t>(value >> 8);
+        emit(code, 2);
+        if (compressed) emit(packed_.data(), packed_.size());
+        else emit(raw, length);
+    }
+
+    runtime::TextStreamSink& sink_;
+    std::size_t frames_;
+    std::size_t planes_;
+    bool windowMajor_;
+    std::size_t loopWindow_;
+    std::uint32_t position_;
+    VtxPlaneFile::Layout layout_;
+    std::vector<std::uint8_t> buffer_;
+    std::vector<std::uint8_t> packed_;
+    std::size_t plane_ = 0;
+    std::size_t window_ = 0;
+};
+
 class TranscodeSource final : public runtime::TextStreamSource {
 public:
     TranscodeSource(runtime::StorageReadHandle& file, const SourceInfo& info,
@@ -153,6 +321,7 @@ public:
         put32(header + 20, srcSize_);
         put32(header + 24, key_);
         sink.write({reinterpret_cast<const char*>(header), sizeof header});
+        WindowEncoder encoder(sink, info_.frames, 14, false, info_.metadata.loopFrame);
 
         std::uint64_t consumed = 0;
         const Lh5ByteReader reader = [&](std::uint8_t* destination, std::size_t capacity) {
@@ -170,12 +339,15 @@ public:
         const Lh5OutputSink output = [&](const std::uint8_t* bytes, std::size_t count) {
             count = std::min(count, remaining);
             if (count == 0) return;
-            sink.write({reinterpret_cast<const char*>(bytes), count});
+            encoder.feed(bytes, count);
             remaining -= count;
         };
         const char* error = nullptr;
         if (!decodeLh5Stream(reader, info_.decodeBytes, output, &error))
             throw DecodeFailure{error ? error : "VTX LHA5 decode failed"};
+        if (remaining != 0) throw DecodeFailure{"VTX register stream is truncated"};
+        encoder.beginDrums();
+        encoder.finish();
     }
 
 private:
@@ -200,7 +372,7 @@ std::shared_ptr<VtxPlaneFile> openCache(runtime::StorageService& storage,
             le32(header + 24) != key)
             return nullptr;
         frames = le32(header + 8);
-        if (frames == 0 || file->size() != sizeof header + frames * 14ull) return nullptr;
+        if (frames == 0) return nullptr;
         metadata = {};
         metadata.ym2149 = header[5] != 0;
         metadata.stereoMode = header[6];
@@ -208,7 +380,9 @@ std::shared_ptr<VtxPlaneFile> openCache(runtime::StorageService& storage,
         metadata.chipClockHz = le32(header + 12);
         metadata.loopFrame = le16(header + 16);
         if (metadata.chipClockHz == 0 || metadata.playerHz == 0) return nullptr;
-        return std::make_shared<VtxPlaneFile>(std::move(file), frames, metadata.loopFrame);
+        const auto layout = VtxPlaneFile::readLayout(*file, 14, false);
+        return std::make_shared<VtxPlaneFile>(std::move(file), frames, metadata.loopFrame, 14,
+                                              false, layout);
     } catch (const std::exception&) {
         return nullptr;
     }
@@ -232,39 +406,110 @@ void evictOtherCaches(runtime::StorageService& storage, const std::string& root,
 }
 } // namespace
 
+VtxPlaneFile::Layout VtxPlaneFile::readLayout(runtime::StorageReadHandle& file,
+                                              std::size_t planeCount, bool windowMajor) {
+    const std::size_t streams = windowMajor ? 1 : planeCount;
+    const std::uint64_t size = file.size();
+    const std::uint64_t trailerBytes = streams * 8 + 4;
+    if (planeCount == 0 || planeCount > MaximumPlanes || size < HeaderBytes + trailerBytes)
+        throw runtime::ServiceError(runtime::ServiceErrorCode::IoError, "music: bad cache");
+    std::uint8_t trailer[MaximumPlanes * 8 + 4];
+    readFully(file, size - trailerBytes, trailer, static_cast<std::size_t>(trailerBytes),
+              "cache trailer");
+    Layout layout;
+    layout.trailerStart = static_cast<std::uint32_t>(size - trailerBytes);
+    for (std::size_t s = 0; s < streams; ++s) {
+        layout.start[s] = le32(trailer + s * 8);
+        layout.loop[s] = le32(trailer + s * 8 + 4);
+        if (layout.start[s] < HeaderBytes || layout.start[s] >= layout.trailerStart ||
+            layout.loop[s] >= layout.trailerStart)
+            throw runtime::ServiceError(runtime::ServiceErrorCode::IoError, "music: bad cache");
+    }
+    layout.drumStart = le32(trailer + streams * 8);
+    if (layout.drumStart < HeaderBytes || layout.drumStart > layout.trailerStart)
+        throw runtime::ServiceError(runtime::ServiceErrorCode::IoError, "music: bad cache");
+    return layout;
+}
+
 VtxPlaneFile::VtxPlaneFile(std::unique_ptr<runtime::StorageReadHandle> file,
                            std::size_t frameCount, std::size_t loopFrame,
-                           std::size_t planeCount, bool interleaved)
+                           std::size_t planeCount, bool windowMajor, const Layout& layout)
     : file_(std::move(file)), frameCount_(frameCount), loopFrame_(loopFrame),
-      planeCount_(std::min(planeCount, MaximumPlanes)), interleaved_(interleaved) {
+      planeCount_(std::min(planeCount, MaximumPlanes)), windowMajor_(windowMajor),
+      layout_(layout) {
+    for (std::size_t s = 0; s < known_.size(); ++s) known_[s] = {0, layout_.start[s]};
     for (std::size_t plane = 0; plane < planeCount_; ++plane) {
         current_[plane].resize(WindowFrames);
         next_[plane].resize(WindowFrames);
         if (!load(plane, 0, current_[plane], currentWindow_[plane]))
             throw runtime::ServiceError(runtime::ServiceErrorCode::IoError,
-                                        "music: cannot read VTX cache");
+                                        "music: cannot read music cache");
     }
+}
+
+// Decodes one window of a stream. known_ remembers where the next blob of each
+// stream starts, so sequential playback never scans; a jump scans blob headers
+// forward from the stream start, the loop window or the last position.
+void VtxPlaneFile::readWindow(std::size_t stream, std::size_t window, std::size_t rawLength,
+                              std::size_t rawBytesPerFrame, std::uint8_t* destination) {
+    const auto blobLength = [&](std::size_t index, std::uint32_t offset, std::uint16_t& code) {
+        std::uint8_t header[2];
+        readFully(*file_, offset, header, 2, "cache window");
+        code = static_cast<std::uint16_t>(header[0] | (header[1] << 8));
+        const std::size_t length = std::min(WindowFrames, frameCount_ - index * WindowFrames);
+        return (code & 0x8000) ? length * rawBytesPerFrame : static_cast<std::size_t>(code);
+    };
+    Known at = known_[stream];
+    if (at.window != window) {
+        Known best{0, layout_.start[stream]};
+        const std::size_t loopWindow = loopFrame_ < frameCount_ ? loopFrame_ / WindowFrames : 0;
+        if (loopFrame_ < frameCount_ && loopWindow <= window)
+            best = {loopWindow, layout_.loop[stream]};
+        if (at.window < window && at.window >= best.window) best = at;
+        for (; best.window < window; ++best.window) {
+            std::uint16_t code;
+            best.offset += 2 + static_cast<std::uint32_t>(blobLength(best.window, best.offset, code));
+        }
+        at = best;
+    }
+    std::uint16_t code;
+    const std::size_t payload = blobLength(window, at.offset, code);
+    if (code & 0x8000) {
+        readFully(*file_, at.offset + 2, destination, rawLength, "cache window");
+    } else {
+        if (payload == 0 || payload > rawLength + rawLength / 2 + 16 ||
+            at.offset + 2ull + payload > layout_.drumStart)
+            throw runtime::ServiceError(runtime::ServiceErrorCode::IoError, "music: bad cache");
+        blob_.resize(payload);
+        readFully(*file_, at.offset + 2, blob_.data(), payload, "cache window");
+        if (!lzDecode(blob_.data(), payload, destination, rawLength))
+            throw runtime::ServiceError(runtime::ServiceErrorCode::IoError, "music: bad cache");
+    }
+    known_[stream] = {window + 1, static_cast<std::uint32_t>(at.offset + 2 + payload)};
 }
 
 bool VtxPlaneFile::load(std::size_t plane, std::size_t start,
                         std::vector<std::uint8_t>& destination, Window& window) {
-    const std::size_t end = std::min(frameCount_, start + WindowFrames);
+    const std::size_t index = start / WindowFrames;
+    const std::size_t length = std::min(WindowFrames, frameCount_ - index * WindowFrames);
     try {
         std::lock_guard lock(fileMutex_);
-        if (!interleaved_) {
-            readFully(*file_, HeaderBytes + plane * frameCount_ + start, destination.data(),
-                      end - start, "VTX cache");
+        destination.resize(WindowFrames);
+        if (!windowMajor_) {
+            readWindow(plane, index, length, 1, destination.data());
         } else {
-            std::vector<std::uint8_t> chunk((end - start) * planeCount_);
-            readFully(*file_, HeaderBytes + start * planeCount_, chunk.data(), chunk.size(),
-                      "VTX cache");
-            for (std::size_t i = 0; i < end - start; ++i)
-                destination[i] = chunk[i * planeCount_ + plane];
+            if (wholeWindowIndex_ != index) {
+                wholeWindowIndex_ = static_cast<std::size_t>(-1);
+                wholeWindow_.resize(length * planeCount_);
+                readWindow(0, index, length * planeCount_, planeCount_, wholeWindow_.data());
+                wholeWindowIndex_ = index;
+            }
+            std::memcpy(destination.data(), wholeWindow_.data() + plane * length, length);
         }
     } catch (const std::exception&) {
         return false;
     }
-    window = {start, end - start};
+    window = {index * WindowFrames, length};
     return true;
 }
 
@@ -325,6 +570,7 @@ void VtxPlaneFile::run() noexcept {
                 continue;
             start = end < frameCount_ ? end : loopFrame_;
             if (start >= frameCount_) continue;
+            start -= start % WindowFrames;
             if (nextWindow_[plane].length != 0 && nextWindow_[plane].start == start) continue;
         }
         Window loaded;
@@ -390,7 +636,7 @@ VtxSong openVtxStreamed(runtime::StorageService& storage, const std::string& pat
 
 namespace ql32::music {
 namespace {
-constexpr std::uint8_t YmCacheVersion = 1;
+constexpr std::uint8_t YmCacheVersion = 2;
 constexpr std::size_t YmDrumSampleBudget = 12288;
 
 std::uint32_t beu32(const std::uint8_t* p) {
@@ -655,6 +901,7 @@ public:
         header[31] = static_cast<std::uint8_t>(y_.drums.size() >> 8);
         sink.write({reinterpret_cast<const char*>(header), sizeof header});
 
+        WindowEncoder encoder(sink, y_.frames, y_.planes, y_.interleaved, y_.metadata.loopFrame);
         std::uint64_t pos = 0;
         std::uint64_t remaining = static_cast<std::uint64_t>(y_.frames) * y_.planes;
         y_.unpack(file_, [&](const std::uint8_t* bytes, std::size_t count) {
@@ -667,15 +914,16 @@ public:
             }
             count = static_cast<std::size_t>(std::min<std::uint64_t>(count, remaining));
             if (count == 0) return;
-            sink.write({reinterpret_cast<const char*>(bytes), count});
+            encoder.feed(bytes, count);
             remaining -= count;
         });
         if (remaining != 0) throw DecodeFailure{"YM register data is truncated"};
+        encoder.beginDrums();
 
         for (const auto& drum : y_.drums) {
             std::uint8_t length[4];
             put32(length, static_cast<std::uint32_t>(drum.size()));
-            sink.write({reinterpret_cast<const char*>(length), sizeof length});
+            encoder.emit(length, sizeof length);
             std::uint8_t block[256];
             for (std::size_t i = 0; i < drum.size();) {
                 std::size_t n = 0;
@@ -684,9 +932,10 @@ public:
                     block[n] = static_cast<std::uint8_t>(v);
                     block[n + 1] = static_cast<std::uint8_t>(v >> 8);
                 }
-                sink.write({reinterpret_cast<const char*>(block), n});
+                encoder.emit(block, n);
             }
         }
+        encoder.finish();
     }
 
 private:
@@ -714,8 +963,7 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
         if (!storage.exists(cachePath)) return nullptr;
         auto file = storage.openRead(cachePath);
         std::uint8_t header[VtxPlaneFile::HeaderBytes];
-        const std::uint64_t size = file->size();
-        if (size < sizeof header) return nullptr;
+        if (file->size() < sizeof header) return nullptr;
         readFully(*file, 0, header, sizeof header, "YM cache header");
         if (std::string_view(reinterpret_cast<const char*>(header), 4) != "Q32Y" ||
             header[4] != YmCacheVersion || le32(header + 20) != srcSize ||
@@ -724,8 +972,10 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
         const std::size_t planes = header[6];
         const std::size_t frames = le32(header + 8);
         if (frames == 0 || planes < 14 || planes > VtxPlaneFile::MaximumPlanes) return nullptr;
-        std::uint64_t cursor = sizeof header + static_cast<std::uint64_t>(frames) * planes;
-        if (cursor > size) return nullptr;
+        const bool windowMajor = (header[5] & 1) != 0;
+        const auto layout = VtxPlaneFile::readLayout(*file, planes, windowMajor);
+        std::uint64_t cursor = layout.drumStart;
+        const std::uint64_t size = layout.trailerStart;
 
         YmCacheContents contents;
         contents.frames = frames;
@@ -763,7 +1013,7 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
         }
         if (cursor != size) return nullptr;
         auto planesFile = std::make_shared<VtxPlaneFile>(
-            std::move(file), frames, m.loopFrame, planes, (header[5] & 1) != 0);
+            std::move(file), frames, m.loopFrame, planes, windowMajor, layout);
         out = std::move(contents);
         return planesFile;
     } catch (const std::exception&) {

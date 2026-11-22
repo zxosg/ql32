@@ -16,25 +16,37 @@
 
 namespace ql32::music {
 
-// QL/32-specific transcoded VTX cache ("Q32V"): a 32-byte header followed by
-// the fourteen register planes exactly as LH5 yields them. The file is
-// written sequentially (so any storage adapter can produce it) and played by
-// reading small per-plane windows. Seeking between the planes is slow on some
-// filesystems (about 40 ms per seek on SPIFFS), so the next window of each
-// plane is read ahead by run(); render-time reads are only a fallback.
-// Playback needs about 8 KiB of heap regardless of song length.
+// QL/32-specific transcoded register cache ("Q32V" for VTX, "Q32Y" for YM,
+// version 2): a 32-byte header, then the register data cut into windows of 256
+// frames, each window stored as a small blob (u16 code: bit 15 = stored raw,
+// otherwise the length of an LZ payload; see lz8 in vtx_stream.cpp), then (YM) the
+// digi-drum bank, then a trailer with the start/loop offsets of every stream.
+// Planar sources keep one stream per register plane (windows of one plane follow
+// each other); interleaved YM sources are stored window-major (one stream whose
+// blobs hold all planes of a window). Reading seeks between streams are slow on
+// some filesystems (about 40 ms on SPIFFS), so the next window of each plane is
+// read ahead by run(); render-time reads are only a fallback. Decoding needs no
+// tables. Playback needs a few KiB of heap regardless of song length.
 class VtxPlaneFile final : public AudioPrefetcher {
 public:
     static constexpr std::size_t HeaderBytes = 32;
     static constexpr std::size_t WindowFrames = 256;
-
     static constexpr std::size_t MaximumPlanes = 16;
 
+    struct Layout {
+        std::array<std::uint32_t, MaximumPlanes> start{};   // first blob of each stream
+        std::array<std::uint32_t, MaximumPlanes> loop{};    // blob of the loop window
+        std::uint32_t drumStart = 0;                        // end of the register blobs
+        std::uint32_t trailerStart = 0;                     // end of the drum bank
+    };
+    // Reads and validates the trailer (throws on a damaged cache).
+    static Layout readLayout(runtime::StorageReadHandle& file, std::size_t planeCount,
+                             bool windowMajor);
+
     // Loads the first window of every plane (may throw on storage errors).
-    // interleaved: the data is frame-major (planeCount bytes per frame) instead
-    // of one plane after another.
     VtxPlaneFile(std::unique_ptr<runtime::StorageReadHandle> file, std::size_t frameCount,
-                 std::size_t loopFrame, std::size_t planeCount = 14, bool interleaved = false);
+                 std::size_t loopFrame, std::size_t planeCount, bool windowMajor,
+                 const Layout& layout);
     std::array<std::uint8_t, 14> registers(std::size_t frame);
     // All sixteen YM registers; planes beyond the file's plane count read as zero.
     std::array<std::uint8_t, 16> registers16(std::size_t frame);
@@ -46,14 +58,25 @@ private:
         std::size_t start = 0;
         std::size_t length = 0;
     };
+    struct Known {
+        std::size_t window = 0;
+        std::uint32_t offset = 0;
+    };
     bool load(std::size_t plane, std::size_t start, std::vector<std::uint8_t>& destination,
               Window& window);
+    void readWindow(std::size_t stream, std::size_t window, std::size_t rawLength,
+                    std::size_t rawBytesPerWindow, std::uint8_t* destination);
     std::unique_ptr<runtime::StorageReadHandle> file_;
     std::size_t frameCount_;
     std::size_t loopFrame_;
     std::size_t planeCount_;
-    bool interleaved_;
-    std::mutex fileMutex_;  // serialises reads from file_
+    bool windowMajor_;
+    Layout layout_;
+    std::mutex fileMutex_;  // serialises reads from file_ and guards the members below
+    std::array<Known, MaximumPlanes> known_{};
+    std::vector<std::uint8_t> blob_;
+    std::vector<std::uint8_t> wholeWindow_;
+    std::size_t wholeWindowIndex_ = static_cast<std::size_t>(-1);
     std::mutex stateMutex_; // guards the window tables and buffer swaps
     std::array<std::vector<std::uint8_t>, MaximumPlanes> current_;
     std::array<std::vector<std::uint8_t>, MaximumPlanes> next_;
