@@ -1,5 +1,6 @@
 #include "ql32/platform/linux/directory_channels.hpp"
 #include "ql32/platform/linux/directory_storage.hpp"
+#include "ql32/platform/linux/virtual_hardware.hpp"
 #include "ql32/interpreter.hpp"
 
 #include <chrono>
@@ -435,6 +436,33 @@ void testInputLineAndSessionResume() {
             "INPUT did not store and return the submitted line");
 }
 
+void testCopyFromHardwareSerialUntilCtrlZ() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-uartcopy-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        auto files = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+        auto hardware = std::make_shared<ql32::platform::linux_host::VirtualHardware>();
+        hardware->setSerialLoopback(true);
+        auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(
+            files, ql32::runtime::ChannelRegistry::SerialWriter{}, hardware);
+        ql32::Interpreter interpreter(storage, channels);
+        std::ostringstream console;
+        interpreter.executeInteractive("u=OPEN(2,1,9600,0,0)\n", console);
+        interpreter.executeInteractive("PRINT #u,\"uart data\";CHR$(26);\"ignored\"\n", console);
+        interpreter.executeInteractive("COPY #u TO \"uart.txt\"\n", console);
+        std::ifstream in(root / "uart.txt", std::ios::binary);
+        const std::string content{std::istreambuf_iterator<char>(in), {}};
+        require(content == "uart data", "COPY from a serial channel did not stop at Ctrl-Z");
+    } catch (...) {
+        std::filesystem::remove_all(root);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testChannelMirroring() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -642,6 +670,7 @@ int main() {
         testInputLineAndSessionResume();
         testDefaultAndRoutedOutputChannels();
         testChannelMirroring();
+        testCopyFromHardwareSerialUntilCtrlZ();
         testChannelBindingSnapshotsEndpoint();
         testGetChannelInspection();
         testTouchChannelAndRunCleanup();

@@ -4124,12 +4124,11 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                         : channels_(std::move(channels)), session_(session), channel_(channel),
                           keyboard_(channel == 0), hardware_(channel > 1 && channels_ &&
                               channels_->isHardwareChannel(session, channel)) {
-                        if (keyboard_ || hardware_) {
-                            if (!ui)
-                                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                    "keyboard input service unavailable");
+                        if (keyboard_ && !ui)
+                            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                "keyboard input service unavailable");
+                        if ((keyboard_ || hardware_) && ui)
                             lines_ = std::make_unique<UiLines>(std::move(ui), session);
-                        }
                     }
                     std::size_t read(std::uint8_t* destination, std::size_t capacity) override {
                         if (!keyboard_ && !hardware_) {
@@ -4139,7 +4138,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                             return bytes.size();
                         }
                         std::string line;
-                        if (!ended_) {
+                        if (!ended_ && lines_) {
                             const auto event = lines_->poll(line);
                             if (event == UiLines::Event::Cancelled)
                                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
