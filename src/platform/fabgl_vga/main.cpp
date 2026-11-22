@@ -475,10 +475,20 @@ ql32::platform::esp32::ArduinoHardware hardwareAdapter(
      2
 #endif
     });
-ql32::platform::esp32::SdStorage sdStorage(SD);
+bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace);
 ql32::platform::esp32::SdChannels sdChannels(SD);
 #if defined(QL32_OLIMEX_USE_SPIFFS)
-ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS");
+bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SPIFFS.totalBytes();
+    used = SPIFFS.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS", spiffsSpace);
 ql32::platform::esp32::SdChannels flashChannels(SPIFFS, "FFS");
 #endif
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)

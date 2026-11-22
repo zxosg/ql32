@@ -20,6 +20,13 @@ struct FileEntry {
     bool isDirectory = false;
 };
 
+struct StorageSpace {
+    std::uint64_t total = 0;
+    std::uint64_t used = 0;
+    std::uint64_t free = 0;
+    bool known = false;
+};
+
 class TextStreamSink {
 public:
     virtual ~TextStreamSink() = default;
@@ -135,6 +142,8 @@ public:
     virtual void removeDirectory(const std::string&) {
         throw ServiceError(ServiceErrorCode::Unavailable, "storage: directory removal unavailable");
     }
+    // Capacity of the drive that holds path; known=false when unsupported.
+    virtual StorageSpace space(const std::string&) { return {}; }
     virtual void format(const std::string&) {
         throw ServiceError(ServiceErrorCode::Unavailable, "storage: format unavailable");
     }

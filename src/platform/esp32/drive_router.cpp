@@ -77,6 +77,10 @@ void DriveRouterStorage::removeDirectory(const std::string& path) {
     forPath(path).removeDirectory(path);
 }
 
+runtime::StorageSpace DriveRouterStorage::space(const std::string& path) {
+    return forPath(path).space(path);
+}
+
 void DriveRouterStorage::format(const std::string& path) {
     forPath(path).format(path);
 }
