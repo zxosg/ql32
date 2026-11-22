@@ -1,3 +1,4 @@
+#include "ql32/platform/esp32/diagnostics.hpp"
 #include <Arduino.h>
 #include <Adafruit_ILI9341.h>
 #include <SD.h>
@@ -221,11 +222,12 @@ void refreshDebugOverlay() {
     }
     const auto freeK = freeBytes / 1024;
     const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
+    const auto minK = boardMemory.minimumFreeBytes().value_or(0) / 1024;
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu TASK:%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK MIN:%lluK TASK:%u %s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
-        static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
+        static_cast<unsigned long long>(minK),
         static_cast<unsigned>(activeTasks), clockText);
     graphics->setDebugOverlayText(line);
 }
@@ -737,6 +739,20 @@ void setup() {
         &boardSystemControl, [](ql32::runtime::SystemControlService*) {});
     services.memory = std::shared_ptr<ql32::runtime::MemoryService>(
         &boardMemory, [](ql32::runtime::MemoryService*) {});
+    // QL/32-specific admission limits, below the measured working states
+    // (4 workers + music: ~38 KB free / 17 KB largest at music start).
+    ql32::runtime::AdmissionPolicy admission;
+    admission.workerTotalBytes = 14 * 1024;
+    admission.workerContiguousBytes = 6 * 1024;
+    // Measured: first audio start + a YM song takes ~31 KB; a later song ~10 KB.
+    admission.musicStartTotalBytes = 32 * 1024;
+    admission.musicStartContiguousBytes = 8 * 1024;
+    admission.musicPlayTotalBytes = 14 * 1024;
+    admission.displayModeGuard = true;
+    boardMemory.setAdmissionPolicy(admission);
+    ql32::platform::esp32::installFailedAllocLogger();
+    std::static_pointer_cast<ql32::platform::olimex_vga::MusicService>(services.music)
+        ->setMemoryService(services.memory);
     services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
         &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
     graphics->setConsoleLayer([](std::uint32_t y, std::uint32_t x,

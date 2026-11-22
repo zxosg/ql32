@@ -4575,6 +4575,13 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const auto previousMode = displayModes_->currentDisplayMode();
             const auto previousSize = graphics_->displaySize();
             std::optional<runtime::DisplayMode> appliedMode;
+            const auto requireModeMemory = [&](const runtime::DisplayMode& target) {
+                if (!memory_) return;
+                if (const auto failure = memory_->displayModeFailure(
+                        previousSize.first, previousSize.second, target.width,
+                        target.height, target.name))
+                    throw runtime::Error::memoryRefused(*failure);
+            };
             const auto comma = argument.find(',');
             const bool numericId = !argument.empty() &&
                 std::all_of(argument.begin(), comma == std::string::npos ?
@@ -4602,8 +4609,17 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 const auto options = comma == std::string::npos ?
                     displayModes_->currentDisplayMode().options :
                     parseModeNumber(std::string_view(argument).substr(comma + 1));
+                for (const auto& mode : displayModes_->availableModes())
+                    if (mode.id == modeId) requireModeMemory(mode);
                 appliedMode = displayModes_->setMode(modeId, options);
             } else {
+                for (const auto& mode : displayModes_->availableModes())
+                    if (mode.name.size() == argument.size() &&
+                        std::equal(argument.begin(), argument.end(), mode.name.begin(),
+                                   [](unsigned char a, unsigned char b) {
+                                       return std::toupper(a) == std::toupper(b);
+                                   }))
+                        requireModeMemory(mode);
                 appliedMode = displayModes_->setMode(argument);
             }
             const auto applied = *appliedMode;

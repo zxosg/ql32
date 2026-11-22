@@ -1,3 +1,4 @@
+#include "ql32/platform/esp32/diagnostics.hpp"
 #include "ql32/platform/olimex_vga/music.hpp"
 
 #include "ql32/music/dac_format.hpp"
@@ -53,6 +54,8 @@ struct MusicService::Impl {
     }
 
     ~Impl() {
+        platform::esp32::diagnostics().musicTask.store(nullptr);
+        platform::esp32::diagnostics().musicIoTask.store(nullptr);
         if (ioWorker) {
             vTaskDelete(ioWorker);
             ioWorker = nullptr;
@@ -69,6 +72,7 @@ struct MusicService::Impl {
     }
 
     std::shared_ptr<runtime::StorageService> storage;
+    std::shared_ptr<runtime::MemoryService> memory;
     std::vector<std::string> vtxCacheRoots;
     int dacGpio;
     SemaphoreHandle_t mutex = nullptr;
@@ -118,12 +122,15 @@ struct MusicService::Impl {
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "music: unable to start audio renderer task");
             }
+            platform::esp32::diagnostics().musicTask.store(worker);
         }
         // Slow storage reads (VTX cache read-ahead) must not run in the audio task.
         if (!ioWorker &&
             xTaskCreatePinnedToCore(&Impl::ioTaskEntry, "ql32_music_io", 4096, this,
                                     1, &ioWorker, tskNO_AFFINITY) != pdPASS)
             ioWorker = nullptr;
+        else
+            platform::esp32::diagnostics().musicIoTask.store(ioWorker);
     }
 
     static void ioTaskEntry(void* context) {
@@ -273,10 +280,32 @@ MusicService::MusicService(std::shared_ptr<runtime::StorageService> storage, int
 
 MusicService::~MusicService() = default;
 
+void MusicService::setMemoryService(std::shared_ptr<runtime::MemoryService> memory) {
+    impl_->memory = std::move(memory);
+}
+
+void MusicService::prepareOutput(const char* what, bool loadsSong) {
+    const bool running = impl_->driverInstalled && impl_->worker;
+    if (impl_->memory) {
+        const auto& policy = impl_->memory->admissionPolicy();
+        const auto failure = running ?
+            (loadsSong ? impl_->memory->admissionFailure(what, policy.musicPlayTotalBytes) :
+                         std::nullopt) :
+            impl_->memory->admissionFailure(what, policy.musicStartTotalBytes,
+                                            policy.musicStartContiguousBytes);
+        if (failure)
+            throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfMemory,
+                                        "music: " + *failure);
+    }
+    // Task stacks need contiguous heap, so create them before the song allocates.
+    impl_->ensureOutput();
+}
+
 void MusicService::play(runtime::MusicSessionId session, const std::string& path) {
     if (!impl_->storage)
         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                     "music: storage service unavailable");
+    prepareOutput("MUSIC PLAY", true);
     auto source = impl_->storage->openRead(path);
     const std::uint64_t byteCount = source->size();
     std::uint8_t signature[2] = {};
@@ -335,6 +364,7 @@ void MusicService::playWav(runtime::MusicSessionId session, const std::string& p
     if (!impl_->storage)
         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                     "music: storage service unavailable");
+    prepareOutput("MUSIC WAV", true);
     auto source = std::make_unique<music::WavSource>(
         impl_->storage->openRead(path), music::VtxPlayer::DefaultSampleRate);
     startMusic(session, std::move(source));
@@ -358,7 +388,7 @@ void MusicService::startMusic(runtime::MusicSessionId session,
 }
 
 void MusicService::testTone(runtime::MusicSessionId session) {
-    impl_->ensureOutput();
+    prepareOutput("MUSIC TEST", false);
     impl_->lock();
     if (impl_->owner != 0 && impl_->owner != session) {
         impl_->unlock();
@@ -377,7 +407,7 @@ void MusicService::testTone(runtime::MusicSessionId session) {
 
 void MusicService::beep(runtime::MusicSessionId session, std::uint32_t durationMs,
                         std::uint32_t pitchHz, runtime::ToneWaveform waveform) {
-    impl_->ensureOutput();
+    prepareOutput("BEEP", false);
     impl_->lock();
     if (impl_->owner != 0 && impl_->owner != session) {
         impl_->unlock();

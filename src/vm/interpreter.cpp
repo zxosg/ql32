@@ -1146,6 +1146,15 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto options = arguments.size() > 1 ? integerArgument(1) :
                         previousMode.options;
                     const auto previousSize = graphics_->displaySize();
+                    if (memory_) {
+                        for (const auto& mode : displayModes_->availableModes()) {
+                            if (mode.id != modeId) continue;
+                            if (const auto failure = memory_->displayModeFailure(
+                                    previousSize.first, previousSize.second, mode.width,
+                                    mode.height, mode.name))
+                                throw runtime::Error::memoryRefused(*failure);
+                        }
+                    }
                     const auto applied = displayModes_->setMode(modeId, options);
                     bool viewportsRetiled = true;
                     try {

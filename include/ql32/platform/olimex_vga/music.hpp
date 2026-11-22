@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ql32/runtime/memory.hpp"
 #include "ql32/runtime/music.hpp"
 #include "ql32/runtime/storage.hpp"
 
@@ -23,6 +24,10 @@ public:
     MusicService(const MusicService&) = delete;
     MusicService& operator=(const MusicService&) = delete;
 
+    // Optional: refuse audio start and song loads when the heap is too low
+    // (limits come from the service's AdmissionPolicy) instead of risking OOM.
+    void setMemoryService(std::shared_ptr<runtime::MemoryService> memory);
+
     void play(runtime::MusicSessionId session, const std::string& path) override;
     void playWav(runtime::MusicSessionId session, const std::string& path) override;
     void testTone(runtime::MusicSessionId session) override;
@@ -37,6 +42,8 @@ public:
     void stopSession(runtime::MusicSessionId session) noexcept override;
 
 private:
+    // Starts the audio task and I2S driver first, then checks the heap for a song.
+    void prepareOutput(const char* what, bool loadsSong);
     void startMusic(runtime::MusicSessionId session, std::unique_ptr<music::AudioSource> source);
     struct Impl;
     std::unique_ptr<Impl> impl_;

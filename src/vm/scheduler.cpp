@@ -190,9 +190,20 @@ void SessionScheduler::removeFromSchedule(Task& task) noexcept {
     task.schedulerEligibleThisTick = false;
 }
 
+namespace {
+void requireTaskMemory(const Services& services) {
+    if (!services.memory) return;
+    const auto& policy = services.memory->admissionPolicy();
+    if (const auto failure = services.memory->admissionFailure(
+            "a new task", policy.workerTotalBytes, policy.workerContiguousBytes))
+        throw runtime::Error::memoryRefused(*failure);
+}
+} // namespace
+
 TaskId SessionScheduler::launch(std::string source, std::ostream& output,
                                 std::string name) {
     if (nextId_ == 0) throw std::overflow_error("scheduler task IDs exhausted");
+    requireTaskMemory(services_);
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
@@ -214,6 +225,7 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output,
 TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output,
                                       std::string name) {
     if (nextId_ == 0) throw std::overflow_error("scheduler task IDs exhausted");
+    requireTaskMemory(services_);
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
@@ -836,9 +848,9 @@ bool SessionScheduler::tick() {
         }
     };
     const auto handleFailure = [&](std::string message, runtime::ErrorCode code,
-                                   std::string detail) {
+                                   std::string detail, bool refusal = false) {
         resetGraphicsUpdateState();
-        const bool outOfMemory = code == runtime::ErrorCode::OutOfMemory;
+        const bool outOfMemory = code == runtime::ErrorCode::OutOfMemory && !refusal;
         if (outOfMemory) {
             if (services_.memory) (void)services_.memory->releaseEmergencyReserve();
             std::string{}.swap(current.error);
@@ -990,9 +1002,10 @@ bool SessionScheduler::tick() {
             current.status = TaskStatus::Runnable;
         }
     } catch (const runtime::Error& error) {
-        handleFailure(error.what(), error.code(), error.detail());
+        handleFailure(error.what(), error.code(), error.detail(), error.memoryRefusal());
     } catch (const runtime::ServiceError& error) {
-        handleFailure(error.what(), error.languageCode(), error.detail());
+        handleFailure(error.what(), error.languageCode(), error.detail(),
+                      error.code() == runtime::ServiceErrorCode::OutOfMemory);
     } catch (const std::bad_alloc& error) {
         handleFailure(error.what(), runtime::ErrorCode::OutOfMemory, error.what());
     } catch (const std::invalid_argument& error) {
