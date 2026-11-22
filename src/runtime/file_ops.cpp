@@ -178,6 +178,13 @@ std::optional<FileEntry> statPath(StorageService& storage, const std::string& pa
         if (entry.name == leaf) return entry;
     for (const auto& entry : entries)
         if (sameName(entry.name, leaf)) return entry;
+    // Flat filesystems (SPIFFS) have no directory entries; a prefix with files is a directory.
+    try {
+        if (!storage.list(path).empty()) return FileEntry{leaf, 0, true};
+    } catch (const ServiceError& error) {
+        if (error.code() != ServiceErrorCode::NotFound &&
+            error.code() != ServiceErrorCode::InvalidPath) throw;
+    }
     return std::nullopt;
 }
 
@@ -192,8 +199,6 @@ Plan planTransfer(StorageService& storage, const std::string& source,
     const auto destinationEntry = statPath(storage, destination);
     const bool destinationIsDirectory = destinationIsDirectoryHint ||
         isRootPath(destination) || (destinationEntry && destinationEntry->isDirectory);
-    if (destinationIsDirectory && !destinationEntry)
-        fail(ServiceErrorCode::NotFound, "destination directory not found: " + destination);
     if (!destinationIsDirectory && sources.paths.size() > 1)
         fail(ServiceErrorCode::InvalidPath,
              std::string(verb) + " of several files needs a destination directory");

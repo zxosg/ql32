@@ -28,6 +28,7 @@
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
 #include "ql32/platform/esp32/cpu_frequency.hpp"
+#include "ql32/platform/esp32/drive_router.hpp"
 #include "ql32/ui/graphic_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
@@ -78,6 +79,16 @@ bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
 }
 ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace);
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
+// Optional removable card, addressed as SDC:/. Unqualified paths stay on FFS:.
+bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdcStorage(SD, "SDC", sdCardSpace);
+ql32::platform::esp32::SdChannels sdcChannels(SD, "SDC");
+ql32::platform::esp32::DriveRouterStorage driveStorage(sdStorage, sdcStorage, true);
+ql32::platform::esp32::DriveRouterChannels driveChannels(sdChannels, sdcChannels, true);
 #else
 bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
     total = SD.totalBytes();
@@ -601,6 +612,8 @@ void setup() {
     const bool storageReady = SPIFFS.begin(true);
     if (storageReady && !SPIFFS.exists("/supervisor"))
         (void)SPIFFS.mkdir("/supervisor");
+    Serial.println(SD.begin(ql32::boards::esp32_2432s028::sdChipSelect, sdBus, 4000000,
+                            "/sd", 5) ? "SDC card mounted" : "SDC card not present");
 #else
     sdBus.begin(ql32::boards::esp32_2432s028::sdSck,
                 ql32::boards::esp32_2432s028::sdMiso,
@@ -679,10 +692,17 @@ void setup() {
         services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
             std::move(profile));
     }
+#if defined(QL32_CYD_USE_SPIFFS)
+    services.storage = std::shared_ptr<ql32::runtime::StorageService>(
+        &driveStorage, [](ql32::runtime::StorageService*) {});
+    auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
+        &driveChannels, [](ql32::runtime::ChannelService*) {});
+#else
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
+#endif
     channelRegistry = std::make_shared<ql32::runtime::ChannelRegistry>(
         std::move(fileChannels), [](std::string_view bytes) {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());

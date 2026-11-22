@@ -42,6 +42,13 @@ ui::DialogOptions pagerInputOptions() {
     return options;
 }
 
+// Typed answer (Y + Enter), unlike the pager's single-key prompt.
+ui::DialogOptions confirmInputOptions() {
+    auto options = pagerInputOptions();
+    options.keyInput = false;
+    return options;
+}
+
 using detail::ArrayArgumentCandidate;
 using detail::ForItemSpec;
 using detail::Instruction;
@@ -2911,7 +2918,7 @@ ExecutionStatus Interpreter::startFileJob(runtime::fileops::Plan plan, std::ostr
             throw std::runtime_error(std::string(commandName) +
                 " needs confirmation but no interactive UI is available; add FORCE");
         }
-        pendingFileConfirm_ = ui_->beginInput(session_id_, prompt, pagerInputOptions());
+        pendingFileConfirm_ = ui_->beginInput(session_id_, prompt, confirmInputOptions());
         return ExecutionStatus::Suspended;
     }
     return runFileJob(output);
