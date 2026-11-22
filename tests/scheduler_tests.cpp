@@ -922,6 +922,32 @@ void testCancellingWorkerDiscardsItsGraphicsAllocations() {
             "cancelling a worker changed the supervisor session");
 }
 
+void testWorkerCanvasIsLazyAndTileSizedInIsolatedMode() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(32, 8, nullptr);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream supervisorOutput;
+    scheduler.launchInteractive(supervisorOutput);
+    require(scheduler.setWindowMode(ql32::runtime::WindowMode::Isolated),
+            "could not enable isolated viewports");
+    std::ostringstream textOutput;
+    scheduler.launchWorker("REPeat forever\n  PAUSE 1\nEND REPeat forever\n", textOutput);
+    for (int tick = 0; tick < 30; ++tick) (void)scheduler.tick();
+    require(graphics->windowManager().size() == 0,
+            "a text-only worker allocated a canvas");
+    std::ostringstream drawOutput;
+    scheduler.launchWorker("PAPER 4\nCLS\nREPeat forever\n  PAUSE 1\nEND REPeat forever\n",
+                           drawOutput);
+    for (int tick = 0; tick < 60 && graphics->windowManager().size() == 0; ++tick)
+        (void)scheduler.tick();
+    require(graphics->windowManager().size() == 1, "drawing worker did not allocate a canvas");
+    const auto state = graphics->windowManager().compositionOrder().front();
+    const auto bytes = (static_cast<std::size_t>(state.bounds.width) * state.bounds.height + 1) / 2;
+    require(bytes < (32u * 8u + 1) / 2,
+            "isolated worker canvas was not smaller than the full screen");
+}
+
 void testSupervisorTaskViewportUsesTaskToSessionMapping() {
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
         32, 16, nullptr);
@@ -1809,6 +1835,7 @@ int main() {
     testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts();
     testCancellingWorkerDiscardsItsGraphicsAllocations();
     testSupervisorTaskViewportUsesTaskToSessionMapping();
+    testWorkerCanvasIsLazyAndTileSizedInIsolatedMode();
     testBasicTaskViewCommandIsSupervisorOnly();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
