@@ -46,7 +46,7 @@ class RecordingMemoryService final : public ql32::runtime::MemoryService {
 public:
     std::uint64_t freeBytes() const override { return 123456; }
     std::optional<ql32::runtime::HeapFragmentationInfo> fragmentationInfo() const override {
-        return ql32::runtime::HeapFragmentationInfo{65432, 17, 0};
+        return ql32::runtime::HeapFragmentationInfo{65432, 17, 445};
     }
 };
 
@@ -362,6 +362,54 @@ void testStopContinueReturnsToPromptAndResumesNextStatement() {
     }
     require(continuationRejected,
             "CONTINUE resumed stale bytecode after the stored program changed");
+}
+
+void testListDefinitionsAndVariables() {
+    ql32::Interpreter interpreter;
+    std::ostringstream setup;
+    interpreter.executeInteractive(
+        "10 DEFINE PROCEDURE Greet(who$, n)\n"
+        "20 PRINT who$\n"
+        "30 END DEFINE\n"
+        "40 DEF FN Twice(x)\n"
+        "50 RETURN x * 2\n"
+        "60 END DEF\n"
+        "70 DEFINE PROCEDURE Quiet\n"
+        "80 END DEFINE\n", setup);
+    const auto run = [&](const std::string& command) {
+        std::ostringstream out;
+        interpreter.executeInteractive(command + "\n", out);
+        return out.str();
+    };
+    require(run("LIST PROC").find("Greet(who$, n)\nQuiet\n") != std::string::npos &&
+                run("LIST PROC").find("Twice") == std::string::npos &&
+                run("list procedures").find("20 PRINT") == std::string::npos,
+            "LIST PROC did not list procedure signatures only");
+    require(run("LIST FN") == "Twice(x)\n", "LIST FN did not list function signatures");
+    require(run("LIST #1, function twice") == "40 DEFine FuNction Twice(x)\n"
+                "50 RETurn x * 2\n60 END DEFine\n",
+            "LIST FN name did not list the definition lines");
+    require(run("LIST PROC greet #1").find("20 PRINT who$") != std::string::npos,
+            "LIST PROC name with trailing channel failed");
+    require(run("LIST 20").find("20 PRINT who$") != std::string::npos,
+            "numeric LIST regressed");
+    bool unknown = false;
+    try { run("LIST PROC missing"); } catch (const std::runtime_error&) { unknown = true; }
+    require(unknown, "LIST PROC with an unknown name did not fail");
+    bool wrongKind = false;
+    try { run("LIST FN Greet"); } catch (const std::runtime_error&) { wrongKind = true; }
+    require(wrongKind, "LIST FN accepted a procedure name");
+
+    ql32::Interpreter empty;
+    std::ostringstream none;
+    empty.executeInteractive("10 PRINT 1\nLIST PROC\nLIST FN\nLIST LOCALS\nLIST GLOBALS\n", none);
+    require(none.str() == "", "empty definition/variable lists printed output");
+
+    ql32::Interpreter vars;
+    std::ostringstream varOutput;
+    vars.executeInteractive("b$=\"x\"\na=1\nLIST GLOBALS\nGLOBALS\n", varOutput);
+    require(varOutput.str() == "A = 1\nB$ = \"x\"\nA = 1\nB$ = \"x\"\n",
+            "GLOBALS were not listed sorted");
 }
 
 void testHelpCommandCatalog() {
@@ -1063,8 +1111,9 @@ void testFreeReturnsAllMetricsWithoutSelector() {
         "PRINT FREE()\n"
         "PRINT FREE(0)\n"
         "PRINT FREE(1)\n"
-        "PRINT FREE(2)\n", output);
-    require(output.str() == "123456,65432,17\n123456\n65432\n17\n",
+        "PRINT FREE(2)\n"
+        "PRINT FREE(3)\n", output);
+    require(output.str() == "123456,65432,17,445\n123456\n65432\n17\n445\n",
             "FREE() did not return all heap metrics or selector forms changed");
 }
 
@@ -1073,7 +1122,7 @@ void testFreeLeavesUnavailableMetricsAsEmptyCsvFields() {
     ql32::Interpreter interpreter({}, {}, {}, {}, {}, memory);
     std::ostringstream output;
     interpreter.execute("PRINT FREE()\n", output);
-    require(output.str() == "123456,,\n",
+    require(output.str() == "123456,,,\n",
             "FREE() did not preserve CSV positions for unavailable metrics");
 }
 
@@ -1421,6 +1470,7 @@ int main() {
         testAtomicProgramLineAndBlocks();
         testDeleteProgramLinesAtomically();
         testStopContinueReturnsToPromptAndResumesNextStatement();
+        testListDefinitionsAndVariables();
         testHelpCommandCatalog();
         testPersistentRepl();
         testEditStoredLineFromRepl();

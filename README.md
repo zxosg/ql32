@@ -26,7 +26,7 @@ targets.
 
 The host CLI includes expressions, structured blocks, procedures, functions,
 locals, arrays, `SELect ON`, numbered-line commands (`LIST`, `RUN`, `NEW`,
-`LOAD`, `SAVE`, `DIR`, `CD`, `DELETE` for lines or files, `RENAME`, and `FORMAT`), and a persistent
+`LOAD`, `SAVE`, `DIR`, `CD`, `DELETE` for lines or files, `RENAME`, `COPY`, `MOVE`, `RMDIR`, and `FORMAT`), and a persistent
 terminal REPL. `CD` maintains a per-session current directory; file commands
 accept relative paths, including `.` and `..`. `FORMAT` recursively clears a
 selected directory, including a drive root. The M2 host slice
