@@ -3,10 +3,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace ql32::music {
+
+class AudioPrefetcher;
+class VtxPlaneFile;
 
 struct YmMetadata {
     std::string format;   // "YM2!", "YM3!", "YM3b", "YM5!", "YM6!"
@@ -41,12 +45,21 @@ public:
     bool hasEffects() const noexcept { return effects_; }
     // External digi-drum bank (centred 16-bit samples), used by YM2 Mad Max files whose
     // drums are not stored in the file. No bank is built in; without one those drums are silent.
+    // Song whose register frames are read from a transcoded cache (see openYmStreamed).
+    static YmSong fromPlaneFile(YmMetadata metadata,
+                                std::vector<std::vector<std::int16_t>> drums,
+                                std::shared_ptr<VtxPlaneFile> planes, std::size_t frameCount,
+                                bool effects);
+    // True once a storage read failed; playback should stop.
+    bool failed() const noexcept;
+    std::shared_ptr<AudioPrefetcher> prefetcher() const;
     void setDrumBank(std::vector<std::vector<std::int16_t>> drums) { drums_ = std::move(drums); }
 
 private:
     YmMetadata metadata_;
     std::vector<std::uint8_t> data_;       // frame-major, 16 bytes per frame
     std::vector<std::vector<std::int16_t>> drums_;   // centred 16-bit samples
+    std::shared_ptr<VtxPlaneFile> planes_;
     std::size_t frameCount_ = 0;
     bool effects_ = false;
 };

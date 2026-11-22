@@ -2,6 +2,7 @@
 
 #include "ql32/music/mixer.hpp"
 #include "ql32/music/vtx.hpp"
+#include "ql32/music/ym.hpp"
 #include "ql32/runtime/storage.hpp"
 
 #include <array>
@@ -27,10 +28,16 @@ public:
     static constexpr std::size_t HeaderBytes = 32;
     static constexpr std::size_t WindowFrames = 256;
 
+    static constexpr std::size_t MaximumPlanes = 16;
+
     // Loads the first window of every plane (may throw on storage errors).
+    // interleaved: the data is frame-major (planeCount bytes per frame) instead
+    // of one plane after another.
     VtxPlaneFile(std::unique_ptr<runtime::StorageReadHandle> file, std::size_t frameCount,
-                 std::size_t loopFrame);
+                 std::size_t loopFrame, std::size_t planeCount = 14, bool interleaved = false);
     std::array<std::uint8_t, 14> registers(std::size_t frame);
+    // All sixteen YM registers; planes beyond the file's plane count read as zero.
+    std::array<std::uint8_t, 16> registers16(std::size_t frame);
     bool failed() const noexcept { return failed_; }
     void run() noexcept override;
 
@@ -44,12 +51,14 @@ private:
     std::unique_ptr<runtime::StorageReadHandle> file_;
     std::size_t frameCount_;
     std::size_t loopFrame_;
+    std::size_t planeCount_;
+    bool interleaved_;
     std::mutex fileMutex_;  // serialises reads from file_
     std::mutex stateMutex_; // guards the window tables and buffer swaps
-    std::array<std::vector<std::uint8_t>, 14> current_;
-    std::array<std::vector<std::uint8_t>, 14> next_;
-    std::array<Window, 14> currentWindow_{};
-    std::array<Window, 14> nextWindow_{};
+    std::array<std::vector<std::uint8_t>, MaximumPlanes> current_;
+    std::array<std::vector<std::uint8_t>, MaximumPlanes> next_;
+    std::array<Window, MaximumPlanes> currentWindow_{};
+    std::array<Window, MaximumPlanes> nextWindow_{};
     std::vector<std::uint8_t> scratch_; // render thread only
     std::atomic<std::size_t> lastFrame_{0};
     std::atomic<bool> failed_{false};
@@ -67,5 +76,18 @@ struct VtxStreamInfo {
 VtxSong openVtxStreamed(runtime::StorageService& storage, const std::string& path,
                         const std::vector<std::string>& cacheRoots,
                         VtxStreamInfo* info = nullptr);
+
+} // namespace ql32::music
+
+namespace ql32::music {
+
+// YM counterpart of openVtxStreamed: the YM5/YM6 (or YM2/YM3/YM3b, raw or LHA
+// wrapped) register stream is transcoded once to a cache and played from small
+// windows, so a song costs a few KiB of heap instead of frames x 16 bytes. Digi-drum
+// samples stay in RAM (at most 32 KiB in total; larger drums are silent). Title,
+// author and comment are not kept. Cache files use the "Q32Y" magic.
+YmSong openYmStreamed(runtime::StorageService& storage, const std::string& path,
+                      const std::vector<std::string>& cacheRoots,
+                      VtxStreamInfo* info = nullptr);
 
 } // namespace ql32::music

@@ -1,5 +1,6 @@
 #include "ql32/music/ym.hpp"
 #include "ql32/music/lh5.hpp"
+#include "ql32/music/vtx_stream.hpp"
 
 #include <cstring>
 #include <stdexcept>
@@ -131,8 +132,26 @@ YmSong YmSong::parse(const std::uint8_t* bytes, std::size_t size) {
     return song;
 }
 
+YmSong YmSong::fromPlaneFile(YmMetadata metadata, std::vector<std::vector<std::int16_t>> drums,
+                             std::shared_ptr<VtxPlaneFile> planes, std::size_t frameCount,
+                             bool effects) {
+    YmSong song;
+    song.metadata_ = std::move(metadata);
+    song.drums_ = std::move(drums);
+    song.planes_ = std::move(planes);
+    song.frameCount_ = frameCount;
+    song.effects_ = effects;
+    song.metadata_.hasLoop = song.metadata_.loopFrame < frameCount;
+    return song;
+}
+
+bool YmSong::failed() const noexcept { return planes_ && planes_->failed(); }
+
+std::shared_ptr<AudioPrefetcher> YmSong::prefetcher() const { return planes_; }
+
 std::array<std::uint8_t, 16> YmSong::registers(std::size_t frame) const {
     if (frame >= frameCount_) throw std::out_of_range("YM frame index is out of range");
+    if (planes_) return planes_->registers16(frame);
     std::array<std::uint8_t, 16> r{};
     std::memcpy(r.data(), data_.data() + frame * 16, 16);
     return r;

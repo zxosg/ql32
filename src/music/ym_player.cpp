@@ -64,6 +64,10 @@ void YmPlayer::loadFrame(std::size_t frame) noexcept {
         return;
     }
     auto r = song_.registers(frame);
+    if (song_.failed()) {
+        playing_ = false;
+        return;
+    }
     frame_ = frame;
     std::array<std::uint8_t, 14> chip;
     bool restart = false;

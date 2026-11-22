@@ -22,6 +22,7 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -850,6 +851,66 @@ public:
     void remove(const std::string& path) override { files.erase(path); }
 };
 
+void testYmStreamedCache() {
+    using namespace ql32::music;
+    const std::vector<std::string> roots = {"SDC:/", "FFS:/"};
+    const std::filesystem::path dir = std::filesystem::path(QL32_EXAMPLES_DIR) / "music";
+    int songs = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+        std::string ext = entry.path().extension().string();
+        for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext != ".ym" || entry.file_size() > YmSong::MaximumPackedBytes) continue;
+        std::ifstream in(entry.path(), std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), {});
+        std::optional<YmSong> parsed;
+        try { parsed = YmSong::parse(std::vector<std::uint8_t>(bytes.begin(), bytes.end())); }
+        catch (const std::runtime_error&) { continue; }
+        const YmSong& reference = *parsed;
+
+        MemoryStorage storage;
+        storage.files["FFS:/song.ym"] = bytes;
+        VtxStreamInfo info;
+        auto song = openYmStreamed(storage, "FFS:/song.ym", roots, &info);
+        require(!info.cacheHit, "first YM open hit a cache");
+        require(song.frameCount() == reference.frameCount() &&
+                song.metadata().format == reference.metadata().format &&
+                song.metadata().frameRateHz == reference.metadata().frameRateHz &&
+                song.metadata().chipClockHz == reference.metadata().chipClockHz &&
+                song.metadata().loopFrame == reference.metadata().loopFrame &&
+                song.metadata().hasLoop == reference.metadata().hasLoop &&
+                song.hasEffects() == reference.hasEffects(),
+                "streamed YM metadata differs");
+        std::size_t drumSamples = 0;
+        for (std::size_t i = 0; i < reference.drumCount(); ++i) drumSamples += reference.drum(i).size();
+        if (drumSamples <= 12288) {
+            require(song.drumCount() == reference.drumCount(), "streamed YM drum count differs");
+            for (std::size_t i = 0; i < reference.drumCount(); ++i)
+                require(song.drum(i) == reference.drum(i), "streamed YM drum differs");
+        }
+        const auto pump = song.prefetcher();
+        require(pump != nullptr, "streamed YM has no prefetcher");
+        for (std::size_t frame = 0; frame < reference.frameCount(); ++frame) {
+            if (frame % 16 == 0) pump->run();
+            require(song.registers(frame) == reference.registers(frame),
+                    "streamed YM registers differ");
+        }
+        require(!song.failed(), "streamed YM reported a read failure");
+
+        const int writes = storage.writes;
+        openYmStreamed(storage, "FFS:/song.ym", roots, &info);
+        require(info.cacheHit && storage.writes == writes, "YM cache was not reused");
+        ++songs;
+    }
+    require(songs >= 2, "example YM files not found");
+
+    MemoryStorage storage;
+    storage.files["FFS:/bad.ym"] = std::string(64, 'x');
+    bool rejected = false;
+    try { openYmStreamed(storage, "FFS:/bad.ym", roots); }
+    catch (const std::runtime_error&) { rejected = true; }
+    require(rejected && storage.files.size() == 1, "malformed YM was cached");
+}
+
 void testVtxStreamedCache() {
     using namespace ql32::music;
     const std::vector<std::string> roots = {"SDC:/", "FFS:/"};
@@ -963,6 +1024,7 @@ int main() {
         testSqtRejectsGarbage();
         testVtxLongAndRaggedStreams();
         testVtxStreamedCache();
+        testYmStreamedCache();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';
