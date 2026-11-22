@@ -7,8 +7,11 @@ bound). Behavior is unchanged; speed was not a goal and was not measured.
 
 | Item | Built | Host-tested | Hardware-verified |
 | --- | --- | --- | --- |
-| Numeric arrays as 8 B doubles | yes (4 PlatformIO envs) | yes (CTest 88/88) | **no** |
-| Compact `Instruction` (shared text, side metadata, `uint32` fields) | yes (4 PlatformIO envs) | yes (CTest 88/88) | **no** |
+| Numeric arrays as 8 B doubles | yes (4 PlatformIO envs) | yes (CTest 88/88) | **verified on hardware (Olimex)**; CYD not verified |
+| Compact `Instruction` (shared text, side metadata, `uint32` fields) | yes (4 PlatformIO envs) | yes (CTest 88/88) | **verified on hardware (Olimex)**; CYD not verified |
+
+Olimex results are in "Hardware results (Olimex)" below. The CYD itself was
+not flashed or measured.
 
 PlatformIO builds all succeeded (flash/RAM use after the change):
 `esp32_2432s028_spiffs` 1,624,881 B flash / 51,584 B static RAM;
@@ -54,6 +57,82 @@ side-metadata moves) but is **not measured**.
   metadata (FOR/SELECT items, call parameters, INPUT variables, jump scopes,
   owner definitions...) moved into a lazily allocated side record;
   indices/counts are `uint32_t`; enums are one byte.
+
+## Hardware results (Olimex) — verified on hardware (Olimex)
+
+Board: Olimex ESP32-SBC-FabGL-style retro build (`olimex_esp32_sbc_retro`,
+ESP32-D0WD-V3 with PSRAM, MAC 7c:9e:bd:e2:98:b4), default 400x300 mode, USB
+serial REPL. Baseline firmware: commit 2051fa9 (built in a temporary worktree,
+flash 1,864,721 B). Compaction firmware: commit e7e0ce8 (flash 1,865,577 B).
+Both were flashed in turn and driven by the same script
+(`tools/ql32-olimex-bytecode-memory.py`) and the same fixtures; raw results:
+`bytecode-memory-olimex-baseline-2051fa9.json` and
+`bytecode-memory-olimex-compaction-e7e0ce8.json`. Heap values are
+`FREE(0)` total / `FREE(1)` largest block (PSRAM included), in bytes.
+This is the Olimex only; the CYD has no PSRAM, so its absolute numbers
+differ, but the per-object sizes (8 B array elements, smaller instructions)
+are the same.
+
+### Idle heap
+
+| | total | largest |
+| --- | ---: | ---: |
+| 2051fa9 | 4,150,963 | 3,997,684 |
+| e7e0ce8 | 4,152,027 | 3,997,684 |
+
+### Program footprint (heap used while the task is alive)
+
+Measured from the REPL against the idle value after reboot, then task reaped.
+
+| Program | 2051fa9 used | e7e0ce8 used | Change |
+| --- | ---: | ---: | ---: |
+| tiny (empty loop, 2 lines) | 7,220 | 5,560 | −23% |
+| 1,200-statement program (`foot_big`, about 1,200 instr.) | 1,243,168 | 697,688 | −44% |
+| `examples/memory-tests/array-worker.bas` (512 doubles) | 25,640 | 11,192 | −56% |
+
+Heap returned to idle values after each task was reaped on both builds.
+
+### DIM boundary (inside a task, one `DIM` plus read/write of the last element)
+
+| Test | 2051fa9 | e7e0ce8 |
+| --- | --- | --- |
+| `DIM a(60000)` | ok, uses 1,920,208 B (readback 5) | ok, uses 480,192 B (readback 5) |
+| `DIM a(150000)` | rejected: array exceeds available memory | ok, readback 5 |
+| `DIM a(450000)` | rejected: array exceeds available memory | ok, uses 3.6 MB, readback 5 |
+| `DIM a(1000001)` | rejected: array allocation limit exceeded | rejected: array allocation limit exceeded |
+| `DIM s$(2000)` + write/read | ok (readback q) | ok (readback q) |
+
+The new limit follows the intended side effect (preflight uses the real
+8 B element size); the 1,000,000-element cap is unchanged.
+
+### Golden programs on the board
+
+Seventeen `tests/cli` programs (arrays, array_by_reference, block_if,
+expression_rules, for_*, functions, language_slice, numeric_portable,
+print_separators, procedure_locals, repeat_*, select, select_edges) were
+uploaded to `FFS:/`, run as tasks with `CHANNEL #1 TO` a serial channel, and
+the serial output captured. Output is identical between 2051fa9 and e7e0ce8
+for all 17 (16 completed normally; `abbreviations` did not complete on either
+build, identically, as it expects a different environment, so it only shows
+no difference, not a pass).
+
+### Load and MODE switching
+
+- Twelve `MODE 0/1/2` switches with a 20,000-element array in the session: no
+  errors on either build; DMA heap before allocation stayed stable (free about
+  203,000, largest 98,292 on both; the compaction build is about 256 B lower
+  in internal free heap, from its slightly larger code); total heap at the
+  end 4,151,959 vs 4,150,907 and largest block 3,932,148 on both.
+- MODE switching with a running 1,200-statement task: `MODE 0` and `MODE 1`
+  succeed and `MODE 2` is refused ("DMA mode change failed; previous mode
+  restored") on both builds, identically. This is existing behavior (the
+  internal DMA heap is too small with the task running), not a regression.
+
+### Cleanup
+
+Fixtures were deleted from `FFS:/`; the serial port was released; the board was
+left running `olimex_esp32_sbc_retro` built from e7e0ce8. Speed was not
+measured on hardware.
 
 ## Not done (candidates)
 
