@@ -211,8 +211,8 @@ python3 tools/ql32-ymodem.py capture /dev/cu.usbserial-XXXX 115200 screen.bmp
 
 `send` uploads the local file; `receive` downloads the device file. Without
 `--device-path`, start `RECV` or `SEND` from an already-open monitor first.
-Transfers use CRC-16 and 1 KiB YMODEM data packets. A failed receive removes
-its partial file and restores any previous destination from `.BAK`.
+Transfers use CRC-16 and 1 KiB YMODEM data packets. A receive writes a temporary file and replaces the destination only after the
+transfer completes; a failed receive leaves any existing file intact.
 On CYD, `capture` sends an indexed BMP snapshot of the retained graphics compositor and
 text console without writing it to board storage. `SCREEN` is also available as
 a monitor command. Capture pauses BASIC scheduling while the image transfers.

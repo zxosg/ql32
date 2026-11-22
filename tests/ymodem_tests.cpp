@@ -96,32 +96,35 @@ void testBinaryRoundTripAndBackup() {
         require(receiveError.empty(), "YMODEM receiver failed during binary round-trip");
         require(targetStorage.readText("payload.bin") == bytes,
                 "YMODEM changed binary file contents");
-        require(!targetStorage.exists("payload.bin.BAK"),
-                "successful YMODEM receive retained its backup");
+        require(!targetStorage.exists(".q32-r") && !targetStorage.exists(".q32-rb"),
+                "successful YMODEM receive left temporary files");
 
         targetStorage.writeText("rollback.bin", "old contents");
-        targetStorage.writeText("rollback.bin.BAK", "existing backup");
+        targetStorage.writeText(".q32-r", "partial");
         ql32::runtime::YModemIo unused;
         unused.readByte = [](std::uint32_t) { return -1; };
         unused.writeBytes = [](const std::uint8_t*, std::size_t) {};
-        bool conflictRejected = false;
+        bool failedReceive = false;
         try {
             ql32::runtime::ymodemReceiveFile("rollback.bin", targetStorage,
                 targetChannels, 3, unused);
-        } catch (const std::exception&) { conflictRejected = true; }
-        require(conflictRejected && targetStorage.readText("rollback.bin") == "old contents" &&
-                    targetStorage.readText("rollback.bin.BAK") == "existing backup",
-                "existing .BAK did not stop receive without changing files");
-        targetStorage.remove("rollback.bin.BAK");
+        } catch (const std::exception&) { failedReceive = true; }
+        require(failedReceive && targetStorage.readText("rollback.bin") == "old contents" &&
+                    !targetStorage.exists(".q32-r") && !targetStorage.exists(".q32-rb") &&
+                    !targetStorage.exists("rollback.bin.BAK"),
+                "failed receive did not leave the original intact and no stray files");
 
-        bool failedReceive = false;
+        // Interrupted install: only the backup remains, so it is restored.
+        targetStorage.remove("rollback.bin");
+        targetStorage.writeText(".q32-rb", "original");
+        failedReceive = false;
         try {
             ql32::runtime::ymodemReceiveFile("rollback.bin", targetStorage,
                 targetChannels, 4, unused);
         } catch (const std::exception&) { failedReceive = true; }
-        require(failedReceive && targetStorage.readText("rollback.bin") == "old contents" &&
-                    !targetStorage.exists("rollback.bin.BAK"),
-                "failed receive did not restore its previous file");
+        require(failedReceive && targetStorage.readText("rollback.bin") == "original" &&
+                    !targetStorage.exists(".q32-rb"),
+                "orphaned backup was not restored by the next receive");
     } catch (...) {
         std::error_code ignored;
         std::filesystem::remove_all(root, ignored);
