@@ -9,6 +9,15 @@
 
 namespace ql32::music {
 
+// Optional background work for a source (for example storage reads that are
+// too slow for the audio path). run() is called repeatedly from a low-priority
+// task, outside any audio lock, and must be thread-safe against render().
+class AudioPrefetcher {
+public:
+    virtual ~AudioPrefetcher() = default;
+    virtual void run() noexcept = 0;
+};
+
 // A mono 16-bit PCM producer at the mixer sample rate.
 class AudioSource {
 public:
@@ -16,6 +25,7 @@ public:
     // Writes exactly `count` samples (silence after the end of the stream).
     virtual void render(std::int16_t* samples, std::size_t count) noexcept = 0;
     virtual bool playing() const noexcept = 0;
+    virtual std::shared_ptr<AudioPrefetcher> prefetcher() const { return nullptr; }
 };
 
 class ToneSource final : public AudioSource {

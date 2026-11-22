@@ -20,24 +20,35 @@ constexpr unsigned MaxCodeBits = 16;
 
 class Bits {
 public:
-    Bits(const std::uint8_t* data, std::size_t size) : data_(data), size_(size) {}
+    explicit Bits(const Lh5ByteReader& reader) : reader_(reader), buffer_(256) {}
 
     bool get(unsigned count, unsigned& result) {
         result = 0;
-        const std::size_t totalBits = size_ * 8;
-        if (count > 24 || bit_ > totalBits || count > totalBits - bit_) return false;
+        if (count > 24) return false;
         for (unsigned i = 0; i < count; ++i) {
-            result = (result << 1) |
-                ((data_[bit_ / 8] >> (7 - (bit_ & 7))) & 1u);
-            ++bit_;
+            if (available_ == 0 && !refill()) return false;
+            result = (result << 1) | ((buffer_[position_] >> (7 - bit_)) & 1u);
+            if (++bit_ == 8) {
+                bit_ = 0;
+                ++position_;
+                --available_;
+            }
         }
         return true;
     }
 
 private:
-    const std::uint8_t* data_;
-    std::size_t size_;
-    std::size_t bit_ = 0;
+    bool refill() {
+        position_ = 0;
+        available_ = reader_(buffer_.data(), buffer_.size());
+        return available_ != 0;
+    }
+
+    const Lh5ByteReader& reader_;
+    std::vector<std::uint8_t> buffer_;
+    std::size_t position_ = 0;
+    std::size_t available_ = 0;
+    unsigned bit_ = 0;
 };
 
 struct Huffman {
@@ -172,25 +183,32 @@ bool readCodeLengths(Bits& bits, const Huffman& pt, Huffman& ctree) {
 }
 } // namespace
 
-bool decodeLh5(const std::uint8_t* input, std::size_t inputSize,
-               std::size_t outputSize, std::vector<std::uint8_t>& output,
-               const char** error) {
+bool decodeLh5Stream(const Lh5ByteReader& reader, std::size_t outputSize,
+                     const Lh5OutputSink& sink, const char** error) {
     if (error) *error = "invalid LH5 stream";
-    if ((!input && inputSize != 0) || outputSize > 1536u * 1024u) {
+    if (outputSize > 1536u * 1024u) {
         if (error) *error = "LH5 data exceeds the supported output limit";
         return false;
     }
-    Bits bits(input, inputSize);
-    std::vector<std::uint8_t> decoded;
-    decoded.reserve(outputSize);
-    // This decoder runs synchronously from the BASIC task. Keeping the 8 KiB
-    // LZ dictionary on that task's stack can overflow the Arduino loop stack
-    // on embedded targets, so allocate it alongside the decoded output.
+    Bits bits(reader);
+    std::size_t produced = 0;
+    // Output is handed to the sink in chunks; only the 8 KiB dictionary is
+    // retained. It lives on the heap because this runs on the BASIC task stack.
+    std::vector<std::uint8_t> chunk;
+    chunk.reserve(512);
+    const auto flush = [&] {
+        if (!chunk.empty()) sink(chunk.data(), chunk.size());
+        chunk.clear();
+    };
+    const auto emit = [&](std::uint8_t byte) {
+        chunk.push_back(byte);
+        ++produced;
+        if (chunk.size() == 512) flush();
+    };
     std::vector<std::uint8_t> dictionary(DictionarySize, 0x20);
     unsigned write = DictionarySize - MaxMatch;
     Huffman pt, ctree, position;
-    std::vector<unsigned> cLengths;
-    while (decoded.size() < outputSize) {
+    while (produced < outputSize) {
         unsigned blockSize;
         if (!bits.get(16, blockSize) || blockSize == 0) {
             if (error) *error = "truncated LH5 block";
@@ -202,7 +220,7 @@ bool decodeLh5(const std::uint8_t* input, std::size_t inputSize,
             if (error) *error = "invalid LH5 Huffman table";
             return false;
         }
-        while (blockSize-- != 0 && decoded.size() < outputSize) {
+        while (blockSize-- != 0 && produced < outputSize) {
             unsigned code;
             if (!ctree.decode(bits, code)) {
                 if (error) *error = "truncated LH5 code";
@@ -210,7 +228,7 @@ bool decodeLh5(const std::uint8_t* input, std::size_t inputSize,
             }
             if (code < 256) {
                 const auto byte = static_cast<std::uint8_t>(code);
-                decoded.push_back(byte);
+                emit(byte);
                 dictionary[write] = byte;
                 write = (write + 1) & (DictionarySize - 1);
                 continue;
@@ -231,17 +249,41 @@ bool decodeLh5(const std::uint8_t* input, std::size_t inputSize,
                 }
                 distance += extra;
             }
-            for (unsigned i = 0; i < length && decoded.size() < outputSize; ++i) {
+            for (unsigned i = 0; i < length && produced < outputSize; ++i) {
                 const unsigned source = (write - distance - 1) & (DictionarySize - 1);
                 const auto byte = dictionary[source];
-                decoded.push_back(byte);
+                emit(byte);
                 dictionary[write] = byte;
                 write = (write + 1) & (DictionarySize - 1);
             }
         }
     }
-    output.swap(decoded);
+    flush();
     if (error) *error = nullptr;
+    return true;
+}
+
+bool decodeLh5(const std::uint8_t* input, std::size_t inputSize,
+               std::size_t outputSize, std::vector<std::uint8_t>& output,
+               const char** error) {
+    if ((!input && inputSize != 0) || outputSize > 1536u * 1024u) {
+        if (error) *error = "LH5 data exceeds the supported output limit";
+        return false;
+    }
+    std::size_t consumed = 0;
+    const Lh5ByteReader reader = [&](std::uint8_t* destination, std::size_t capacity) {
+        const std::size_t count = std::min(capacity, inputSize - consumed);
+        if (count != 0) std::copy_n(input + consumed, count, destination);
+        consumed += count;
+        return count;
+    };
+    std::vector<std::uint8_t> decoded;
+    decoded.reserve(outputSize);
+    const Lh5OutputSink sink = [&](const std::uint8_t* bytes, std::size_t count) {
+        decoded.insert(decoded.end(), bytes, bytes + count);
+    };
+    if (!decodeLh5Stream(reader, outputSize, sink, error)) return false;
+    output.swap(decoded);
     return true;
 }
 

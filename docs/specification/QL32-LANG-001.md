@@ -581,15 +581,17 @@ and the OPL samples noted in [docs/reference](../reference/README.md).
 
 `FREE()` returns a comma-delimited string containing the current free-memory
 estimate in bytes, the largest contiguous free block in bytes, and the number
-of free blocks reported by the allocator, in that order. A platform without
+of free blocks, and the number of allocated blocks reported by the allocator,
+in that order. A platform without
 fragmentation metrics leaves the unavailable fields empty while preserving the
 comma positions. `FREE(0)` returns the free-memory estimate as a number;
 `FREE(1)` returns the largest contiguous free block as a number, and `FREE(2)`
-returns the number of free blocks as a number. ESP32 reports all three values
-for byte-addressable heap. Linux supports only selector 0; selector 1 and 2
+returns the number of free blocks as a number; `FREE(3)` returns the number of
+allocated blocks. ESP32 reports all four values
+for byte-addressable heap. Linux supports only selector 0; selectors 1 to 3
 report that allocator fragmentation metrics are unavailable. Selectors must
-be integer values from 0 through 2. `ql32.inc` defines
-`KFreeTotal`, `KFreeContiguous`, and `KFreeFragments` for the selector values.
+be integer values from 0 through 3. `ql32.inc` defines
+`KFreeTotal`, `KFreeContiguous`, `KFreeFragments`, and `KFreeAllocated` for the selector values.
 Values are platform memory snapshots, not exact counts of memory owned by the
 current BASIC session. The target shell's separate `MEM` command is not
 implemented.
@@ -617,7 +619,21 @@ interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
 `DELETE`, `RENAME`, `FORMAT`, and `CD`. `LIST line` selects one exact line;
 `LIST start TO end` selects an inclusive range, `LIST start TO` continues to
 the final stored line, and `LIST TO end` begins at the first stored line.
-The legacy `LIST start-end` range syntax remains accepted. `RENUMBER` defaults
+The legacy `LIST start-end` range syntax remains accepted. The channel may
+also be written first as `LIST #ch, selector`. QL/32-specific extensions:
+`LIST PROC` / `LIST PROCEDURES` and `LIST FN` / `LIST FUNCTIONS` print one
+signature line (name and parameters, no program lines) per definition in
+program order, and print nothing, without error, when none are defined;
+`LIST PROC name` / `LIST FN name` (case-insensitive, optional `#ch,`) print the
+stored lines from `DEFine` to `END DEFine`, and an unknown name, or a name of
+the other kind, is an error. Definitions are found by scanning stored lines
+whose first statement is the `DEFine` header. `LIST GLOBALS` and
+`LIST LOCALS` print `name = value` lines sorted by name, then array bounds. With
+a DEBUG task attached they read its debug snapshot (LOCALS = innermost call
+frame); otherwise GLOBALS shows the interactive session variables and LOCALS is
+empty. Empty output is not an error. The `GLOBALS` and `LOCALS` debug commands
+are aliases with the same sorted output (no DEBUG task required). `RUN` does not
+expose the finished program's variables to the session. `RENUMBER` defaults
 to start 10 and step 10; `RENUMBER start, step` supplies both values. It
 rewrites numeric `GOTO`, `GO TO`, and `RESTORE` targets when they refer to a
 stored line, and commits only if the renumbered program validates. It rejects
@@ -701,8 +717,14 @@ Wait mode focuses the child while it runs, then resumes the caller. Child
 failure details are available through `ERR`, `ERR$`, and `ERRX$`. Without wait
 mode, source completion leaves the task at its own interactive prompt with its
 variables, program, graphics window, and channels retained. `TASKS` lists task
-IDs, kind, priority, state, and errors, along with the global instruction
-slice; suspended tasks also show their saved resume priority.
+IDs, source name, priority, state, and errors, along with the global instruction
+slice; suspended tasks also show their saved resume priority. The source name
+(QL/32-specific) is `SUPERVISOR` for the supervisor, otherwise the file passed
+to `TASK` with its directory and extension removed. Names longer than 10
+characters show the first 7 and last 3 characters joined by `..` (for example
+`ffs:/name_long_very_12.bas` is listed as `name_lo.._12`), so a numeric suffix
+stays visible; the column is therefore up to 12 characters wide. Tasks started
+without a file show `(inline)`. `TASKRESULT` reports it as `File:`.
 `PAUSE delay` suspends only the calling task for `delay` milliseconds while
 the scheduler continues running other tasks. The delay must be numeric and in
 `0..4294967295`; fractional values round up to the next millisecond. `PAUSE 0`
@@ -1194,8 +1216,14 @@ Arities come from the compiler's built-in signature table.
 
 ### 11.1 MUSIC, BEEP, VOLUME (audio)
 
-Audio is implemented only on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
-`MusicService` in `src/platform/olimex_vga`). Linux, CYD, Tenstar, and LILYGO
+Audio is implemented on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
+`MusicService` in `src/platform/olimex_vga`) and, experimentally, on the CYD
+(same service on the GPIO26 DAC2 speaker output). Targets without PSRAM
+(the CYD) do not decode VTX files into RAM: the first `MUSIC PLAY` transcodes
+the file into a QL/32-specific plane cache (`.q32v-<hash>`, about 14 bytes per
+frame) on `SDC:/`, or on `FFS:/` when no SD card is present or it is
+write-protected, and later plays reuse it. Playback then needs about 8 KiB of
+heap for any song length. Linux, Tenstar, and LILYGO
 raise "music service unavailable" / "audio service unavailable". One session at
 a time owns the output; another session's request raises `ResourceBusy`.
 
@@ -1300,7 +1328,7 @@ mode. Shell form: `MODE [LIST|name|modeId[,options]]`. See
 
 ### 11.8 Shell and debugger commands (not compiled BASIC statements)
 
-Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `EDIT [n]`, `RENUMBER [start,step]`,
+=======
 `DIR`, `CAT`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
 `REBOOT`, `TASKS`, `TASKCHANNELS`, `KILL`, `TASKVIEW`, `WINDOWMODE
 [ISOLATED|SHARED]`, `MODE`, `TASKRESULT`, `LOGON`, `LOGOFF`, `SUSPEND`,

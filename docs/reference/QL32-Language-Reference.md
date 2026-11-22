@@ -386,7 +386,7 @@ logical operators.
 | `ERR` | `ERR()` | Current QL/32 error code. | `code% = ERR()` |
 | `ERR$` | `ERR$(code)` | Message for an error code. | `message$ = ERR$(ERR())` |
 | `ERRX$` | `ERRX$()` | Contextual detail for the current task error. | `detail$ = ERRX$()` |
-| `FREE` | `FREE()` or `FREE(selector)` | Returns formatted memory information or selected total/contiguous/fragment values. | `bytes = FREE(0)` |
+| `FREE` | `FREE()` or `FREE(selector)` | Returns formatted memory information or selected total/contiguous/fragment/allocated-block values. | `bytes = FREE(0)` |
 | `CPUFREQ` | `CPUFREQ()` | Current CPU clock in MHz, or zero when unavailable. `[ESP32]` | `mhz% = CPUFREQ()` |
 | `MODE` | `MODE()` | Returns the current display mode. `[DISPLAY]` | `mode% = MODE()` |
 | `SYSINFO$` | `SYSINFO$(selector)` | Returns version, build ID, profile, display, input, storage, or feature summary. Selector constants are in `ql32.inc`; values describe the compiled profile. | `board$ = SYSINFO$(KSysPlatform)` |
@@ -456,7 +456,7 @@ target shell services. Examples use prompt syntax.
 | --- | --- | --- | --- |
 | `HELP` | `HELP` | Lists shell commands, BASIC words, functions, and optional-service notes. | `HELP` |
 | `RUN` | `RUN` | Compiles and executes the numbered program; clears variables for a new run. | `RUN` |
-| `LIST` | `LIST [line [TO [end]]] [#channel]` | Lists all lines, one exact line, or an inclusive line range. `LIST TO end` starts at the first line; `LIST start TO` continues through the last. The legacy `start-end` form remains accepted. | `LIST 10 TO 50` |
+| `LIST` | `LIST [#channel,] [line [TO [end]]] [#channel]`; `LIST [#channel,] PROC\|PROCEDURE\|FN\|FUNCTION [name]`; `LIST GLOBALS\|LOCALS [#channel]` | Lists all lines, one exact line, or an inclusive line range. `LIST TO end` starts at the first line; `LIST start TO` continues through the last. The legacy `start-end` form remains accepted. `LIST PROC`/`LIST FN` without a name print one signature line (name and parameters) per definition, nothing if none exist; with a name they print the lines from `DEFine` to `END DEFine` (unknown name is an error). `LIST GLOBALS`/`LIST LOCALS` print sorted variables (session variables, or the DEBUG task snapshot when attached). | `LIST 10 TO 50` |
 | `EDIT` | `EDIT [lineNumber]` | Opens a numbered program line for replacement. While editing, Up/Down selects the previous/next stored line; Ctrl+Left/Right moves by word. | `EDIT 100` |
 | `RENUMBER` | `RENUMBER [start, step]` | Renumbers stored lines; defaults to start 10 and step 10. Updates numeric `GOTO`/`GO TO` and `RESTORE` references that target existing lines. | `RENUMBER 100, 10` |
 | `NEW` | `NEW` | Clears the stored numbered program. | `NEW` |
@@ -469,7 +469,7 @@ target shell services. Examples use prompt syntax.
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |
 | `FORMAT` | `FORMAT path` | Recursively clears the selected directory or volume. Destructive. | `FORMAT "SDC:/"` |
 | `PAGER` | `PAGER ON\|OFF` | Enables or disables per-session pagination of generated listings. | `PAGER ON` |
-| `TASKS` | `TASKS [#channel]` | Lists scheduler tasks and state. Embedded REPL. `[ESP32]` | `TASKS` |
+| `TASKS` | `TASKS [#channel]` | Lists scheduler tasks with source file name (shortened to `name_lo.._12` form), priority and state. Embedded REPL. `[ESP32]` | `TASKS` |
 | `TASKRESULT` | `TASKRESULT id` | Prints available properties for a task. Embedded REPL. `[ESP32]` | `TASKRESULT 2` |
 | `TASKCHANNELS` | `TASKCHANNELS id` | Lists a task's reserved and opened channels. Embedded REPL. `[ESP32]` | `TASKCHANNELS 2` |
 | `LOGON` | `LOGON id` | Routes interactive commands to an idle worker session. Embedded REPL. `[ESP32]` | `LOGON 2` |
@@ -493,8 +493,8 @@ target shell services. Examples use prompt syntax.
 | `NEXT` | `NEXT` | Runs through calls from the current statement while debugging. | `NEXT` |
 | `DEBUG CONTINUE` | `DEBUG CONTINUE` | Resumes the debugger target. | `DEBUG CONTINUE` |
 | `WHERE` | `WHERE` | Shows the paused task's source location. | `WHERE` |
-| `LOCALS` | `LOCALS` | Lists local values and array bounds. | `LOCALS` |
-| `GLOBALS` | `GLOBALS` | Lists session globals and array bounds. | `GLOBALS` |
+| `LOCALS` | `LOCALS` | Alias of `LIST LOCALS`: sorted local values and array bounds. | `LOCALS` |
+| `GLOBALS` | `GLOBALS` | Alias of `LIST GLOBALS`: sorted session globals and array bounds. | `GLOBALS` |
 | `STACK` | `STACK` | Shows the procedure/function call stack. | `STACK` |
 | `EVAL` | `EVAL expression` | Evaluates a side-effect-free expression in the paused task. | `EVAL A+B*2` |
 | `WATCH` | `WATCH expression` | Adds a side-effect-free expression watch. | `WATCH count%` |
