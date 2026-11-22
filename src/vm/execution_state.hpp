@@ -37,7 +37,20 @@ struct RuntimeFrame {
 };
 struct ArrayReference { std::string name; };
 using StackEntry = std::variant<double, std::string, ArrayReference>;
-struct RuntimeArray { std::vector<std::size_t> lengths; std::vector<Value> values; };
+// Numeric arrays store 8 B doubles; only string arrays pay for std::string.
+struct RuntimeArray {
+    std::vector<std::size_t> lengths;
+    std::vector<double> numbers;
+    std::vector<std::string> strings;
+    bool isString = false;
+    Value get(std::size_t offset) const {
+        return isString ? Value{strings.at(offset)} : Value{numbers.at(offset)};
+    }
+    void set(std::size_t offset, Value value) {
+        if (isString) strings[offset] = std::move(std::get<std::string>(value));
+        else numbers[offset] = std::get<double>(value);
+    }
+};
 struct SelectState { double value = 0; bool matched = false; };
 struct DialogBuilder {
     std::string title;

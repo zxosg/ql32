@@ -1083,9 +1083,12 @@ void testDimRejectsArrayLargerThanLargestFreeBlock() {
     std::ostringstream output;
     interpreter.execute("DIM small(100)\nPRINT \"ok\"\n", output);
     require(output.str() == "ok\n", "DIM within the largest free block failed");
+    // Numeric elements are 8 B, so 5001 elements (about 40 KB) fit in 65,432 B.
+    interpreter.execute("DIM packed(5000)\nPACKED(5000)=7\nPRINT packed(5000)\n", output);
+    require(output.str() == "ok\n7\n", "numeric array did not use compact elements");
     bool rejected = false;
     try {
-        interpreter.execute("DIM big(5000)\n", output);
+        interpreter.execute("DIM big(9000)\n", output);
     } catch (const std::exception& error) {
         rejected = std::string(error.what()).find("array exceeds available memory") !=
             std::string::npos;

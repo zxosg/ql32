@@ -891,7 +891,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             offset += dimensionIndex * stride;
             stride *= array.lengths[i];
         }
-        array.values[offset] = std::move(value);
+        array.set(offset, std::move(value));
     };
     auto writePrintText = [&](const std::string& text, const Instruction& at) {
         if (state.printChannel == 0) {
@@ -3172,23 +3172,28 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             // instead of exhausting the heap and unwinding through bad_alloc.
             if (memory_) {
                 if (const auto info = memory_->fragmentationInfo()) {
-                    if (static_cast<std::uint64_t>(elements) * sizeof(Value) >
+                    const std::size_t elementBytes =
+                        !instruction.name.empty() && instruction.name.back() == '$'
+                            ? sizeof(std::string) : sizeof(double);
+                    if (static_cast<std::uint64_t>(elements) * elementBytes >
                         info->largestFreeBlockBytes)
                         runtimeError(instruction, "array exceeds available memory");
                 }
             }
             RuntimeArray array;
             array.lengths = std::move(lengths);
-            if (!instruction.name.empty() && instruction.name.back() == '$')
-                array.values.resize(elements, std::string{});
-            else
-                array.values.resize(elements, 0.0);
+            if (!instruction.name.empty() && instruction.name.back() == '$') {
+                array.isString = true;
+                array.strings.resize(elements);
+            } else {
+                array.numbers.resize(elements, 0.0);
+            }
             arrays[instruction.name] = std::move(array);
             break;
         }
         case Op::ArrayGet: {
             auto [array, offset] = arrayOffset(instruction);
-            pushValue(array->values[offset],
+            pushValue(array->get(offset),
                       !instruction.name.empty() && instruction.name.back() == '%');
             break;
         }
@@ -3249,7 +3254,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                      number > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
                     runtimeError(instruction, "Int32 array element out of range");
             }
-            array->values[offset] = std::move(value);
+            array->set(offset, std::move(value));
             break;
         }
         case Op::SelectBegin: {
@@ -4197,7 +4202,7 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
                 offset += indexes[i] * stride;
                 stride *= array->second.lengths[i];
             }
-            values.push_back(array->second.values.at(offset));
+            values.push_back(array->second.get(offset));
             break;
         }
         case Op::Negate: values.emplace_back(-number(popValue())); break;

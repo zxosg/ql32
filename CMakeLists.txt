@@ -61,6 +61,11 @@ target_link_libraries(ql32_host INTERFACE ql32_portable ql32_host_adapters)
 add_executable(ql32 src/main.cpp)
 target_link_libraries(ql32 PRIVATE ql32_host)
 
+# Host-only bytecode footprint measurement (not built for firmware).
+add_executable(ql32_bytecode_footprint EXCLUDE_FROM_ALL tools/bytecode_footprint.cpp)
+target_link_libraries(ql32_bytecode_footprint PRIVATE ql32_host)
+target_include_directories(ql32_bytecode_footprint PRIVATE src)
+
 if(QL32_BUILD_TESTS)
   enable_testing()
   find_package(Python3 COMPONENTS Interpreter QUIET)
