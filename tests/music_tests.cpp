@@ -22,6 +22,7 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -850,6 +851,128 @@ public:
     void remove(const std::string& path) override { files.erase(path); }
 };
 
+std::string interleavedYm(std::size_t frames, bool planar) {
+    std::string out = "YM5!LeOnArD!";
+    const auto be32 = [&](std::uint32_t v) {
+        for (int i = 3; i >= 0; --i) out.push_back(static_cast<char>(v >> (8 * i)));
+    };
+    be32(static_cast<std::uint32_t>(frames));
+    be32(planar ? 1 : 0);
+    out += std::string("\0\0", 2);
+    be32(2000000);
+    out.push_back(0); out.push_back(50);
+    be32(300);
+    out += std::string("\0\0", 2);
+    out += std::string("\0\0\0", 3);
+    std::string data(frames * 16, 0);
+    std::uint32_t seed = 7;
+    for (std::size_t f = 0; f < frames; ++f)
+        for (std::size_t r = 0; r < 16; ++r) {
+            seed = seed * 1664525u + 1013904223u;
+            const std::size_t at = planar ? r * frames + f : f * 16 + r;
+            data[at] = static_cast<char>(r < 4 ? (f / 7 + r) : (seed >> 24) & (r % 3 ? 0 : 3));
+        }
+    return out + data + "End!";
+}
+
+void testYmInterleavedStreamed() {
+    using namespace ql32::music;
+    const std::vector<std::string> roots = {"FFS:/"};
+    for (const bool planar : {false, true}) {
+        const std::string bytes = interleavedYm(1000, planar);
+        const auto reference = YmSong::parse(std::vector<std::uint8_t>(bytes.begin(), bytes.end()));
+        MemoryStorage storage;
+        storage.files["FFS:/i.ym"] = bytes;
+        auto song = openYmStreamed(storage, "FFS:/i.ym", roots);
+        const auto pump = song.prefetcher();
+        for (std::size_t frame = 0; frame < reference.frameCount(); ++frame) {
+            if (frame % 16 == 0) pump->run();
+            require(song.registers(frame) == reference.registers(frame), "layout YM differs");
+        }
+        for (std::size_t frame = 300; frame < 700; ++frame) {
+            if (frame % 16 == 0) pump->run();
+            require(song.registers(frame) == reference.registers(frame), "layout YM loop differs");
+        }
+        for (std::size_t frame = reference.frameCount(); frame-- > 0; frame -= std::min<std::size_t>(frame, 97))
+            require(song.registers(frame) == reference.registers(frame), "layout YM reverse differs");
+        require(!song.failed(), "layout YM failed");
+        require(storage.files.size() == 2, "cache not created");
+    }
+}
+
+void testYmStreamedCache() {
+    using namespace ql32::music;
+    const std::vector<std::string> roots = {"SDC:/", "FFS:/"};
+    const std::filesystem::path dir = std::filesystem::path(QL32_EXAMPLES_DIR) / "music";
+    int songs = 0;
+    std::size_t cacheBytes = 0, rawBytes = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+        std::string ext = entry.path().extension().string();
+        for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext != ".ym" || entry.file_size() > YmSong::MaximumPackedBytes) continue;
+        std::ifstream in(entry.path(), std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), {});
+        std::optional<YmSong> parsed;
+        try { parsed = YmSong::parse(std::vector<std::uint8_t>(bytes.begin(), bytes.end())); }
+        catch (const std::runtime_error&) { continue; }
+        const YmSong& reference = *parsed;
+
+        MemoryStorage storage;
+        storage.files["FFS:/song.ym"] = bytes;
+        VtxStreamInfo info;
+        auto song = openYmStreamed(storage, "FFS:/song.ym", roots, &info);
+        require(!info.cacheHit, "first YM open hit a cache");
+        require(song.frameCount() == reference.frameCount() &&
+                song.metadata().format == reference.metadata().format &&
+                song.metadata().frameRateHz == reference.metadata().frameRateHz &&
+                song.metadata().chipClockHz == reference.metadata().chipClockHz &&
+                song.metadata().loopFrame == reference.metadata().loopFrame &&
+                song.metadata().hasLoop == reference.metadata().hasLoop &&
+                song.hasEffects() == reference.hasEffects(),
+                "streamed YM metadata differs");
+        std::size_t drumSamples = 0;
+        for (std::size_t i = 0; i < reference.drumCount(); ++i) drumSamples += reference.drum(i).size();
+        if (drumSamples <= 12288) {
+            require(song.drumCount() == reference.drumCount(), "streamed YM drum count differs");
+            for (std::size_t i = 0; i < reference.drumCount(); ++i)
+                require(song.drum(i) == reference.drum(i), "streamed YM drum differs");
+        }
+        const auto pump = song.prefetcher();
+        require(pump != nullptr, "streamed YM has no prefetcher");
+        for (std::size_t frame = 0; frame < reference.frameCount(); ++frame) {
+            if (frame % 16 == 0) pump->run();
+            require(song.registers(frame) == reference.registers(frame),
+                    "streamed YM registers differ");
+        }
+        require(!song.failed(), "streamed YM reported a read failure");
+        // Out-of-order access (scans from the stream start or loop window).
+        std::uint32_t seed = 12345;
+        for (int k = 0; k < 200; ++k) {
+            seed = seed * 1664525u + 1013904223u;
+            const std::size_t frame = (seed >> 8) % reference.frameCount();
+            require(song.registers(frame) == reference.registers(frame),
+                    "streamed YM random access differs");
+        }
+        require(!song.failed(), "streamed YM random access failed");
+        cacheBytes += storage.files[info.cachePath].size();
+        rawBytes += reference.frameCount() * (reference.hasEffects() ? 16 : 14);
+
+        const int writes = storage.writes;
+        openYmStreamed(storage, "FFS:/song.ym", roots, &info);
+        require(info.cacheHit && storage.writes == writes, "YM cache was not reused");
+        ++songs;
+    }
+    require(songs >= 2, "example YM files not found");
+    require(cacheBytes * 10 < rawBytes * 4, "YM cache is not compressed");
+
+    MemoryStorage storage;
+    storage.files["FFS:/bad.ym"] = std::string(64, 'x');
+    bool rejected = false;
+    try { openYmStreamed(storage, "FFS:/bad.ym", roots); }
+    catch (const std::runtime_error&) { rejected = true; }
+    require(rejected && storage.files.size() == 1, "malformed YM was cached");
+}
+
 void testVtxStreamedCache() {
     using namespace ql32::music;
     const std::vector<std::string> roots = {"SDC:/", "FFS:/"};
@@ -963,6 +1086,8 @@ int main() {
         testSqtRejectsGarbage();
         testVtxLongAndRaggedStreams();
         testVtxStreamedCache();
+        testYmStreamedCache();
+        testYmInterleavedStreamed();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';

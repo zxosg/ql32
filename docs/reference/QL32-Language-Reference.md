@@ -238,7 +238,7 @@ SMSQ/E compatibility.
 | `DISNET` | `DISNET` | Disconnects the network service. `[NETWORK]` | `DISNET` |
 | `BEEP` | `BEEP ms, hz [, waveform]` | Plays a tone and suspends only the calling task for `ms` (1..600000). `hz` 20..10000. Waveform: `"SQUARE"` (default), `"SINE"`, `"TRIANGLE"`, `"SAW"` (rising), `"SAWDOWN"` (falling) or 0..4. QL/32-specific; differs from SMSQ/E `BEEP`. Needs the audio service. `[AUDIO]` | `BEEP 200, 440, "sine"` |
 | `VOLUME` | `VOLUME level` | Global output level 0..255 for `BEEP` and `MUSIC`; default 128. `[AUDIO]` | `VOLUME 200` |
-| `MUSIC` | `MUSIC PLAY path$`, `MUSIC PAUSE`, `MUSIC RESUME`, `MUSIC STOP`, `MUSIC STATUS` | Plays VTX AY/YM register streams through the Olimex mono DAC. File loading and decoding finish before `PLAY` returns; sample streaming then runs independently. File size is limited to 64 KiB and decoded register data to 96 KiB. Other sound chips and file formats are not yet supported. `[AUDIO]` | `MUSIC PLAY "SDC:/music/theme.vtx"` |
+| `MUSIC` | `MUSIC PLAY path$`, `MUSIC PAUSE`, `MUSIC RESUME`, `MUSIC STOP`, `MUSIC STATUS` | Plays VTX AY/YM register streams through the Olimex mono DAC. On the CYD, VTX and YM songs are transcoded once to a cache file (`SDC:/` or `FFS:/`) and streamed from it; the first `PLAY` of a song can take seconds to minutes. Elsewhere file loading and decoding finish before `PLAY` returns; file size is limited to 64 KiB and decoded register data to 96 KiB. Other sound chips and file formats are not yet supported. `[AUDIO]` | `MUSIC PLAY "SDC:/music/theme.vtx"` |
 | `FLASH` | `FLASH mode` inside `IPRINT` or `BUSY` options | Selects a toast flash mode; it is an option in these commands, not a standalone display command. `[DISPLAY]` | `IPRINT FLASH KInfoFlashText, "Ready"` |
 
 ### Graphics and display
@@ -469,6 +469,7 @@ target shell services. Examples use prompt syntax.
 | `DELETE` | `DELETE line[, line ...]` or `DELETE path$ [FORCE]` | Deletes program lines atomically or removes files (wildcards allowed; more than one match asks for confirmation unless `FORCE`). | `DELETE 10, 20` |
 | `COPY` | `COPY src TO dst [FORCE]` | QL/32-specific. Copies files (wildcards in the leaf) or `#channel` data; refuses overwrite without `FORCE`. A source of `#0` (keyboard) or a hardware serial channel copies input as a non-blocking job until Ctrl-Z (0x1A); Esc cancels. | `COPY "*.bas" TO "SDC:/bak/"` |
 | `MOVE` | `MOVE src TO dst [FORCE]` | QL/32-specific. Moves files; across drives copies, verifies, then removes the source. | `MOVE "a.bas" TO "SDC:/a.bas"` |
+| `MKDIR` | `MKDIR dir` | QL/32-specific. Creates a directory (parent must exist; error if it exists). On `FFS:` it is a no-op until a file is created inside. | `MKDIR "work"` |
 | `RMDIR` | `RMDIR dir [FORCE]` | QL/32-specific. Removes an empty directory; `FORCE` removes recursively. Never removes a drive root or the current directory. | `RMDIR "old" FORCE` |
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |
 | `FORMAT` | `FORMAT path` | Recursively clears the selected directory or volume. Destructive. | `FORMAT "SDC:/"` |

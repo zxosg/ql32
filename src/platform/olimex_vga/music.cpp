@@ -9,6 +9,7 @@
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_stream.hpp"
 #include "ql32/music/vtx_player.hpp"
+#include "ql32/music/ym_player.hpp"
 
 #include <Arduino.h>
 #include <driver/i2s.h>
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <vector>
@@ -250,12 +252,13 @@ struct MusicService::Impl {
                 writeErrorLogged = true;
             }
             if (blockNumber % DiagnosticIntervalBlocks == 0 && blockNumber <= DiagnosticLastBlock) {
-                Serial.printf("music: blocks=%u pcm=%d..%d dac=0x%04x..0x%04x maxGap=%uus late=%u stack=%u\n",
+                Serial.printf("music: blocks=%u pcm=%d..%d dac=0x%04x..0x%04x maxGap=%uus late=%u stack=%u iostack=%u\n",
                     static_cast<unsigned>(blockNumber), blockMin, blockMax,
                     static_cast<unsigned>(music::pcmToDac16(static_cast<std::int16_t>(blockMin))),
                     static_cast<unsigned>(music::pcmToDac16(static_cast<std::int16_t>(blockMax))),
                     static_cast<unsigned>(maxGapUs), static_cast<unsigned>(lateBlocks),
-                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
+                    ioWorker ? static_cast<unsigned>(uxTaskGetStackHighWaterMark(ioWorker)) : 0u);
                 blockMin = std::numeric_limits<int>::max();
                 blockMax = std::numeric_limits<int>::min();
                 maxGapUs = 0;
@@ -285,6 +288,25 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
         try {
             startMusic(session, std::make_unique<music::VtxSource>(
                 music::openVtxStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
+        } catch (const runtime::ServiceError&) {
+            throw;
+        } catch (const std::exception& error) {
+            throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
+                                        std::string("music: ") + error.what());
+        }
+        return;
+    }
+    std::uint8_t lead[7] = {};
+    const bool leadRead = byteCount >= sizeof lead && source->readAt(0, lead, sizeof lead) == sizeof lead;
+    if (!impl_->vtxCacheRoots.empty() && leadRead &&
+        byteCount <= music::YmSong::MaximumPackedBytes &&
+        ((lead[0] == 'Y' && lead[1] == 'M') ||
+         (byteCount >= 22 && (std::memcmp(lead + 2, "-lh5-", 5) == 0 ||
+                              std::memcmp(lead + 2, "-lh0-", 5) == 0)))) {
+        source.reset();
+        try {
+            startMusic(session, std::make_unique<music::YmSource>(
+                music::openYmStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
         } catch (const runtime::ServiceError&) {
             throw;
         } catch (const std::exception& error) {

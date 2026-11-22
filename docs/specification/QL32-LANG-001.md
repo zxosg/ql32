@@ -692,7 +692,7 @@ leaves the stored program unchanged. `DELETE path$` removes a file and
 `RENAME path$,newpath$` (or `RENAME path$ TO newpath$`) moves a file.
 QL/32-specific file commands (no SMSQ/E compatibility is claimed): `COPY source TO
 destination [FORCE]`, `MOVE source TO destination [FORCE]`, `DELETE path [FORCE]` and
-`RMDIR directory [FORCE]`. Sources may use `*`/`?` wildcards in the leaf name only; a
+`MKDIR directory` and `RMDIR directory [FORCE]`. Sources may use `*`/`?` wildcards in the leaf name only; a
 source or destination may be `#channel` for `COPY` (file channels as sources; bytes are
 copied unchanged). A destination ending in `/` or naming an existing directory receives
 files under their own names; several sources require a directory destination. `COPY`
@@ -702,7 +702,10 @@ programs or sessions without a UI fail instead of prompting. Zero wildcard match
 error. Drive roots and the current directory are never removed. Copies stream in
 2048-byte slices through a temporary file, so the scheduler is never blocked; `MOVE`
 across drives is copy, size verification, then source removal. The first failure stops
-the command and reports how many items completed. Directories cannot be copied.
+the command and reports how many items completed. Directories cannot be copied. `MKDIR` fails if the path exists or its parent is
+missing. On `FFS:` (SPIFFS, which has no directory entries) `MKDIR` succeeds without
+creating anything: a directory exists once a file with that prefix exists, so a repeated
+`MKDIR` there is not an error and an empty directory cannot be listed or removed.
 Previously. Their paths are resolved relative to the
 current directory unless drive-qualified. Rename fails if the destination
 already exists; file deletion applies to files, not directories. `FORMAT path$`
@@ -1252,10 +1255,16 @@ Audio is implemented on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
 `MusicService` in `src/platform/olimex_vga`) and, experimentally, on the CYD
 (same service on the GPIO26 DAC2 speaker output). Targets without PSRAM
 (the CYD) do not decode VTX files into RAM: the first `MUSIC PLAY` transcodes
-the file into a QL/32-specific plane cache (`.q32v-<hash>`, about 14 bytes per
-frame) on `SDC:/`, or on `FFS:/` when no SD card is present or it is
+the file into a QL/32-specific plane cache (`.q32v-<hash>`, version 2, LZ-compressed in
+256-frame windows, typically 12-38% of the raw 14 or 16 bytes per frame) on `SDC:/`, or on `FFS:/` when no SD card is present or it is
 write-protected, and later plays reuse it. Playback then needs about 8 KiB of
-heap for any song length. Linux, Tenstar, and LILYGO
+heap for any song length. YM2!/YM3!/YM3b/YM5!/YM6! files (raw or LHA wrapped,
+up to 256 KiB packed) take the same path with a `Q32Y` cache (14 or 16 register
+bytes per frame compressed the same way, any YM5/YM6 register layout); measured on the CYD a playing YM
+costs about 15 KiB of heap, all released by `MUSIC STOP` apart from the music
+service's retained task stacks. Digi-drum samples stay in RAM (at most 12288
+samples in total; further drums are silent) and title/author/comment are not kept.
+The first play of a song needs seconds to a few minutes to write the cache. Linux, Tenstar, and LILYGO
 raise "music service unavailable" / "audio service unavailable". One session at
 a time owns the output; another session's request raises `ResourceBusy`.
 

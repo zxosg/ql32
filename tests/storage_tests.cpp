@@ -350,6 +350,16 @@ void testCopyMoveDeleteRmdir() {
         interpreter.executeInteractive("DELETE \"r.txt\"\n", out);
         require(!storage->exists("r.txt"), "single DELETE failed");
 
+        interpreter.executeInteractive("MKDIR \"made\"\nMKDIR \"made/inner\"\n", out);
+        require(std::filesystem::is_directory(root / "made" / "inner"), "MKDIR failed");
+        require(fails(interpreter, "MKDIR \"made\""), "MKDIR of existing directory allowed");
+        require(fails(interpreter, "MKDIR \"nope/child\""), "MKDIR with missing parent allowed");
+        require(fails(interpreter, "MKDIR \"w*\""), "MKDIR accepted a wildcard");
+        interpreter.executeInteractive("COPY \"a.txt\" TO \"made/inner/\"\n", out);
+        require(storage->exists("made/inner/a.txt"), "COPY into MKDIR directory failed");
+        interpreter.executeInteractive("RMDIR \"made\" FORCE\n", out);
+        require(!storage->exists("made"), "RMDIR of MKDIR tree failed");
+
         std::filesystem::create_directories(root / "tree" / "sub");
         storage->writeText("tree/sub/f.txt", "1");
         storage->writeText("tree/g.txt", "2");

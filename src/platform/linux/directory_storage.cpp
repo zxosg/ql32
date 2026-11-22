@@ -296,6 +296,17 @@ void DirectoryStorage::remove(const std::string& path) {
     }
 }
 
+void DirectoryStorage::createDirectory(const std::string& path) {
+    const auto resolved = resolve(path, true);
+    std::error_code error;
+    if (std::filesystem::exists(resolved, error))
+        throw ServiceError(ServiceErrorCode::IoError, "storage: already exists: " + path);
+    if (!std::filesystem::create_directory(resolved, error)) {
+        if (error) fail(resolved, error);
+        throw ServiceError(ServiceErrorCode::IoError, "storage: could not create directory: " + path);
+    }
+}
+
 void DirectoryStorage::removeDirectory(const std::string& path) {
     const auto resolved = resolve(path, false);
     if (resolved == root_)

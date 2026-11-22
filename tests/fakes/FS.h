@@ -85,6 +85,11 @@ public:
         return true;
     }
     bool remove(const char* path) { return files_.erase(path) != 0; }
+    bool mkdir(const char* path) {
+        const std::string key(path);
+        if (exists(path) || !directories_.contains(parent(path))) return false;
+        return directories_.insert(key).second;
+    }
     bool rmdir(const char* path) {
         const std::string key(path);
         if (!directories_.contains(key) || key == "/" || !children(key).empty()) return false;
