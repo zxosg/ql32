@@ -292,3 +292,19 @@ void DirectoryStorage::format(const std::string& path) {
 }
 
 } // namespace ql32::platform::linux_host
+
+namespace ql32::platform::linux_host {
+
+runtime::StorageSpace DirectoryStorage::space(const std::string&) {
+    std::error_code error;
+    const auto info = std::filesystem::space(root_, error);
+    if (error) return {};
+    runtime::StorageSpace result;
+    result.total = info.capacity;
+    result.free = info.available;
+    result.used = info.capacity - info.free;
+    result.known = true;
+    return result;
+}
+
+} // namespace ql32::platform::linux_host

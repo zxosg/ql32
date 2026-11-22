@@ -668,10 +668,18 @@ escape its root. A drive prefix can be used by any operation that accepts a
 storage path, including `LOAD`, `SAVE`, `DIR`, `INCLUDE`, `TASK`, and file
 channels, as well as the file commands below.
 
-`DIR [#channel] [DETAILS] [path]` lists the immediate entries of a directory
-in sorted name order; plain directory names end in `/`. In details mode,
-directories appear as `<name>` and files as `name (N bytes)`. With no path
-either form lists the session's current directory. `CD path$` changes that
+`DIR [#channel] [path|pattern]` lists the immediate entries of a directory
+in the storage adapter's name order; directory names end in `/`. The last path
+component may contain `*` (any run) and `?` (any one character), matched
+case-insensitively. With no path it lists the session's current directory.
+`CAT [#channel] [path|pattern]` (QL32-specific) prints a detailed listing:
+directories first, then files, each group in case-insensitive name order, with
+raw byte sizes right-aligned (`<DIR>` for directories), a
+`N file(s), M dir(s), S bytes` line, and `Total:`, `Used:`, `Free:` byte counts
+for the drive holding the listed path. The space lines are omitted when the
+storage adapter cannot report capacity (`StorageService::space()` returns
+`known=false`). `DIR DETAILS` was replaced by `CAT` and now reports an error.
+Both commands honor the output channel and the pager. `CD path$` changes that
 directory for the current interpreter session. `CD` accepts a quoted path, a
 string variable, or a bare path such as
 `CD ..`; relative paths start at the current directory. `.` and `..` components
@@ -1321,7 +1329,7 @@ mode. Shell form: `MODE [LIST|name|modeId[,options]]`. See
 ### 11.8 Shell and debugger commands (not compiled BASIC statements)
 
 Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `LIST [#ch,] PROC|FN [name]`, `LIST GLOBALS|LOCALS`, `EDIT [n]`, `RENUMBER [start,step]`,
-`DIR`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
+`DIR`, `CAT`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
 `REBOOT`, `TASKS`, `TASKCHANNELS`, `KILL`, `TASKVIEW`, `WINDOWMODE
 [ISOLATED|SHARED]`, `MODE`, `TASKRESULT`, `LOGON`, `LOGOFF`, `SUSPEND`,
 `RESUME`, `SLICE`, `PRIORITY`, `MUSIC`. Monitor-only: `RECV`, `SEND`, `SCREEN`

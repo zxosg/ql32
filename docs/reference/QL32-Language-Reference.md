@@ -462,7 +462,8 @@ target shell services. Examples use prompt syntax.
 | `NEW` | `NEW` | Clears the stored numbered program. | `NEW` |
 | `LOAD` | `LOAD "path.bas"` | Loads numbered or unnumbered source from storage. | `LOAD "FFS:/demo.bas"` |
 | `SAVE` | `SAVE "path.bas"` | Saves the stored program. | `SAVE "SDC:/demo.bas"` |
-| `DIR` | `DIR [#channel] [DETAILS] [path]` | Lists a directory in sorted name order; `DETAILS` includes file sizes and labels subdirectories. | `DIR DETAILS "FFS:/"` |
+| `DIR` | `DIR [#channel] [path\|pattern]` | Lists a directory in storage order; subdirectories end in `/`. The last path component may use `*` and `?` wildcards (case-insensitive). | `DIR "FFS:/*.bas"` |
+| `CAT` | `CAT [#channel] [path\|pattern]` | Detailed listing: directories first, then files, case-insensitive order, raw byte sizes right-aligned, then file/directory counts and the drive's Total/Used/Free bytes (omitted if the drive cannot report them). QL32-specific. Replaces `DIR DETAILS`. | `CAT "FFS:/"` |
 | `CD` | `CD [path]` | Changes the current directory for this interpreter session. | `CD "SDC:/programs"` |
 | `DELETE` | `DELETE line[, line ...]` or `DELETE path$` | Deletes program lines atomically or removes a file. | `DELETE 10, 20` |
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |

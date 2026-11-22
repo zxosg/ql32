@@ -246,6 +246,20 @@ std::vector<runtime::FileEntry> SdStorage::list(const std::string& path) {
     return entries;
 }
 
+runtime::StorageSpace SdStorage::space(const std::string&) {
+    runtime::StorageSpace result;
+    std::uint64_t total = 0;
+    std::uint64_t used = 0;
+    if (!spaceProvider_) return result;
+    ensureAvailable();
+    if (!spaceProvider_(total, used)) return result;
+    result.total = total;
+    result.used = std::min(used, total);
+    result.free = total - result.used;
+    result.known = true;
+    return result;
+}
+
 bool SdStorage::exists(const std::string& path) {
     const std::string resolved = resolve(path, false);
     ensureAvailable();

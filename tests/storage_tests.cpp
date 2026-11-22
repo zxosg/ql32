@@ -133,24 +133,62 @@ void testInteractiveFileCommands() {
                 "LOAD, LIST, RUN, or DIR returned unexpected output");
 
         std::ostringstream detailedRoot;
-        interpreter.executeInteractive("DIR DETAILS\n", detailedRoot);
+        interpreter.executeInteractive("CAT\n", detailedRoot);
         const auto demoSize = std::filesystem::file_size(root / "demo.bas");
-        require(detailedRoot.str() ==
-                    "demo.bas (" + std::to_string(demoSize) + " bytes)\n",
-                "DIR DETAILS did not report the file size");
+        const std::string demoSizeText = std::to_string(demoSize);
+        const std::string demoLine = "demo.bas " +
+            std::string(demoSizeText.size() < 5 ? 5 - demoSizeText.size() : 0, ' ') +
+            demoSizeText + "\n";
+        require(detailedRoot.str().rfind(demoLine, 0) == 0,
+                "CAT did not report the raw file size");
+        require(detailedRoot.str().find("1 file(s), 0 dir(s), " + demoSizeText + " bytes\n") !=
+                    std::string::npos,
+                "CAT did not report the file and byte totals");
+        require(detailedRoot.str().find("Total: ") != std::string::npos &&
+                    detailedRoot.str().find("Used:  ") != std::string::npos &&
+                    detailedRoot.str().find("Free:  ") != std::string::npos,
+                "CAT did not report drive space");
+        std::ostringstream legacyDetails;
+        bool legacyRejected = false;
+        try {
+            interpreter.executeInteractive("DIR DETAILS\n", legacyDetails);
+        } catch (const std::exception&) {
+            legacyRejected = true;
+        }
+        require(legacyRejected, "DIR DETAILS should be replaced by CAT");
 
         std::filesystem::create_directories(root / "work" / "child");
+        std::filesystem::create_directories(root / "Alpha");
         storage->writeText("work/child/item.bas", "10 PRINT \"item\"\n");
+        storage->writeText("Zeta.txt", "z");
+        storage->writeText("beta.TXT", "bb");
         std::ostringstream detailedDirectory;
-        interpreter.executeInteractive("DIR DETAILS\n", detailedDirectory);
-        require(detailedDirectory.str().find("<work>\n") != std::string::npos,
-                "DIR DETAILS did not label subdirectories");
-        std::ostringstream detailedPath;
-        interpreter.executeInteractive("DIR DETAILS work/child\n", detailedPath);
-        const auto itemSize = std::filesystem::file_size(root / "work/child/item.bas");
-        require(detailedPath.str() ==
-                    "item.bas (" + std::to_string(itemSize) + " bytes)\n",
-                "DIR DETAILS path did not report nested file size");
+        interpreter.executeInteractive("CAT\n", detailedDirectory);
+        const std::string catalog = detailedDirectory.str();
+        const auto alpha = catalog.find("Alpha/");
+        const auto work = catalog.find("work/");
+        const auto beta = catalog.find("beta.TXT");
+        const auto demo = catalog.find("demo.bas");
+        const auto zeta = catalog.find("Zeta.txt");
+        require(alpha != std::string::npos && alpha < work && work < beta &&
+                    beta < demo && demo < zeta,
+                "CAT did not list directories first with case-insensitive order");
+        require(catalog.find("<DIR>") != std::string::npos &&
+                    catalog.find("3 file(s), 2 dir(s), ") != std::string::npos,
+                "CAT did not label directories or count entries");
+
+        std::ostringstream wildcard;
+        interpreter.executeInteractive("DIR *.txt\nCAT #1 \"z*\"\n", wildcard);
+        require(wildcard.str().rfind("Zeta.txt\nbeta.TXT\n", 0) == 0 ||
+                    wildcard.str().rfind("beta.TXT\nZeta.txt\n", 0) == 0,
+                "DIR wildcard did not match case-insensitively");
+        require(wildcard.str().find("Zeta.txt 5") == std::string::npos &&
+                    wildcard.str().find("1 file(s), 0 dir(s), 1 bytes\n") != std::string::npos,
+                "CAT wildcard did not filter and total entries");
+        std::ostringstream wildcardPath;
+        interpreter.executeInteractive("CAT work/child/i?em.*\n", wildcardPath);
+        require(wildcardPath.str().rfind("item.bas ", 0) == 0,
+                "CAT wildcard in a subdirectory did not match");
         interpreter.executeInteractive("CD \"work/child\"\nDIR\n", output);
         require(output.str().size() >= 9 &&
                     output.str().compare(output.str().size() - 9, 9, "item.bas\n") == 0,

@@ -23,6 +23,7 @@ public:
     void remove(const std::string& path) override;
     void removeDirectory(const std::string& path) override;
     void format(const std::string& path) override;
+    runtime::StorageSpace space(const std::string& path) override;
 
 private:
     std::filesystem::path root_;

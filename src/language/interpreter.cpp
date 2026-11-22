@@ -127,7 +127,7 @@ constexpr std::string_view builtinFunctions[] = {
 };
 
 constexpr std::string_view shellHelpCommands[] = {
-    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
+    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "CAT", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
     "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "MODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
@@ -179,6 +179,80 @@ std::string commandHelpListing() {
     listing << "Some commands require optional runtime services (storage, task control, "
             << "debugger, graphics, network, or system control).\n";
     return listing.str();
+}
+
+bool hasWildcard(const std::string& text) {
+    return text.find_first_of("*?") != std::string::npos;
+}
+
+// Case-insensitive match supporting '*' (any run) and '?' (any one character).
+bool wildcardMatch(const std::string& pattern, const std::string& text) {
+    std::size_t p = 0, t = 0, star = std::string::npos, mark = 0;
+    const auto same = [](char a, char b) {
+        return std::toupper(static_cast<unsigned char>(a)) ==
+               std::toupper(static_cast<unsigned char>(b));
+    };
+    while (t < text.size()) {
+        if (p < pattern.size() && (pattern[p] == '?' || (pattern[p] != '*' && same(pattern[p], text[t])))) {
+            ++p; ++t;
+        } else if (p < pattern.size() && pattern[p] == '*') {
+            star = p++;
+            mark = t;
+        } else if (star != std::string::npos) {
+            p = star + 1;
+            t = ++mark;
+        } else {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
+// CAT listing: directories first, then files; each group sorted
+// case-insensitively with the exact name as a deterministic tie-break.
+std::string catListing(std::vector<runtime::FileEntry> entries,
+                       const runtime::StorageSpace& space) {
+    const auto lower = [](const std::string& value) {
+        std::string result = value;
+        for (char& c : result) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return result;
+    };
+    std::stable_sort(entries.begin(), entries.end(), [&](const auto& left, const auto& right) {
+        if (left.isDirectory != right.isDirectory) return left.isDirectory;
+        const std::string a = lower(left.name), b = lower(right.name);
+        return a != b ? a < b : left.name < right.name;
+    });
+    std::size_t files = 0, directories = 0;
+    std::uintmax_t bytes = 0;
+    std::size_t nameWidth = 0, sizeWidth = 5;
+    for (const auto& entry : entries) {
+        nameWidth = std::max(nameWidth, entry.name.size() + (entry.isDirectory ? 1 : 0));
+        if (entry.isDirectory) { ++directories; continue; }
+        ++files;
+        bytes += entry.size;
+        sizeWidth = std::max(sizeWidth, std::to_string(entry.size).size());
+    }
+    const auto pad = [](const std::string& value, std::size_t width) {
+        return std::string(width > value.size() ? width - value.size() : 0, ' ') + value;
+    };
+    std::string listing;
+    for (const auto& entry : entries) {
+        std::string name = entry.name + (entry.isDirectory ? "/" : "");
+        name.resize(nameWidth, ' ');
+        listing += name + " " +
+            pad(entry.isDirectory ? "<DIR>" : std::to_string(entry.size), sizeWidth) + "\n";
+    }
+    listing += std::to_string(files) + " file(s), " + std::to_string(directories) +
+        " dir(s), " + std::to_string(bytes) + " bytes\n";
+    if (space.known) {
+        const std::size_t width = std::max({std::to_string(space.total).size(),
+            std::to_string(space.used).size(), std::to_string(space.free).size()});
+        listing += "Total: " + pad(std::to_string(space.total), width) + " bytes\n";
+        listing += "Used:  " + pad(std::to_string(space.used), width) + " bytes\n";
+        listing += "Free:  " + pad(std::to_string(space.free), width) + " bytes\n";
+    }
+    return listing;
 }
 
 std::string wrapListingText(const std::string& text, std::size_t columns) {
@@ -3328,6 +3402,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
             word.rfind("SAVE ", 0) == 0 || word == "DIR" ||
             word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
+            word == "CAT" || word.rfind("CAT ", 0) == 0 || word.rfind("CAT#", 0) == 0 ||
             word == "DELETE" || word.rfind("DELETE ", 0) == 0 ||
             word == "RENAME" || word.rfind("RENAME ", 0) == 0 ||
             word == "FORMAT" || word.rfind("FORMAT ", 0) == 0 ||
@@ -3865,7 +3940,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             storage_->list(path);
             current_directory_ = path;
         } else if (word == "DIR" || word.rfind("DIR ", 0) == 0 ||
-                   word.rfind("DIR#", 0) == 0) {
+                   word.rfind("DIR#", 0) == 0 || word == "CAT" ||
+                   word.rfind("CAT ", 0) == 0 || word.rfind("CAT#", 0) == 0) {
+            const bool catalog = word.rfind("CAT", 0) == 0;
+            const char* commandName = catalog ? "CAT" : "DIR";
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
             std::uint64_t channel = default_output_channel_;
@@ -3873,30 +3951,40 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!argument.empty() && argument.front() == '#') {
                 const auto separator = argument.find_first_of(" \t");
                 const std::string channelToken = argument.substr(0, separator);
-                channel = parseChannelSelector(channelToken, "DIR");
+                channel = parseChannelSelector(channelToken, commandName);
                 argument = separator == std::string::npos ? std::string{} :
                     trim(argument.substr(separator));
             }
-            bool details = false;
-            const auto upperArgument = uppercaseAscii(argument);
-            if (upperArgument == "DETAILS" || upperArgument.rfind("DETAILS ", 0) == 0 ||
-                upperArgument.rfind("DETAILS\t", 0) == 0) {
-                details = true;
-                argument = trim(argument.substr(7));
-            }
+            if (uppercaseAscii(argument) == "DETAILS" ||
+                uppercaseAscii(argument).rfind("DETAILS ", 0) == 0)
+                throw std::runtime_error("DIR DETAILS was replaced by CAT");
             std::string path;
-            if (!argument.empty()) path = normalizePath(commandPathValue(argument, "DIR"));
-            else path = current_directory_;
-            std::string listing;
-            for (const auto& entry : storage_->list(path)) {
-                if (!details) {
-                    listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
-                } else if (entry.isDirectory) {
-                    listing += "<" + entry.name + ">\n";
-                } else {
-                    listing += entry.name + " (" + std::to_string(entry.size) +
-                        " bytes)\n";
+            std::string pattern;
+            if (!argument.empty()) {
+                std::string raw = commandPathValue(argument, commandName);
+                const auto separator = raw.find_last_of("/:");
+                const std::string leaf = separator == std::string::npos ? raw :
+                    raw.substr(separator + 1);
+                if (hasWildcard(leaf)) {
+                    pattern = leaf;
+                    raw.erase(separator == std::string::npos ? 0 : separator + 1);
+                    if (raw.empty()) raw = ".";
                 }
+                path = normalizePath(raw);
+            } else {
+                path = current_directory_;
+            }
+            auto entries = storage_->list(path);
+            if (!pattern.empty())
+                entries.erase(std::remove_if(entries.begin(), entries.end(),
+                    [&](const auto& entry) { return !wildcardMatch(pattern, entry.name); }),
+                    entries.end());
+            std::string listing;
+            if (catalog) {
+                listing = catListing(std::move(entries), storage_->space(path));
+            } else {
+                for (const auto& entry : entries)
+                    listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
             }
             if (writeGeneratedListing(channel, listing)) {
                 preserveInteractiveTail();

@@ -72,10 +72,20 @@ ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
 #if defined(QL32_CYD_USE_SPIFFS)
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS");
+bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SPIFFS.totalBytes();
+    used = SPIFFS.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace);
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
 #else
-ql32::platform::esp32::SdStorage sdStorage(SD, "SDC");
+bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace);
 ql32::platform::esp32::SdChannels sdChannels(SD, "SDC");
 #endif
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;

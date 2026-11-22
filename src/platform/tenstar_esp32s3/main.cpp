@@ -55,7 +55,12 @@ ql32::platform::esp32::CpuFrequency boardCpuFrequency;
 ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS");
+bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SPIFFS.totalBytes();
+    used = SPIFFS.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace);
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
 std::unique_ptr<ql32::platform::tenstar_esp32s3::TftTextConsole> tftConsole;
 std::unique_ptr<std::ostream> basicOutput;

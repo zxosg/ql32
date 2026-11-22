@@ -11,6 +11,7 @@ extern "C" {
 #include <driver/spi_master.h>
 #include <esp_err.h>
 #include <esp_vfs_fat.h>
+#include <ff.h>
 #include <sdmmc_cmd.h>
 }
 
@@ -313,6 +314,23 @@ std::vector<runtime::FileEntry> IdfSdStorage::list(const std::string& path) {
         return left.name < right.name;
     });
     return entries;
+}
+
+runtime::StorageSpace IdfSdStorage::space(const std::string&) {
+    ensureAvailable();
+    runtime::StorageSpace result;
+    FATFS* fatfs = nullptr;
+    DWORD freeClusters = 0;
+    // The single SDSPI mount is FatFs volume 0.
+    if (f_getfree("0:", &freeClusters, &fatfs) != FR_OK || !fatfs) return result;
+    const std::uint64_t clusterBytes =
+        static_cast<std::uint64_t>(fatfs->csize) * FF_MIN_SS;
+    result.total = static_cast<std::uint64_t>(fatfs->n_fatent - 2) * clusterBytes;
+    result.free = std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(freeClusters) * clusterBytes, result.total);
+    result.used = result.total - result.free;
+    result.known = true;
+    return result;
 }
 
 bool IdfSdStorage::exists(const std::string& path) {
