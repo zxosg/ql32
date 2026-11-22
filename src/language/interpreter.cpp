@@ -1,4 +1,6 @@
 #include "ql32/interpreter.hpp"
+#include "ql32/runtime/file_ops.hpp"
+#include "ql32/runtime/path_glob.hpp"
 #include "bytecode.hpp"
 #include "../vm/execution_state.hpp"
 
@@ -17,6 +19,7 @@
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
+#include <cstring>
 #include <string_view>
 #include <thread>
 #include <unordered_set>
@@ -25,6 +28,8 @@
 
 namespace ql32 {
 namespace {
+using runtime::hasWildcard;
+using runtime::wildcardMatch;
 std::atomic<runtime::SessionId> nextInterpreterSessionId{1};
 
 ui::DialogOptions pagerInputOptions() {
@@ -127,7 +132,7 @@ constexpr std::string_view builtinFunctions[] = {
 };
 
 constexpr std::string_view shellHelpCommands[] = {
-    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "CAT", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
+    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "CAT", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "COPY", "MOVE", "RMDIR", "FORMAT",
     "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "MODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
@@ -157,7 +162,9 @@ std::string commandHelpListing() {
             << "Ctrl+Left/Right moves by word.\n"
             << "RENUMBER [start, step] renumbers the stored program (default 10, 10).\n";
     listing << "DELETE lineNumber1,... atomically deletes numbered program lines; "
-            << "DELETE path$ removes a file.\n";
+            << "DELETE path$ removes a file; wildcards remove several (FORCE skips the prompt).\n"
+            << "COPY src TO dst [FORCE], MOVE src TO dst [FORCE]: files or #channels; "
+            << "FORCE overwrites. RMDIR dir [FORCE] removes a directory (FORCE: recursive).\n";
     listing << "BASIC statements and commands:\n";
     bool first = true;
     for (const Keyword& keyword : keywords) {
@@ -177,34 +184,6 @@ std::string commandHelpListing() {
     listing << "Some commands require optional runtime services (storage, task control, "
             << "debugger, graphics, network, or system control).\n";
     return listing.str();
-}
-
-bool hasWildcard(const std::string& text) {
-    return text.find_first_of("*?") != std::string::npos;
-}
-
-// Case-insensitive match supporting '*' (any run) and '?' (any one character).
-bool wildcardMatch(const std::string& pattern, const std::string& text) {
-    std::size_t p = 0, t = 0, star = std::string::npos, mark = 0;
-    const auto same = [](char a, char b) {
-        return std::toupper(static_cast<unsigned char>(a)) ==
-               std::toupper(static_cast<unsigned char>(b));
-    };
-    while (t < text.size()) {
-        if (p < pattern.size() && (pattern[p] == '?' || (pattern[p] != '*' && same(pattern[p], text[t])))) {
-            ++p; ++t;
-        } else if (p < pattern.size() && pattern[p] == '*') {
-            star = p++;
-            mark = t;
-        } else if (star != std::string::npos) {
-            p = star + 1;
-            t = ++mark;
-        } else {
-            return false;
-        }
-    }
-    while (p < pattern.size() && pattern[p] == '*') ++p;
-    return p == pattern.size();
 }
 
 // CAT listing: directories first, then files; each group sorted
@@ -2784,6 +2763,7 @@ void Interpreter::abortExecution() noexcept {
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();
     clearPager();
+    clearFileJob();
     closeExecutionChannels();
     requestedPauseDurationMs_ = 0;
 }
@@ -2894,6 +2874,93 @@ ExecutionStatus Interpreter::resumeInteractivePager(std::ostream& output) {
     clearPager();
     return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
                                              ExecutionStatus::InteractivePending;
+}
+
+void Interpreter::clearFileJob() noexcept {
+    pendingFileConfirm_.reset();
+    pendingFileJob_.reset();
+    fileJobOutput_ = nullptr;
+}
+
+void Interpreter::writeTextToChannel(std::ostream& output, runtime::ChannelId channel,
+                                     std::string_view text) {
+    channel = resolveChannel(channel);
+    if (channel == 0) {
+        output << text;
+        if (text.find('\n') != std::string_view::npos) output_column_ = 0;
+    } else if (channel == 1) {
+        if (graphics_) graphics_->writeText(session_id_, std::string(text));
+        else output << text;
+    } else {
+        if (!channels_)
+            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                        "channel output unavailable");
+        channels_->write(session_id_, channel, std::string(text));
+    }
+}
+
+ExecutionStatus Interpreter::startFileJob(runtime::fileops::Plan plan, std::ostream& output,
+                                          const char* commandName) {
+    clearFileJob();
+    const bool confirm = plan.needsConfirmation;
+    const std::string prompt = plan.confirmation;
+    pendingFileJob_ = std::make_unique<runtime::fileops::Job>(*storage_, std::move(plan));
+    if (confirm) {
+        if (!ui_) {
+            clearFileJob();
+            throw std::runtime_error(std::string(commandName) +
+                " needs confirmation but no interactive UI is available; add FORCE");
+        }
+        pendingFileConfirm_ = ui_->beginInput(session_id_, prompt, pagerInputOptions());
+        return ExecutionStatus::Suspended;
+    }
+    return runFileJob(output);
+}
+
+ExecutionStatus Interpreter::runFileJob(std::ostream& output) {
+    fileJobOutput_ = &output;
+    bool done = false;
+    try {
+        done = pendingFileJob_->run(std::chrono::milliseconds(20));
+    } catch (...) {
+        clearFileJob();
+        pendingInteractiveTail_.clear();
+        throw;
+    }
+    if (!done) return ExecutionStatus::Yielded;
+    const auto& plan = pendingFileJob_->plan();
+    if (plan.steps.size() > 1 || plan.recursive)
+        writeTextToChannel(output, default_output_channel_, pendingFileJob_->summary() + "\n");
+    clearFileJob();
+    return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
+                                             ExecutionStatus::InteractivePending;
+}
+
+ExecutionStatus Interpreter::resumeFileJob(std::ostream& output) {
+    if (pendingFileConfirm_) {
+        if (!ui_) {
+            clearFileJob();
+            return ExecutionStatus::Completed;
+        }
+        const auto result = ui_->poll(*pendingFileConfirm_);
+        if (!result) return ExecutionStatus::Suspended;
+        pendingFileConfirm_.reset();
+        std::string answer;
+        if (result->kind == ui::ResultKind::Submitted && !result->fields.empty()) {
+            if (const auto* submitted = std::get_if<std::string>(&result->fields.front()))
+                answer = *submitted;
+        }
+        const auto first = answer.find_first_not_of(" \t\r\n");
+        const bool yes = first != std::string::npos &&
+            std::toupper(static_cast<unsigned char>(answer[first])) == 'Y';
+        if (!yes) {
+            writeTextToChannel(output, default_output_channel_, "Cancelled\n");
+            clearFileJob();
+            return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
+                                                     ExecutionStatus::InteractivePending;
+        }
+    }
+    return runFileJob(output);
 }
 
 void Interpreter::releaseGraphicsResources() noexcept {
@@ -3060,9 +3127,10 @@ std::string detail::expandIncludes(const std::string& source,
 
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
     auto status = executeInteractiveResumable(source, output);
-    while (status == ExecutionStatus::WaitingTime) {
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(requestedPauseDurationMs_));
+    while (status == ExecutionStatus::WaitingTime || status == ExecutionStatus::Yielded) {
+        if (status == ExecutionStatus::WaitingTime)
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(requestedPauseDurationMs_));
         status = resume(output);
     }
     if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel ||
@@ -3208,6 +3276,39 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             parsePathValue(text.substr(0, separator), "RENAME"),
             parsePathValue(text.substr(separator + 1), "RENAME")};
     };
+    // Splits on whitespace outside double quotes; quoted text stays in its token.
+    auto splitCommandWords = [&](const std::string& text) {
+        std::vector<std::string> words;
+        std::string current;
+        bool quoted = false;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            const char c = text[i];
+            if (c == '"') {
+                if (quoted && i + 1 < text.size() && text[i + 1] == '"') {
+                    current += "\"\"";
+                    ++i;
+                    continue;
+                }
+                quoted = !quoted;
+                current.push_back(c);
+            } else if (!quoted && std::isspace(static_cast<unsigned char>(c))) {
+                if (!current.empty()) words.push_back(std::move(current));
+                current.clear();
+            } else {
+                current.push_back(c);
+            }
+        }
+        if (quoted) throw std::runtime_error("unterminated quoted path");
+        if (!current.empty()) words.push_back(std::move(current));
+        return words;
+    };
+    auto takeForce = [&](std::vector<std::string>& words) {
+        if (words.size() > 1 && uppercaseAscii(words.back()) == "FORCE") {
+            words.pop_back();
+            return true;
+        }
+        return false;
+    };
     auto parseChannelSelector = [&](std::string selector, const char* commandName) {
         selector = trim(std::move(selector));
         if (selector.empty() || selector.front() != '#')
@@ -3306,6 +3407,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "CAT" || word.rfind("CAT ", 0) == 0 || word.rfind("CAT#", 0) == 0 ||
             word == "DELETE" || word.rfind("DELETE ", 0) == 0 ||
             word == "RENAME" || word.rfind("RENAME ", 0) == 0 ||
+            word == "COPY" || word.rfind("COPY ", 0) == 0 ||
+            word == "MOVE" || word.rfind("MOVE ", 0) == 0 ||
+            word == "RMDIR" || word.rfind("RMDIR ", 0) == 0 ||
             word == "FORMAT" || word.rfind("FORMAT ", 0) == 0 ||
             word == "CD" || word.rfind("CD ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
@@ -3745,14 +3849,147 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 if (!storage_)
                     throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                 "storage service unavailable");
-                const std::string path = normalizePath(parsePathValue(argument, "DELETE"));
-                storage_->remove(path);
+                auto words = splitCommandWords(argument);
+                const bool force = takeForce(words);
+                if (words.size() != 1)
+                    throw std::runtime_error("DELETE syntax is DELETE path [FORCE]");
+                const std::string path = normalizePath(commandPathValue(words[0], "DELETE"));
+                const auto status = startFileJob(
+                    runtime::fileops::planDelete(*storage_, path, force), output, "DELETE");
+                if (status != ExecutionStatus::Completed) {
+                    preserveInteractiveTail();
+                    return status;
+                }
             }
         } else if (word == "RENAME" || word.rfind("RENAME ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
-            const auto paths = splitRenamePaths(normalizedLine.substr(6));
+            const auto renameWords = splitCommandWords(normalizedLine.substr(6));
+            const auto paths = renameWords.size() == 3 && uppercaseAscii(renameWords[1]) == "TO" ?
+                std::pair<std::string, std::string>{
+                    parsePathValue(renameWords[0], "RENAME"),
+                    parsePathValue(renameWords[2], "RENAME")} :
+                splitRenamePaths(normalizedLine.substr(6));
             storage_->rename(normalizePath(paths.first), normalizePath(paths.second));
+        } else if (word == "COPY" || word.rfind("COPY ", 0) == 0 ||
+                   word == "MOVE" || word.rfind("MOVE ", 0) == 0) {
+            const bool move = word.rfind("MOVE", 0) == 0;
+            const char* commandName = move ? "MOVE" : "COPY";
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            auto words = splitCommandWords(normalizedLine.substr(4));
+            const bool force = takeForce(words);
+            std::size_t toIndex = words.size();
+            for (std::size_t i = 0; i < words.size(); ++i) {
+                if (uppercaseAscii(words[i]) != "TO") continue;
+                if (toIndex != words.size())
+                    throw std::runtime_error(std::string(commandName) + " requires exactly one TO");
+                toIndex = i;
+            }
+            if (toIndex != 1 || words.size() != 3)
+                throw std::runtime_error(std::string(commandName) +
+                                         " syntax is " + commandName + " source TO destination [FORCE]");
+            const bool sourceChannel = words[0].front() == '#';
+            const bool destinationChannel = words[2].front() == '#';
+            if (move && (sourceChannel || destinationChannel))
+                throw std::runtime_error("MOVE does not accept channels");
+            const std::uint64_t sessionId = session_id_;
+            auto makeSource = [&](const std::string& token) {
+                const runtime::ChannelId channel = resolveChannel(
+                    parseChannelSelector(token, commandName));
+                if (!channels_)
+                    throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                "channel service unavailable");
+                class ChannelSource final : public runtime::fileops::ByteSource {
+                public:
+                    ChannelSource(std::shared_ptr<runtime::ChannelService> channels,
+                                  std::uint64_t session, runtime::ChannelId channel)
+                        : channels_(std::move(channels)), session_(session), channel_(channel) {}
+                    std::size_t read(std::uint8_t* destination, std::size_t capacity) override {
+                        if (channels_->atEnd(session_, channel_)) return 0;
+                        const std::string bytes = channels_->readBytes(session_, channel_, capacity);
+                        std::memcpy(destination, bytes.data(), bytes.size());
+                        return bytes.size();
+                    }
+                private:
+                    std::shared_ptr<runtime::ChannelService> channels_;
+                    std::uint64_t session_;
+                    runtime::ChannelId channel_;
+                };
+                return std::shared_ptr<runtime::fileops::ByteSource>(
+                    std::make_shared<ChannelSource>(channels_, sessionId, channel));
+            };
+            auto makeSink = [&](const std::string& token) {
+                const runtime::ChannelId channel = resolveChannel(
+                    parseChannelSelector(token, commandName));
+                class ChannelSink final : public runtime::fileops::ByteSink {
+                public:
+                    ChannelSink(Interpreter& owner, std::uint64_t session,
+                                runtime::ChannelId channel)
+                        : owner_(owner), session_(session), channel_(channel) {}
+                    void write(const std::uint8_t* data, std::size_t size) override {
+                        const std::string_view text(reinterpret_cast<const char*>(data), size);
+                        if (channel_ > 1) {
+                            if (!owner_.channels_)
+                                throw runtime::ServiceError(
+                                    runtime::ServiceErrorCode::Unavailable,
+                                    "channel service unavailable");
+                            owner_.channels_->writeBytes(session_, channel_, text);
+                        } else {
+                            std::ostringstream discard;
+                            owner_.writeTextToChannel(
+                                owner_.fileJobOutput_ ? *owner_.fileJobOutput_ : discard,
+                                channel_, text);
+                        }
+                    }
+                private:
+                    Interpreter& owner_;
+                    std::uint64_t session_;
+                    runtime::ChannelId channel_;
+                };
+                return std::shared_ptr<runtime::fileops::ByteSink>(
+                    std::make_shared<ChannelSink>(*this, sessionId, channel));
+            };
+            runtime::fileops::Plan plan;
+            if (sourceChannel && destinationChannel) {
+                plan = runtime::fileops::planStream(makeSource(words[0]), makeSink(words[2]));
+            } else if (sourceChannel) {
+                const std::string rawDestination = commandPathValue(words[2], commandName);
+                plan = runtime::fileops::planStreamToFile(
+                    *storage_, normalizePath(rawDestination), force, makeSource(words[0]));
+            } else if (destinationChannel) {
+                const std::string rawSource = commandPathValue(words[0], commandName);
+                plan = runtime::fileops::planFileToStream(
+                    *storage_, normalizePath(rawSource), makeSink(words[2]));
+            } else {
+                const std::string rawSource = commandPathValue(words[0], commandName);
+                const std::string rawDestination = commandPathValue(words[2], commandName);
+                const bool directoryHint = !rawDestination.empty() &&
+                    (rawDestination.back() == '/' || rawDestination.back() == ':');
+                plan = runtime::fileops::planTransfer(
+                    *storage_, normalizePath(rawSource), normalizePath(rawDestination),
+                    directoryHint, force, move);
+            }
+            const auto status = startFileJob(std::move(plan), output, commandName);
+            if (status != ExecutionStatus::Completed) {
+                preserveInteractiveTail();
+                return status;
+            }
+        } else if (word == "RMDIR" || word.rfind("RMDIR ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            auto words = splitCommandWords(normalizedLine.substr(5));
+            const bool force = takeForce(words);
+            if (words.size() != 1)
+                throw std::runtime_error("RMDIR syntax is RMDIR directory [FORCE]");
+            const std::string path = normalizePath(commandPathValue(words[0], "RMDIR"));
+            const auto status = startFileJob(
+                runtime::fileops::planRemoveDirectory(*storage_, path, current_directory_, force),
+                output, "RMDIR");
+            if (status != ExecutionStatus::Completed) {
+                preserveInteractiveTail();
+                return status;
+            }
         } else if (word == "FORMAT" || word.rfind("FORMAT ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
@@ -4414,6 +4651,10 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
                     status = resume(output);
                     continue;
                 }
+                if (status == ExecutionStatus::Yielded) {
+                    status = resume(output);
+                    continue;
+                }
                 if (status == ExecutionStatus::WaitingTime) {
                     std::this_thread::sleep_for(
                         std::chrono::milliseconds(requestedPauseDurationMs_));
@@ -4430,6 +4671,7 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
             if (ui_) ui_->cancelSession(session_id_);
             execution_.reset();
             clearPager();
+            clearFileJob();
             diagnostics << "ql32: " << error.what() << '\n';
         }
     }
@@ -4443,6 +4685,7 @@ void Interpreter::clear() {
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();
     clearPager();
+    clearFileJob();
     closeExecutionChannels();
     *uiSession_ = detail::UISessionState{};
     variables_.clear();

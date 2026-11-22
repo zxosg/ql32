@@ -673,7 +673,21 @@ directory on that drive.
 `DELETE lineNumber1,...` deletes the listed program lines atomically. The
 candidate program is validated once after all removals, and a failed edit
 leaves the stored program unchanged. `DELETE path$` removes a file and
-`RENAME path$,newpath$` moves a file. Their paths are resolved relative to the
+`RENAME path$,newpath$` (or `RENAME path$ TO newpath$`) moves a file.
+QL/32-specific file commands (no SMSQ/E compatibility is claimed): `COPY source TO
+destination [FORCE]`, `MOVE source TO destination [FORCE]`, `DELETE path [FORCE]` and
+`RMDIR directory [FORCE]`. Sources may use `*`/`?` wildcards in the leaf name only; a
+source or destination may be `#channel` for `COPY` (file channels as sources; bytes are
+copied unchanged). A destination ending in `/` or naming an existing directory receives
+files under their own names; several sources require a directory destination. `COPY`
+and `MOVE` refuse to overwrite and `RMDIR` refuses non-empty directories unless `FORCE`
+is given; a `DELETE` wildcard matching more than one file asks `Y/N` unless `FORCE`, and
+programs or sessions without a UI fail instead of prompting. Zero wildcard matches is an
+error. Drive roots and the current directory are never removed. Copies stream in
+2048-byte slices through a temporary file, so the scheduler is never blocked; `MOVE`
+across drives is copy, size verification, then source removal. The first failure stops
+the command and reports how many items completed. Directories cannot be copied.
+Previously. Their paths are resolved relative to the
 current directory unless drive-qualified. Rename fails if the destination
 already exists; file deletion applies to files, not directories. `FORMAT path$`
 recursively deletes all files and subdirectories

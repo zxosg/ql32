@@ -287,12 +287,95 @@ void testInteractiveFileCommands() {
     std::filesystem::remove_all(root);
 }
 
+bool fails(ql32::Interpreter& interpreter, const std::string& line) {
+    std::ostringstream sink;
+    try {
+        interpreter.executeInteractive(line + "\n", sink);
+    } catch (const std::exception&) {
+        return true;
+    }
+    return false;
+}
+
+void testCopyMoveDeleteRmdir() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-fileops-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+        ql32::Interpreter interpreter(storage);
+        std::ostringstream out;
+        const std::string big(5000, 'x');
+        storage->writeText("a.txt", big);
+        storage->writeText("b.txt", "bee");
+        storage->writeText("c.dat", "see");
+        std::filesystem::create_directories(root / "dir");
+
+        interpreter.executeInteractive("COPY \"a.txt\" TO \"copy.txt\"\n", out);
+        require(storage->readText("copy.txt") == big && storage->exists("a.txt"),
+                "COPY did not duplicate the file");
+        require(fails(interpreter, "COPY \"b.txt\" TO \"copy.txt\""),
+                "COPY overwrote without FORCE");
+        require(storage->readText("copy.txt") == big, "refused COPY changed destination");
+        interpreter.executeInteractive("COPY \"b.txt\" TO \"copy.txt\" FORCE\n", out);
+        require(storage->readText("copy.txt") == "bee", "COPY FORCE did not overwrite");
+        require(fails(interpreter, "COPY \"a.txt\" TO \"a.txt\""), "COPY onto itself allowed");
+        require(fails(interpreter, "COPY \"nope*\" TO \"dir/\""), "COPY with no match allowed");
+        require(fails(interpreter, "COPY \"*.txt\" TO \"single.txt\""),
+                "multiple sources into one file allowed");
+
+        interpreter.executeInteractive("COPY \"*.txt\" TO \"dir/\"\n", out);
+        require(storage->exists("dir/a.txt") && storage->exists("dir/b.txt") &&
+                    storage->exists("dir/copy.txt") && !storage->exists("dir/c.dat"),
+                "wildcard COPY into a directory failed");
+
+        interpreter.executeInteractive("MOVE \"c.dat\" TO \"moved.dat\"\n", out);
+        require(!storage->exists("c.dat") && storage->readText("moved.dat") == "see",
+                "MOVE failed");
+        require(fails(interpreter, "MOVE \"moved.dat\" TO \"b.txt\""), "MOVE overwrote");
+        interpreter.executeInteractive("MOVE \"moved.dat\" TO \"b.txt\" FORCE\n", out);
+        require(storage->readText("b.txt") == "see" && !storage->exists("moved.dat"),
+                "MOVE FORCE failed");
+        interpreter.executeInteractive("RENAME \"b.txt\" TO \"r.txt\"\n", out);
+        require(storage->exists("r.txt") && !storage->exists("b.txt"), "RENAME TO failed");
+
+        require(fails(interpreter, "DELETE \"dir/*.txt\""),
+                "multi-file DELETE without UI did not require FORCE");
+        require(storage->exists("dir/a.txt"), "refused DELETE removed files");
+        interpreter.executeInteractive("DELETE \"dir/*.txt\" FORCE\n", out);
+        require(!storage->exists("dir/a.txt") && !storage->exists("dir/copy.txt"),
+                "DELETE wildcard FORCE failed");
+        require(fails(interpreter, "DELETE \"dir/*.txt\" FORCE"), "DELETE no match allowed");
+        interpreter.executeInteractive("DELETE \"r.txt\"\n", out);
+        require(!storage->exists("r.txt"), "single DELETE failed");
+
+        std::filesystem::create_directories(root / "tree" / "sub");
+        storage->writeText("tree/sub/f.txt", "1");
+        storage->writeText("tree/g.txt", "2");
+        require(fails(interpreter, "RMDIR \"tree\""), "RMDIR removed non-empty dir");
+        interpreter.executeInteractive("RMDIR \"tree\" FORCE\n", out);
+        require(!storage->exists("tree"), "RMDIR FORCE did not remove tree");
+        interpreter.executeInteractive("RMDIR \"dir\"\n", out);
+        std::filesystem::create_directories(root / "cwd");
+        interpreter.executeInteractive("CD \"/\"\nCD cwd\n", out);
+        require(fails(interpreter, "RMDIR \"/cwd\" FORCE"), "RMDIR removed current directory");
+        require(fails(interpreter, "RMDIR \"/\" FORCE"), "RMDIR removed root");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 int main() {
     try {
         testDirectoryStorage();
         testInteractiveFileCommands();
+        testCopyMoveDeleteRmdir();
     } catch (const std::exception& error) {
         std::cerr << "storage test failed: " << error.what() << '\n';
         return 1;

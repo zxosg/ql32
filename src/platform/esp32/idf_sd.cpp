@@ -81,6 +81,34 @@ std::string normalizePath(const std::string& path, bool allowRoot,
     return result.empty() ? "/" : result;
 }
 
+class IdfSdWriteHandle final : public runtime::StorageWriteHandle {
+public:
+    explicit IdfSdWriteHandle(int descriptor) : descriptor_(descriptor) {}
+    ~IdfSdWriteHandle() override {
+        if (descriptor_ >= 0) ::close(descriptor_);
+    }
+    void write(const std::uint8_t* data, std::size_t size) override {
+        std::size_t offset = 0;
+        while (offset < size) {
+            const auto written = ::write(descriptor_, data + offset, size - offset);
+            if (written <= 0)
+                throw ServiceError(ServiceErrorCode::IoError, errorText("storage write"));
+            offset += static_cast<std::size_t>(written);
+        }
+    }
+    void close() override {
+        if (::fsync(descriptor_) != 0)
+            throw ServiceError(ServiceErrorCode::IoError, errorText("storage sync"));
+        const int closing = descriptor_;
+        descriptor_ = -1;
+        if (::close(closing) != 0)
+            throw ServiceError(ServiceErrorCode::IoError, errorText("storage close"));
+    }
+
+private:
+    int descriptor_ = -1;
+};
+
 class IdfSdReadHandle final : public runtime::StorageReadHandle {
 public:
     IdfSdReadHandle(int descriptor, std::uint64_t size)
@@ -231,6 +259,16 @@ std::unique_ptr<runtime::StorageReadHandle> IdfSdStorage::openRead(
     }
     return std::make_unique<IdfSdReadHandle>(descriptor,
         static_cast<std::uint64_t>(status.st_size));
+}
+
+std::unique_ptr<runtime::StorageWriteHandle> IdfSdStorage::openWrite(
+        const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    const int descriptor = ::open(fullPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (descriptor < 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage write open"));
+    return std::make_unique<IdfSdWriteHandle>(descriptor);
 }
 
 void IdfSdStorage::writeText(const std::string& path, const std::string& contents) {

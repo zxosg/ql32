@@ -679,6 +679,7 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
                                           std::size_t instructionBudget,
                                           runtime::CancellationToken stop) {
     if (hasPendingInteractivePager()) return resumeInteractivePager(output);
+    if (hasPendingFileJob()) return resumeFileJob(output);
     if (!execution_) throw std::runtime_error("interpreter has no suspended execution");
     if (instructionBudget == 0)
         throw std::invalid_argument("instruction budget must be positive");

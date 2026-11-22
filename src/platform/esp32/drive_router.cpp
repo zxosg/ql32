@@ -39,6 +39,11 @@ std::unique_ptr<runtime::StorageReadHandle> DriveRouterStorage::openRead(
     return forPath(path).openRead(path);
 }
 
+std::unique_ptr<runtime::StorageWriteHandle> DriveRouterStorage::openWrite(
+        const std::string& path) {
+    return forPath(path).openWrite(path);
+}
+
 void DriveRouterStorage::writeText(const std::string& path, const std::string& contents) {
     forPath(path).writeText(path, contents);
 }
