@@ -21,7 +21,9 @@ namespace ql32::runtime::fileops {
 class ByteSource {
 public:
     virtual ~ByteSource() = default;
-    // Returns 0 only at end of stream.
+    // Returns 0 only at end of stream, or NoData when none is available yet
+    // (the job then yields and retries on its next slice).
+    static constexpr std::size_t NoData = static_cast<std::size_t>(-1);
     virtual std::size_t read(std::uint8_t* destination, std::size_t capacity) = 0;
 };
 

@@ -4053,24 +4053,99 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 if (!channels_)
                     throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                 "channel service unavailable");
+                // Keyboard lines come from the UI service; Ctrl-Z ends the stream
+                // and Esc/cancel aborts. A serial source also watches the keyboard
+                // for those two keys so it can be stopped locally.
+                class UiLines {
+                public:
+                    enum class Event { None, Line, Cancelled };
+                    UiLines(std::shared_ptr<ui::Service> ui, std::uint64_t session)
+                        : ui_(std::move(ui)), session_(session) {}
+                    ~UiLines() {
+                        if (!request_) return;
+                        try { ui_->cancel(*request_); } catch (...) {}
+                    }
+                    Event poll(std::string& line) {
+                        if (!request_) request_ = ui_->beginInput(session_, {});
+                        const auto result = ui_->poll(*request_);
+                        if (!result) return Event::None;
+                        request_.reset();
+                        if (result->kind == ui::ResultKind::Cancelled) return Event::Cancelled;
+                        line.clear();
+                        if (!result->fields.empty())
+                            if (const auto* text = std::get_if<std::string>(&result->fields.front()))
+                                line = *text;
+                        return Event::Line;
+                    }
+                private:
+                    std::shared_ptr<ui::Service> ui_;
+                    std::uint64_t session_;
+                    std::optional<ui::RequestId> request_;
+                };
                 class ChannelSource final : public runtime::fileops::ByteSource {
                 public:
                     ChannelSource(std::shared_ptr<runtime::ChannelService> channels,
+                                  std::shared_ptr<ui::Service> ui,
                                   std::uint64_t session, runtime::ChannelId channel)
-                        : channels_(std::move(channels)), session_(session), channel_(channel) {}
+                        : channels_(std::move(channels)), session_(session), channel_(channel),
+                          keyboard_(channel == 0), hardware_(channel > 1 && channels_ &&
+                              channels_->isHardwareChannel(session, channel)) {
+                        if (keyboard_ || hardware_) {
+                            if (!ui)
+                                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                    "keyboard input service unavailable");
+                            lines_ = std::make_unique<UiLines>(std::move(ui), session);
+                        }
+                    }
                     std::size_t read(std::uint8_t* destination, std::size_t capacity) override {
-                        if (channels_->atEnd(session_, channel_)) return 0;
-                        const std::string bytes = channels_->readBytes(session_, channel_, capacity);
-                        std::memcpy(destination, bytes.data(), bytes.size());
-                        return bytes.size();
+                        if (!keyboard_ && !hardware_) {
+                            if (channels_->atEnd(session_, channel_)) return 0;
+                            const std::string bytes = channels_->readBytes(session_, channel_, capacity);
+                            std::memcpy(destination, bytes.data(), bytes.size());
+                            return bytes.size();
+                        }
+                        std::string line;
+                        if (!ended_) {
+                            const auto event = lines_->poll(line);
+                            if (event == UiLines::Event::Cancelled)
+                                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                            "cancelled");
+                            if (keyboard_ && event == UiLines::Event::Line) {
+                                const auto end = line.find('\x1a');
+                                if (end != std::string::npos) { line.resize(end); ended_ = true; }
+                                else line += '\n';
+                                pending_ += line;
+                            } else if (hardware_ && event == UiLines::Event::Line) {
+                                if (line.find('\x1a') != std::string::npos) ended_ = true;
+                            }
+                        }
+                        if (hardware_ && !ended_ && pending_.empty()) {
+                            const std::string bytes = channels_->readBytes(
+                                session_, channel_, std::min<std::size_t>(capacity, 256));
+                            const auto end = bytes.find('\x1a');
+                            pending_ += bytes.substr(0, end);
+                            if (end != std::string::npos) ended_ = true;
+                        }
+                        if (!pending_.empty()) {
+                            const std::size_t count = std::min(capacity, pending_.size());
+                            std::memcpy(destination, pending_.data(), count);
+                            pending_.erase(0, count);
+                            return count;
+                        }
+                        return ended_ ? 0 : runtime::fileops::ByteSource::NoData;
                     }
                 private:
                     std::shared_ptr<runtime::ChannelService> channels_;
                     std::uint64_t session_;
                     runtime::ChannelId channel_;
+                    bool keyboard_;
+                    bool hardware_;
+                    bool ended_ = false;
+                    std::string pending_;
+                    std::unique_ptr<UiLines> lines_;
                 };
                 return std::shared_ptr<runtime::fileops::ByteSource>(
-                    std::make_shared<ChannelSource>(channels_, sessionId, channel));
+                    std::make_shared<ChannelSource>(channels_, ui_, sessionId, channel));
             };
             auto makeSink = [&](const std::string& token) {
                 const runtime::ChannelId channel = resolveChannel(

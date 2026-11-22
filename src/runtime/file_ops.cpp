@@ -461,6 +461,7 @@ bool Job::runStep(Step& step, Clock::time_point deadline) {
                                            : *active.source;
     for (;;) {
         const std::size_t count = source.read(active.buffer.data(), active.buffer.size());
+        if (count == ByteSource::NoData) return false;
         if (count == 0) break;
         if (active.writer) active.writer->write(active.buffer.data(), count);
         else active.sink->write(active.buffer.data(), count);
