@@ -139,7 +139,7 @@ constexpr std::string_view builtinFunctions[] = {
 };
 
 constexpr std::string_view shellHelpCommands[] = {
-    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "CAT", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "COPY", "MOVE", "RMDIR", "FORMAT",
+    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "CAT", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "COPY", "MOVE", "MKDIR", "RMDIR", "FORMAT",
     "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "MODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
@@ -173,7 +173,7 @@ std::string commandHelpListing() {
     listing << "DELETE lineNumber1,... atomically deletes numbered program lines; "
             << "DELETE path$ removes a file; wildcards remove several (FORCE skips the prompt).\n"
             << "COPY src TO dst [FORCE], MOVE src TO dst [FORCE]: files or #channels; "
-            << "FORCE overwrites. RMDIR dir [FORCE] removes a directory (FORCE: recursive).\n"
+            << "FORCE overwrites. MKDIR dir creates a directory. RMDIR dir [FORCE] removes a directory (FORCE: recursive).\n"
             << "MIRROR #src TO #dst copies text and graphics commands to another channel; "
             << "MIRROR DELETE #dst, MIRROR LIST.\n";
     listing << "BASIC statements and commands:\n";
@@ -3695,6 +3695,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word == "RENAME" || word.rfind("RENAME ", 0) == 0 ||
             word == "COPY" || word.rfind("COPY ", 0) == 0 ||
             word == "MOVE" || word.rfind("MOVE ", 0) == 0 ||
+            word == "MKDIR" || word.rfind("MKDIR ", 0) == 0 ||
             word == "RMDIR" || word.rfind("RMDIR ", 0) == 0 ||
             word == "FORMAT" || word.rfind("FORMAT ", 0) == 0 ||
             word == "CD" || word.rfind("CD ", 0) == 0 ||
@@ -4411,6 +4412,14 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 preserveInteractiveTail();
                 return status;
             }
+        } else if (word == "MKDIR" || word.rfind("MKDIR ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const auto words = splitCommandWords(normalizedLine.substr(5));
+            if (words.size() != 1)
+                throw std::runtime_error("MKDIR syntax is MKDIR directory");
+            runtime::fileops::makeDirectory(
+                *storage_, normalizePath(commandPathValue(words[0], "MKDIR")));
         } else if (word == "RMDIR" || word.rfind("RMDIR ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");

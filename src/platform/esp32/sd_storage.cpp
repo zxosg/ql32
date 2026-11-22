@@ -357,6 +357,15 @@ void SdStorage::remove(const std::string& path) {
                            "storage: remove failed: " + path);
 }
 
+void SdStorage::createDirectory(const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    if (filesystem_.mkdir(resolved.c_str())) return;
+    // SPIFFS has no directories; the name becomes a directory when a file is created in it.
+    if (drive_ == "FFS") return;
+    throw ServiceError(ServiceErrorCode::IoError, "storage: could not create directory: " + path);
+}
+
 void SdStorage::removeDirectory(const std::string& path) {
     const std::string resolved = resolve(path, false);
     ensureAvailable();

@@ -61,6 +61,8 @@ struct Plan {
 std::string joinPath(const std::string& directory, const std::string& leaf);
 void splitPath(const std::string& path, std::string& directory, std::string& leaf);
 bool isRootPath(const std::string& path);
+// MKDIR: fails if the path exists or its parent directory is missing.
+void makeDirectory(StorageService& storage, const std::string& path);
 std::optional<FileEntry> statPath(StorageService& storage, const std::string& path);
 
 // `destinationIsDirectoryHint` is true when the user wrote a trailing '/'.

@@ -188,6 +188,23 @@ std::optional<FileEntry> statPath(StorageService& storage, const std::string& pa
     return std::nullopt;
 }
 
+void makeDirectory(StorageService& storage, const std::string& path) {
+    if (hasWildcard(path)) fail(ServiceErrorCode::InvalidPath, "MKDIR does not accept wildcards");
+    std::string target = path;
+    while (target.size() > 1 && target.back() == '/' && !isRootPath(target)) target.pop_back();
+    if (isRootPath(target) || statPath(storage, target))
+        fail(ServiceErrorCode::IoError, "already exists: " + path);
+    std::string directory, leaf;
+    splitPath(target, directory, leaf);
+    if (leaf.empty()) fail(ServiceErrorCode::InvalidPath, "invalid directory name: " + path);
+    if (!directory.empty() && !isRootPath(directory)) {
+        const auto parent = statPath(storage, directory);
+        if (!parent || !parent->isDirectory)
+            fail(ServiceErrorCode::NotFound, "parent directory not found: " + directory);
+    }
+    storage.createDirectory(target);
+}
+
 Plan planTransfer(StorageService& storage, const std::string& source,
                   const std::string& destination, bool destinationIsDirectoryHint,
                   bool force, bool move) {
