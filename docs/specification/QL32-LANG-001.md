@@ -978,6 +978,24 @@ Graphics fail if that endpoint lacks graphics capability. Changing the default
 to `#0` selects `#0` for unqualified output; explicit selectors still use the
 selected handle's active binding. The current runtime still resolves per-session
 routes per operation; direct binding is the approved target architecture.
+`MIRROR #source TO #destination` (QL/32-specific; no SMSQ/E reference)
+adds a session-local text mirror: every text write to the source's resolved
+endpoint (PRINT, WRITE, LIST, DIR, CAT, HELP, diagnostics and prompts) is also
+written to the destination, which may be `#0`, `#1`, a window, serial, file or
+null channel. From the moment the mirror is set up, graphics drawing and state
+commands to a screen or window source (PLOT, LINE, RECT, CIRCLE, TEXT, BLIT, CLS,
+AT, INK, PAPER, OVER, FONT, GFONT) are also executed as-is on each window or
+screen destination, which keeps its own size, position and palette; nothing is
+scaled or copied, out-of-window pixels are clipped, and a destination error
+disables the mirror. WINDOW, CLOSEWINDOW and palette commands are never
+forwarded. INPUT echo is not mirrored; reads are never mirrored. Self-mirroring, chains and cycles are
+rejected, a source has at most 4 mirrors, and tasks do not inherit mirrors.
+Mirror writes never block or fail the program: a failing destination is
+disabled, and a full serial buffer drops bytes (platform serial writer is
+non-blocking) and counts them. A paged listing is mirrored once in full.
+`MIRROR DELETE #destination` removes all mirrors into it, `MIRROR LIST` shows
+relations, drop counts and failures, and closing a channel removes its
+relations.
 Channel handles belong to one interpreter session. A task launched by the
 embedded `TASK` command has its own `#0`, `#1`, and opened handle numbers; a
 number in one session does not select a handle in another. The sessions still

@@ -140,6 +140,9 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::At:
         case Op::ChannelDefault:
         case Op::ChannelRoute:
+        case Op::ChannelMirror:
+        case Op::ChannelMirrorDelete:
+        case Op::ChannelMirrorList:
         case Op::ChannelSeek:
         case Op::ChannelRead:
         case Op::ChannelWrite:
@@ -239,7 +242,13 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             consumed = 1;
             break;
         case Op::ChannelRoute:
+        case Op::ChannelMirror:
             consumed = 2;
+            break;
+        case Op::ChannelMirrorDelete:
+            consumed = 1;
+            break;
+        case Op::ChannelMirrorList:
             break;
         case Op::ChannelSeek:
         case Op::ChannelRead:
@@ -535,6 +544,9 @@ const char* opcodeName(Op op) {
     case Op::Print: return "PRINT";
     case Op::PrintSeparator: return "PRINT_SEPARATOR"; case Op::PrintEnd: return "PRINT_END";
     case Op::PrintCommit: return "PRINT_COMMIT";
+    case Op::ChannelMirror: return "CHANNEL_MIRROR";
+    case Op::ChannelMirrorDelete: return "CHANNEL_MIRROR_DELETE";
+    case Op::ChannelMirrorList: return "CHANNEL_MIRROR_LIST";
     case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
     case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
     case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Read: return "READ";
@@ -896,29 +908,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     };
     auto writePrintText = [&](const std::string& text, const Instruction& at) {
         if (state.printChannel == 0) {
-            output << text;
             output_column_ += utf8Length(text);
         } else if (state.printChannel == 1) {
-            if (graphics_) graphics_->writeText(session_id_, text);
-            else {
-                output << text;
-                output_column_ += utf8Length(text);
-            }
+            if (!graphics_) output_column_ += utf8Length(text);
             state.printChannelColumn += utf8Length(text);
-        } else {
-            if (!channels_) runtimeError(at, "channel output is unavailable");
-            const auto opened = channels_->listOpen(session_id_);
-            const auto endpoint = std::find_if(opened.begin(), opened.end(),
-                [&](const runtime::ChannelInfo& info) {
-                    return info.handle == state.printChannel;
-                });
-            if (endpoint != opened.end() && endpoint->type == runtime::ChannelType::Window) {
-                if (!graphics_) runtimeError(at, "screen output is unavailable");
-                graphics_->writeText(session_id_, state.printChannel, text);
-            } else {
-                channels_->write(session_id_, state.printChannel, text);
-            }
+        } else if (!channels_) {
+            runtimeError(at, "channel output is unavailable");
         }
+        emitText(output, state.printChannel, text);
     };
     auto selectPrintBatch = [&](runtime::ChannelId channel) {
         if (!graphics_) return;
@@ -2549,6 +2546,22 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "graphics service unavailable");
                     if (!nullSink) {
+                    // Mirrored destinations receive the same command as-is and keep
+                    // their own attributes; WINDOW and CLOSEWINDOW are never forwarded.
+                    const auto sourceChannel = channel;
+                    std::vector<runtime::ChannelId> graphicsTargets{sourceChannel};
+                    if (instruction.name != "WINDOW" && instruction.name != "CLOSEWINDOW")
+                        for (const auto destination : graphicsMirrorTargets(sourceChannel))
+                            graphicsTargets.push_back(destination);
+                    const bool batchTargets = graphicsTargets.size() > 1 &&
+                        instruction.name != "BLIT";
+                    if (batchTargets) graphics_->beginPresentationBatch(session_id_);
+                    try {
+                    for (std::size_t targetIndex = 0; targetIndex < graphicsTargets.size();
+                         ++targetIndex) {
+                    const auto channel = graphicsTargets[targetIndex];
+                    const bool mirrorTarget = targetIndex != 0;
+                    try {
                     const auto integerArgument = [&](std::size_t index,
                                                      const char* description) {
                         const auto* number = std::get_if<double>(&arguments[index]);
@@ -2797,6 +2810,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } else {
                         graphics_->clear(session_id_, channel);
                     }
+                    } catch (...) {
+                        if (!mirrorTarget) throw;
+                        failMirror(sourceChannel, channel, "graphics command failed");
+                    }
+                    }
+                    } catch (...) {
+                        if (batchTargets) {
+                            try { graphics_->endPresentationBatch(session_id_); } catch (...) {}
+                        }
+                        throw;
+                    }
+                    if (batchTargets) graphics_->endPresentationBatch(session_id_);
                     }
                     break;
                 }
@@ -3007,18 +3032,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 } else if (instruction.name == "WRITE") {
                     const auto channel = resolveChannel(channelArgument(0));
                     const std::string text = textArgument(1) + "\n";
-                    if (channel == 0) {
-                        output << text;
-                        output_column_ = 0;
-                    } else if (channel == 1) {
-                        if (graphics_) graphics_->writeText(session_id_, text);
-                        else output << text;
-                    } else {
-                        if (!channels_)
-                            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                                        "channel service unavailable");
-                        channels_->write(session_id_, channel, text);
-                    }
+                    emitText(output, channel, text);
+                    if (channel == 0) output_column_ = 0;
                 } else if (instruction.name == "CLOSE") {
                     closeChannel(channelArgument(0));
                 } else if (instruction.name == "DEALLOC") {
@@ -3647,6 +3662,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 runtimeError(instruction, "AT supports only console and screen channels");
             const auto row = static_cast<std::uint32_t>(rowValue - 1);
             const auto column = static_cast<std::uint32_t>(columnValue - 1);
+            for (const auto destination : graphicsMirrorTargets(channel)) {
+                try {
+                    if (graphics_) (void)graphics_->setTextPosition(session_id_, destination,
+                                                                    row, column);
+                } catch (...) {
+                    failMirror(channel, destination, "AT failed");
+                }
+            }
             const bool positioned = graphics_ && graphics_->setTextPosition(session_id_,
                 channel, row, column);
             if (!positioned && channel == 0) {
@@ -3718,6 +3741,31 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         static_cast<std::uint64_t>(destination));
             break;
         }
+        case Op::ChannelMirror: {
+            const double destination = numeric(pop(), instruction);
+            const double source = numeric(pop(), instruction);
+            const auto validHandle = [](double handle) {
+                return std::isfinite(handle) && std::trunc(handle) == handle && handle >= 0 &&
+                    handle <= static_cast<double>(std::numeric_limits<std::uint64_t>::max());
+            };
+            if (!validHandle(source) || !validHandle(destination))
+                runtimeError(instruction, "channel handles must be nonnegative integers");
+            addMirror(static_cast<std::uint64_t>(source),
+                      static_cast<std::uint64_t>(destination));
+            break;
+        }
+        case Op::ChannelMirrorDelete: {
+            const double destination = numeric(pop(), instruction);
+            if (!std::isfinite(destination) || std::trunc(destination) != destination ||
+                destination < 0 ||
+                destination > static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
+                runtimeError(instruction, "channel handle must be a nonnegative integer");
+            deleteMirrors(static_cast<std::uint64_t>(destination));
+            break;
+        }
+        case Op::ChannelMirrorList:
+            writeTextToChannel(output, default_output_channel_, mirrorListing());
+            break;
         case Op::ChannelSeek: {
             if (!channels_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "channel service unavailable");

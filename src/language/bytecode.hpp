@@ -28,7 +28,8 @@ enum class Op : std::uint8_t {
     Input, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
     DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd,
-    Pause, Beep, Volume, MusicPlay, MusicWav, MusicTest, MusicStop, MusicPause, MusicResume, MusicStatus
+    Pause, Beep, Volume, MusicPlay, MusicWav, MusicTest, MusicStop, MusicPause, MusicResume, MusicStatus,
+    ChannelMirror, ChannelMirrorDelete, ChannelMirrorList
 };
 
 struct ForItemSpec {

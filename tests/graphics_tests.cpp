@@ -2066,6 +2066,30 @@ void testTextCellsFillCharacterGapsWithPaper() {
     require(sawInk, "text glyph did not use the active ink color");
 }
 
+void testMirrorForwardsGraphicsAsIsToDestination() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(nullptr);
+    ql32::Interpreter interpreter({}, channels, {}, graphics);
+    std::ostringstream output;
+    interpreter.executeInteractive("w=OPEN(4)\n", output);
+    interpreter.executeInteractive("INK #w,5\n", output);
+    interpreter.executeInteractive("MIRROR #1 TO #w\n", output);
+    interpreter.executeInteractive("INK 3\n", output);
+    interpreter.executeInteractive("LINE 1,2,30,40\n", output);
+    interpreter.executeInteractive("RECT 0,0,5,5,1\nWINDOW 1,1,50,50\n", output);
+    interpreter.executeInteractive("MIRROR DELETE #w\nLINE 7,7,8,8\n", output);
+    const auto count = [&](const char* name, ql32::graphics::ChannelId channel) {
+        return std::count_if(graphics->events.begin(), graphics->events.end(),
+            [&](const Event& event) { return event.name == name && event.channel == channel; });
+    };
+    require(count("INK", 2) == 2 && count("INK", 1) == 1,
+            "state commands must be forwarded only after MIRROR is set up");
+    require(count("LINE", 1) == 2 && count("LINE", 2) == 1,
+            "LINE forms were not routed to the destination as-is");
+    require(count("RECT", 2) == 1 && count("WINDOW", 2) == 0,
+            "RECT must be forwarded and WINDOW must not");
+}
+
 void testCloseWindowCommandDispatch() {
     auto graphics = std::make_shared<RecordingGraphics>();
     ql32::Interpreter interpreter({}, {}, {}, graphics);
@@ -2542,6 +2566,7 @@ int main() {
     testEveryPrintableAsciiCharacterHasAGlyph();
     testTextCellsFillCharacterGapsWithPaper();
     testCloseWindowCommandDispatch();
+    testMirrorForwardsGraphicsAsIsToDestination();
     testAtPositionsDefaultAndOpenedScreenChannels();
     testAtWorksOnNumberedBasicLineWithVariableCoordinates();
     testAtRejectsZeroRowOrColumn();

@@ -716,6 +716,13 @@ void setup() {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
         }, std::shared_ptr<ql32::runtime::HardwareChannelService>(
             &hardwareAdapter, [](ql32::runtime::HardwareChannelService*) {}), true);
+    channelRegistry->setSerialTryWriter([](std::string_view bytes) -> std::size_t {
+        const std::size_t room = static_cast<std::size_t>(Serial.availableForWrite());
+        const std::size_t count = std::min(room, bytes.size());
+        if (count != 0)
+            Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), count);
+        return count;
+    });
     services.channels = channelRegistry;
     // The CYD speaker amplifier is fed by DAC2 on GPIO26.
     services.music = std::make_shared<ql32::platform::olimex_vga::MusicService>(

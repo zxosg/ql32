@@ -311,6 +311,17 @@ void ChannelRegistry::write(SessionId session, ChannelId channel,
     }
 }
 
+std::size_t ChannelRegistry::writeNonBlocking(SessionId session, ChannelId channel,
+                                              const std::string& text) {
+    const Endpoint opened = endpoint(session, channel);
+    if (opened.type == ChannelType::Serial && serialTryWriter_) {
+        const std::size_t accepted = std::min(serialTryWriter_(text), text.size());
+        return text.size() - accepted;
+    }
+    write(session, channel, text);
+    return 0;
+}
+
 void ChannelRegistry::close(SessionId session, ChannelId channel) {
     const Endpoint opened = endpoint(session, channel);
     if (opened.type == ChannelType::File) files_->close(session, opened.backend);

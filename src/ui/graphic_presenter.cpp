@@ -739,6 +739,11 @@ void GraphicPresenter::handleSerialByte(char byte, std::uint32_t nowMs) {
         handleKey(event);
         return;
     }
+    if (byte == 0x1a && inputActive() && !request_->dialogOptions.keyInput) {
+        service_->submitInput(request_->id, inputEdit_ + '\x1a');
+        finish();
+        return;
+    }
     if (byte == 27) { serialEscapeState_ = 1; serialEscapeAt_ = nowMs; return; }
     if (byte == '\r' || byte == '\n') event.key = input::Key::Enter;
     else if (byte == '\b' || byte == 127) event.key = input::Key::Backspace;
