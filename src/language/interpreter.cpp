@@ -692,6 +692,7 @@ public:
         }
         code_.arrays = arrays_;
         code_.constants = constants_;
+        internText();
         return std::move(code_);
     }
 
@@ -702,10 +703,18 @@ public:
         code_.functions = enclosingFunctions_;
         code_.arrays = arrays_;
         code_.constants = constants_;
+        internText();
         return std::move(code_);
     }
 
 private:
+    void internText() {
+        std::unordered_map<std::string, std::shared_ptr<const std::string>> pool;
+        for (Instruction& instruction : code_) {
+            instruction.name.intern(pool);
+        }
+    }
+
     std::vector<Token> tokens_;
     InstructionSequence code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
@@ -771,7 +780,7 @@ private:
                     if (found != lineTargets_.end()) target = &found->second;
                 }
             } else {
-                const auto found = labels_.find(instruction.ownerDefinition.get() + "\x1f" + instruction.name);
+                const auto found = labels_.find(instruction.extra().ownerDefinition.get() + "\x1f" + instruction.name);
                 if (found != labels_.end()) target = &found->second;
             }
             if (!target) {
@@ -779,11 +788,11 @@ private:
                 error(instruction, instruction.targetIsLineNumber ?
                       "GOTO line number does not exist" : "GOTO label does not exist");
             }
-            if (target->ownerDefinition != instruction.ownerDefinition.get())
+            if (target->ownerDefinition != instruction.extra().ownerDefinition.get())
                 error(instruction, "GOTO cannot cross a procedure or function boundary");
-            if (target->scopes.size() != instruction.jumpScopes.size() ||
+            if (target->scopes.size() != instruction.extra().jumpScopes.size() ||
                 !std::equal(target->scopes.begin(), target->scopes.end(),
-                            instruction.jumpScopes.begin()))
+                            instruction.extra().jumpScopes.begin()))
                 error(instruction, "GOTO cannot enter or leave a structured loop or SELECT block");
             instruction.target = target->address;
         }
@@ -809,7 +818,7 @@ private:
             if (instruction.name.empty()) continue;
 
             const auto label = labels_.find(
-                instruction.ownerDefinition.get() + "\x1f" + instruction.name);
+                instruction.extra().ownerDefinition.get() + "\x1f" + instruction.name);
             if (label == labels_.end())
                 error(instruction, "RESTORE label does not exist");
             std::size_t item = 0;
@@ -881,8 +890,14 @@ private:
     }
     void emit(Op op, const Token& token, Value value = 0.0, std::string name = {},
               PrintSeparator separator = PrintSeparator::None) {
-        code_.push_back({op, std::move(value), std::move(name), token.line,
-                         token.column, separator});
+        Instruction instruction{op, 0.0, std::move(name), token.line, token.column, separator};
+        if (const auto* text = std::get_if<std::string>(&value)) {
+            instruction.name = *text;
+            instruction.textLiteral = true;
+        } else {
+            instruction.value = std::get<double>(value);
+        }
+        code_.push_back(std::move(instruction));
     }
     void resolveCalls(bool tolerateUnresolvedCalls) {
         for (Instruction& instruction : code_) {
@@ -1021,8 +1036,8 @@ private:
                     continue;
                 }
                 if (tolerateUnresolvedCalls) continue;
-                if (!instruction.ownerDefinition.empty()) {
-                    const auto owner = definitions_.find(instruction.ownerDefinition.get());
+                if (!instruction.extra().ownerDefinition.empty()) {
+                    const auto owner = definitions_.find(instruction.extra().ownerDefinition.get());
                     if (owner != definitions_.end() &&
                         std::find(owner->second.parameters.begin(), owner->second.parameters.end(),
                                   instruction.name) != owner->second.parameters.end())
@@ -1036,9 +1051,9 @@ private:
             if (instruction.argCount != definition.parameters.size())
                 error(instruction, "incorrect argument count");
             instruction.target = definition.address;
-            instruction.parameters = definition.parameters;
-            instruction.localNames = definition.locals;
-            for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
+            instruction.mutableExtra().parameters = definition.parameters;
+            instruction.mutableExtra().localNames = definition.locals;
+            for (const ArrayArgumentCandidate& argument : instruction.extra().arrayArgumentCandidates) {
                 const auto array = arrays_.find(argument.name);
                 if (array == arrays_.end()) continue;
                 std::size_t& parameterRank =
@@ -1053,11 +1068,11 @@ private:
         while (propagated) {
             propagated = false;
             for (Instruction& instruction : code_) {
-                if (instruction.op != Op::Call || instruction.ownerDefinition.empty()) continue;
-                const auto caller = definitions_.find(instruction.ownerDefinition.get());
+                if (instruction.op != Op::Call || instruction.extra().ownerDefinition.empty()) continue;
+                const auto caller = definitions_.find(instruction.extra().ownerDefinition.get());
                 const auto callee = definitions_.find(instruction.name);
                 if (caller == definitions_.end() || callee == definitions_.end()) continue;
-                for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
+                for (const ArrayArgumentCandidate& argument : instruction.extra().arrayArgumentCandidates) {
                     const auto parameter = std::find(caller->second.parameters.begin(),
                                                      caller->second.parameters.end(), argument.name);
                     if (parameter == caller->second.parameters.end()) continue;
@@ -1083,19 +1098,19 @@ private:
             if (callee == definitions_.end()) continue;
             for (std::size_t i = 0; i < callee->second.parameterArrayRanks.size(); ++i) {
                 if (callee->second.parameterArrayRanks[i] == 0) continue;
-                const auto argument = std::find_if(instruction.arrayArgumentCandidates.begin(),
-                    instruction.arrayArgumentCandidates.end(),
+                const auto argument = std::find_if(instruction.extra().arrayArgumentCandidates.begin(),
+                    instruction.extra().arrayArgumentCandidates.end(),
                     [&](const ArrayArgumentCandidate& candidate) {
                         return candidate.parameterIndex == i;
                     });
-                if (argument == instruction.arrayArgumentCandidates.end() ||
+                if (argument == instruction.extra().arrayArgumentCandidates.end() ||
                     code_[argument->loadInstruction].op != Op::PushArrayRef)
                     error(instruction, "array argument required for array parameter");
             }
         }
         for (Instruction& instruction : code_) {
-            if (instruction.op == Op::Call && !instruction.ownerDefinition.empty()) {
-                const auto owner = definitions_.find(instruction.ownerDefinition.get());
+            if (instruction.op == Op::Call && !instruction.extra().ownerDefinition.empty()) {
+                const auto owner = definitions_.find(instruction.extra().ownerDefinition.get());
                 if (owner != definitions_.end()) {
                     const auto parameter = std::find(owner->second.parameters.begin(),
                                                      owner->second.parameters.end(), instruction.name);
@@ -1116,8 +1131,8 @@ private:
                     }
                 }
             }
-            if (instruction.op == Op::ArraySet && !instruction.ownerDefinition.empty()) {
-                const auto owner = definitions_.find(instruction.ownerDefinition.get());
+            if (instruction.op == Op::ArraySet && !instruction.extra().ownerDefinition.empty()) {
+                const auto owner = definitions_.find(instruction.extra().ownerDefinition.get());
                 if (owner != definitions_.end()) {
                     const auto parameter = std::find(owner->second.parameters.begin(),
                                                      owner->second.parameters.end(), instruction.name);
@@ -1270,8 +1285,8 @@ private:
         instruction.argCount = arguments + static_cast<std::size_t>(channelArgument);
         instruction.channelArgument = channelArgument;
         instruction.expectsValue = expectsValue;
-        instruction.arrayArgumentCandidates = std::move(arrayCandidates);
-        instruction.ownerDefinition = currentDefinitionName_;
+        instruction.mutableExtra().arrayArgumentCandidates = std::move(arrayCandidates);
+        instruction.mutableExtra().ownerDefinition = currentDefinitionName_;
         code_.push_back(std::move(instruction));
     }
     void blockDim() {
@@ -1352,7 +1367,7 @@ private:
                     if (!match(Kind::Comma)) break;
                 }
                 Instruction compare{Op::SelectMatch, 0.0, {}, armToken.line, armToken.column};
-                compare.selectItems = std::move(items);
+                compare.mutableExtra().selectItems = std::move(items);
                 code_.push_back(std::move(compare));
                 falseJump = code_.size();
                 emit(Op::JumpIfFalse, armToken);
@@ -1502,7 +1517,7 @@ private:
         const std::size_t initIndex = code_.size();
         Instruction init{Op::ForInit, 0.0, variable.text, keyword.line, keyword.column};
         init.loopId = nextLoopId_++;
-        init.forItems = std::move(items);
+        init.mutableExtra().forItems = std::move(items);
         code_.push_back(std::move(init));
         const std::size_t body = code_.size();
         controlScopes_.push_back(code_[initIndex].loopId);
@@ -1610,8 +1625,8 @@ private:
             error(peek(), "expected TO after GO");
         Instruction jump{Op::Jump, 0.0, {}, keyword.line, keyword.column};
         jump.sourceJump = true;
-        jump.jumpScopes = controlScopes_;
-        jump.ownerDefinition = currentDefinitionName_;
+        jump.mutableExtra().jumpScopes = controlScopes_;
+        jump.mutableExtra().ownerDefinition = currentDefinitionName_;
         if (check(Kind::Number)) {
             const Token target = advance();
             if (!std::isfinite(target.number) || std::trunc(target.number) != target.number ||
@@ -1768,7 +1783,7 @@ private:
                 Instruction read{Op::Read, 0.0, target.text,
                                  keyword.line, keyword.column};
                 read.rank = rank;
-                read.ownerDefinition = currentDefinitionName_;
+                read.mutableExtra().ownerDefinition = currentDefinitionName_;
                 code_.push_back(std::move(read));
 
                 if (!match(Kind::Comma)) break;
@@ -1782,7 +1797,7 @@ private:
         if (match(Kind::Restore)) {
             const Token keyword = previous();
             Instruction restore{Op::Restore, 0.0, {}, keyword.line, keyword.column};
-            restore.ownerDefinition = currentDefinitionName_;
+            restore.mutableExtra().ownerDefinition = currentDefinitionName_;
             if (check(Kind::Number)) {
                 const Token line = advance();
                 if (!std::isfinite(line.number) || std::trunc(line.number) != line.number ||
@@ -1866,7 +1881,7 @@ private:
                 if (target.text.empty() || target.text.back() != '$')
                     error(target, "binary IN target must be a string variable ending in '$'");
                 instruction.op = Op::ChannelRead;
-                instruction.targetVariable = target.text;
+                instruction.mutableExtra().targetVariable = target.text;
             } else if (operationName == "OUT") {
                 expression();
                 if (!match(Kind::Comma)) error(peek(), "expected ',' before output length");
@@ -2027,9 +2042,9 @@ private:
                     if (!check(Kind::Identifier))
                         error(peek(), "expected INPUT destination variable");
                     const Token target = advance();
-                    input.inputVariables.push_back(target.text);
+                    input.mutableExtra().inputVariables.push_back(target.text);
                 } while (match(Kind::Comma));
-                input.name = input.inputVariables[0];
+                input.name = input.extra().inputVariables[0];
                 if (input.expectsValue && !hasPromptChannel) {
                     // The prompt channel is the standard output channel #1.
                     input.target = 1;
@@ -2072,7 +2087,7 @@ private:
                     error(name, "IPRINT expects text, optional duration, and optional position");
                 emitCall(name, options.size() + arguments, false);
                 code_.back().optionCount = options.size();
-                code_.back().parameters = std::move(options);
+                code_.back().mutableExtra().parameters = std::move(options);
                 return;
             }
             if (name.text == "BUSY") {
@@ -2098,7 +2113,7 @@ private:
                     error(name, "BUSY expects text and an optional position, or OFF");
                 emitCall(name, options.size() + arguments, false);
                 code_.back().optionCount = options.size();
-                code_.back().parameters = std::move(options);
+                code_.back().mutableExtra().parameters = std::move(options);
                 return;
             }
             if (name.text == "LINE") {
@@ -2148,7 +2163,7 @@ private:
                 if (!commandArgumentTerminator())
                     error(peek(), "expected end of statement after LINE coordinates");
                 emitCall(name, arguments, false, {}, hasChannelArgument);
-                code_.back().parameters = {std::move(lineForm)};
+                code_.back().mutableExtra().parameters = {std::move(lineForm)};
                 return;
             }
             const bool supportsChannelSelector =
@@ -2196,7 +2211,7 @@ private:
             expression();
             Instruction instruction{Op::ArraySet, 0.0, name.text, name.line, name.column};
             instruction.rank = rank;
-            instruction.ownerDefinition = currentDefinitionName_;
+            instruction.mutableExtra().ownerDefinition = currentDefinitionName_;
             code_.push_back(std::move(instruction));
             return;
         }

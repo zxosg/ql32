@@ -86,7 +86,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             validTarget(instruction, instruction.target);
             break;
         case Op::ForInit:
-            if (instruction.forItems.empty()) invalid(instruction, "FOR has no range items");
+            if (instruction.extra().forItems.empty()) invalid(instruction, "FOR has no range items");
             validTarget(instruction, instruction.target);
             break;
         case Op::ForNext:
@@ -96,7 +96,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Call:
             if (!instruction.builtin && instruction.target >= code.size())
                 invalid(instruction, "call target is invalid");
-            if (!instruction.builtin && instruction.parameters.size() != instruction.argCount)
+            if (!instruction.builtin && instruction.extra().parameters.size() != instruction.argCount)
                 invalid(instruction, "call argument metadata is inconsistent");
             break;
         case Op::DimArray:
@@ -105,7 +105,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             if (instruction.rank == 0) invalid(instruction, "array rank must be positive");
             break;
         case Op::SelectMatch:
-            if (instruction.selectItems.empty()) invalid(instruction, "SELECT arm is empty");
+            if (instruction.extra().selectItems.empty()) invalid(instruction, "SELECT arm is empty");
             break;
         case Op::Push:
         case Op::PushArrayRef:
@@ -279,7 +279,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::MusicStatus:
             break;
         case Op::ForInit:
-            for (const ForItemSpec& item : instruction.forItems)
+            for (const ForItemSpec& item : instruction.extra().forItems)
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd) +
                             static_cast<std::size_t>(item.hasStep);
             break;
@@ -306,7 +306,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             consumed = instruction.rank + 1;
             break;
         case Op::SelectMatch:
-            for (const SelectItemSpec& item : instruction.selectItems)
+            for (const SelectItemSpec& item : instruction.extra().selectItems)
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd);
             produced = 1;
             break;
@@ -2029,11 +2029,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto* option = std::get_if<double>(&arguments[i]);
                         if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
                             runtimeError(instruction, "BUSY style values must be integers");
-                        if (instruction.parameters[i] == "INK" ||
-                            instruction.parameters[i] == "PAPER") {
+                        if (instruction.extra().parameters[i] == "INK" ||
+                            instruction.extra().parameters[i] == "PAPER") {
                             if (*option < 0 || *option > 7)
                                 runtimeError(instruction, "BUSY ink and paper must be in 0..7");
-                            if (instruction.parameters[i] == "INK")
+                            if (instruction.extra().parameters[i] == "INK")
                                 ink = static_cast<std::uint8_t>(*option);
                             else paper = static_cast<std::uint8_t>(*option);
                         } else {
@@ -2078,11 +2078,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto* option = std::get_if<double>(&arguments[i]);
                         if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
                             runtimeError(instruction, "IPRINT style values must be integers");
-                        if (instruction.parameters[i] == "INK" ||
-                            instruction.parameters[i] == "PAPER") {
+                        if (instruction.extra().parameters[i] == "INK" ||
+                            instruction.extra().parameters[i] == "PAPER") {
                             if (*option < 0 || *option > 7)
                                 runtimeError(instruction, "IPRINT ink and paper must be in 0..7");
-                            if (instruction.parameters[i] == "INK")
+                            if (instruction.extra().parameters[i] == "INK")
                                 ink = static_cast<std::uint8_t>(*option);
                             else paper = static_cast<std::uint8_t>(*option);
                         } else {
@@ -2724,8 +2724,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } else if (instruction.name == "PLOT") {
                         graphics_->pixel(session_id_, channel, pointArguments());
                     } else if (instruction.name == "LINE") {
-                        const std::string lineForm = instruction.parameters.empty() ?
-                            std::string{} : instruction.parameters[0];
+                        const std::string lineForm = instruction.extra().parameters.empty() ?
+                            std::string{} : instruction.extra().parameters[0];
                         if (lineForm == "MOVE") {
                             graphics_->setGraphicsPosition(session_id_, channel,
                                                            pointArguments());
@@ -3081,8 +3081,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             frame.callBasicLine = instruction.basicLine;
             frame.function = instruction.expectsValue;
             frame.name = instruction.name;
-            for (std::size_t i = 0; i < instruction.parameters.size(); ++i) {
-                const std::string& parameter = instruction.parameters[i];
+            for (std::size_t i = 0; i < instruction.extra().parameters.size(); ++i) {
+                const std::string& parameter = instruction.extra().parameters[i];
                 if (const auto* array = std::get_if<ArrayReference>(&arguments[i])) {
                     std::string actualName = array->name;
                     if (!callFrames.empty()) {
@@ -3101,7 +3101,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     frame.locals[parameter] = std::get<std::string>(arguments[i]);
                 }
             }
-            for (const std::string& local : instruction.localNames) {
+            for (const std::string& local : instruction.extra().localNames) {
                 if (frame.locals.find(local) == frame.locals.end()) {
                     if (!local.empty() && local.back() == '$') frame.locals[local] = std::string{};
                     else frame.locals[local] = 0.0;
@@ -3265,8 +3265,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         case Op::SelectMatch: {
             if (selectStates.empty()) runtimeError(instruction, "inactive SELECT block");
             bool matched = false;
-            for (std::size_t i = instruction.selectItems.size(); i-- > 0;) {
-                const SelectItemSpec& item = instruction.selectItems[i];
+            for (std::size_t i = instruction.extra().selectItems.size(); i-- > 0;) {
+                const SelectItemSpec& item = instruction.extra().selectItems[i];
                 double end = 0;
                 if (item.hasEnd) end = numeric(pop(), instruction);
                 const double start = numeric(pop(), instruction);
@@ -3292,9 +3292,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             break;
         case Op::ForInit: {
             ForState state;
-            state.ranges.resize(instruction.forItems.size());
-            for (std::size_t i = instruction.forItems.size(); i-- > 0;) {
-                const ForItemSpec& spec = instruction.forItems[i];
+            state.ranges.resize(instruction.extra().forItems.size());
+            for (std::size_t i = instruction.extra().forItems.size(); i-- > 0;) {
+                const ForItemSpec& spec = instruction.extra().forItems[i];
                 ForRange& range = state.ranges[i];
                 if (spec.hasStep) range.step = numeric(pop(), instruction);
                 if (spec.hasEnd) range.end = numeric(pop(), instruction);
@@ -3384,7 +3384,10 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         case Op::Jump:
             pc = instruction.target;
             break;
-        case Op::Push: pushValue(instruction.value); break;
+        case Op::Push:
+            pushValue(instruction.textLiteral ? Value{instruction.name.str()}
+                                              : Value{instruction.value});
+            break;
         case Op::PushArrayRef: stack.emplace_back(ArrayReference{instruction.name}); break;
         case Op::Load: {
             bool foundLocal = false;
@@ -3680,7 +3683,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             break;
         }
         case Op::Restore:
-            state.dataPointer = std::min(instruction.target, code.dataItems.size());
+            state.dataPointer = std::min<std::size_t>(instruction.target, code.dataItems.size());
             break;
         case Op::PrintChannel: {
             const double channel = numeric(pop(), instruction);
@@ -3742,11 +3745,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             Value value(channels_->readBytes(session_id_,
                 resolveChannel(static_cast<runtime::ChannelId>(channel)),
                 static_cast<std::size_t>(count)));
-            if (instruction.targetVariable.empty() || instruction.targetVariable.back() != '$')
+            if (instruction.extra().targetVariable.empty() || instruction.extra().targetVariable.back() != '$')
                 runtimeError(instruction, "binary IN target must be a string variable");
-            if (!callFrames.empty() && callFrames.back().locals.count(instruction.targetVariable.get()))
-                callFrames.back().locals[instruction.targetVariable.get()] = std::move(value);
-            else variables_[instruction.targetVariable.get()] = std::move(value);
+            if (!callFrames.empty() && callFrames.back().locals.count(instruction.extra().targetVariable.get()))
+                callFrames.back().locals[instruction.extra().targetVariable.get()] = std::move(value);
+            else variables_[instruction.extra().targetVariable.get()] = std::move(value);
             break;
         }
         case Op::ChannelWrite: {
@@ -3885,16 +3888,16 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             state.pendingChannelRead.reset();
             if (!line) runtimeError(instruction, "end of file during INPUT");
-            if (instruction.inputVariables.size() <= 1) {
-                const std::string& target = instruction.inputVariables.empty() ?
-                    instruction.name : instruction.inputVariables[0];
+            if (instruction.extra().inputVariables.size() <= 1) {
+                const std::string& target = instruction.extra().inputVariables.empty() ?
+                    instruction.name.str() : instruction.extra().inputVariables[0];
                 storeInputValue(target, *line, instruction);
             } else {
                 const auto fields = splitInputRecord(*line);
-                if (fields.size() != instruction.inputVariables.size())
+                if (fields.size() != instruction.extra().inputVariables.size())
                     runtimeError(instruction, "INPUT field count does not match destinations");
                 for (std::size_t index = 0; index < fields.size(); ++index)
-                    storeInputValue(instruction.inputVariables[index], fields[index], instruction);
+                    storeInputValue(instruction.extra().inputVariables[index], fields[index], instruction);
             }
             break;
         }
@@ -4148,12 +4151,13 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
         using detail::Op;
         switch (instruction.op) {
         case Op::Push:
-            if (const auto* literal = std::get_if<double>(&instruction.value)) {
+            if (!instruction.textLiteral) {
+                const double literal = instruction.value;
                 const double rounded = execution_->code.numericPrecision ==
                     detail::NumericPrecision::Single ?
-                    static_cast<double>(static_cast<float>(*literal)) : *literal;
+                    static_cast<double>(static_cast<float>(literal)) : literal;
                 values.emplace_back(rounded);
-            } else values.push_back(instruction.value);
+            } else values.push_back(Value{instruction.name.str()});
             break;
         case Op::Load: {
             bool found = false;

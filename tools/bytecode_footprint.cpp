@@ -13,11 +13,6 @@ namespace {
 
 std::size_t heapOf(const std::string& s) { return s.capacity() > 15 ? s.capacity() + 1 : 0; }
 
-std::size_t heapOf(const ql32::Value& v) {
-    const auto* s = std::get_if<std::string>(&v);
-    return s ? heapOf(*s) : 0;
-}
-
 } // namespace
 
 int main(int argc, char** argv) {
@@ -36,26 +31,33 @@ int main(int argc, char** argv) {
         }
         std::size_t outOfLine = 0, nameRefs = 0, pushValues = 0;
         std::set<std::string> names, pushes;
+        std::set<const void*> counted;
+        // Shared text: one control block plus string object plus any heap buffer.
+        auto shared = [&](const SharedText& t) {
+            if (t.empty() || !counted.insert(t.storageId()).second) return;
+            outOfLine += 2 * sizeof(void*) + sizeof(std::string) + heapOf(t.str());
+        };
         for (const auto& ins : code) {
-            outOfLine += heapOf(ins.name) + heapOf(ins.value);
+            shared(ins.name);
             if (!ins.name.empty()) { ++nameRefs; names.insert(ins.name); }
             if (ins.op == Op::Push) {
                 ++pushValues;
-                const auto* s = std::get_if<std::string>(&ins.value);
-                pushes.insert(s ? "s:" + *s : "n:" + std::to_string(std::get<double>(ins.value)));
+                pushes.insert(ins.textLiteral ? "s:" + ins.name.str()
+                                              : "n:" + std::to_string(ins.value));
             }
             auto vec = [&](const auto& v, std::size_t elem) {
                 if (!v.empty()) outOfLine += sizeof(void*) * 3 + v.size() * elem;
             };
-            vec(ins.forItems, sizeof(ForItemSpec));
-            vec(ins.selectItems, sizeof(SelectItemSpec));
-            vec(ins.jumpScopes, sizeof(std::size_t));
-            vec(ins.arrayArgumentCandidates, sizeof(ArrayArgumentCandidate));
-            for (const auto& s : ins.parameters) outOfLine += sizeof(s) + heapOf(s);
-            for (const auto& s : ins.inputVariables) outOfLine += sizeof(s) + heapOf(s);
-            for (const auto& s : ins.localNames) outOfLine += sizeof(s) + heapOf(s);
-            if (!ins.ownerDefinition.empty()) outOfLine += sizeof(std::string) + 8 + ins.ownerDefinition.get().size();
-            if (!ins.targetVariable.empty()) outOfLine += sizeof(std::string) + 8 + ins.targetVariable.get().size();
+            if (&ins.extra() != &Instruction{}.extra()) outOfLine += sizeof(InstructionExtras);
+            vec(ins.extra().forItems, sizeof(ForItemSpec));
+            vec(ins.extra().selectItems, sizeof(SelectItemSpec));
+            vec(ins.extra().jumpScopes, sizeof(std::size_t));
+            vec(ins.extra().arrayArgumentCandidates, sizeof(ArrayArgumentCandidate));
+            for (const auto& s : ins.extra().parameters) outOfLine += sizeof(s) + heapOf(s);
+            for (const auto& s : ins.extra().inputVariables) outOfLine += sizeof(s) + heapOf(s);
+            for (const auto& s : ins.extra().localNames) outOfLine += sizeof(s) + heapOf(s);
+            if (!ins.extra().ownerDefinition.empty()) outOfLine += sizeof(std::string) + 8 + ins.extra().ownerDefinition.get().size();
+            if (!ins.extra().targetVariable.empty()) outOfLine += sizeof(std::string) + 8 + ins.extra().targetVariable.get().size();
         }
         const std::size_t record = code.size() * sizeof(Instruction);
         std::cout << argv[i] << ',' << code.size() << ',' << record << ',' << outOfLine << ','
