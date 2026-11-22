@@ -692,7 +692,7 @@ leaves the stored program unchanged. `DELETE path$` removes a file and
 `RENAME path$,newpath$` (or `RENAME path$ TO newpath$`) moves a file.
 QL/32-specific file commands (no SMSQ/E compatibility is claimed): `COPY source TO
 destination [FORCE]`, `MOVE source TO destination [FORCE]`, `DELETE path [FORCE]` and
-`RMDIR directory [FORCE]`. Sources may use `*`/`?` wildcards in the leaf name only; a
+`MKDIR directory` and `RMDIR directory [FORCE]`. Sources may use `*`/`?` wildcards in the leaf name only; a
 source or destination may be `#channel` for `COPY` (file channels as sources; bytes are
 copied unchanged). A destination ending in `/` or naming an existing directory receives
 files under their own names; several sources require a directory destination. `COPY`
@@ -702,7 +702,10 @@ programs or sessions without a UI fail instead of prompting. Zero wildcard match
 error. Drive roots and the current directory are never removed. Copies stream in
 2048-byte slices through a temporary file, so the scheduler is never blocked; `MOVE`
 across drives is copy, size verification, then source removal. The first failure stops
-the command and reports how many items completed. Directories cannot be copied.
+the command and reports how many items completed. Directories cannot be copied. `MKDIR` fails if the path exists or its parent is
+missing. On `FFS:` (SPIFFS, which has no directory entries) `MKDIR` succeeds without
+creating anything: a directory exists once a file with that prefix exists, so a repeated
+`MKDIR` there is not an error and an empty directory cannot be listed or removed.
 Previously. Their paths are resolved relative to the
 current directory unless drive-qualified. Rename fails if the destination
 already exists; file deletion applies to files, not directories. `FORMAT path$`

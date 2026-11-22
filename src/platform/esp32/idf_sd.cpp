@@ -436,6 +436,13 @@ void IdfSdStorage::remove(const std::string& path) {
         throw ServiceError(ServiceErrorCode::IoError, errorText("storage remove"));
 }
 
+void IdfSdStorage::createDirectory(const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    if (::mkdir(fullPath.c_str(), 0775) != 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage create directory"));
+}
+
 void IdfSdStorage::removeDirectory(const std::string& path) {
     ensureAvailable();
     const std::string fullPath = resolve(path, false);

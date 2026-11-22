@@ -469,6 +469,7 @@ target shell services. Examples use prompt syntax.
 | `DELETE` | `DELETE line[, line ...]` or `DELETE path$ [FORCE]` | Deletes program lines atomically or removes files (wildcards allowed; more than one match asks for confirmation unless `FORCE`). | `DELETE 10, 20` |
 | `COPY` | `COPY src TO dst [FORCE]` | QL/32-specific. Copies files (wildcards in the leaf) or `#channel` data; refuses overwrite without `FORCE`. A source of `#0` (keyboard) or a hardware serial channel copies input as a non-blocking job until Ctrl-Z (0x1A); Esc cancels. | `COPY "*.bas" TO "SDC:/bak/"` |
 | `MOVE` | `MOVE src TO dst [FORCE]` | QL/32-specific. Moves files; across drives copies, verifies, then removes the source. | `MOVE "a.bas" TO "SDC:/a.bas"` |
+| `MKDIR` | `MKDIR dir` | QL/32-specific. Creates a directory (parent must exist; error if it exists). On `FFS:` it is a no-op until a file is created inside. | `MKDIR "work"` |
 | `RMDIR` | `RMDIR dir [FORCE]` | QL/32-specific. Removes an empty directory; `FORCE` removes recursively. Never removes a drive root or the current directory. | `RMDIR "old" FORCE` |
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |
 | `FORMAT` | `FORMAT path` | Recursively clears the selected directory or volume. Destructive. | `FORMAT "SDC:/"` |

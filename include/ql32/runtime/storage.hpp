@@ -155,6 +155,11 @@ public:
     virtual std::uintmax_t size(const std::string& path) = 0;
     virtual void rename(const std::string& path, const std::string& newPath) = 0;
     virtual void remove(const std::string& path) = 0;
+    // Creates one directory; the parent must exist. Flat filesystems may succeed
+    // without creating anything because a directory exists once it holds files.
+    virtual void createDirectory(const std::string&) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "storage: directory creation unavailable");
+    }
     virtual void removeDirectory(const std::string&) {
         throw ServiceError(ServiceErrorCode::Unavailable, "storage: directory removal unavailable");
     }
