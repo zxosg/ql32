@@ -20,6 +20,7 @@ public:
     bool paused() const noexcept { return paused_; }
     std::size_t framePosition() const noexcept { return framePosition_; }
     const VtxMetadata& metadata() const noexcept { return song_.metadata(); }
+    std::shared_ptr<AudioPrefetcher> prefetcher() const { return song_.prefetcher(); }
 
 private:
     void loadFrame(std::size_t frame) noexcept;

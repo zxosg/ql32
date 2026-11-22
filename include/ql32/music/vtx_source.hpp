@@ -13,6 +13,7 @@ public:
         player_.render(samples, count);
     }
     bool playing() const noexcept override { return player_.playing(); }
+    std::shared_ptr<AudioPrefetcher> prefetcher() const override { return player_.prefetcher(); }
 
 private:
     VtxPlayer player_;

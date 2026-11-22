@@ -4,6 +4,8 @@
 #include "ql32/runtime/storage.hpp"
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace ql32::music { class AudioSource; }
 
@@ -11,7 +13,12 @@ namespace ql32::platform::olimex_vga {
 
 class MusicService final : public runtime::MusicService {
 public:
-    explicit MusicService(std::shared_ptr<runtime::StorageService> storage);
+    // dacGpio selects the ESP32 built-in DAC pin: 25 (DAC1, default) or 26 (DAC2, CYD speaker).
+    // vtxCacheRoots (tried in order, e.g. {"SDC:/", "FFS:/"}) makes VTX files play from a
+    // transcoded cache on storage instead of being decoded into RAM; use it on targets
+    // without PSRAM. Empty keeps the in-RAM decode.
+    explicit MusicService(std::shared_ptr<runtime::StorageService> storage, int dacGpio = 25,
+                          std::vector<std::string> vtxCacheRoots = {});
     ~MusicService() override;
     MusicService(const MusicService&) = delete;
     MusicService& operator=(const MusicService&) = delete;
