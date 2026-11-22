@@ -233,6 +233,7 @@ SMSQ/E compatibility.
 | `OUT` | `OUT channel, value` or `OUT channel, register, value` | Writes a scalar device value or register. `[HARDWARE]` | `OUT gpio%, 1` |
 | `XFER` | `XFER #channel, txAddress, txLength, rxAddress, rxLength` | Performs a raw SPI transaction; I2C supports raw transfer through its adapter. `[HARDWARE]` | `XFER #spi%, tx%, 2, rx%, 2` |
 | `CHANNEL` | `CHANNEL #channel` or `CHANNEL #source TO #destination` | Changes the default output channel or session-local channel route. | `CHANNEL #0` |
+| `MIRROR` | `MIRROR #source TO #destination`, `MIRROR DELETE #destination`, `MIRROR LIST` | QL/32-specific. Copies text written to the source endpoint (`#0`, `#1`, window, serial, file) to the destination too. Text only; no graphics, no INPUT echo. Session-local, max 4 per source, no chains or cycles. A failing destination is disabled; a full CYD serial buffer drops bytes (counted in `MIRROR LIST`). Closing a channel removes its mirrors. | `MIRROR #0 TO #log` |
 | `GETNET` | `GETNET ssid$, password$` | Connects to a Wi-Fi network. `[NETWORK]` | `GETNET ssid$, pass$` |
 | `DISNET` | `DISNET` | Disconnects the network service. `[NETWORK]` | `DISNET` |
 | `BEEP` | `BEEP ms, hz [, waveform]` | Plays a tone and suspends only the calling task for `ms` (1..600000). `hz` 20..10000. Waveform: `"SQUARE"` (default), `"SINE"`, `"TRIANGLE"`, `"SAW"` (rising), `"SAWDOWN"` (falling) or 0..4. QL/32-specific; differs from SMSQ/E `BEEP`. Needs the audio service. `[AUDIO]` | `BEEP 200, 440, "sine"` |

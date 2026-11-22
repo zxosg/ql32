@@ -142,6 +142,13 @@ public:
     virtual bool atEnd(SessionId session, ChannelId channel) = 0;
     virtual void write(SessionId session, ChannelId channel,
                        const std::string& text) = 0;
+    // Mirror targets must never stall the caller. Returns the number of bytes
+    // dropped instead of written; adapters without a bounded path write normally.
+    virtual std::size_t writeNonBlocking(SessionId session, ChannelId channel,
+                                         const std::string& text) {
+        write(session, channel, text);
+        return 0;
+    }
     virtual void close(SessionId session, ChannelId channel) = 0;
     virtual void closeSession(SessionId session) = 0;
 
@@ -181,6 +188,8 @@ public:
 class ChannelRegistry final : public ChannelService {
 public:
     using SerialWriter = std::function<void(std::string_view)>;
+    // Writes as many bytes as fit without blocking and returns that count.
+    using SerialTryWriter = std::function<std::size_t(std::string_view)>;
 
     explicit ChannelRegistry(std::shared_ptr<ChannelService> files,
                              SerialWriter serialWriter = {},
@@ -220,6 +229,9 @@ public:
     bool atEnd(SessionId session, ChannelId channel) override;
     void write(SessionId session, ChannelId channel,
                const std::string& text) override;
+    std::size_t writeNonBlocking(SessionId session, ChannelId channel,
+                                 const std::string& text) override;
+    void setSerialTryWriter(SerialTryWriter writer) { serialTryWriter_ = std::move(writer); }
     void close(SessionId session, ChannelId channel) override;
     void closeSession(SessionId session) override;
     std::vector<ChannelInfo> listOpen(SessionId session) override;
@@ -233,6 +245,7 @@ private:
     };
     std::shared_ptr<ChannelService> files_;
     SerialWriter serialWriter_;
+    SerialTryWriter serialTryWriter_;
     std::shared_ptr<HardwareChannelService> hardware_;
     bool touchAvailable_ = false;
     std::unordered_map<ChannelId, Endpoint> endpoints_;

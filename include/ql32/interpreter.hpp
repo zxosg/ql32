@@ -138,6 +138,17 @@ private:
     ExecutionStatus runFileJob(std::ostream& output);
     void writeTextToChannel(std::ostream& output, runtime::ChannelId channel,
                             std::string_view text);
+    // Single text-output choke point for a resolved endpoint; fans out to mirrors.
+    void emitText(std::ostream& output, runtime::ChannelId endpoint,
+                  const std::string& text, bool mirror = true);
+    void writeEndpoint(std::ostream& output, runtime::ChannelId endpoint,
+                       const std::string& text);
+    void mirrorText(std::ostream& output, runtime::ChannelId source,
+                    const std::string& text);
+    void addMirror(runtime::ChannelId source, runtime::ChannelId destination);
+    void deleteMirrors(runtime::ChannelId destination);
+    void removeMirrorsFor(runtime::ChannelId channel);
+    std::string mirrorListing() const;
     runtime::ChannelId resolveChannel(runtime::ChannelId channel) const;
     void setDefaultOutputChannel(runtime::ChannelId channel);
     void bindChannel(runtime::ChannelId source, runtime::ChannelId destination);
@@ -163,6 +174,15 @@ private:
     // Logical channels point directly at the endpoint handle they currently
     // represent. No channel-to-channel route chains are retained.
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;
+    struct Mirror {
+        runtime::ChannelId destination = 0;
+        bool disabled = false;
+        std::uint64_t dropped = 0;
+        std::string failure;
+    };
+    // Session-local text mirrors keyed by resolved source endpoint.
+    std::map<runtime::ChannelId, std::vector<Mirror>> mirrors_;
+    bool emittingMirror_ = false;
     std::vector<runtime::ChannelId> executionChannels_;
     bool interactiveCommandExecution_ = false;
     bool persistentSessionResources_ = false;

@@ -435,6 +435,76 @@ void testInputLineAndSessionResume() {
             "INPUT did not store and return the submitted line");
 }
 
+void testChannelMirroring() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-mirror-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    const auto fails = [](ql32::Interpreter& interpreter, const std::string& source) {
+        std::ostringstream sink;
+        try { interpreter.execute(source, sink); } catch (const std::exception&) { return true; }
+        return false;
+    };
+    const auto slurp = [&](const char* name) {
+        std::ifstream in(root / name, std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+    try {
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+        std::ostringstream console;
+        {
+            ql32::Interpreter interpreter(storage, channels);
+            interpreter.executeInteractive("log = OPEN(\"log.txt\", \"WRITE\")\n", console);
+            interpreter.executeInteractive("MIRROR #0 TO #log\n", console);
+            interpreter.executeInteractive("PRINT #0,\"one\"\nWRITE 0, \"two\"\n", console);
+            interpreter.executeInteractive("10 PRINT #0,\"stored\"\n", console);
+            interpreter.executeInteractive("CHANNEL #0\n", console);
+            interpreter.executeInteractive("LIST\n", console);
+            interpreter.executeInteractive("MIRROR LIST\n", console);
+            require(fails(interpreter, "MIRROR #0 TO #0\n"), "self mirror must be rejected");
+            require(fails(interpreter, "MIRROR #log TO #0\n"), "mirror cycle must be rejected");
+            interpreter.executeInteractive("MIRROR DELETE #log\nPRINT #0,\"unmirrored\"\n", console);
+            interpreter.executeInteractive("MIRROR #0 TO #log\nCLOSE #log\nPRINT #0,\"after close\"\n", console);
+            interpreter.executeInteractive("MIRROR LIST\n", console);
+            require(fails(interpreter, "MIRROR #0 TO #77\n"), "closed target must be rejected");
+        }
+        require(slurp("log.txt") == "one\ntwo\n10 PRINT #0,\"stored\"\nMIRROR #0 TO #2\n",
+                "mirror file did not receive PRINT, WRITE and LIST text");
+        require(console.str().find("MIRROR #0 TO #") != std::string::npos,
+                "MIRROR LIST did not list the relation");
+        require(console.str().find("unmirrored") != std::string::npos &&
+                console.str().find("after close") != std::string::npos,
+                "primary output must continue after delete/close");
+        require(console.str().find("No mirrors") != std::string::npos,
+                "closing the target must remove its mirror");
+
+        std::ostringstream limits;
+        ql32::Interpreter interpreter(storage, channels);
+        interpreter.executeInteractive(
+            "a = OPEN(\"a.txt\", \"WRITE\")\nb = OPEN(\"b.txt\", \"WRITE\")\n"
+            "c = OPEN(\"c.txt\", \"WRITE\")\nd = OPEN(\"d.txt\", \"WRITE\")\n"
+            "e = OPEN(\"e.txt\", \"WRITE\")\n"
+            "MIRROR #0 TO #a\nMIRROR #0 TO #b\nMIRROR #0 TO #c\nMIRROR #0 TO #d\n", limits);
+        require(fails(interpreter, "MIRROR #0 TO #e\n"), "fifth mirror must be rejected");
+        require(fails(interpreter, "MIRROR #a TO #e\n"), "mirror chain must be rejected");
+
+        std::ostringstream failing;
+        ql32::Interpreter reader(storage, channels);
+        reader.executeInteractive(
+            "r = OPEN(\"a.txt\", \"READ\")\nMIRROR #0 TO #r\nPRINT #0,\"still shown\"\n"
+            "MIRROR LIST\n", failing);
+        require(failing.str().find("still shown") != std::string::npos &&
+                failing.str().find("DISABLED") != std::string::npos,
+                "failing mirror must auto-disable without affecting the primary");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testDefaultAndRoutedOutputChannels() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -571,6 +641,7 @@ int main() {
         testUpdateMode();
         testInputLineAndSessionResume();
         testDefaultAndRoutedOutputChannels();
+        testChannelMirroring();
         testChannelBindingSnapshotsEndpoint();
         testGetChannelInspection();
         testTouchChannelAndRunCleanup();

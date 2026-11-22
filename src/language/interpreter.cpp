@@ -171,7 +171,9 @@ std::string commandHelpListing() {
     listing << "DELETE lineNumber1,... atomically deletes numbered program lines; "
             << "DELETE path$ removes a file; wildcards remove several (FORCE skips the prompt).\n"
             << "COPY src TO dst [FORCE], MOVE src TO dst [FORCE]: files or #channels; "
-            << "FORCE overwrites. RMDIR dir [FORCE] removes a directory (FORCE: recursive).\n";
+            << "FORCE overwrites. RMDIR dir [FORCE] removes a directory (FORCE: recursive).\n"
+            << "MIRROR #src TO #dst copies text output to another channel; "
+            << "MIRROR DELETE #dst, MIRROR LIST.\n";
     listing << "BASIC statements and commands:\n";
     bool first = true;
     for (const Keyword& keyword : keywords) {
@@ -1975,6 +1977,37 @@ private:
             }
             return;
         }
+        if (check(Kind::Identifier) && uppercaseAscii(peek().text) == "MIRROR" &&
+            current_ + 1 < tokens_.size()) {
+            const Kind next = tokens_[current_ + 1].kind;
+            const bool nextIsWord = next == Kind::Identifier || next == Kind::BuiltinCommand;
+            const std::string word = nextIsWord ? uppercaseAscii(tokens_[current_ + 1].text) : "";
+            if (next == Kind::Hash) {
+                const Token name = advance();
+                advance();
+                expression();
+                if (!match(Kind::To)) error(peek(), "expected TO after MIRROR #source");
+                if (!match(Kind::Hash)) error(peek(), "expected destination '#channel' after TO");
+                expression();
+                emit(Op::ChannelMirror, name);
+                return;
+            }
+            if (word == "DELETE" && current_ + 2 < tokens_.size() &&
+                tokens_[current_ + 2].kind == Kind::Hash) {
+                const Token name = advance();
+                advance();
+                advance();
+                expression();
+                emit(Op::ChannelMirrorDelete, name);
+                return;
+            }
+            if (word == "LIST") {
+                const Token name = advance();
+                advance();
+                emit(Op::ChannelMirrorList, name);
+                return;
+            }
+        }
         if (check(Kind::BuiltinCommand)) {
             const Token name = advance();
             if (check(Kind::LeftParen))
@@ -2829,18 +2862,8 @@ void Interpreter::writePagerPage(std::ostream& output, std::size_t lineCount) {
     const std::string page = pendingPagerText_.substr(
         pendingPagerOffset_, end - pendingPagerOffset_);
     const runtime::ChannelId channel = resolveChannel(pendingPagerChannel_);
-    if (channel == 0) {
-        output << page;
-        if (page.find('\n') != std::string::npos) output_column_ = 0;
-    } else if (channel == 1) {
-        if (graphics_) graphics_->writeText(session_id_, page);
-        else output << page;
-    } else {
-        if (!channels_)
-            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                        "channel output unavailable");
-        channels_->write(session_id_, channel, page);
-    }
+    emitText(output, channel, page, false);
+    if (channel == 0 && page.find('\n') != std::string::npos) output_column_ = 0;
     output.flush();
     pendingPagerOffset_ = end;
 }
@@ -2892,18 +2915,150 @@ void Interpreter::clearFileJob() noexcept {
 void Interpreter::writeTextToChannel(std::ostream& output, runtime::ChannelId channel,
                                      std::string_view text) {
     channel = resolveChannel(channel);
-    if (channel == 0) {
+    emitText(output, channel, std::string(text));
+    if (channel == 0 && text.find('\n') != std::string_view::npos) output_column_ = 0;
+}
+
+void Interpreter::writeEndpoint(std::ostream& output, runtime::ChannelId endpoint,
+                                const std::string& text) {
+    if (endpoint == 0) {
         output << text;
-        if (text.find('\n') != std::string_view::npos) output_column_ = 0;
-    } else if (channel == 1) {
-        if (graphics_) graphics_->writeText(session_id_, std::string(text));
+    } else if (endpoint == 1) {
+        if (graphics_) graphics_->writeText(session_id_, text);
         else output << text;
     } else {
         if (!channels_)
             throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                         "channel output unavailable");
-        channels_->write(session_id_, channel, std::string(text));
+        const auto opened = channels_->listOpen(session_id_);
+        const auto info = std::find_if(opened.begin(), opened.end(),
+            [&](const runtime::ChannelInfo& item) { return item.handle == endpoint; });
+        if (info != opened.end() && info->type == runtime::ChannelType::Window) {
+            if (!graphics_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "screen output is unavailable");
+            graphics_->writeText(session_id_, endpoint, text);
+        } else {
+            channels_->write(session_id_, endpoint, text);
+        }
     }
+}
+
+void Interpreter::emitText(std::ostream& output, runtime::ChannelId endpoint,
+                           const std::string& text, bool mirror) {
+    writeEndpoint(output, endpoint, text);
+    if (mirror && !mirrors_.empty()) mirrorText(output, endpoint, text);
+}
+
+void Interpreter::mirrorText(std::ostream& output, runtime::ChannelId source,
+                             const std::string& text) {
+    const auto found = mirrors_.find(source);
+    if (found == mirrors_.end() || emittingMirror_) return;
+    emittingMirror_ = true;
+    for (auto& mirror : found->second) {
+        if (mirror.disabled) continue;
+        try {
+            if (!channelIsOpen(mirror.destination)) {
+                mirror.disabled = true;
+                mirror.failure = "target closed";
+            } else if (mirror.destination > 1 && channels_) {
+                const auto opened = channels_->listOpen(session_id_);
+                const auto info = std::find_if(opened.begin(), opened.end(),
+                    [&](const runtime::ChannelInfo& item) {
+                        return item.handle == mirror.destination;
+                    });
+                if (info != opened.end() && info->type != runtime::ChannelType::Window)
+                    mirror.dropped += channels_->writeNonBlocking(
+                        session_id_, mirror.destination, text);
+                else
+                    writeEndpoint(output, mirror.destination, text);
+            } else {
+                writeEndpoint(output, mirror.destination, text);
+            }
+        } catch (const std::exception& error) {
+            mirror.disabled = true;
+            mirror.failure = error.what();
+        } catch (...) {
+            mirror.disabled = true;
+            mirror.failure = "write failed";
+        }
+    }
+    emittingMirror_ = false;
+}
+
+void Interpreter::addMirror(runtime::ChannelId source, runtime::ChannelId destination) {
+    const runtime::ChannelId from = resolveChannel(source);
+    const runtime::ChannelId to = resolveChannel(destination);
+    if (from == to)
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "a channel cannot mirror to itself");
+    if (to > 1) {
+        const auto opened = channels_ ? channels_->listOpen(session_id_)
+                                      : std::vector<runtime::ChannelInfo>{};
+        const auto info = std::find_if(opened.begin(), opened.end(),
+            [&](const runtime::ChannelInfo& item) { return item.handle == to; });
+        if (info == opened.end() ||
+            (info->type != runtime::ChannelType::Window &&
+             info->type != runtime::ChannelType::File &&
+             info->type != runtime::ChannelType::Serial &&
+             info->type != runtime::ChannelType::Null))
+            throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                        "mirror target must be a text output channel");
+    }
+    // Mirrors apply to primary writes only, so a relation may not chain or loop.
+    if (mirrors_.count(to))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "mirror chains and cycles are not supported");
+    for (const auto& entry : mirrors_)
+        for (const auto& mirror : entry.second)
+            if (mirror.destination == from)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                            "mirror chains and cycles are not supported");
+    auto& list = mirrors_[from];
+    for (auto& mirror : list) {
+        if (mirror.destination != to) continue;
+        mirror = Mirror{to, false, 0, {}};
+        return;
+    }
+    if (list.size() >= 4) {
+        if (list.empty()) mirrors_.erase(from);
+        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                    "a channel can have at most 4 mirrors");
+    }
+    list.push_back(Mirror{to, false, 0, {}});
+}
+
+void Interpreter::deleteMirrors(runtime::ChannelId destination) {
+    runtime::ChannelId target = destination;
+    try { target = resolveChannel(destination); } catch (const runtime::ServiceError&) {}
+    for (auto entry = mirrors_.begin(); entry != mirrors_.end();) {
+        auto& list = entry->second;
+        list.erase(std::remove_if(list.begin(), list.end(),
+            [&](const Mirror& mirror) {
+                return mirror.destination == target || mirror.destination == destination;
+            }), list.end());
+        if (list.empty()) entry = mirrors_.erase(entry);
+        else ++entry;
+    }
+}
+
+void Interpreter::removeMirrorsFor(runtime::ChannelId channel) {
+    mirrors_.erase(channel);
+    deleteMirrors(channel);
+}
+
+std::string Interpreter::mirrorListing() const {
+    std::string listing;
+    for (const auto& entry : mirrors_)
+        for (const auto& mirror : entry.second) {
+            listing += "MIRROR #" + std::to_string(entry.first) + " TO #" +
+                       std::to_string(mirror.destination);
+            if (mirror.dropped != 0)
+                listing += " dropped " + std::to_string(mirror.dropped) + " bytes";
+            if (mirror.disabled) listing += " DISABLED: " + mirror.failure;
+            listing += "\n";
+        }
+    return listing.empty() ? "No mirrors\n" : listing;
 }
 
 ExecutionStatus Interpreter::startFileJob(runtime::fileops::Plan plan, std::ostream& output,
@@ -3087,6 +3242,7 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
     executionChannels_.erase(std::remove(executionChannels_.begin(),
         executionChannels_.end(), channel), executionChannels_.end());
     channel_bindings_.erase(channel);
+    removeMirrorsFor(channel);
     for (auto binding = channel_bindings_.begin(); binding != channel_bindings_.end();) {
         if (binding->second == channel) binding = channel_bindings_.erase(binding);
         else ++binding;
@@ -3341,19 +3497,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         return static_cast<std::uint64_t>(*number);
     };
     auto writeChannelText = [&](std::uint64_t channel, const std::string& text) {
-        channel = resolveChannel(channel);
-        if (channel == 0) {
-            output << text;
-            if (text.find('\n') != std::string::npos) output_column_ = 0;
-        } else if (channel == 1) {
-            if (graphics_) graphics_->writeText(session_id_, text);
-            else output << text;
-        } else {
-            if (!channels_)
-                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                            "channel output unavailable");
-            channels_->write(session_id_, channel, text);
-        }
+        writeTextToChannel(output, channel, text);
     };
     auto writeGeneratedListing = [&](std::uint64_t channel,
                                      const std::string& listing) {
@@ -3380,6 +3524,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             return false;
         }
 
+        // Mirrors receive the whole listing once; only the display is paged.
+        mirrorText(output, endpoint, listing);
         pendingPagerText_ = wrapped;
         pendingPagerOffset_ = 0;
         pendingPagerPageRows_ = pageRows;
