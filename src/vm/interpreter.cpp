@@ -3386,7 +3386,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             break;
         case Op::Push:
             pushValue(instruction.textLiteral ? Value{instruction.name.str()}
-                                              : Value{instruction.value});
+                                              : Value{instruction.literal()});
             break;
         case Op::PushArrayRef: stack.emplace_back(ArrayReference{instruction.name}); break;
         case Op::Load: {
@@ -4152,7 +4152,7 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
         switch (instruction.op) {
         case Op::Push:
             if (!instruction.textLiteral) {
-                const double literal = instruction.value;
+                const double literal = instruction.literal();
                 const double rounded = execution_->code.numericPrecision ==
                     detail::NumericPrecision::Single ?
                     static_cast<double>(static_cast<float>(literal)) : literal;

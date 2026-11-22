@@ -17,8 +17,8 @@ void require(bool ok, const char* message) {
 }
 
 void testRecordSizeBudget() {
-    // 104 B on LP64 at the time of writing; the budget guards against regrowth.
-    require(sizeof(Instruction) <= 112, "Instruction grew beyond its memory budget");
+    // 48 B on LP64 (40 B on 32-bit) at the time of writing; the budget guards against regrowth.
+    require(sizeof(Instruction) <= 48, "Instruction grew beyond its memory budget");
 }
 
 void testNamesAndStringLiteralsAreShared() {
@@ -46,7 +46,7 @@ void testLiteralsKeepTheirType() {
     for (const auto& instruction : code) {
         if (instruction.op != Op::Push) continue;
         if (instruction.textLiteral) ++strings;
-        else { ++numbers; require(instruction.value == 2.5, "numeric literal changed"); }
+        else { ++numbers; require(instruction.literal() == 2.5, "numeric literal changed"); }
     }
     require(strings == 2 && numbers == 1, "literal kinds changed");
 }

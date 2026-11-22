@@ -4,10 +4,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <deque>
+#include <limits>
+#include <stdexcept>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -141,16 +146,54 @@ private:
 };
 
 
-// Shared immutable text. Identifier names and string literals repeat across
-// instructions; compileSource() collapses equal values onto one allocation.
+// Owns interned identifier names and string literals. Addresses of pooled
+// strings stay valid for the pool's lifetime, so instructions hold one pointer.
+class TextPool {
+public:
+    const std::string* intern(const std::string& value) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return &*strings_.insert(value).first;
+    }
+    std::size_t count() const { return strings_.size(); }
+
+    // Pool that receives text assigned on this thread (set while compiling).
+    static TextPool*& active() {
+        thread_local TextPool* current = nullptr;
+        return current;
+    }
+    // Fallback for text created outside a compilation (tests, tools).
+    static TextPool& fallback() {
+        static TextPool pool;
+        return pool;
+    }
+
+private:
+    std::mutex mutex_;
+    std::unordered_set<std::string> strings_;
+};
+
+class TextPoolScope {
+public:
+    explicit TextPoolScope(const std::shared_ptr<TextPool>& pool)
+        : previous_(TextPool::active()) { TextPool::active() = pool.get(); }
+    ~TextPoolScope() { TextPool::active() = previous_; }
+    TextPoolScope(const TextPoolScope&) = delete;
+    TextPoolScope& operator=(const TextPoolScope&) = delete;
+
+private:
+    TextPool* previous_;
+};
+
+// Interned immutable text: one pointer into the owning InstructionSequence's
+// TextPool (empty text is null).
 class SharedText {
 public:
     SharedText() = default;
     SharedText(const std::string& value) { assign(value); }
-    SharedText(std::string&& value) { assign(std::move(value)); }
+    SharedText(std::string&& value) { assign(value); }
     SharedText(const char* value) { assign(value); }
     SharedText& operator=(const std::string& value) { assign(value); return *this; }
-    SharedText& operator=(std::string&& value) { assign(std::move(value)); return *this; }
+    SharedText& operator=(std::string&& value) { assign(value); return *this; }
     SharedText& operator=(const char* value) { assign(value); return *this; }
 
     const std::string& str() const noexcept { return text_ ? *text_ : emptyText(); }
@@ -159,25 +202,19 @@ public:
     std::size_t size() const noexcept { return str().size(); }
     char back() const { return str().back(); }
     const char* c_str() const noexcept { return str().c_str(); }
-    // Replace this text with the canonical allocation for an equal string.
-    void intern(std::unordered_map<std::string, std::shared_ptr<const std::string>>& pool) {
-        if (!text_) return;
-        auto found = pool.find(*text_);
-        if (found == pool.end()) found = pool.emplace(*text_, text_).first;
-        text_ = found->second;
-    }
-    const void* storageId() const noexcept { return text_.get(); }
+    const void* storageId() const noexcept { return text_; }
 
 private:
     static const std::string& emptyText() {
         static const std::string empty;
         return empty;
     }
-    template <typename T> void assign(T&& value) {
-        if (std::string(value).empty()) text_.reset();
-        else text_ = std::make_shared<const std::string>(std::forward<T>(value));
+    void assign(const std::string& value) {
+        if (value.empty()) { text_ = nullptr; return; }
+        TextPool* pool = TextPool::active();
+        text_ = (pool ? pool : &TextPool::fallback())->intern(value);
     }
-    std::shared_ptr<const std::string> text_;
+    const std::string* text_ = nullptr;
 };
 inline bool operator==(const SharedText& a, const SharedText& b) { return a.str() == b.str(); }
 inline bool operator!=(const SharedText& a, const SharedText& b) { return a.str() != b.str(); }
@@ -234,40 +271,88 @@ private:
     std::unique_ptr<InstructionExtras> value_;
 };
 
-struct Instruction {
-    Op op;
-    // Numeric literal (Op::Push). A string literal is stored in `name` and
-    // flagged by textLiteral, so no instruction carries a second text pointer.
-    double value = 0.0;
+// Narrow stored integer that rejects values it cannot hold instead of wrapping.
+template <typename T> class Narrow {
+public:
+    constexpr Narrow() = default;
+    Narrow(long long value) { set(value); }
+    Narrow& operator=(long long value) { set(value); return *this; }
+    constexpr operator int() const noexcept { return value_; }
+
+private:
+    void set(long long value) {
+        if (value < 0 || value > static_cast<long long>(std::numeric_limits<T>::max()))
+            throw std::length_error("program exceeds a bytecode field limit");
+        value_ = static_cast<T>(value);
+    }
+    T value_ = 0;
+};
+
+struct InstructionFlags {
+    bool explicitNext : 1;
+    bool clearTarget : 1;
+    bool expectsValue : 1;
+    bool builtin : 1;
+    bool channelArgument : 1;
+    bool sliceHasStart : 1;
+    bool sliceHasEnd : 1;
+    bool sliceSingle : 1;
+    bool sourceJump : 1;
+    bool targetIsLineNumber : 1;
+    bool statementStart : 1;
+    bool textLiteral : 1;
+    InstructionFlags() : explicitNext(false), clearTarget(false), expectsValue(false), builtin(false), channelArgument(false), sliceHasStart(false), sliceHasEnd(false), sliceSingle(false), sourceJump(false), targetIsLineNumber(false), statementStart(false), textLiteral(false) {}
+};
+
+// Pointers first so the flag bits share the tail of the first cache line
+// instead of forcing alignment padding.
+struct InstructionHead {
     SharedText name;
-    int line = 1;
-    int column = 1;
-    PrintSeparator separator = PrintSeparator::None;
-    std::uint32_t target = 0;
-    std::uint32_t exitTarget = 0;
-    std::uint32_t loopId = 0;
-    bool explicitNext = false;
-    bool clearTarget = false;
-    std::uint32_t argCount = 0;
-    std::uint32_t optionCount = 0;
-    bool expectsValue = false;
-    bool builtin = false;
-    bool channelArgument = false;
-    std::uint32_t rank = 0;
-    bool sliceHasStart = false;
-    bool sliceHasEnd = false;
-    bool sliceSingle = false;
-    bool sourceJump = false;
-    bool targetIsLineNumber = false;
-    bool statementStart = false;
-    bool textLiteral = false;
-    int basicLine = 0;
-    int sourceLineTarget = 0;
     ExtrasPtr extras;
+};
+
+struct Instruction : InstructionHead, InstructionFlags {
+    Instruction() = default;
+    // `literal` is only meaningful for Op::Push; a string literal goes in `name`.
+    Instruction(Op opcode, double literal = 0.0, SharedText text = {}, long long sourceLine = 1,
+                long long sourceColumn = 1, PrintSeparator sep = PrintSeparator::None)
+        : op(opcode), separator(sep) {
+        name = std::move(text);
+        line = sourceLine;
+        column = sourceColumn;
+        if (opcode == Op::Push) setLiteral(literal);
+    }
+
+    // Numeric literal of Op::Push, held in the jump-target words Push never uses.
+    double literal() const noexcept {
+        std::uint64_t bits = (static_cast<std::uint64_t>(exitTarget) << 32) | target;
+        double result;
+        std::memcpy(&result, &bits, sizeof result);
+        return result;
+    }
+    void setLiteral(double value) noexcept {
+        std::uint64_t bits;
+        std::memcpy(&bits, &value, sizeof bits);
+        target = static_cast<std::uint32_t>(bits);
+        exitTarget = static_cast<std::uint32_t>(bits >> 32);
+    }
 
     // Read access never allocates; mutableExtra() creates the side record.
     const InstructionExtras& extra() const { return extras.get(); }
     InstructionExtras& mutableExtra() { return extras.mutate(); }
+
+    std::uint32_t target = 0;
+    std::uint32_t exitTarget = 0;
+    std::uint32_t loopId = 0;
+    Narrow<std::uint16_t> line = 1;
+    Narrow<std::uint16_t> column = 1;
+    Narrow<std::uint16_t> basicLine = 0;
+    Narrow<std::uint16_t> sourceLineTarget = 0;
+    Narrow<std::uint16_t> argCount = 0;
+    Narrow<std::uint16_t> optionCount = 0;
+    Narrow<std::uint8_t> rank = 0;
+    Op op = Op::Push;
+    PrintSeparator separator = PrintSeparator::None;
 };
 
 struct FunctionMetadata {
@@ -291,6 +376,7 @@ struct InstructionSequence : std::deque<Instruction> {
     std::unordered_map<std::string, std::size_t> arrays;
     std::unordered_map<std::string, Value> constants;
     std::vector<DataItem> dataItems;
+    std::shared_ptr<TextPool> textPool = std::make_shared<TextPool>();
 };
 
 InstructionSequence compileSource(const std::string& source);

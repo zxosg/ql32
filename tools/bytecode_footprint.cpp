@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
             if (ins.op == Op::Push) {
                 ++pushValues;
                 pushes.insert(ins.textLiteral ? "s:" + ins.name.str()
-                                              : "n:" + std::to_string(ins.value));
+                                              : "n:" + std::to_string(ins.literal()));
             }
             auto vec = [&](const auto& v, std::size_t elem) {
                 if (!v.empty()) outOfLine += sizeof(void*) * 3 + v.size() * elem;

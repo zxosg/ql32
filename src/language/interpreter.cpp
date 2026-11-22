@@ -649,6 +649,7 @@ public:
         : tokens_(std::move(tokens)) {
         if (enclosing) {
             enclosingFunctions_ = enclosing->functions;
+            code_.textPool = enclosing->textPool;
             arrays_ = enclosing->arrays;
             constants_ = enclosing->constants;
             for (const auto& [name, function] : enclosing->functions) {
@@ -668,6 +669,7 @@ public:
     InstructionSequence compile(bool tolerateUnresolvedCalls = false,
                                  bool tolerateIncompleteBlocks = false,
                                  bool tolerateUnresolvedSourceJumps = false) {
+        detail::TextPoolScope textScope(code_.textPool);
         try {
             block(true);
             if (!check(Kind::End)) error(peek(), "unexpected block terminator");
@@ -692,29 +694,21 @@ public:
         }
         code_.arrays = arrays_;
         code_.constants = constants_;
-        internText();
         return std::move(code_);
     }
 
     InstructionSequence compileExpression() {
+        detail::TextPoolScope textScope(code_.textPool);
         expression();
         if (!check(Kind::End)) error(peek(), "unexpected text after expression");
         resolveCalls(false);
         code_.functions = enclosingFunctions_;
         code_.arrays = arrays_;
         code_.constants = constants_;
-        internText();
         return std::move(code_);
     }
 
 private:
-    void internText() {
-        std::unordered_map<std::string, std::shared_ptr<const std::string>> pool;
-        for (Instruction& instruction : code_) {
-            instruction.name.intern(pool);
-        }
-    }
-
     std::vector<Token> tokens_;
     InstructionSequence code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
@@ -895,7 +889,7 @@ private:
             instruction.name = *text;
             instruction.textLiteral = true;
         } else {
-            instruction.value = std::get<double>(value);
+            instruction.setLiteral(std::get<double>(value));
         }
         code_.push_back(std::move(instruction));
     }
