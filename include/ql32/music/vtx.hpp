@@ -3,10 +3,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace ql32::music {
+
+class VtxPlaneFile;
+class AudioPrefetcher;
 
 struct VtxMetadata {
     std::string title;
@@ -34,10 +38,18 @@ public:
     const VtxMetadata& metadata() const noexcept { return metadata_; }
     std::size_t frameCount() const noexcept { return frameCount_; }
     std::array<std::uint8_t, 14> registers(std::size_t frame) const;
+    // A song backed by a transcoded plane file (see vtx_stream.hpp).
+    static VtxSong fromPlaneFile(VtxMetadata metadata,
+                                 std::shared_ptr<VtxPlaneFile> planes,
+                                 std::size_t frameCount);
+    // True once a storage read failed; playback should stop.
+    bool failed() const noexcept;
+    std::shared_ptr<AudioPrefetcher> prefetcher() const;
 
 private:
     VtxMetadata metadata_;
     std::vector<std::uint8_t> registers_;
+    std::shared_ptr<VtxPlaneFile> planes_;
     std::size_t frameCount_ = 0;
 };
 

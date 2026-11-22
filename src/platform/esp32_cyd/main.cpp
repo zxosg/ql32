@@ -682,7 +682,7 @@ void setup() {
     services.channels = channelRegistry;
     // The CYD speaker amplifier is fed by DAC2 on GPIO26.
     services.music = std::make_shared<ql32::platform::olimex_vga::MusicService>(
-        services.storage, 26);
+        services.storage, 26, std::vector<std::string>{"SDC:/", "FFS:/"});
     services.ui = uiService;
     services.graphics = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(

@@ -7,6 +7,7 @@
 #include "ql32/music/vtx_source.hpp"
 #include "ql32/music/song_loader.hpp"
 #include "ql32/music/vtx.hpp"
+#include "ql32/music/vtx_stream.hpp"
 #include "ql32/music/vtx_player.hpp"
 
 #include <Arduino.h>
@@ -41,13 +42,19 @@ void failIfEspError(esp_err_t error, const char* operation) {
 } // namespace
 
 struct MusicService::Impl {
-    explicit Impl(std::shared_ptr<runtime::StorageService> storageService, int dacPin)
+    explicit Impl(std::shared_ptr<runtime::StorageService> storageService, int dacPin,
+                  std::vector<std::string> cacheRoots)
         : storage(std::move(storageService)), dacGpio(dacPin),
+          vtxCacheRoots(std::move(cacheRoots)),
           mutex(xSemaphoreCreateMutex()) {
         if (!mutex) throw std::bad_alloc();
     }
 
     ~Impl() {
+        if (ioWorker) {
+            vTaskDelete(ioWorker);
+            ioWorker = nullptr;
+        }
         if (worker) {
             vTaskDelete(worker);
             worker = nullptr;
@@ -60,9 +67,12 @@ struct MusicService::Impl {
     }
 
     std::shared_ptr<runtime::StorageService> storage;
+    std::vector<std::string> vtxCacheRoots;
     int dacGpio;
     SemaphoreHandle_t mutex = nullptr;
     TaskHandle_t worker = nullptr;
+    TaskHandle_t ioWorker = nullptr;
+    std::shared_ptr<music::AudioPrefetcher> prefetch; // guarded by `mutex`
     music::Mixer mixer; // Music slot: VTX or WAV stream; Effect slot: BEEP and MUSIC TEST
     std::uint8_t outputVolume = music::DefaultVolume;
     runtime::MusicSessionId owner = 0;
@@ -106,6 +116,26 @@ struct MusicService::Impl {
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "music: unable to start audio renderer task");
             }
+        }
+        // Slow storage reads (VTX cache read-ahead) must not run in the audio task.
+        if (!ioWorker &&
+            xTaskCreatePinnedToCore(&Impl::ioTaskEntry, "ql32_music_io", 4096, this,
+                                    1, &ioWorker, tskNO_AFFINITY) != pdPASS)
+            ioWorker = nullptr;
+    }
+
+    static void ioTaskEntry(void* context) {
+        static_cast<Impl*>(context)->runIo();
+    }
+
+    void runIo() {
+        for (;;) {
+            lock();
+            if (!mixer.active(music::Mixer::Music)) prefetch.reset();
+            const auto current = prefetch;
+            unlock();
+            if (current) current->run();
+            vTaskDelay(pdMS_TO_TICKS(20));
         }
     }
 
@@ -234,8 +264,9 @@ struct MusicService::Impl {
     }
 };
 
-MusicService::MusicService(std::shared_ptr<runtime::StorageService> storage, int dacGpio)
-    : impl_(std::make_unique<Impl>(std::move(storage), dacGpio)) {}
+MusicService::MusicService(std::shared_ptr<runtime::StorageService> storage, int dacGpio,
+                           std::vector<std::string> vtxCacheRoots)
+    : impl_(std::make_unique<Impl>(std::move(storage), dacGpio, std::move(vtxCacheRoots))) {}
 
 MusicService::~MusicService() = default;
 
@@ -245,6 +276,23 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                                     "music: storage service unavailable");
     auto source = impl_->storage->openRead(path);
     const std::uint64_t byteCount = source->size();
+    std::uint8_t signature[2] = {};
+    if (!impl_->vtxCacheRoots.empty() && byteCount >= 2 &&
+        source->readAt(0, signature, 2) == 2 &&
+        ((signature[0] == 'a' && signature[1] == 'y') ||
+         (signature[0] == 'y' && signature[1] == 'm'))) {
+        source.reset();
+        try {
+            startMusic(session, std::make_unique<music::VtxSource>(
+                music::openVtxStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
+        } catch (const runtime::ServiceError&) {
+            throw;
+        } catch (const std::exception& error) {
+            throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
+                                        std::string("music: ") + error.what());
+        }
+        return;
+    }
     if (byteCount == 0 || byteCount > MaximumFileBytes)
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
                                     "music: song file is empty or too large");
@@ -279,6 +327,7 @@ void MusicService::startMusic(runtime::MusicSessionId session,
         throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
                                     "music: audio output is owned by another session");
     }
+    impl_->prefetch = source->prefetcher();
     impl_->mixer.set(music::Mixer::Music, std::move(source));
     impl_->owner = session;
     impl_->playbackState = runtime::MusicPlaybackState::Playing;

@@ -9,6 +9,7 @@
 #include "ql32/music/wav.hpp"
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_player.hpp"
+#include "ql32/music/vtx_stream.hpp"
 #include "ql32/music/ym_player.hpp"
 #include "ql32/runtime/music.hpp"
 
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -817,6 +819,120 @@ void testVtxLongAndRaggedStreams() {
     require(maximumSongFileBytes() >= VtxSong::MaximumFileBytes, "loader limit below VTX limit");
 }
 
+class MemoryStorage final : public ql32::runtime::StorageService {
+public:
+    std::map<std::string, std::string> files;
+    std::string readOnlyPrefix;
+    int writes = 0;
+    std::string readText(const std::string& path) override { return files.at(path); }
+    std::unique_ptr<ql32::runtime::StorageReadHandle> openRead(const std::string& path) override {
+        return std::make_unique<ql32::runtime::MemoryStorageReadHandle>(files.at(path));
+    }
+    void writeText(const std::string& path, const std::string& contents) override {
+        if (!readOnlyPrefix.empty() && path.rfind(readOnlyPrefix, 0) == 0)
+            throw ql32::runtime::ServiceError(
+                ql32::runtime::ServiceErrorCode::PermissionDenied, "write protected");
+        ++writes;
+        files[path] = contents;
+    }
+    std::vector<ql32::runtime::FileEntry> list(const std::string& path) override {
+        std::vector<ql32::runtime::FileEntry> result;
+        for (const auto& [name, data] : files)
+            if (name.rfind(path, 0) == 0) result.push_back({name, data.size(), false});
+        return result;
+    }
+    bool exists(const std::string& path) override { return files.count(path) != 0; }
+    std::uintmax_t size(const std::string& path) override { return files.at(path).size(); }
+    void rename(const std::string& path, const std::string& newPath) override {
+        files[newPath] = std::move(files.at(path));
+        files.erase(path);
+    }
+    void remove(const std::string& path) override { files.erase(path); }
+};
+
+void testVtxStreamedCache() {
+    using namespace ql32::music;
+    const std::vector<std::string> roots = {"SDC:/", "FFS:/"};
+    const std::filesystem::path dir = std::filesystem::path(QL32_EXAMPLES_DIR) / "music";
+    int songs = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.path().extension() != ".vtx") continue;
+        std::ifstream in(entry.path(), std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), {});
+        const auto reference = VtxSong::parse(std::vector<std::uint8_t>(bytes.begin(), bytes.end()));
+
+        MemoryStorage storage;
+        storage.files["FFS:/song.vtx"] = bytes;
+        storage.readOnlyPrefix = "SDC:";   // SD card write-protected
+        VtxStreamInfo info;
+        auto song = openVtxStreamed(storage, "FFS:/song.vtx", roots, &info);
+        require(!info.cacheHit && info.cachePath.rfind("FFS:/", 0) == 0,
+                "write-protected SDC did not fall back to FFS");
+        require(song.frameCount() == reference.frameCount() &&
+                song.metadata().playerHz == reference.metadata().playerHz &&
+                song.metadata().loopFrame == reference.metadata().loopFrame &&
+                song.metadata().chipClockHz == reference.metadata().chipClockHz,
+                "streamed VTX metadata differs");
+        for (std::size_t frame = 0; frame < reference.frameCount(); ++frame)
+            require(song.registers(frame) == reference.registers(frame),
+                    "streamed VTX registers differ");
+        require(!song.failed(), "streamed VTX reported a read failure");
+        // Read-ahead path: sequential playback with run() interleaved, then a loop jump.
+        auto ahead = openVtxStreamed(storage, "FFS:/song.vtx", roots);
+        const auto pump = ahead.prefetcher();
+        require(pump != nullptr, "streamed VTX has no prefetcher");
+        for (std::size_t frame = 0; frame < reference.frameCount(); ++frame) {
+            if (frame % 16 == 0) pump->run();
+            require(ahead.registers(frame) == reference.registers(frame),
+                    "read-ahead VTX registers differ");
+        }
+        const std::size_t loop = std::min<std::size_t>(
+            reference.metadata().loopFrame, reference.frameCount() - 1);
+        pump->run();
+        for (std::size_t frame = loop; frame < std::min(reference.frameCount(), loop + 600); ++frame) {
+            if (frame % 16 == 0) pump->run();
+            require(ahead.registers(frame) == reference.registers(frame),
+                    "VTX registers differ after loop jump");
+        }
+        require(!ahead.failed(), "read-ahead VTX reported a read failure");
+
+        const int writes = storage.writes;
+        openVtxStreamed(storage, "FFS:/song.vtx", roots, &info);
+        require(info.cacheHit && storage.writes == writes, "VTX cache was not reused");
+
+        storage.readOnlyPrefix.clear();
+        openVtxStreamed(storage, "FFS:/song.vtx", roots, &info);
+        require(info.cacheHit && info.cachePath.rfind("FFS:/", 0) == 0,
+                "an existing cache was not found on the fallback root");
+
+        // A different song at the same path invalidates the cache.
+        storage.files["FFS:/song.vtx"][17] ^= 1;
+        openVtxStreamed(storage, "FFS:/song.vtx", roots, &info);
+        require(!info.cacheHit && info.cachePath.rfind("SDC:/", 0) == 0,
+                "changed source reused a stale cache or ignored the first root");
+        ++songs;
+    }
+    require(songs >= 3, "example VTX files not found");
+
+    MemoryStorage storage;
+    storage.files["FFS:/bad.vtx"] = std::string(64, 'x');
+    bool rejected = false;
+    try { openVtxStreamed(storage, "FFS:/bad.vtx", roots); }
+    catch (const std::runtime_error&) { rejected = true; }
+    require(rejected && storage.files.size() == 1, "malformed VTX was cached");
+
+    storage.readOnlyPrefix = "FFS:/.";
+    storage.files["FFS:/ok.vtx"] = [] {
+        std::ifstream in(std::filesystem::path(QL32_EXAMPLES_DIR) / "music/LyraII1.vtx",
+                         std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), {});
+    }();
+    rejected = false;
+    try { openVtxStreamed(storage, "FFS:/ok.vtx", {"FFS:/"}); }
+    catch (const ql32::runtime::ServiceError&) { rejected = true; }
+    require(rejected, "unwritable cache roots did not report an error");
+}
+
 void testSqtRejectsGarbage() {
     std::vector<std::uint8_t> junk(300);
     for (std::size_t i = 0; i < junk.size(); ++i) junk[i] = static_cast<std::uint8_t>(i * 37 + 11);
@@ -846,6 +962,7 @@ int main() {
         testVtxEnvelopeShapeKept();
         testSqtRejectsGarbage();
         testVtxLongAndRaggedStreams();
+        testVtxStreamedCache();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {
         std::cerr << "music test failed: " << error.what() << '\n';
