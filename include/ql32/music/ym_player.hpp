@@ -24,6 +24,7 @@ public:
     bool playing() const noexcept { return playing_; }
     std::size_t framePosition() const noexcept { return frame_; }
     const YmMetadata& metadata() const noexcept { return song_.metadata(); }
+    std::shared_ptr<AudioPrefetcher> prefetcher() const { return song_.prefetcher(); }
 
 private:
     enum class Effect : std::uint8_t { None, Sid, Drum, Sinus, Buzzer };
@@ -65,6 +66,7 @@ public:
         player_.render(samples, count);
     }
     bool playing() const noexcept override { return player_.playing(); }
+    std::shared_ptr<AudioPrefetcher> prefetcher() const override { return player_.prefetcher(); }
 
 private:
     YmPlayer player_;

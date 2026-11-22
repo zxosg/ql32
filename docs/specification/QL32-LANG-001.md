@@ -1193,7 +1193,13 @@ Audio is implemented on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
 the file into a QL/32-specific plane cache (`.q32v-<hash>`, about 14 bytes per
 frame) on `SDC:/`, or on `FFS:/` when no SD card is present or it is
 write-protected, and later plays reuse it. Playback then needs about 8 KiB of
-heap for any song length. Linux, Tenstar, and LILYGO
+heap for any song length. YM2!/YM3!/YM3b/YM5!/YM6! files (raw or LHA wrapped,
+up to 256 KiB packed) take the same path with a `Q32Y` cache (14 or 16 register
+bytes per frame, any YM5/YM6 register layout); measured on the CYD a playing YM
+costs about 15 KiB of heap, all released by `MUSIC STOP` apart from the music
+service's retained task stacks. Digi-drum samples stay in RAM (at most 12288
+samples in total; further drums are silent) and title/author/comment are not kept.
+The first play of a song needs seconds to a few minutes to write the cache. Linux, Tenstar, and LILYGO
 raise "music service unavailable" / "audio service unavailable". One session at
 a time owns the output; another session's request raises `ResourceBusy`.
 

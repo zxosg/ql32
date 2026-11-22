@@ -9,6 +9,7 @@
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/vtx_stream.hpp"
 #include "ql32/music/vtx_player.hpp"
+#include "ql32/music/ym_player.hpp"
 
 #include <Arduino.h>
 #include <driver/i2s.h>
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <limits>
 #include <new>
 #include <vector>
@@ -285,6 +287,25 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
         try {
             startMusic(session, std::make_unique<music::VtxSource>(
                 music::openVtxStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
+        } catch (const runtime::ServiceError&) {
+            throw;
+        } catch (const std::exception& error) {
+            throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
+                                        std::string("music: ") + error.what());
+        }
+        return;
+    }
+    std::uint8_t lead[7] = {};
+    const bool leadRead = byteCount >= sizeof lead && source->readAt(0, lead, sizeof lead) == sizeof lead;
+    if (!impl_->vtxCacheRoots.empty() && leadRead &&
+        byteCount <= music::YmSong::MaximumPackedBytes &&
+        ((lead[0] == 'Y' && lead[1] == 'M') ||
+         (byteCount >= 22 && (std::memcmp(lead + 2, "-lh5-", 5) == 0 ||
+                              std::memcmp(lead + 2, "-lh0-", 5) == 0)))) {
+        source.reset();
+        try {
+            startMusic(session, std::make_unique<music::YmSource>(
+                music::openYmStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
         } catch (const runtime::ServiceError&) {
             throw;
         } catch (const std::exception& error) {
