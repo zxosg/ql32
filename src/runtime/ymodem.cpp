@@ -1,6 +1,7 @@
 #include "ql32/runtime/ymodem.hpp"
 
 #include <array>
+#include <functional>
 #include <charconv>
 #include <cstring>
 #include <limits>
@@ -99,7 +100,12 @@ std::string baseName(std::string_view path) {
     return std::string(separator == std::string_view::npos ? path : path.substr(separator + 1));
 }
 
-std::string backupPath(const std::string& path) { return path + ".BAK"; }
+// Fixed per-directory names keep SPIFFS paths short and let a later receive
+// recover from an interrupted one.
+std::string siblingPath(const std::string& path, const char* leaf) {
+    const auto separator = path.find_last_of("/:");
+    return (separator == std::string::npos ? std::string() : path.substr(0, separator + 1)) + leaf;
+}
 
 void sendCancel(const YModemIo& io) noexcept {
     try {
@@ -126,7 +132,7 @@ std::uint64_t parseFileSize(const std::uint8_t* field, std::size_t length) {
 }
 
 void receiveProtocol(const YModemIo& io, ChannelService& channels, SessionId session,
-                     ChannelId channel) {
+                     ChannelId channel, const std::function<void()>& commit) {
     Packet packet;
     bool headerReceived = false;
     std::uint64_t remaining = 0;
@@ -215,6 +221,9 @@ void receiveProtocol(const YModemIo& io, ChannelService& channels, SessionId ses
     bool finished = false;
     for (unsigned attempt = 0; attempt < kMaxRetries; ++attempt) {
         if (readPacket(io, packet) && packet.sequence == 0 && packet.payload[0] == 0) {
+            // The sender treats this ACK as completion, so the file must be
+            // closed and installed first.
+            commit();
             sendByte(io, kAck);
             finished = true;
             break;
@@ -308,37 +317,41 @@ void ymodemSendFile(const std::string& path, StorageService& storage,
 
 void ymodemReceiveFile(const std::string& path, StorageService& storage,
                        ChannelService& channels, SessionId session, const YModemIo& io) {
-    const std::string backup = backupPath(path);
-    if (storage.exists(backup))
-        throw ServiceError(ServiceErrorCode::IoError,
-                           "receive stopped: backup already exists: " + backup);
-    const bool hadPrevious = storage.exists(path);
-    if (hadPrevious) storage.rename(path, backup);
+    const std::string temporary = siblingPath(path, ".q32-r");
+    const std::string backup = siblingPath(path, ".q32-rb");
+    // Recover from an interrupted earlier receive: a lone backup is the
+    // original file; a backup next to the destination is a finished install.
+    if (storage.exists(backup)) {
+        if (storage.exists(path)) storage.remove(backup);
+        else storage.rename(backup, path);
+    }
+    if (storage.exists(temporary)) storage.remove(temporary);
 
     ChannelId channel = 0;
     bool opened = false;
     try {
-        channel = channels.open(session, path, ChannelMode::Write);
+        channel = channels.open(session, temporary, ChannelMode::Write);
         opened = true;
         if (io.ready) io.ready();
-        receiveProtocol(io, channels, session, channel);
-        channels.close(session, channel);
-        opened = false;
-    } catch (const std::exception& error) {
+        receiveProtocol(io, channels, session, channel, [&] {
+            channels.close(session, channel);
+            opened = false;
+            const bool hadPrevious = storage.exists(path);
+            if (hadPrevious) storage.rename(path, backup);
+            try {
+                storage.rename(temporary, path);
+            } catch (...) {
+                if (hadPrevious) { try { storage.rename(backup, path); } catch (...) {} }
+                throw;
+            }
+            if (hadPrevious) { try { storage.remove(backup); } catch (...) {} }
+        });
+    } catch (const std::exception&) {
         sendCancel(io);
-        if (opened) {
-            try { channels.close(session, channel); } catch (...) {}
-        }
-        try {
-            if (storage.exists(path)) storage.remove(path);
-            if (hadPrevious) storage.rename(backup, path);
-        } catch (const std::exception& cleanupError) {
-            throw std::runtime_error(std::string(error.what()) +
-                "; cleanup failed: " + cleanupError.what());
-        }
+        if (opened) { try { channels.close(session, channel); } catch (...) {} }
+        try { if (storage.exists(temporary)) storage.remove(temporary); } catch (...) {}
         throw;
     }
-    if (hadPrevious) storage.remove(backup);
 }
 
 } // namespace ql32::runtime
