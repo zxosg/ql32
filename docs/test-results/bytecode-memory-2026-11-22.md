@@ -181,3 +181,36 @@ Reaching it needs op-specific operand overlays (target/loopId/argCount/rank
 share two words by opcode) plus a pc-keyed source-line table, which touches
 ~180 `.line/.column/.basicLine` sites and the debugger; estimated 24 B host /
 16-20 B ESP32. Not done in this stage.
+
+## Stage 3: operand overlay (d296f49)
+
+`loopId` (loop ops), `argCount`+`optionCount` (Call/Beep/array ops) and
+`sourceLineTarget` (GOTO/GOSUB/RESTORE by number) never occur on the same
+opcode, so they share one 32-bit word behind accessors; 16-bit halves still throw
+instead of wrapping. The 16-bit position fields are declared before the 32-bit
+words so they fill the padding after the flag bits.
+`Instruction`: 48 -> 40 B on x86-64 (budget test now `<= 40`; ~32 B on 32-bit
+by layout, not compiler-measured: no 32-bit toolchain on the host).
+
+| Gate | Result |
+| --- | --- |
+| Host CTest | 88/88 (host-tested), incl. overlay independence test |
+| Benchmarks (best of 5) | loop 69.5 ms, recursion 31.4, string_concat 33.5, array_fill 60.8 (previous stage 75.4/35.4/38.0/67.4): no regression |
+| PlatformIO | all four build: CYD 1,625,821 B flash / 51,624 RAM; Olimex 1,866,341 / 57,068; TENSTAR 1,586,437 / 50,624; LILYGO 1,703,789 / 54,200 (built) |
+| Olimex | **verified on hardware (Olimex)**: golden output of all 17 programs identical to 47fc269; MODE 0/1/2 loop stable; DIM(60000) 480,196 B |
+
+Heap used (47fc269 -> d296f49): tiny 4,528 -> 4,096 B; 1,200-statement
+program 332,084 -> 271,652 B (**-78% vs 2051fa9's 1,243,168 B**); array-worker
+9,824 -> 9,352 B. Raw: `bytecode-memory-olimex-stage3-d296f49.json`.
+
+### Line/column side table: evaluated, not done
+
+Every opcode can raise an error and the debugger maps any pc, so a pc-keyed table
+needs one dense entry per instruction (line, column, basicLine = 6 B). That is
+the same 6 B the record already spends, plus table overhead; there is no net
+saving (only a lookup cost and a rewrite of ~40 VM and every compiler site).
+Remaining record: name pointer + extras pointer (16 B host), flags 2, positions 6,
+target/exitTarget/operand 12, rank/op/separator 3 = 40 B. 16 B would need the
+name/extras pointers and positions removed from the record, which needs
+dense side tables costing about as much as they free.
+Summary of record size: 256 -> 104 -> 48 -> 40 B host (-84%); ESP32 160 -> ~32 B (-80%).

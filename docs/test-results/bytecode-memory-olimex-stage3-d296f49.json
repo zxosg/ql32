@@ -1,0 +1,347 @@
+{
+  "label": "ovl",
+  "time": "2026-11-22T06:58:28",
+  "idle": [
+    {
+      "total": 4152535,
+      "largest": 3997684,
+      "blocks": 22
+    },
+    {
+      "total": 4152527,
+      "largest": 3997684,
+      "blocks": 22
+    },
+    {
+      "total": 4152519,
+      "largest": 3997684,
+      "blocks": 21
+    }
+  ],
+  "dim": {
+    "d60000": {
+      "before": {
+        "total": 4149363,
+        "largest": 3997684,
+        "blocks": 23
+      },
+      "after": {
+        "total": 3669167,
+        "largest": 3473396,
+        "blocks": 22
+      },
+      "readback": "5",
+      "error": null
+    },
+    "d150000": {
+      "before": {
+        "total": 4149335,
+        "largest": 3997684,
+        "blocks": 18
+      },
+      "after": {
+        "total": 2949123,
+        "largest": 2752500,
+        "blocks": 17
+      },
+      "readback": "5",
+      "error": null
+    },
+    "d450000": {
+      "before": {
+        "total": 4149323,
+        "largest": 3997684,
+        "blocks": 20
+      },
+      "after": {
+        "total": 549119,
+        "largest": 401396,
+        "blocks": 19
+      },
+      "readback": "5",
+      "error": null
+    },
+    "d1000001": {
+      "before": {
+        "total": 4149303,
+        "largest": 3997684,
+        "blocks": 18
+      },
+      "after": null,
+      "readback": null,
+      "error": "VM error: line 3, column 1: array allocation limit exceeded"
+    },
+    "s2000": {
+      "before": {
+        "total": 4149299,
+        "largest": 3997684,
+        "blocks": 17
+      },
+      "after": {
+        "total": 4101091,
+        "largest": 3932148,
+        "blocks": 18
+      },
+      "readback": "q",
+      "error": null
+    }
+  },
+  "footprint": {
+    "idle": {
+      "total": 4152523,
+      "largest": 3997684,
+      "blocks": 20
+    },
+    "tiny": {
+      "in_program": {
+        "total": 4151063,
+        "largest": 3997684,
+        "blocks": 19
+      },
+      "from_repl": {
+        "total": 4148427,
+        "largest": 3997684,
+        "blocks": 17
+      },
+      "after_kill": {
+        "total": 4152343,
+        "largest": 3997684,
+        "blocks": 21
+      }
+    },
+    "big": {
+      "in_program": {
+        "total": 3883423,
+        "largest": 3866612,
+        "blocks": 24
+      },
+      "from_repl": {
+        "total": 3880871,
+        "largest": 3866612,
+        "blocks": 22
+      },
+      "after_kill": {
+        "total": 4152363,
+        "largest": 3866612,
+        "blocks": 24
+      }
+    },
+    "array": {
+      "in_program": {
+        "total": 4145619,
+        "largest": 3866612,
+        "blocks": 21
+      },
+      "from_repl": {
+        "total": 4143171,
+        "largest": 3866612,
+        "blocks": 20
+      },
+      "after_kill": {
+        "total": 4152343,
+        "largest": 3866612,
+        "blocks": 22
+      }
+    }
+  },
+  "golden": {
+    "abbreviations": {
+      "done": false,
+      "output": "t = TASK(\"FFS:/g_abbreviations.bas\")> t = TASK(\"FFS:/g_abbreviations.bas\")\n> BASIC session 2 VM error: line 70, column 1: undefined procedure or function"
+    },
+    "arrays": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_arrays.bas\")> t = TASK(\"FFS:/g_arrays.bas\")\n> 7\n9\n0\nQL/32\n9"
+    },
+    "array_by_reference": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_array_by_reference.bas\")> t = TASK(\"FFS:/g_array_by_reference.bas\")\n> 73\n73"
+    },
+    "block_if": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_block_if.bas\")> t = TASK(\"FFS:/g_block_if.bas\")\n> B\ntruth\nsafe"
+    },
+    "expression_rules": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_expression_rules.bas\")> t = TASK(\"FFS:/g_expression_rules.bas\")\n> 4\n64\n1\n-3\n2\n1\n0\n0.3333333333333333\n0"
+    },
+    "for_exit": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_for_exit.bas\")> t = TASK(\"FFS:/g_for_exit.bas\")\n> 1\n2\nafter\nouter"
+    },
+    "for_inline": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_for_inline.bas\")> t = TASK(\"FFS:/g_for_inline.bas\")\n> 1\n2\n3\n1"
+    },
+    "for_ranges": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_for_ranges.bas\")> t = TASK(\"FFS:/g_for_ranges.bas\")\n> 2\n4\n6\n8\n10\n12\n15\n13\n11\n9\n11\n12\n21\n22\n1\n2\n3\nlate\n2\n4\n6\n9\nafter"
+    },
+    "functions": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_functions.bas\")> t = TASK(\"FFS:/g_functions.bas\")\n> 16\n120"
+    },
+    "language_slice": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_language_slice.bas\")> t = TASK(\"FFS:/g_language_slice.bas\")\n> 13\nQL\"/32\n4"
+    },
+    "numeric_portable": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_numeric_portable.bas\")> t = TASK(\"FFS:/g_numeric_portable.bas\")\n> 0.1\n1e-07\n1e+20\n0.3333333333333333"
+    },
+    "print_separators": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_print_separators.bas\")> t = TASK(\"FFS:/g_print_separators.bas\")\n> AB\nAB\nA        B\nA\nB\nCD\nEF"
+    },
+    "procedure_locals": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_procedure_locals.bas\")> t = TASK(\"FFS:/g_procedure_locals.bas\")\n> 6\n5\n0"
+    },
+    "repeat_control": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_repeat_control.bas\")> t = TASK(\"FFS:/g_repeat_control.bas\")\n> late\n3\ndone"
+    },
+    "repeat_inline": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_repeat_inline.bas\")> t = TASK(\"FFS:/g_repeat_inline.bas\")\n> 1"
+    },
+    "select": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_select.bas\")> t = TASK(\"FFS:/g_select.bas\")\n> range\nremainder\nafter"
+    },
+    "select_edges": {
+      "done": true,
+      "output": "t = TASK(\"FFS:/g_select_edges.bas\")> t = TASK(\"FFS:/g_select_edges.bas\")\n> inclusive and first\nnested select\nremainder fallback\nno match falls through"
+    }
+  },
+  "mode": {
+    "start": {
+      "total": 4152523,
+      "largest": 3997684,
+      "blocks": 20
+    },
+    "log": [
+      {
+        "mode": 0,
+        "dma_free": 203028,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 1,
+        "dma_free": 202940,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 2,
+        "dma_free": 202956,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 0,
+        "dma_free": 202432,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 1,
+        "dma_free": 202956,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 2,
+        "dma_free": 202948,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 0,
+        "dma_free": 202956,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 1,
+        "dma_free": 202956,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 2,
+        "dma_free": 202436,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 0,
+        "dma_free": 202956,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 1,
+        "dma_free": 202944,
+        "dma_largest": 110580,
+        "error": false
+      },
+      {
+        "mode": 2,
+        "dma_free": 202956,
+        "dma_largest": 110580,
+        "error": false
+      }
+    ],
+    "end": {
+      "total": 4152443,
+      "largest": 3932148,
+      "blocks": 25
+    }
+  },
+  "mode_with_task": {
+    "log": [
+      {
+        "mode": 0,
+        "error": false,
+        "text": "efill core=1, PSRAM stress=disabled (0 bytes), DMA heap remaining=35724 bytes\nDisplay mode set to 320x200 (320x200); window contents preserved where possible.\n>"
+      },
+      {
+        "mode": 1,
+        "error": false,
+        "text": "efill core=1, PSRAM stress=disabled (0 bytes), DMA heap remaining=26924 bytes\nDisplay mode set to 320x240 (320x240); window contents preserved where possible.\n>"
+      },
+      {
+        "mode": 2,
+        "error": true,
+        "text": "abled, refill core=1, PSRAM stress=disabled (0 bytes), DMA heap remaining=27452 bytes\nBASIC session 1 VM error: DMA mode change failed; previous mode restored\n>"
+      },
+      {
+        "mode": 0,
+        "error": false,
+        "text": "efill core=1, PSRAM stress=disabled (0 bytes), DMA heap remaining=35532 bytes\nDisplay mode set to 320x200 (320x200); window contents preserved where possible.\n>"
+      },
+      {
+        "mode": 1,
+        "error": false,
+        "text": "efill core=1, PSRAM stress=disabled (0 bytes), DMA heap remaining=27252 bytes\nDisplay mode set to 320x240 (320x240); window contents preserved where possible.\n>"
+      },
+      {
+        "mode": 2,
+        "error": true,
+        "text": "abled, refill core=1, PSRAM stress=disabled (0 bytes), DMA heap remaining=27260 bytes\nBASIC session 1 VM error: DMA mode change failed; previous mode restored\n>"
+      }
+    ],
+    "heap": {
+      "total": 3926879,
+      "largest": 3866612,
+      "blocks": 35
+    }
+  },
+  "final": {
+    "total": 4152135,
+    "largest": 3932148,
+    "blocks": 24
+  }
+}
