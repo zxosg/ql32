@@ -2416,7 +2416,8 @@ public:
     explicit SupervisorTaskControl(bool isSupervisor = true)
         : isSupervisor_(isSupervisor) {}
     ql32::runtime::TaskId startTask(std::string, std::ostream&,
-                                    ql32::runtime::TaskId, std::uint32_t) override {
+                                    ql32::runtime::TaskId, std::uint32_t,
+                                    std::string) override {
         return 0;
     }
     bool killTask(ql32::runtime::TaskId) override { return false; }

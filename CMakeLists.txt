@@ -18,6 +18,7 @@ add_library(ql32_portable
   src/music/lh5.cpp
   src/music/vtx.cpp
   src/music/vtx_player.cpp
+  src/music/vtx_stream.cpp
   src/music/ym.cpp
   src/music/ym_player.cpp
   src/music/pt3.cpp

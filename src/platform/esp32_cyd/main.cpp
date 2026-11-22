@@ -34,6 +34,7 @@
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
+#include "ql32/platform/olimex_vga/music.hpp"
 #include "ql32/platform/esp32/system_control.hpp"
 #include "ql32/platform/esp32/monitor_transfer.hpp"
 #include "ql32/platform/esp32/remote_debug_protocol.hpp"
@@ -203,18 +204,25 @@ void refreshDebugOverlay() {
     const auto freeBytes = boardMemory.freeBytes();
     const auto heap = boardMemory.fragmentationInfo();
     const std::size_t activeTasks = scheduler ? scheduler->activeTaskCount() : 0;
-    char clockText[9] = "--:--:--";
-    if (const auto timestamp = boardClock.unixTimeSeconds()) {
-        const std::time_t value = static_cast<std::time_t>(*timestamp);
-        std::tm parts{};
-        if (gmtime_r(&value, &parts))
-            std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
-                          parts.tm_hour, parts.tm_min, parts.tm_sec);
+    char clockText[16]{};
+    const auto timestamp = boardClock.unixTimeSeconds();
+    std::tm parts{};
+    const std::time_t value = timestamp ? static_cast<std::time_t>(*timestamp) : 0;
+    if (timestamp && gmtime_r(&value, &parts)) {
+        std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
+                      parts.tm_hour, parts.tm_min, parts.tm_sec);
+    } else {
+        // Unsynchronized wall clock: show uptime instead, marked with "UP".
+        const std::uint32_t seconds = now / 1000;
+        std::snprintf(clockText, sizeof(clockText), "UP %02u:%02u:%02u",
+                      static_cast<unsigned>((seconds / 3600) % 100),
+                      static_cast<unsigned>((seconds / 60) % 60),
+                      static_cast<unsigned>(seconds % 60));
     }
     const auto freeK = freeBytes / 1024;
     const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu TASK:%u %s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
@@ -716,6 +724,9 @@ void setup() {
         return count;
     });
     services.channels = channelRegistry;
+    // The CYD speaker amplifier is fed by DAC2 on GPIO26.
+    services.music = std::make_shared<ql32::platform::olimex_vga::MusicService>(
+        services.storage, 26, std::vector<std::string>{"SDC:/", "FFS:/"});
     services.ui = uiService;
     services.graphics = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(

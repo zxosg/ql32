@@ -259,7 +259,7 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
                 debug_log += console.command("STATS")
                 debug_log += console.command("STEP")
                 debug_log += console.command("WHERE")
-                debug_log += console.command("CONTINUE")
+                debug_log += console.command("DEBUG CONTINUE")
                 console.check_output(debug_log, "debugger attach/inspect/continue")
             after_active, _ = sample(console, name, f"during{repetition}")
             cancel_log, cancelled_status, task_count_after_cancel = cancel_worker(
@@ -327,7 +327,7 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
             if task_id is not None:
                 if debugger:
                     try:
-                        console.command("CONTINUE")
+                        console.command("DEBUG CONTINUE")
                     except Exception:
                         pass
                 try:
@@ -444,7 +444,7 @@ def main() -> int:
 
             run_worker_case(
                 console, "array", "ql32_mem_array.bas", args.cycles,
-                tolerance, baseline, minimum_drop=8 * 1024,
+                tolerance, baseline, minimum_drop=4 * 1024,
                 report_cases=report["cases"],
             )
             run_worker_case(

@@ -7,6 +7,7 @@
 #include "ql32/music/vtx_source.hpp"
 #include "ql32/music/song_loader.hpp"
 #include "ql32/music/vtx.hpp"
+#include "ql32/music/vtx_stream.hpp"
 #include "ql32/music/vtx_player.hpp"
 
 #include <Arduino.h>
@@ -41,12 +42,19 @@ void failIfEspError(esp_err_t error, const char* operation) {
 } // namespace
 
 struct MusicService::Impl {
-    explicit Impl(std::shared_ptr<runtime::StorageService> storageService)
-        : storage(std::move(storageService)), mutex(xSemaphoreCreateMutex()) {
+    explicit Impl(std::shared_ptr<runtime::StorageService> storageService, int dacPin,
+                  std::vector<std::string> cacheRoots)
+        : storage(std::move(storageService)), dacGpio(dacPin),
+          vtxCacheRoots(std::move(cacheRoots)),
+          mutex(xSemaphoreCreateMutex()) {
         if (!mutex) throw std::bad_alloc();
     }
 
     ~Impl() {
+        if (ioWorker) {
+            vTaskDelete(ioWorker);
+            ioWorker = nullptr;
+        }
         if (worker) {
             vTaskDelete(worker);
             worker = nullptr;
@@ -59,8 +67,12 @@ struct MusicService::Impl {
     }
 
     std::shared_ptr<runtime::StorageService> storage;
+    std::vector<std::string> vtxCacheRoots;
+    int dacGpio;
     SemaphoreHandle_t mutex = nullptr;
     TaskHandle_t worker = nullptr;
+    TaskHandle_t ioWorker = nullptr;
+    std::shared_ptr<music::AudioPrefetcher> prefetch; // guarded by `mutex`
     music::Mixer mixer; // Music slot: VTX or WAV stream; Effect slot: BEEP and MUSIC TEST
     std::uint8_t outputVolume = music::DefaultVolume;
     runtime::MusicSessionId owner = 0;
@@ -92,8 +104,10 @@ struct MusicService::Impl {
                            "I2S0 install");
             driverInstalled = true;
             failIfEspError(i2s_set_pin(OutputPort, nullptr), "I2S0 pin setup");
-            failIfEspError(i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN),
-                           "GPIO25 DAC setup");
+            // I2S right slot drives DAC1 (GPIO25); left slot drives DAC2 (GPIO26).
+            failIfEspError(i2s_set_dac_mode(dacGpio == 26 ? I2S_DAC_CHANNEL_LEFT_EN
+                                                          : I2S_DAC_CHANNEL_RIGHT_EN),
+                           "DAC setup");
         }
         if (!worker) {
             if (xTaskCreatePinnedToCore(&Impl::taskEntry, "ql32_music", 6144, this,
@@ -102,6 +116,26 @@ struct MusicService::Impl {
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "music: unable to start audio renderer task");
             }
+        }
+        // Slow storage reads (VTX cache read-ahead) must not run in the audio task.
+        if (!ioWorker &&
+            xTaskCreatePinnedToCore(&Impl::ioTaskEntry, "ql32_music_io", 4096, this,
+                                    1, &ioWorker, tskNO_AFFINITY) != pdPASS)
+            ioWorker = nullptr;
+    }
+
+    static void ioTaskEntry(void* context) {
+        static_cast<Impl*>(context)->runIo();
+    }
+
+    void runIo() {
+        for (;;) {
+            lock();
+            if (!mixer.active(music::Mixer::Music)) prefetch.reset();
+            const auto current = prefetch;
+            unlock();
+            if (current) current->run();
+            vTaskDelay(pdMS_TO_TICKS(20));
         }
     }
 
@@ -179,8 +213,8 @@ struct MusicService::Impl {
 
             for (std::size_t i = 0; i < SamplesPerBlock; ++i) {
                 const std::uint16_t value = music::pcmToDac16(pcm[i]);
-                // The right DAC channel is GPIO25; duplicate mono PCM into
-                // both I2S slots and enable only that DAC channel.
+                // Duplicate mono PCM into both I2S slots and enable only the
+                // DAC channel wired to the configured pin.
                 dac[i * 2] = value;
                 dac[i * 2 + 1] = value;
             }
@@ -230,8 +264,9 @@ struct MusicService::Impl {
     }
 };
 
-MusicService::MusicService(std::shared_ptr<runtime::StorageService> storage)
-    : impl_(std::make_unique<Impl>(std::move(storage))) {}
+MusicService::MusicService(std::shared_ptr<runtime::StorageService> storage, int dacGpio,
+                           std::vector<std::string> vtxCacheRoots)
+    : impl_(std::make_unique<Impl>(std::move(storage), dacGpio, std::move(vtxCacheRoots))) {}
 
 MusicService::~MusicService() = default;
 
@@ -241,6 +276,23 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                                     "music: storage service unavailable");
     auto source = impl_->storage->openRead(path);
     const std::uint64_t byteCount = source->size();
+    std::uint8_t signature[2] = {};
+    if (!impl_->vtxCacheRoots.empty() && byteCount >= 2 &&
+        source->readAt(0, signature, 2) == 2 &&
+        ((signature[0] == 'a' && signature[1] == 'y') ||
+         (signature[0] == 'y' && signature[1] == 'm'))) {
+        source.reset();
+        try {
+            startMusic(session, std::make_unique<music::VtxSource>(
+                music::openVtxStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
+        } catch (const runtime::ServiceError&) {
+            throw;
+        } catch (const std::exception& error) {
+            throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
+                                        std::string("music: ") + error.what());
+        }
+        return;
+    }
     if (byteCount == 0 || byteCount > MaximumFileBytes)
         throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
                                     "music: song file is empty or too large");
@@ -275,6 +327,7 @@ void MusicService::startMusic(runtime::MusicSessionId session,
         throw runtime::ServiceError(runtime::ServiceErrorCode::ResourceBusy,
                                     "music: audio output is owned by another session");
     }
+    impl_->prefetch = source->prefetcher();
     impl_->mixer.set(music::Mixer::Music, std::move(source));
     impl_->owner = session;
     impl_->playbackState = runtime::MusicPlaybackState::Playing;
@@ -296,7 +349,8 @@ void MusicService::testTone(runtime::MusicSessionId session) {
     impl_->playbackState = runtime::MusicPlaybackState::Playing;
     if (impl_->worker) xTaskNotifyGive(impl_->worker);
     impl_->unlock();
-    Serial.println("music: 1 kHz test tone active on GPIO25; use MUSIC STOP to end");
+    Serial.printf("music: 1 kHz test tone active on GPIO%d; use MUSIC STOP to end\n",
+                  impl_->dacGpio);
 }
 
 void MusicService::beep(runtime::MusicSessionId session, std::uint32_t durationMs,

@@ -1,5 +1,6 @@
 #include "ql32/music/vtx.hpp"
 #include "ql32/music/lh5.hpp"
+#include "ql32/music/vtx_stream.hpp"
 
 #include <stdexcept>
 #include <string_view>
@@ -87,8 +88,23 @@ VtxSong VtxSong::parse(const std::uint8_t* bytes, std::size_t size) {
     return song;
 }
 
+VtxSong VtxSong::fromPlaneFile(VtxMetadata metadata,
+                               std::shared_ptr<VtxPlaneFile> planes,
+                               std::size_t frameCount) {
+    VtxSong song;
+    song.metadata_ = std::move(metadata);
+    song.planes_ = std::move(planes);
+    song.frameCount_ = frameCount;
+    return song;
+}
+
+bool VtxSong::failed() const noexcept { return planes_ && planes_->failed(); }
+
+std::shared_ptr<AudioPrefetcher> VtxSong::prefetcher() const { return planes_; }
+
 std::array<std::uint8_t, 14> VtxSong::registers(std::size_t frame) const {
     if (frame >= frameCount_) throw std::out_of_range("VTX frame index is out of range");
+    if (planes_) return planes_->registers(frame);
     // YM3/VTX register data is stored as fourteen register planes.
     std::array<std::uint8_t, 14> result{};
     for (std::size_t reg = 0; reg < result.size(); ++reg)

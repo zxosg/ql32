@@ -164,6 +164,8 @@ std::string commandHelpListing() {
     appendHelpNames(listing, shellHelpCommands);
     listing << "LIST [line [TO [end]]] lists all stored lines, one line, or an "
             << "inclusive range.\n"
+            << "LIST [#ch,] PROC|FN [name] lists definition signatures or one "
+            << "definition; LIST GLOBALS|LOCALS lists variables.\n"
             << "EDIT [lineNumber] opens a stored line; bare EDIT reopens the last "
             << "edited line or the first line. Up/Down selects adjacent lines; "
             << "Ctrl+Left/Right moves by word.\n"
@@ -686,6 +688,87 @@ std::string expandCompactEnd(const std::string& source) {
     expanded += secondWord;
     expanded.append(source, end, std::string::npos);
     return expanded;
+}
+
+struct ProgramDefinition {
+    bool function = false;
+    std::string name;
+    std::string signature;
+    int firstLine = 0;
+    int lastLine = 0;
+};
+
+// Text scan of stored lines: DEFine PROCedure/FuNction ... END DEFine.
+std::vector<ProgramDefinition> scanProgramDefinitions(const std::map<int, std::string>& program) {
+    std::vector<ProgramDefinition> definitions;
+    const auto nextWord = [](const std::string& text, std::size_t& pos) {
+        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+        const std::size_t begin = pos;
+        while (pos < text.size() && !std::isspace(static_cast<unsigned char>(text[pos])) &&
+               text[pos] != '(' && text[pos] != ':')
+            ++pos;
+        std::string word = text.substr(begin, pos - begin);
+        std::transform(word.begin(), word.end(), word.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        return word;
+    };
+    bool open = false;
+    int previous = 0;
+    for (const auto& [number, body] : program) {
+        std::size_t pos = 0;
+        const std::string first = nextWord(body, pos);
+        const std::string second = nextWord(body, pos);
+        if (first == "DEFINE" && (second == "PROCEDURE" || second == "FUNCTION")) {
+            if (open) definitions.back().lastLine = previous;
+            ProgramDefinition definition;
+            definition.function = second == "FUNCTION";
+            definition.firstLine = number;
+            definition.lastLine = number;
+            const std::size_t begin = body.find_first_not_of(" \t", pos);
+            definition.signature = begin == std::string::npos ? std::string{} :
+                body.substr(begin);
+            while (!definition.signature.empty() &&
+                   std::isspace(static_cast<unsigned char>(definition.signature.back())))
+                definition.signature.pop_back();
+            const std::size_t nameEnd = definition.signature.find_first_of(" \t(");
+            definition.name = definition.signature.substr(0, nameEnd);
+            definitions.push_back(std::move(definition));
+            open = true;
+        } else if (first == "END" && second == "DEFINE" && open) {
+            definitions.back().lastLine = number;
+            open = false;
+        }
+        previous = number;
+    }
+    if (open) definitions.back().lastLine = previous;
+    return definitions;
+}
+
+template <typename Values, typename Arrays>
+void appendSortedVariables(std::ostringstream& listing, const Values& values,
+                           const Arrays& arrays) {
+    std::vector<std::string> names;
+    names.reserve(values.size());
+    for (const auto& entry : values) names.push_back(entry.first);
+    std::sort(names.begin(), names.end());
+    for (const auto& name : names) {
+        listing << name << " = ";
+        const auto& value = values.at(name);
+        if (const auto* number = std::get_if<double>(&value)) listing << *number;
+        else listing << '"' << std::get<std::string>(value) << '"';
+        listing << '\n';
+    }
+    auto sortedArrays = arrays;
+    std::sort(sortedArrays.begin(), sortedArrays.end(),
+              [](const auto& left, const auto& right) { return left.first < right.first; });
+    for (const auto& [name, dimensions] : sortedArrays) {
+        listing << name << "(";
+        for (std::size_t i = 0; i < dimensions.size(); ++i) {
+            if (i != 0) listing << ",";
+            listing << (dimensions[i] == 0 ? 0 : dimensions[i] - 1);
+        }
+        listing << ")\n";
+    }
 }
 
 struct DefinitionInfo {
@@ -3577,6 +3660,22 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             "Enter=Page, L=Line, Q=Quit", pagerInputOptions());
         return true;
     };
+    // Debug snapshot when a DEBUG task is attached, otherwise the session variables.
+    const auto variableListing = [&](bool globals) {
+        std::ostringstream listing;
+        using ArrayList = std::vector<std::pair<std::string, std::vector<std::size_t>>>;
+        if (taskControl_ && debugTaskId_ != 0) {
+            const auto snapshot = taskControl_->debugInspect(debugTaskId_);
+            if (!snapshot) throw std::runtime_error("debug task is unavailable");
+            if (globals) appendSortedVariables(listing, snapshot->globals, snapshot->arrays);
+            else if (!snapshot->frames.empty())
+                appendSortedVariables(listing, snapshot->frames.back().locals,
+                                      snapshot->frames.back().arrays);
+        } else if (globals) {
+            appendSortedVariables(listing, variables_, ArrayList{});
+        }
+        return listing.str();
+    };
     bool commandMode = false;
     std::istringstream probe(source);
     for (std::string line; std::getline(probe, line);) {
@@ -3806,6 +3905,81 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             std::string selector = trim(normalizedLine.substr(4));
             std::transform(selector.begin(), selector.end(), selector.begin(),
                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            // "#ch" alone, or "#ch, rest"; returns the remaining text.
+            const auto takeChannel = [&](const std::string& text) {
+                const auto comma = text.find(',');
+                channel = parseChannelSelector(
+                    comma == std::string::npos ? text : trim(text.substr(0, comma)), "LIST");
+                return comma == std::string::npos ? std::string{} :
+                    trim(text.substr(comma + 1));
+            };
+            std::string definitionKind;
+            std::string definitionName;
+            {
+                std::string rest = selector;
+                if (!rest.empty() && rest.front() == '#') rest = takeChannel(rest);
+                const auto wordEnd = rest.find_first_of(" \t#");
+                const std::string first = rest.substr(0, wordEnd);
+                if (first == "GLOBALS" || first == "LOCALS" || first == "PROC" ||
+                    first == "PROCEDURE" || first == "PROCEDURES" || first == "FN" ||
+                    first == "FUNCTION" || first == "FUNCTIONS") {
+                    definitionKind = first;
+                    rest = wordEnd == std::string::npos ? std::string{} :
+                        trim(rest.substr(wordEnd));
+                    if (!rest.empty() && rest.front() == '#') rest = takeChannel(rest);
+                    const auto channelPos = rest.find(" #");
+                    if (channelPos != std::string::npos) {
+                        takeChannel(trim(rest.substr(channelPos + 1)));
+                        rest = trim(rest.substr(0, channelPos));
+                    }
+                    definitionName = rest;
+                    selector.clear();
+                } else if (!selector.empty() && selector.front() == '#') {
+                    selector = rest;
+                }
+            }
+            if (!definitionKind.empty()) {
+                const bool variables = definitionKind == "GLOBALS" || definitionKind == "LOCALS";
+                const bool function = definitionKind.front() == 'F';
+                if (variables && !definitionName.empty())
+                    throw std::runtime_error("LIST " + definitionKind + " takes no name");
+                std::string listing;
+                if (variables) {
+                    listing = variableListing(definitionKind == "GLOBALS");
+                } else {
+                    const char* kindName = function ? "FUNCTION" : "PROCEDURE";
+                    const auto definitions = scanProgramDefinitions(program_);
+                    if (definitionName.empty()) {
+                        for (const auto& definition : definitions)
+                            if (definition.function == function)
+                                listing += definition.signature + "\n";
+                    } else {
+                        const ProgramDefinition* match = nullptr;
+                        const ProgramDefinition* other = nullptr;
+                        for (const auto& definition : definitions) {
+                            std::string upper = definition.name;
+                            std::transform(upper.begin(), upper.end(), upper.begin(),
+                                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                            if (upper != definitionName) continue;
+                            if (definition.function == function) { match = &definition; break; }
+                            if (!other) other = &definition;
+                        }
+                        if (!match) {
+                            throw std::runtime_error(std::string(kindName) + " " + definitionName +
+                                (other ? std::string(" is a ") + (function ? "procedure" : "function") :
+                                         std::string(" not found")));
+                        }
+                        for (const auto& [number, body] : program_) {
+                            if (number < match->firstLine || number > match->lastLine) continue;
+                            listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
+                        }
+                    }
+                }
+                if (writeGeneratedListing(channel, listing)) {
+                    preserveInteractiveTail();
+                    return ExecutionStatus::Suspended;
+                }
+            } else {
             if (selector.empty()) {
                 // Whole program.
             } else if (selector.front() == '#') {
@@ -3886,6 +4060,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (writeGeneratedListing(channel, listing)) {
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;
+            }
             }
         } else if (word == "REBOOT") {
             if (!systemControl_)
@@ -4464,8 +4639,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             for (const auto& task : tasks) {
                 if (task.state == runtime::TaskState::Cancelled) continue;
                 listing += std::to_string(task.id) + " ";
-                if (task.supervisor) listing += "SUPERVISOR ";
-                else listing += "WORKER ";
+                listing += task.supervisor ? "SUPERVISOR" :
+                    (task.name.empty() ? "(inline)" : task.name);
+                listing += " ";
                 if (task.priority == 0) {
                     if (task.resumePriority == 0) {
                         listing += "P=0 DISABLED (no saved resume priority)";
@@ -4582,7 +4758,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!taskControl_->debugSetDiagnostics(debugTaskId_, enabled, trace))
                 throw std::runtime_error("debug task is unavailable");
             writeChannelText(0, word + "\n");
-        } else if (word == "WHERE" || word == "LOCALS" || word == "GLOBALS" ||
+        } else if (word == "LOCALS" || word == "GLOBALS") {
+            if (writeGeneratedListing(0, variableListing(word == "GLOBALS"))) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
+        } else if (word == "WHERE" ||
                    word == "STACK" || word == "STATS" || word == "WATCHES" ||
                    word == "BREAKPOINTS") {
             if (!taskControl_ || debugTaskId_ == 0)
@@ -4590,25 +4771,6 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const auto snapshot = taskControl_->debugInspect(debugTaskId_);
             if (!snapshot) throw std::runtime_error("debug task is unavailable");
             std::ostringstream listing;
-            const auto printMap = [&](const std::unordered_map<std::string, runtime::DebugValue>& values) {
-                if (values.empty()) { listing << "(none)\n"; return; }
-                for (const auto& [name, value] : values) {
-                    listing << name << " = ";
-                    if (const auto* number = std::get_if<double>(&value)) listing << *number;
-                    else listing << '"' << std::get<std::string>(value) << '"';
-                    listing << '\n';
-                }
-            };
-            const auto printArrays = [&](const auto& arrays) {
-                for (const auto& [name, dimensions] : arrays) {
-                    listing << name << "(";
-                    for (std::size_t i = 0; i < dimensions.size(); ++i) {
-                        if (i != 0) listing << ",";
-                        listing << (dimensions[i] == 0 ? 0 : dimensions[i] - 1);
-                    }
-                    listing << ")\n";
-                }
-            };
             if (word == "WHERE") {
                 listing << (snapshot->paused ? "PAUSED " : "RUNNING ");
                 if (snapshot->location.basicLine != 0)
@@ -4616,15 +4778,6 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 listing << "source " << snapshot->location.sourceLine << ":" <<
                     snapshot->location.column << " bytecode " << snapshot->location.instruction << '\n';
                 if (!snapshot->frames.empty()) listing << "in " << snapshot->frames.back().name << '\n';
-            } else if (word == "LOCALS") {
-                if (snapshot->frames.empty()) listing << "(no local frame)\n";
-                else {
-                    printMap(snapshot->frames.back().locals);
-                    printArrays(snapshot->frames.back().arrays);
-                }
-            } else if (word == "GLOBALS") {
-                printMap(snapshot->globals);
-                printArrays(snapshot->arrays);
             } else if (word == "STACK") {
                 if (snapshot->frames.empty()) listing << "(no call frames)\n";
                 for (std::size_t i = 0; i < snapshot->frames.size(); ++i)
@@ -4740,6 +4893,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 runtime::taskStateName(found->state)) + "\n";
             detail += "Kind: " + std::string(found->supervisor ? "SUPERVISOR" :
                 (found->interactive ? "WORKER" : "PROGRAM")) + "\n";
+            detail += "File: " + (found->name.empty() ? std::string("(none)") :
+                                  found->name) + "\n";
             detail += "Priority: " + std::to_string(found->priority) + "\n";
             detail += "Resume priority: " + std::to_string(found->resumePriority) + "\n";
             detail += "Open channels: " + std::to_string(found->openChannels) + "\n";
