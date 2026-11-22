@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "ql32/runtime/error.hpp"
+
 namespace ql32::graphics {
 namespace {
 
@@ -95,10 +97,18 @@ WindowId WindowedService::ensureWindow(SessionId session, ChannelId channel) {
     const auto bounds = defaultBounds != defaultWindowBounds_.end() ? defaultBounds->second :
         Rect{0, 0, std::max(1u, std::min(viewport.canvasWidth, manager_.screenWidth())),
              std::max(1u, std::min(viewport.canvasHeight, manager_.screenHeight()))};
+    requireCanvasMemory(bounds);
     const auto id = manager_.create(session, bounds,
                                    PixelDepth::Four);
     sessionWindows_.emplace(key, id);
     return id;
+}
+
+void WindowedService::requireCanvasMemory(Rect bounds) const {
+    if (!canvasAdmission_) return;
+    const auto bytes = (static_cast<std::size_t>(bounds.width) * bounds.height + 1) / 2;
+    if (const auto failure = canvasAdmission_(bytes))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfMemory, *failure);
 }
 
 WindowId WindowedService::windowForSession(SessionId session) {
@@ -856,6 +866,7 @@ void WindowedService::setWindowBounds(SessionId session, ChannelId channel, Rect
         // frozen canvases here just as ensureWindow() does for drawing commands.
         discardFrozenWindows();
         discardPresentationBuffer();
+        requireCanvasMemory(bounds);
         const auto id = manager_.create(session, bounds, PixelDepth::Four);
         sessionWindows_.emplace(key, id);
         const auto state = manager_.windowState(id);

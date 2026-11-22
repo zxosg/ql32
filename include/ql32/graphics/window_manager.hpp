@@ -90,6 +90,19 @@ public:
     std::uint64_t allocate(std::size_t bytes);
     void release(std::uint64_t handle) noexcept;
     void replace(std::uint64_t handle, std::vector<std::uint8_t>&& bytes);
+    std::size_t capacity(std::uint64_t handle) const noexcept;
+    // Resizes within the existing allocation; never reallocates.
+    bool resizeInPlace(std::uint64_t handle, std::size_t bytes) noexcept;
+    // Returns spare capacity to the allocator when it is worth the transient copy.
+    void trim(std::uint64_t handle) noexcept;
+    // Frees the block and allocates a zeroed one; contents are lost. On
+    // failure the previous size is restored (zeroed) and the error rethrown.
+    void reallocateDiscard(std::uint64_t handle, std::size_t bytes);
+    // Platform probe returning the largest free allocation in bytes.
+    void setMemoryProbe(std::function<std::size_t()> probe) {
+        memoryProbe_ = std::move(probe);
+    }
+    bool lowMemoryFor(std::size_t bytes) const;
     void setResizeObserver(CanvasResizeObserver observer) {
         resizeObserver_ = std::move(observer);
     }
@@ -107,6 +120,7 @@ private:
     std::uint64_t nextHandle_ = 1;
     std::list<Block> blocks_;
     CanvasResizeObserver resizeObserver_;
+    std::function<std::size_t()> memoryProbe_;
 };
 
 // Retained indexed canvas with packed 1-, 4-, or 8-bit pixels.
@@ -190,6 +204,9 @@ public:
 
     WindowId create(SessionId owner, Rect bounds,
                     PixelDepth depth = PixelDepth::Four);
+    void setCanvasMemoryProbe(std::function<std::size_t()> probe) {
+        arena_.setMemoryProbe(std::move(probe));
+    }
     void setCanvasResizeObserver(CanvasResizeObserver observer) {
         arena_.setResizeObserver(std::move(observer));
     }

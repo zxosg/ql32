@@ -25,6 +25,8 @@ struct AdmissionPolicy {
     std::uint64_t musicStartContiguousBytes = 0;
     std::uint64_t musicPlayTotalBytes = 0;    // loading a song once audio is running
     bool displayModeGuard = false;            // refuse MODE growth that cannot fit
+    bool canvasGuard = false;                 // refuse a new canvas that cannot fit
+    std::uint64_t canvasHeadroomBytes = 0;    // free bytes that must remain after a canvas
 };
 
 // Reports memory currently available to the platform runtime. The exact pool
@@ -69,6 +71,13 @@ public:
         const std::uint64_t newArea = newWidth * newHeight;
         if (newArea <= oldArea) return std::nullopt;
         return admissionFailure("display mode " + std::string(modeName), (newArea - oldArea) / 2);
+    }
+    // A new canvas needs one contiguous block of `canvasBytes` plus headroom.
+    std::optional<std::string> canvasFailure(std::uint64_t canvasBytes) const {
+        if (!admissionPolicy_.canvasGuard) return std::nullopt;
+        return admissionFailure("a " + std::to_string(canvasBytes) + " byte canvas",
+                                canvasBytes + admissionPolicy_.canvasHeadroomBytes,
+                                canvasBytes);
     }
     bool canAdmit(std::uint64_t totalBytes, std::uint64_t contiguousBytes = 0) const {
         return !admissionFailure("request", totalBytes, contiguousBytes);

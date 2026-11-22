@@ -201,6 +201,54 @@ void CanvasArena::replace(std::uint64_t handle, std::vector<std::uint8_t>&& byte
     std::vector<std::uint8_t>().swap(bytes);
 }
 
+std::size_t CanvasArena::capacity(std::uint64_t handle) const noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    return found == blocks_.end() ? 0 : found->bytes.capacity();
+}
+
+bool CanvasArena::resizeInPlace(std::uint64_t handle, std::size_t bytes) noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    if (found == blocks_.end() || bytes == 0 || bytes > found->bytes.capacity())
+        return false;
+    found->bytes.resize(bytes, 0);
+    return true;
+}
+
+void CanvasArena::trim(std::uint64_t handle) noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    if (found == blocks_.end()) return;
+    auto& bytes = found->bytes;
+    const auto spare = bytes.capacity() - bytes.size();
+    if (spare < 64 || spare < bytes.capacity() / 4) return;
+    // shrink_to_fit briefly holds the smaller copy beside the old block.
+    if (memoryProbe_ && memoryProbe_() < bytes.size()) return;
+    try {
+        bytes.shrink_to_fit();
+    } catch (...) {
+        // Keeping the larger block is always valid.
+    }
+}
+
+void CanvasArena::reallocateDiscard(std::uint64_t handle, std::size_t bytes) {
+    auto& target = find(handle);
+    if (bytes == 0) throw std::runtime_error("canvas dimensions must be positive");
+    const auto previous = target.bytes.size();
+    std::vector<std::uint8_t>().swap(target.bytes);
+    try {
+        target.bytes.assign(bytes, 0);
+    } catch (...) {
+        try { target.bytes.assign(previous, 0); } catch (...) {}
+        throw;
+    }
+}
+
+bool CanvasArena::lowMemoryFor(std::size_t bytes) const {
+    return memoryProbe_ && memoryProbe_() < bytes;
+}
+
 void CanvasArena::reportResize(CanvasResizePhase phase, std::size_t oldBytes,
                                std::size_t newBytes) const noexcept {
     if (!resizeObserver_) return;
@@ -877,16 +925,25 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
 
     const auto newBytes = checkedCanvasBytes(width, height, depth_);
     const auto oldBytes = storageBytes();
-    if (!arena_ && newBytes <= pixels_.capacity()) {
+    const bool inPlace = arena_ ? newBytes <= arena_->capacity(arenaHandle_)
+                                : newBytes <= pixels_.capacity();
+    if (inPlace) {
         const auto oldWidth = width_;
         const auto oldHeight = height_;
         const auto copyWidth = std::min(oldWidth, width);
         const auto copyHeight = std::min(oldHeight, height);
-        if (newBytes > pixels_.size()) pixels_.resize(newBytes, 0);
+        if (arena_) {
+            if (newBytes > oldBytes) {
+                arena_->resizeInPlace(arenaHandle_, newBytes);
+                arenaPixels_ = arena_->data(arenaHandle_);
+            }
+        } else if (newBytes > pixels_.size()) {
+            pixels_.resize(newBytes, 0);
+        }
 
         // Move overlapping rows in the safe direction when the row stride
-        // changes. This lets orientation swaps reuse the existing canvas
-        // allocation instead of requiring a second full-size buffer.
+        // changes. This reuses the existing allocation instead of requiring a
+        // second full-size buffer.
         if (width > oldWidth) {
             for (std::uint32_t row = copyHeight; row > 0; --row)
                 for (std::uint32_t column = copyWidth; column > 0; --column) {
@@ -909,7 +966,28 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
             for (std::uint32_t column = 0; column < width; ++column)
                 if (row >= copyHeight || column >= copyWidth)
                     writePixel(static_cast<std::size_t>(row) * width + column, paper_);
-        if (newBytes < pixels_.size()) pixels_.resize(newBytes);
+        if (arena_) {
+            if (newBytes < oldBytes) {
+                arena_->resizeInPlace(arenaHandle_, newBytes);
+                arena_->trim(arenaHandle_);
+                arenaPixels_ = arena_->data(arenaHandle_);
+            }
+        } else if (newBytes < pixels_.size()) {
+            pixels_.resize(newBytes);
+        }
+        return;
+    }
+
+    // Growth when the largest free block cannot hold a second copy: free the
+    // old pixels first and start from a cleared (paper) canvas. QL/32-specific.
+    if (arena_ && arena_->lowMemoryFor(newBytes)) {
+        arena_->reportResize(CanvasResizePhase::BeforeAllocation, oldBytes, newBytes);
+        arena_->reallocateDiscard(arenaHandle_, newBytes);
+        arenaPixels_ = arena_->data(arenaHandle_);
+        width_ = width;
+        height_ = height;
+        clear();
+        arena_->reportResize(CanvasResizePhase::AfterSwap, oldBytes, newBytes);
         return;
     }
 

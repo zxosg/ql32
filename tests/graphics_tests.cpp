@@ -1994,6 +1994,88 @@ void testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink() {
             "resizing one window changed another window's pixels");
 }
 
+void testArenaCanvasResizeReusesAllocationAtEveryDepth() {
+    using namespace ql32::graphics;
+    for (const auto depth : {PixelDepth::One, PixelDepth::Four, PixelDepth::Eight}) {
+        WindowManager manager(64, 64);
+        const auto id = manager.create(1, {0, 0, 32, 16}, depth);
+        const ColorIndex top = depth == PixelDepth::One ? 1 : 7;
+        auto& canvas = manager.canvas(id);
+        canvas.setPixel(0, 0, top);
+        canvas.setPixel(9, 3, top);
+        canvas.setPixel(31, 15, top);
+
+        std::size_t bothLive = 0;
+        manager.setCanvasResizeObserver(
+            [&](CanvasResizePhase phase, std::size_t, std::size_t) {
+                if (phase == CanvasResizePhase::BothBuffersLive) ++bothLive;
+            });
+        manager.setBounds(id, {0, 0, 10, 4});
+        require(bothLive == 0, "shrinking a canvas held both buffers live");
+        require(canvas.width() == 10 && canvas.height() == 4 &&
+                    canvas.pixel(0, 0) == top && canvas.pixel(9, 3) == top,
+                "in-place shrink lost cropped pixels");
+
+        // Growing back reuses spare capacity when it was kept, and must
+        // paper-fill the new area either way.
+        manager.setBounds(id, {0, 0, 20, 8});
+        require(canvas.pixel(0, 0) == top && canvas.pixel(9, 3) == top &&
+                    canvas.pixel(19, 7) == canvas.paper(),
+                "regrow lost pixels or did not paper-fill the new area");
+        manager.setCanvasResizeObserver({});
+    }
+}
+
+void testCanvasGrowthWithoutRoomFreesOldBufferFirst() {
+    using namespace ql32::graphics;
+    WindowManager manager(64, 64);
+    const auto id = manager.create(1, {0, 0, 8, 8}, PixelDepth::Four);
+    auto& canvas = manager.canvas(id);
+    canvas.setPixel(1, 1, 5);
+
+    std::size_t bothLive = 0;
+    manager.setCanvasResizeObserver(
+        [&](CanvasResizePhase phase, std::size_t, std::size_t) {
+            if (phase == CanvasResizePhase::BothBuffersLive) ++bothLive;
+        });
+    manager.setCanvasMemoryProbe([] { return std::size_t{16}; });
+    manager.setBounds(id, {0, 0, 32, 32});
+    require(bothLive == 0, "low-memory growth held old and new buffers together");
+    require(canvas.width() == 32 && canvas.height() == 32 &&
+                canvas.pixel(1, 1) == canvas.paper(),
+            "low-memory growth did not produce a cleared canvas of the new size");
+    canvas.setPixel(31, 31, 9);
+    require(canvas.pixel(31, 31) == 9, "low-memory growth left unusable pixel storage");
+
+    manager.setCanvasMemoryProbe([] { return std::size_t{1} << 20; });
+    manager.setBounds(id, {0, 0, 40, 40});
+    require(bothLive == 1 && canvas.pixel(31, 31) == 9,
+            "growth with enough memory did not preserve pixels");
+}
+
+void testWindowedServiceRefusesCanvasBeforeAllocating() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(100, 100, presenter);
+    std::size_t asked = 0;
+    graphics.setCanvasAdmission([&](std::size_t bytes) -> std::optional<std::string> {
+        asked = bytes;
+        return "not enough memory for a canvas";
+    });
+    bool refused = false;
+    try {
+        graphics.setInk(1, 3);
+        graphics.circle(1, {4, 5}, 0);
+    } catch (const ql32::runtime::ServiceError& error) {
+        refused = error.code() == ql32::runtime::ServiceErrorCode::OutOfMemory;
+    }
+    require(refused && asked == 5000, "canvas admission did not refuse a full-screen canvas");
+    require(graphics.windowManager().size() == 0,
+            "refused canvas still allocated a window");
+    graphics.setCanvasAdmission({});
+    graphics.circle(1, {4, 5}, 0);
+    require(graphics.windowManager().size() == 1, "canvas not created after admission cleared");
+}
+
 void testFailedCanvasResizePreservesAllWindows() {
     using namespace ql32::graphics;
     WindowManager manager(16, 8);
@@ -2562,6 +2644,9 @@ int main() {
     testDefaultCanvasIsSizedToTaskViewport();
     testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin();
     testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
+    testArenaCanvasResizeReusesAllocationAtEveryDepth();
+    testCanvasGrowthWithoutRoomFreesOldBufferFirst();
+    testWindowedServiceRefusesCanvasBeforeAllocating();
     testFailedCanvasResizePreservesAllWindows();
     testEveryPrintableAsciiCharacterHasAGlyph();
     testTextCellsFillCharacterGapsWithPaper();

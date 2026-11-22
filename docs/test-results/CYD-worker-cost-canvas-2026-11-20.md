@@ -1,0 +1,26 @@
+# Per-worker memory cost and canvas admission
+
+## Interpreter/worker cost (bytes of free heap)
+
+Host (malloc-hook, `ql32_worker_cost_probe`, no graphics): launch 2.5-2.7 KB
+(Interpreter + Task shell); first slice +2.4 KB (mandel, sincos) or +11 KB
+(churn: `DIM(255)` and strings); compile transient peak 17-34 KB.
+
+CYD (`HEAP STATS`, idle 145,556 free / 94,196 largest):
+
+| Program | Delta after launch + first slice | Largest after |
+| --- | ---: | ---: |
+| churn.bas (no canvas) | 8,668 | 94,196 |
+| sincos.bas (canvas) | 44,584 | 55,284 |
+| mandel.bas (canvas) | 50,168 | 55,284 |
+
+The Interpreter itself is a few KB; the canvas (38,400 B full screen) dominates.
+
+## Canvas admission (CYD, 8 KB headroom)
+
+Three full-screen `w.bas` workers: free 145 KB -> 103 KB -> 60 KB (largest
+17 KB). The 4th-6th now refuse before allocating:
+`not enough memory for a 38400 byte canvas: need 46592 bytes free (38400 contiguous), have 56564 free, 17396 largest`.
+`TILE` then shrinks the canvases in place: free 56 KB -> 139 KB.
+Launch, `TILE`, repeat four times, then `MUSIC PLAY`: all four run and music
+starts (137 KB -> 106 KB free, no failed allocations).

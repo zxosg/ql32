@@ -165,6 +165,15 @@ public:
     void invalidateSystemRegion(Rect region);
     void composeDisplayRow(std::uint32_t y, std::vector<ColorIndex>& row) const;
     WindowManager& windowManager() noexcept { return manager_; }
+    // Returns a refusal message when a canvas of the given byte size must not be
+    // allocated; checked before any allocation so a refusal leaves memory intact.
+    using CanvasAdmission = std::function<std::optional<std::string>(std::size_t)>;
+    void setCanvasAdmission(CanvasAdmission admission) {
+        canvasAdmission_ = std::move(admission);
+    }
+    void setCanvasMemoryProbe(std::function<std::size_t()> probe) {
+        manager_.setCanvasMemoryProbe(std::move(probe));
+    }
     void setCanvasResizeObserver(CanvasResizeObserver observer) {
         manager_.setCanvasResizeObserver(std::move(observer));
     }
@@ -228,6 +237,8 @@ private:
     std::map<SurfaceKey, FontState> graphicsFonts_;
     std::unordered_map<ChannelId, Rect> defaultWindowBounds_;
     std::function<void(Rect)> consoleBoundsCallback_;
+    CanvasAdmission canvasAdmission_;
+    void requireCanvasMemory(Rect bounds) const;
     std::function<void(ColorIndex, ColorIndex)> consoleColorsCallback_;
     std::function<void()> consoleClearCallback_;
     std::function<void(std::uint32_t, std::uint32_t)> consoleTextPositionCallback_;

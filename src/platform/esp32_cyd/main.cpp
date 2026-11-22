@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <ctime>
 #include <cstring>
 #include <memory>
@@ -224,9 +225,10 @@ void refreshDebugOverlay() {
     const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
     const auto minK = boardMemory.minimumFreeBytes().value_or(0) / 1024;
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK MIN:%lluK TASK:%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu MIN:%lluK TASK:%u %s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
+        static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
         static_cast<unsigned long long>(minK),
         static_cast<unsigned>(activeTasks), clockText);
     graphics->setDebugOverlayText(line);
@@ -568,6 +570,14 @@ void setup() {
         [] { if (tftConsole) tftConsole->reconfigure(); });
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         display.width(), display.height(), framePresenter);
+    graphics->setCanvasAdmission([](std::size_t bytes) {
+        return boardMemory.canvasFailure(bytes);
+    });
+    graphics->setCanvasMemoryProbe([]() -> std::size_t {
+        const auto info = boardMemory.fragmentationInfo();
+        return info ? static_cast<std::size_t>(info->largestFreeBlockBytes)
+                    : std::numeric_limits<std::size_t>::max();
+    });
     graphics->setCanvasResizeObserver(
         [](ql32::graphics::CanvasResizePhase phase, std::size_t oldBytes,
            std::size_t newBytes) {
@@ -749,6 +759,9 @@ void setup() {
     admission.musicStartContiguousBytes = 8 * 1024;
     admission.musicPlayTotalBytes = 14 * 1024;
     admission.displayModeGuard = true;
+    // A full-screen canvas is 38400 bytes in one block; leave room for the music service.
+    admission.canvasGuard = true;
+    admission.canvasHeadroomBytes = 8 * 1024;
     boardMemory.setAdmissionPolicy(admission);
     ql32::platform::esp32::installFailedAllocLogger();
     std::static_pointer_cast<ql32::platform::olimex_vga::MusicService>(services.music)
