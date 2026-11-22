@@ -99,6 +99,7 @@ CONST KFlowXonXoff = 2
 CONST KFreeTotal = 0
 CONST KFreeContiguous = 1
 CONST KFreeFragments = 2
+CONST KFreeAllocated = 3
 ' TASK and GETTASK selectors, plus TASKRESULT selectors
 CONST KTaskWait = 1
 CONST KTaskResultStatus = 1

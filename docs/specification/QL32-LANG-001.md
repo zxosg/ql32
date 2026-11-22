@@ -581,15 +581,17 @@ and the OPL samples noted in [docs/reference](../reference/README.md).
 
 `FREE()` returns a comma-delimited string containing the current free-memory
 estimate in bytes, the largest contiguous free block in bytes, and the number
-of free blocks reported by the allocator, in that order. A platform without
+of free blocks, and the number of allocated blocks reported by the allocator,
+in that order. A platform without
 fragmentation metrics leaves the unavailable fields empty while preserving the
 comma positions. `FREE(0)` returns the free-memory estimate as a number;
 `FREE(1)` returns the largest contiguous free block as a number, and `FREE(2)`
-returns the number of free blocks as a number. ESP32 reports all three values
-for byte-addressable heap. Linux supports only selector 0; selector 1 and 2
+returns the number of free blocks as a number; `FREE(3)` returns the number of
+allocated blocks. ESP32 reports all four values
+for byte-addressable heap. Linux supports only selector 0; selectors 1 to 3
 report that allocator fragmentation metrics are unavailable. Selectors must
-be integer values from 0 through 2. `ql32.inc` defines
-`KFreeTotal`, `KFreeContiguous`, and `KFreeFragments` for the selector values.
+be integer values from 0 through 3. `ql32.inc` defines
+`KFreeTotal`, `KFreeContiguous`, `KFreeFragments`, and `KFreeAllocated` for the selector values.
 Values are platform memory snapshots, not exact counts of memory owned by the
 current BASIC session. The target shell's separate `MEM` command is not
 implemented.

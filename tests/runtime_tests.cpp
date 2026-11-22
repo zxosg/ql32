@@ -46,7 +46,7 @@ class RecordingMemoryService final : public ql32::runtime::MemoryService {
 public:
     std::uint64_t freeBytes() const override { return 123456; }
     std::optional<ql32::runtime::HeapFragmentationInfo> fragmentationInfo() const override {
-        return ql32::runtime::HeapFragmentationInfo{65432, 17, 0};
+        return ql32::runtime::HeapFragmentationInfo{65432, 17, 445};
     }
 };
 
@@ -1063,8 +1063,9 @@ void testFreeReturnsAllMetricsWithoutSelector() {
         "PRINT FREE()\n"
         "PRINT FREE(0)\n"
         "PRINT FREE(1)\n"
-        "PRINT FREE(2)\n", output);
-    require(output.str() == "123456,65432,17\n123456\n65432\n17\n",
+        "PRINT FREE(2)\n"
+        "PRINT FREE(3)\n", output);
+    require(output.str() == "123456,65432,17,445\n123456\n65432\n17\n445\n",
             "FREE() did not return all heap metrics or selector forms changed");
 }
 
@@ -1073,7 +1074,7 @@ void testFreeLeavesUnavailableMetricsAsEmptyCsvFields() {
     ql32::Interpreter interpreter({}, {}, {}, {}, {}, memory);
     std::ostringstream output;
     interpreter.execute("PRINT FREE()\n", output);
-    require(output.str() == "123456,,\n",
+    require(output.str() == "123456,,,\n",
             "FREE() did not preserve CSV positions for unavailable metrics");
 }
 
