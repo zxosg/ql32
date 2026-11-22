@@ -33,6 +33,7 @@
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
+#include "ql32/platform/olimex_vga/music.hpp"
 #include "ql32/platform/esp32/system_control.hpp"
 #include "ql32/platform/esp32/monitor_transfer.hpp"
 #include "ql32/platform/esp32/remote_debug_protocol.hpp"
@@ -679,6 +680,9 @@ void setup() {
         }, std::shared_ptr<ql32::runtime::HardwareChannelService>(
             &hardwareAdapter, [](ql32::runtime::HardwareChannelService*) {}), true);
     services.channels = channelRegistry;
+    // The CYD speaker amplifier is fed by DAC2 on GPIO26.
+    services.music = std::make_shared<ql32::platform::olimex_vga::MusicService>(
+        services.storage, 26);
     services.ui = uiService;
     services.graphics = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(

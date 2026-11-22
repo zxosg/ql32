@@ -1186,8 +1186,10 @@ Arities come from the compiler's built-in signature table.
 
 ### 11.1 MUSIC, BEEP, VOLUME (audio)
 
-Audio is implemented only on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
-`MusicService` in `src/platform/olimex_vga`). Linux, CYD, Tenstar, and LILYGO
+Audio is implemented on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
+`MusicService` in `src/platform/olimex_vga`) and, experimentally, on the CYD
+(same service on the GPIO26 DAC2 speaker output; the tone, a small VTX and
+BEEP are verified on hardware, larger VTX files can exhaust heap). Linux, Tenstar, and LILYGO
 raise "music service unavailable" / "audio service unavailable". One session at
 a time owns the output; another session's request raises `ResourceBusy`.
 

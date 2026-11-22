@@ -41,8 +41,9 @@ void failIfEspError(esp_err_t error, const char* operation) {
 } // namespace
 
 struct MusicService::Impl {
-    explicit Impl(std::shared_ptr<runtime::StorageService> storageService)
-        : storage(std::move(storageService)), mutex(xSemaphoreCreateMutex()) {
+    explicit Impl(std::shared_ptr<runtime::StorageService> storageService, int dacPin)
+        : storage(std::move(storageService)), dacGpio(dacPin),
+          mutex(xSemaphoreCreateMutex()) {
         if (!mutex) throw std::bad_alloc();
     }
 
@@ -59,6 +60,7 @@ struct MusicService::Impl {
     }
 
     std::shared_ptr<runtime::StorageService> storage;
+    int dacGpio;
     SemaphoreHandle_t mutex = nullptr;
     TaskHandle_t worker = nullptr;
     music::Mixer mixer; // Music slot: VTX or WAV stream; Effect slot: BEEP and MUSIC TEST
@@ -92,8 +94,10 @@ struct MusicService::Impl {
                            "I2S0 install");
             driverInstalled = true;
             failIfEspError(i2s_set_pin(OutputPort, nullptr), "I2S0 pin setup");
-            failIfEspError(i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN),
-                           "GPIO25 DAC setup");
+            // I2S right slot drives DAC1 (GPIO25); left slot drives DAC2 (GPIO26).
+            failIfEspError(i2s_set_dac_mode(dacGpio == 26 ? I2S_DAC_CHANNEL_LEFT_EN
+                                                          : I2S_DAC_CHANNEL_RIGHT_EN),
+                           "DAC setup");
         }
         if (!worker) {
             if (xTaskCreatePinnedToCore(&Impl::taskEntry, "ql32_music", 6144, this,
@@ -179,8 +183,8 @@ struct MusicService::Impl {
 
             for (std::size_t i = 0; i < SamplesPerBlock; ++i) {
                 const std::uint16_t value = music::pcmToDac16(pcm[i]);
-                // The right DAC channel is GPIO25; duplicate mono PCM into
-                // both I2S slots and enable only that DAC channel.
+                // Duplicate mono PCM into both I2S slots and enable only the
+                // DAC channel wired to the configured pin.
                 dac[i * 2] = value;
                 dac[i * 2 + 1] = value;
             }
@@ -230,8 +234,8 @@ struct MusicService::Impl {
     }
 };
 
-MusicService::MusicService(std::shared_ptr<runtime::StorageService> storage)
-    : impl_(std::make_unique<Impl>(std::move(storage))) {}
+MusicService::MusicService(std::shared_ptr<runtime::StorageService> storage, int dacGpio)
+    : impl_(std::make_unique<Impl>(std::move(storage), dacGpio)) {}
 
 MusicService::~MusicService() = default;
 
@@ -296,7 +300,8 @@ void MusicService::testTone(runtime::MusicSessionId session) {
     impl_->playbackState = runtime::MusicPlaybackState::Playing;
     if (impl_->worker) xTaskNotifyGive(impl_->worker);
     impl_->unlock();
-    Serial.println("music: 1 kHz test tone active on GPIO25; use MUSIC STOP to end");
+    Serial.printf("music: 1 kHz test tone active on GPIO%d; use MUSIC STOP to end\n",
+                  impl_->dacGpio);
 }
 
 void MusicService::beep(runtime::MusicSessionId session, std::uint32_t durationMs,

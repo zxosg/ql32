@@ -11,7 +11,8 @@ namespace ql32::platform::olimex_vga {
 
 class MusicService final : public runtime::MusicService {
 public:
-    explicit MusicService(std::shared_ptr<runtime::StorageService> storage);
+    // dacGpio selects the ESP32 built-in DAC pin: 25 (DAC1, default) or 26 (DAC2, CYD speaker).
+    explicit MusicService(std::shared_ptr<runtime::StorageService> storage, int dacGpio = 25);
     ~MusicService() override;
     MusicService(const MusicService&) = delete;
     MusicService& operator=(const MusicService&) = delete;
