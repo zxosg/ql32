@@ -115,6 +115,9 @@ the same `MemoryService` used by BASIC `FREE()` after each rotation:
 | 4 bit | 125,532 | 125,532 | 125,532 | 125,532 | 125,532 |
 | 8 bit | 87,132 | 87,132 | 87,132 | 87,132 | 87,132 |
 
+On the CYD the window mode defaults to `ISOLATED` at boot (QL/32-specific; each
+task gets a tile-sized canvas, `WINDOWMODE SHARED` restores full-screen canvases).
+
 On the CYD the debug overlay shows `FREE`, `MAX` (largest block), `BLK` (allocated
 block count) and `MIN` (lowest free heap since boot, QL/32-specific); the line
 fills about 52 of the 53 columns of a 320-pixel screen. The serial monitor command `HEAP STATS`
