@@ -787,6 +787,9 @@ void setup() {
     remoteCapabilities.screenCapture = true;
     remoteDebugger = std::make_unique<ql32::platform::esp32::RemoteDebugProtocol>(
         std::move(remoteCapabilities));
+    // QL/32-specific: tile-sized worker canvases by default (as WINDOWMODE
+    // ISOLATED); the startup program is compiled, so it cannot issue the command.
+    (void)scheduler->setWindowMode(ql32::runtime::WindowMode::Isolated);
     replTask = scheduler->launchInteractive(*basicOutput, std::move(startupProgram));
 }
 
