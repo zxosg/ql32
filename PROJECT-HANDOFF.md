@@ -4,7 +4,8 @@ Use this file to continue work as any coding agent or human contributor. Read
 it together with [`AGENTS.md`](AGENTS.md) before changing the project. The
 specifications and dated reports in `docs/test-results` are the project
 record; refresh this handoff after meaningful implementation or
-hardware-acceptance changes. Last refreshed 2026-11-21.
+hardware-acceptance changes. Last refreshed 2026-11-22 (documentation audit:
+[report](docs/test-results/documentation-audit-2026-11-22.md)).
 
 ## Project and architecture
 
@@ -31,6 +32,11 @@ stale-test fixes), `jan-pal-handoff-refresh`, `jan-pal-basic-file-seek`,
 `jan-pal-fix-ctest-failures` duplicates the sound branch's `49887c0` and was
 skipped. Check Git and the remote rather than assuming the source branches
 or this historical integration state are unchanged.
+
+Status 2026-11-22: `origin/main` contains the integration, the retro default and
+the bytecode compaction; the "local only" and 83/84-test statements in this
+section and under Next work are historical (current host suite: see the audit
+report).
 
 A user music patch (modified `music.hpp`, `music.cpp`, `interpreter.cpp`,
 `bytecode.hpp`, `music_tests.cpp`) may exist **uncommitted in the main
@@ -157,8 +163,10 @@ and `..._test_{mode}_sf_{static,checker,gradient,random,fullscreen,scroll}`.
 Geometry 120/60 (320x240) and 100/50 (320x200), no core/IRQ/timing change.
 A diagnostic-only horizontal shift on 320-wide modes caused late refills and is
 now disabled in single-fb. Hardware: all patterns, 11 min soaks and runtime
-BASIC palette animation + 20 cancel cycles gave 0 late refills. MODE stays
-compile-time per env; runtime single-fb family and colour limit analysed in
+BASIC palette animation + 20 cancel cycles gave 0 late refills. MODE was
+compile-time per env at that point; it later became runtime-selectable
+(`MODE 0/1/2`) in `olimex_esp32_sbc_retro` (see Olimex PlatformIO
+environments). The family and colour limit are analysed in
 `docs/test-results/olimex-single-framebuffer-320x-2026-11-21.md`. Default env
 unchanged; not pushed.
 
@@ -521,6 +529,39 @@ under VGA load were not logged (by ear only: attractor plus VTX clean).
   was flashed and checked with three live sin/cos workers, the visible debug
   bar, mode switching, and cleanup. See
   [QL32-API-001](docs/specification/QL32-API-001.md) for command behavior.
+
+## Where everything is documented (2026-11-22 audit)
+
+- **Every BASIC statement, function, shell and debugger command:**
+  [QL32-LANG-001 section 11](docs/specification/QL32-LANG-001.md), derived from
+  the keyword/built-in tables in `src/language/interpreter.cpp`. Detailed
+  semantics: LANG sections 2-9, [API](docs/specification/QL32-API-001.md),
+  [UI](docs/specification/QL32-UI-001.md).
+- **Audio:** `MUSIC PLAY|WAV|TEST|STOP|PAUSE|RESUME|STATUS`, `BEEP`, `VOLUME`;
+  Olimex only. There is no `SEEK` keyword: random access is `#ch AT offset`
+  with `FPOS`/`FLEN`. No `SOUND` or `PLAY` statement exists.
+- **Limits:** `DIM` total 1,000,000 elements per array on every target plus an
+  ESP32 largest-free-block check (8 B per numeric element); `SLICE` 1..65536;
+  `BEEP` 1..600000 ms and 20..10000 Hz; `VOLUME` 0..255; binary `#c IN/OUT`
+  8192 B; breakpoint lines 1..32767; compiled-program fields are 16-bit (line,
+  column, call arguments at most 65535).
+- **PlatformIO envs:** default set is `lilygo_vga32`, `esp32_2432s028_spiffs`,
+  `olimex_esp32_sbc_fabgl`, `olimex_esp32_sbc_retro`. Others: `esp32_2432s028`
+  (SD-only CYD), `esp32_2432s028_spiffs_debug` (DWARF symbols for decoding
+  Xtensa PCs), `ql32_tenstar_esp32s3`, `esp32s3_tft` (backlog placeholder), and
+  the Olimex PSRAM/FabGL/DMA experiment families above;
+  see [QL32-PLAT-001](docs/specification/QL32-PLAT-001.md).
+- **Tools (`tools/`):** `build-target.sh` (`linux|mac|vga32|olimex|olimex-psram|
+  olimex-retro|cyd`), `ql32-ymodem.py`/`ql32_ymodem.py` (file transfer, BMP
+  capture), `ql32_remote_debugger/` (PC debugger/file/image GUI),
+  `ql32-memory-test.py` (board memory report), `ql32-olimex-bytecode-memory.py`
+  (Olimex bytecode memory measurement over `/dev/ttyUSB0`),
+  `bytecode_footprint.cpp` (host CSV of compiled footprint),
+  `run-vm-benchmarks.py` (VM timing of `benchmarks/*.bas` and Mandelbrot),
+  `upload-olimex-fs.sh` (stage and upload startup files to the Olimex SPIFFS),
+  `convert_spleen_bdf.py` with `spleen-source/` (font conversion). Note that
+  `build-target.sh cyd` builds the SD-only `esp32_2432s028`; use
+  `pio run -e esp32_2432s028_spiffs` for the preferred CYD profile.
 
 ## Starting a new session
 

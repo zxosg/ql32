@@ -1173,3 +1173,147 @@ compiled by `RUN`. Multiple-range evaluation is tested once in source order.
 Nested inline loops are outside the explicit M1 grammar, and board allocation
 limits are a later hardware qualification item. Broader SMSQ/E compatibility
 claims remain limited to behavior with both source references and tests.
+
+## 11. Built-in reference index (2026-11-22 audit)
+
+This section lists every built-in command, function, shell command, and
+debugger command that the 2026-11-22 implementation accepts. It is derived from
+the keyword and built-in tables in `src/language/interpreter.cpp`, not from
+other documents. Detailed semantics stay in the sections named in the last
+column. Everything here is QL/32-specific unless a row cites a reference; no
+SMSQ/E compatibility is claimed without a cited source and a conformance test.
+Arities come from the compiler's built-in signature table.
+
+### 11.1 MUSIC, BEEP, VOLUME (audio)
+
+Audio is implemented only on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
+`MusicService` in `src/platform/olimex_vga`). Linux, CYD, Tenstar, and LILYGO
+raise "music service unavailable" / "audio service unavailable". One session at
+a time owns the output; another session's request raises `ResourceBusy`.
+
+| Statement | Effect |
+| --- | --- |
+| `MUSIC PLAY path$` | Plays a tracker/chip file; the decoder is chosen from file content: VTX, YM2!/YM3!/YM3b/YM5!/YM6! (raw or LHA `-lh5-`/`-lh0-`), PT3, SQT (see section 8). Loops where the format has a loop point. |
+| `MUSIC WAV path$` | Streams an uncompressed PCM WAV (8-bit unsigned or 16-bit signed, mono/stereo, 4000-48000 Hz, resampled to 22050 Hz) from storage with a 2 KiB buffer. Other formats raise a runtime error. QL/32-specific, not SMSQ/E. |
+| `MUSIC TEST` | Starts a 1 kHz sine test tone until `MUSIC STOP`. |
+| `MUSIC STOP` | Stops all audio from the owning session and releases ownership. |
+| `MUSIC PAUSE` / `MUSIC RESUME` | Pauses/resumes the owner's music. |
+| `MUSIC STATUS` | Prints `MUSIC PLAYING`, `MUSIC PAUSED`, or `MUSIC STOPPED`. |
+| `BEEP duration, pitch [, waveform]` | See section 8 (`1..600000` ms, `20..10000` Hz; waveforms 0..4 or names). |
+| `VOLUME level` | Global output level `0..255`, default `128`, not persistent. |
+
+`MUSIC` takes exactly one subcommand; `PLAY` and `WAV` require a string path,
+the others take no argument. Example:
+
+```basic
+MUSIC WAV "FFS:/jingle.wav"
+PAUSE 2000
+MUSIC STATUS
+MUSIC STOP
+```
+
+`MUSIC` is also in the shell command list. Not supported: YMT1/YMT2/MIX and PT3
+TurboSound; no other formats are recognised.
+
+### 11.2 Statements and keywords
+
+`PRINT`, `AT` (also `#ch AT offset`), `DATA`, `READ`, `RESTORE`, `STOP`, `DIM`,
+`SELect ON`, `ON`, `REMark`, `GO TO`/`GOTO`, `REMAINDER`, `IF`/`THEN`/`ELSE`/
+`END IF`, `FOR`/`TO`/`STEP`/`NEXT`, `REPeat`/`EXIT`, `DEFine PROCedure`/
+`FuNction`, `LOCal`, `RETurn`, `CONST`, `OPTION`, and the operators `DIV`,
+`MOD`, `AND`, `OR`, `XOR`, `NOT`. Sections 2-7.
+
+`DIM name(d1[,d2...])` accepts non-negative integer upper bounds up to
+2147483647 per dimension but the **total element count is capped at 1,000,000
+per array on every target** (`array allocation limit exceeded`). On ESP32 the
+request must also fit the largest free heap block (`array exceeds available
+memory`); the preflight uses 8 bytes per numeric element (numeric arrays are
+stored as raw doubles since 2026-11-22) and `sizeof(std::string)` per string
+element. Dimensioned arrays are session-owned and passed by reference.
+
+### 11.3 Channel, file and memory commands
+
+| Syntax | Notes |
+| --- | --- |
+| `OPEN(path$, mode$)` | Function; modes `READ`, `WRITE`, `APPEND`, `UPDATE`. Section 8. |
+| `CLOSE h`, `WRITE #c, ...`, `INPUT [#c,] ...`, `READ$(c)`, `EOF(c)` | Section 8. |
+| `#c AT offset` | **SEEK equivalent**; there is no `SEEK` keyword. Zero-based absolute byte offset `0..FLEN`. QL/32-specific. |
+| `FPOS(c)`, `FLEN(c)` | Current position and length. |
+| `#c IN n, buf$`, `#c OUT n, buf$` | Exact binary transfers, at most 8192 bytes. |
+| `CHANNEL #c [TO #d]`, `GETCHANNEL(selector)` | Default-channel routing and lookup. |
+| `IN(port)`, `OUT port, value`, `IOREAD(pin)`, `IOWRITE(pin, value)` | Hardware channels, section 8.1. |
+| `ALLOC(n)`, `DEALLOC h`, `PEEK`/`PEEK_W`/`PEEK_L(h, offset)`, `POKE`/`POKE_W`/`POKE_L h, offset, value`, `XFER` | Session-owned binary buffers, section 8.1. |
+
+### 11.4 Functions
+
+String: `LEN`, `LEFT$`, `RIGHT$`, `MID$`, `REPT$`, `CODE`, `ASC`, `CHR$`,
+`UPPER$`, `LOWER$`, `STR$`, `VAL`, `HEX$`, `BIN$`, `EVAL`, `EVAL$`, `LOC`.
+Numeric: `SIN`, `COS`, `INT`, `RND`, `RGB`, `CPUFREQ`, `FREE`, and the 32-bit
+bit functions `BAND`, `BOR`, `BXOR`, `BNOT`, `ROL`, `ROR`, `SRA`, `SRL`, `SLA`,
+`SLL`. `RANDOMIZE seed` seeds `RND`. Errors: `ERR`, `ERR$(code)`, `ERRX$`.
+Tasks: `TASK`, `TASKRESULT`, `GETTASK`. System: `SYSINFO$(selector)`,
+`CAPABILITY(selector)`, `MODE(selector)`.
+
+### 11.5 Graphics, windows, fonts, images, palette
+
+| Syntax | Notes |
+| --- | --- |
+| `INK c`, `PAPER c`, `OVER m`, `FLASH ...`, `RGB(r,g,b)` | Colour state; `RGB` returns a packed colour. |
+| `PLOT x,y`, `LINE x1,y1,x2,y2`, `RECT x,y,w,h`, `CIRCLE x,y,r`, `TEXT x,y,text$` | Drawing into the selected window. |
+| `CLS`, `ROTATE deg`, `TILE`, `GUPDATE`, `BLIT ...` | Section 9 / API M3. `GUPDATE` batches present. |
+| `WINDOW x,y,w,h`, `CLOSEWINDOW` | Section 9 / API M3-M4. |
+| `PALETTE i,rgb`, `PALROT`, `PALSHIFT`, `PALFADE`, `GPALETTE$(i)`, `GPALETTESIZE()` | Indexed palette; 16 entries on retro/PSRAM-DMA profiles. |
+| `FONT`, `GFONT`, `LOADFONT(path$)`, `GETFONT(...)`, `UNLOADFONT` | Fonts. |
+| `LOADIMAGE(path$)`, `UNLOADIMAGE h`, `BLIT` | QIMG v2 indexed images. |
+| `GWIDTH()`, `GHEIGHT()`, `GDEPTH()`, `GORIGINX()`, `GORIGINY()`, `GROTATION()`, `GX()`, `GY()` | Canvas queries; `GDEPTH` returns bits per pixel. |
+| `MODE modeId[,options]`, `MODE(KModeCurrent)`, `MODE(KModeOptions)` | Runtime display mode; see 11.7. |
+
+### 11.6 UI, dialogs, menus, network
+
+`ALERT title$, text$`, `CONFIRM(title$, text$)`, `IPRINT`, `BUSY` (section 9);
+declarative dialogs `DINIT([title$, options])`, `DTEXT d,label$`,
+`DEDIT d,label$,initial$`, `DINT d,label$,initial,min,max`,
+`DFLOAT d,label$,initial,min,max`, `DCHOICE d,label$,initial,"A|B|C"`,
+`DCHECK d,label$,state`, `DBUTTONS d,accept$,cancel$`, `DIALOG(d)`,
+`DGET$(d,field)`, `DGET(d,field)`; menus `MINIT(title$)`, `MCARD m,id,label$,
+shortcut$`, `MENABLE m,id,enabled`, `MENU(m)`. Syntax and presenter behaviour:
+[QL32-UI-001](QL32-UI-001.md). Network: `GETNET ssid$,password$`, `DISNET`,
+`NETSTAT$()`, `NETADDR$()`, `NETSIGNAL()` ([QL32-NET-001](QL32-NET-001.md)).
+
+### 11.7 Display modes
+
+`MODE` is runtime-selectable and supervisor-only (workers keep running).
+`MODE 0/1/2` = 320x200 / 320x240 / 400x300 on `olimex_esp32_sbc_retro`
+(single framebuffer, 16-entry RGB222 palette, boots in mode 2); modes 3/4
+(640x400/640x480) are rejected there with "mode N is unavailable" and need the
+`olimex_esp32_sbc_fabgl_psram` image. Fixed-mode builds report their single
+mode. Shell form: `MODE [LIST|name|modeId[,options]]`. See
+[QL32-PLAT-001](QL32-PLAT-001.md) and [QL32-API-001](QL32-API-001.md).
+
+### 11.8 Shell and debugger commands (not compiled BASIC statements)
+
+Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `EDIT [n]`, `RENUMBER [start,step]`,
+`DIR`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
+`REBOOT`, `TASKS`, `TASKCHANNELS`, `KILL`, `TASKVIEW`, `WINDOWMODE
+[ISOLATED|SHARED]`, `MODE`, `TASKRESULT`, `LOGON`, `LOGOFF`, `SUSPEND`,
+`RESUME`, `SLICE`, `PRIORITY`, `MUSIC`. Monitor-only: `RECV`, `SEND`, `SCREEN`
+(YMODEM/BMP capture, see README).
+
+Debugger: `DEBUG id`, `BREAK line`, `CLEARBREAK line`, `BREAKPOINTS`, `STEP`,
+`NEXT`, `CONTINUE`, `DEBUG CONTINUE`, `WHERE`, `LOCALS`, `GLOBALS`, `STACK`,
+`STATS`, `WATCH expr`, `UNWATCH expr`, `WATCHES`, `EVAL expr`, `DIAGNOSTICS
+ON|RESET`, `TRACE ON`, `DEBUGBAR`. Breakpoint lines are BASIC line
+numbers (`1..32767`) in numbered programs and physical source lines in
+unnumbered programs. `EVAL` and watches accept side-effect-free expressions only.
+Details: README "Debugger".
+
+### 11.9 Compiled program representation
+
+Programs compile to a compacted bytecode (2026-11-22): one `Instruction` record
+is 40 bytes on x86-64 (was 256), with interned text pointers, packed flag bits,
+narrow 16-bit line/column fields and one shared operand word; rarely used
+metadata is kept out of line. A program that exceeds a narrow field (for
+example more than 65535 source lines/columns or 65535 call arguments) fails to
+compile with "program exceeds a bytecode field limit". Behaviour is unchanged;
+see [QL32-VM-001](QL32-VM-001.md) and the
+[bytecode memory report](../test-results/bytecode-memory-2026-11-22.md).

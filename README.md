@@ -161,7 +161,16 @@ tools/build-target.sh mac
 tools/build-target.sh cyd
 tools/build-target.sh vga32
 tools/build-target.sh olimex
+tools/build-target.sh olimex-psram    # olimex_esp32_sbc_fabgl_psram
+tools/build-target.sh olimex-retro    # olimex_esp32_sbc_retro (default WROVER image)
 ```
+
+`cyd` builds the SD-only `esp32_2432s028` profile; the preferred CYD profile
+is `pio run -e esp32_2432s028_spiffs`. The Tenstar uses
+`pio run -e ql32_tenstar_esp32s3`. Other helper tools (`ql32-memory-test.py`,
+`run-vm-benchmarks.py`, `bytecode_footprint`, `upload-olimex-fs.sh`) are listed
+in [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md). Every BASIC command is indexed in
+[the language reference](docs/specification/QL32-LANG-001.md#11-built-in-reference-index-2026-11-22-audit).
 
 The host executables are `build/linux/ql32` and `build/macos/ql32`. Run the
 matching host test suite with `ctest --test-dir build/linux --output-on-failure`
