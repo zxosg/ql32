@@ -768,9 +768,9 @@ private:
             const SourceTarget* target = nullptr;
             if (instruction.targetIsLineNumber) {
                 static const SourceTarget beginning{};
-                if (instruction.sourceLineTarget == 0) target = &beginning;
+                if (instruction.sourceLineTarget() == 0) target = &beginning;
                 else {
-                    const auto found = lineTargets_.find(instruction.sourceLineTarget);
+                    const auto found = lineTargets_.find(instruction.sourceLineTarget());
                     if (found != lineTargets_.end()) target = &found->second;
                 }
             } else {
@@ -804,7 +804,7 @@ private:
                 std::size_t item = 0;
                 while (item < code_.dataItems.size() &&
                        (code_.dataItems[item].basicLine == 0 ||
-                        code_.dataItems[item].basicLine < instruction.sourceLineTarget))
+                        code_.dataItems[item].basicLine < instruction.sourceLineTarget()))
                     ++item;
                 instruction.target = item;
                 continue;
@@ -898,11 +898,11 @@ private:
             if (instruction.op != Op::Call) continue;
             if (isBuiltinName(instruction.name)) {
                 const auto [arguments, returnsValue] = builtinSignature(instruction);
-                if (instruction.channelArgument && instruction.argCount == 0)
+                if (instruction.channelArgument && instruction.argCount() == 0)
                     error(instruction, "channel selector is missing");
-                const std::size_t passedArguments = instruction.argCount -
+                const std::size_t passedArguments = instruction.argCount() -
                     static_cast<std::size_t>(instruction.channelArgument) -
-                    instruction.optionCount;
+                    instruction.optionCount();
                 if (instruction.name == "FREE") {
                     if (passedArguments > 1)
                         error(instruction, "FREE accepts zero or one selector (0, 1, or 2)");
@@ -1023,7 +1023,7 @@ private:
             if (found == definitions_.end()) {
                 const auto array = arrays_.find(instruction.name);
                 if (instruction.expectsValue && array != arrays_.end()) {
-                    if (instruction.argCount != array->second)
+                    if (instruction.argCount() != array->second)
                         error(instruction, "incorrect array rank");
                     instruction.op = Op::ArrayGet;
                     instruction.rank = array->second;
@@ -1042,7 +1042,7 @@ private:
             const DefinitionInfo& definition = found->second;
             if (instruction.expectsValue != definition.function)
                 error(instruction, "procedure/function used in the wrong context");
-            if (instruction.argCount != definition.parameters.size())
+            if (instruction.argCount() != definition.parameters.size())
                 error(instruction, "incorrect argument count");
             instruction.target = definition.address;
             instruction.mutableExtra().parameters = definition.parameters;
@@ -1113,11 +1113,11 @@ private:
                             parameter - owner->second.parameters.begin());
                         const std::size_t rank = owner->second.parameterArrayRanks[index];
                         if (rank == 0) error(instruction, "array parameter has no array argument");
-                        if (instruction.argCount != rank)
+                        if (instruction.argCount() != rank)
                             throw std::runtime_error("line " + std::to_string(instruction.line) +
                                 ", column " + std::to_string(instruction.column) +
                                 ": incorrect array rank (indexes " +
-                                std::to_string(instruction.argCount) + ", rank " +
+                                std::to_string(instruction.argCount()) + ", rank " +
                                 std::to_string(rank) + ")");
                         instruction.op = Op::ArrayGet;
                         instruction.rank = rank;
@@ -1208,13 +1208,13 @@ private:
         if (!loop.isFor) {
             Instruction instruction{Op::LoopNext, 0.0, nameToken.text, keyword.line, keyword.column};
             instruction.target = loop.body;
-            instruction.loopId = loop.id;
+            instruction.setLoopId(loop.id);
             code_.push_back(std::move(instruction));
             return;
         }
         Instruction instruction{Op::ForNext, 0.0, nameToken.text, keyword.line, keyword.column};
         instruction.target = loop.body;
-        instruction.loopId = loop.id;
+        instruction.setLoopId(loop.id);
         instruction.explicitNext = explicitNext;
         code_.push_back(std::move(instruction));
         loop.nextInstructions.push_back(code_.size() - 1);
@@ -1222,7 +1222,7 @@ private:
     void emitExit(const Token& keyword, const Token& nameToken) {
         LoopContext& loop = findLoop(nameToken);
         Instruction instruction{Op::ExitLoop, 0.0, nameToken.text, keyword.line, keyword.column};
-        instruction.loopId = loop.id;
+        instruction.setLoopId(loop.id);
         code_.push_back(std::move(instruction));
         loop.exitInstructions.push_back(code_.size() - 1);
     }
@@ -1276,7 +1276,7 @@ private:
                   std::vector<ArrayArgumentCandidate> arrayCandidates = {},
                   bool channelArgument = false) {
         Instruction instruction{Op::Call, 0.0, name.text, name.line, name.column};
-        instruction.argCount = arguments + static_cast<std::size_t>(channelArgument);
+        instruction.setArgCount(arguments + static_cast<std::size_t>(channelArgument));
         instruction.channelArgument = channelArgument;
         instruction.expectsValue = expectsValue;
         instruction.mutableExtra().arrayArgumentCandidates = std::move(arrayCandidates);
@@ -1510,12 +1510,12 @@ private:
 
         const std::size_t initIndex = code_.size();
         Instruction init{Op::ForInit, 0.0, variable.text, keyword.line, keyword.column};
-        init.loopId = nextLoopId_++;
+        init.setLoopId(nextLoopId_++);
         init.mutableExtra().forItems = std::move(items);
         code_.push_back(std::move(init));
         const std::size_t body = code_.size();
-        controlScopes_.push_back(code_[initIndex].loopId);
-        loops_.push_back({code_[initIndex].loopId, variable.text, body, true, {}, {}});
+        controlScopes_.push_back(code_[initIndex].loopId());
+        loops_.push_back({code_[initIndex].loopId(), variable.text, body, true, {}, {}});
 
         if (match(Kind::Colon)) {
             // Inline bodies end at NEXT. Nested inline loops are deliberately excluded.
@@ -1627,7 +1627,7 @@ private:
                 target.number < 0 || target.number > 32767)
                 error(target, "GOTO target must be a line number in 0..32767");
             jump.targetIsLineNumber = true;
-            jump.sourceLineTarget = static_cast<int>(target.number);
+            jump.setSourceLineTarget(static_cast<int>(target.number));
         } else if (check(Kind::Identifier)) {
             jump.name = advance().text;
         } else {
@@ -1798,7 +1798,7 @@ private:
                     line.number < 0 || line.number > 32767)
                     error(line, "RESTORE line number must be an integer in 0..32767");
                 restore.targetIsLineNumber = true;
-                restore.sourceLineTarget = static_cast<int>(line.number);
+                restore.setSourceLineTarget(static_cast<int>(line.number));
             } else if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
                        commandArgumentTerminatorAt(current_ + 1)) {
                 restore.name = advance().text;
@@ -1953,10 +1953,10 @@ private:
                 if (!match(Kind::Comma)) error(peek(), "expected ',' and pitch after BEEP duration");
                 expression();
                 Instruction beep{Op::Beep, 0.0, {}, name.line, name.column};
-                beep.argCount = 2;
+                beep.setArgCount(2);
                 if (match(Kind::Comma)) {
                     expression();
-                    beep.argCount = 3;
+                    beep.setArgCount(3);
                 }
                 if (!commandArgumentTerminator())
                     error(peek(), "expected end of statement after BEEP arguments");
@@ -2080,7 +2080,7 @@ private:
                 if (arguments < 1 || arguments > 3)
                     error(name, "IPRINT expects text, optional duration, and optional position");
                 emitCall(name, options.size() + arguments, false);
-                code_.back().optionCount = options.size();
+                code_.back().setOptionCount(options.size());
                 code_.back().mutableExtra().parameters = std::move(options);
                 return;
             }
@@ -2106,7 +2106,7 @@ private:
                 if (arguments < 1 || arguments > 2)
                     error(name, "BUSY expects text and an optional position, or OFF");
                 emitCall(name, options.size() + arguments, false);
-                code_.back().optionCount = options.size();
+                code_.back().setOptionCount(options.size());
                 code_.back().mutableExtra().parameters = std::move(options);
                 return;
             }

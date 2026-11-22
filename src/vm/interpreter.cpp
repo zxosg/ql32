@@ -96,7 +96,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Call:
             if (!instruction.builtin && instruction.target >= code.size())
                 invalid(instruction, "call target is invalid");
-            if (!instruction.builtin && instruction.extra().parameters.size() != instruction.argCount)
+            if (!instruction.builtin && instruction.extra().parameters.size() != instruction.argCount())
                 invalid(instruction, "call argument metadata is inconsistent");
             break;
         case Op::DimArray:
@@ -266,7 +266,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             consumed = 1;
             break;
         case Op::Beep:
-            consumed = instruction.argCount;
+            consumed = instruction.argCount();
             break;
         case Op::MusicPlay:
         case Op::MusicWav:
@@ -284,7 +284,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
                             static_cast<std::size_t>(item.hasStep);
             break;
         case Op::Call:
-            consumed = instruction.argCount;
+            consumed = instruction.argCount();
             produced = instruction.expectsValue ? 1 : 0;
             break;
         case Op::Return:
@@ -1067,8 +1067,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             return ExecutionStatus::ProgramStopped;
         case Op::Call: {
             if (state.diagnosticsEnabled && !instruction.builtin) ++state.procedureCalls;
-            std::vector<StackEntry> arguments(instruction.argCount);
-            for (std::size_t i = instruction.argCount; i-- > 0;)
+            std::vector<StackEntry> arguments(instruction.argCount());
+            for (std::size_t i = instruction.argCount(); i-- > 0;)
                 arguments[i] = popEntry();
             std::optional<runtime::ChannelId> selectedChannel;
             if (instruction.channelArgument) {
@@ -2025,7 +2025,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         break;
                     }
                     std::uint8_t ink = 0, paper = 7, displayMode = 0;
-                    for (std::size_t i = 0; i < instruction.optionCount; ++i) {
+                    for (std::size_t i = 0; i < instruction.optionCount(); ++i) {
                         const auto* option = std::get_if<double>(&arguments[i]);
                         if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
                             runtimeError(instruction, "BUSY style values must be integers");
@@ -2042,7 +2042,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             displayMode = static_cast<std::uint8_t>(*option);
                         }
                     }
-                    const auto textIndex = instruction.optionCount;
+                    const auto textIndex = instruction.optionCount();
                     const auto* text = std::get_if<std::string>(&arguments[textIndex]);
                     if (!text) runtimeError(instruction, "BUSY text must be a string");
                     int positionX = -1;
@@ -2074,7 +2074,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (!ui_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                            "UI service unavailable");
                     std::uint8_t ink = 0, paper = 7, displayMode = 0;
-                    for (std::size_t i = 0; i < instruction.optionCount; ++i) {
+                    for (std::size_t i = 0; i < instruction.optionCount(); ++i) {
                         const auto* option = std::get_if<double>(&arguments[i]);
                         if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
                             runtimeError(instruction, "IPRINT style values must be integers");
@@ -2091,7 +2091,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             displayMode = static_cast<std::uint8_t>(*option);
                         }
                     }
-                    const auto textIndex = instruction.optionCount;
+                    const auto textIndex = instruction.optionCount();
                     const auto* text = std::get_if<std::string>(&arguments[textIndex]);
                     if (!text) runtimeError(instruction, "IPRINT text must be a string");
                     double durationSeconds = 3.0;
@@ -3312,11 +3312,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             const double initial = state.ranges[state.item].start;
             assignLoopValue(instruction, initial);
-            forStates[instruction.loopId] = std::move(state);
+            forStates[instruction.loopId()] = std::move(state);
             break;
         }
         case Op::ForNext: {
-            auto found = forStates.find(instruction.loopId);
+            auto found = forStates.find(instruction.loopId());
             if (found == forStates.end()) runtimeError(instruction, "inactive FOR loop");
             ForState& state = found->second;
             const auto variable = variables_.find(instruction.name);
@@ -3334,7 +3334,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (!range.single && rangeContains(range, next)) {
                 assignLoopValue(instruction, next);
                 for (auto loop = forStates.begin(); loop != forStates.end();) {
-                    if (loop->first > instruction.loopId) loop = forStates.erase(loop);
+                    if (loop->first > instruction.loopId()) loop = forStates.erase(loop);
                     else ++loop;
                 }
                 pc = instruction.target;
@@ -3355,7 +3355,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             assignLoopValue(instruction, state.ranges[state.item].start);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId) loop = forStates.erase(loop);
+                if (loop->first > instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
@@ -3363,14 +3363,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         }
         case Op::LoopNext:
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId) loop = forStates.erase(loop);
+                if (loop->first > instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
             break;
         case Op::ExitLoop:
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first >= instruction.loopId) loop = forStates.erase(loop);
+                if (loop->first >= instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
@@ -3786,7 +3786,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                             "audio service unavailable");
             runtime::ToneWaveform waveform = runtime::ToneWaveform::Square;
-            if (instruction.argCount == 3) waveform = waveformArgument(pop(), instruction);
+            if (instruction.argCount() == 3) waveform = waveformArgument(pop(), instruction);
             const double pitch = numeric(pop(), instruction);
             const double duration = numeric(pop(), instruction);
             if (!std::isfinite(duration) || std::trunc(duration) != duration ||

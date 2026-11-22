@@ -17,8 +17,23 @@ void require(bool ok, const char* message) {
 }
 
 void testRecordSizeBudget() {
-    // 48 B on LP64 (40 B on 32-bit) at the time of writing; the budget guards against regrowth.
-    require(sizeof(Instruction) <= 48, "Instruction grew beyond its memory budget");
+    // 40 B on LP64 (36 B on 32-bit) at the time of writing; the budget guards against regrowth.
+    require(sizeof(Instruction) <= 40, "Instruction grew beyond its memory budget");
+}
+
+void testOperandOverlayKeepsFieldsIndependent() {
+    Instruction call{Op::Call};
+    call.setArgCount(65535);
+    call.setOptionCount(7);
+    require(call.argCount() == 65535 && call.optionCount() == 7, "call operands collide");
+    call.setArgCount(3);
+    require(call.optionCount() == 7, "argCount write clobbered optionCount");
+    Instruction loop{Op::ForNext};
+    loop.setLoopId(4000000000u);
+    require(loop.loopId() == 4000000000u, "loop id truncated");
+    bool threw = false;
+    try { call.setArgCount(65536); } catch (const std::length_error&) { threw = true; }
+    require(threw, "oversized argCount was accepted");
 }
 
 void testNamesAndStringLiteralsAreShared() {
@@ -66,6 +81,7 @@ void testInstructionsWithoutMetadataAllocateNothingExtra() {
 
 int main() {
     testRecordSizeBudget();
+    testOperandOverlayKeepsFieldsIndependent();
     testNamesAndStringLiteralsAreShared();
     testLiteralsKeepTheirType();
     testInstructionsWithoutMetadataAllocateNothingExtra();

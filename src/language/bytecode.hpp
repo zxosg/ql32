@@ -341,18 +341,39 @@ struct Instruction : InstructionHead, InstructionFlags {
     const InstructionExtras& extra() const { return extras.get(); }
     InstructionExtras& mutableExtra() { return extras.mutate(); }
 
-    std::uint32_t target = 0;
-    std::uint32_t exitTarget = 0;
-    std::uint32_t loopId = 0;
+    // Declaration order is deliberate: the 16-bit fields fill the tail padding
+    // after the flag bits before the 32-bit words start.
     Narrow<std::uint16_t> line = 1;
     Narrow<std::uint16_t> column = 1;
     Narrow<std::uint16_t> basicLine = 0;
-    Narrow<std::uint16_t> sourceLineTarget = 0;
-    Narrow<std::uint16_t> argCount = 0;
-    Narrow<std::uint16_t> optionCount = 0;
+    std::uint32_t target = 0;
+    std::uint32_t exitTarget = 0;
+    // One operand word shared by opcodes that never overlap:
+    //   ForInit/ForNext/LoopNext/ExitLoop: loopId (all 32 bits)
+    //   Call, Beep and array ops:          argCount (low 16), optionCount (high 16)
+    //   Goto/Gosub/Restore by number:      sourceLineTarget (low 16)
+    std::uint32_t loopId() const noexcept { return operand_; }
+    void setLoopId(std::size_t value) {
+        if (value > 0xFFFFFFFFull) throw std::length_error("program exceeds a bytecode field limit");
+        operand_ = static_cast<std::uint32_t>(value);
+    }
+    int argCount() const noexcept { return static_cast<int>(operand_ & 0xFFFFu); }
+    void setArgCount(long long value) { operand_ = (operand_ & 0xFFFF0000u) | checked16(value); }
+    int optionCount() const noexcept { return static_cast<int>(operand_ >> 16); }
+    void setOptionCount(long long value) { operand_ = (operand_ & 0xFFFFu) | (checked16(value) << 16); }
+    int sourceLineTarget() const noexcept { return argCount(); }
+    void setSourceLineTarget(long long value) { setArgCount(value); }
+
+    std::uint32_t operand_ = 0;
     Narrow<std::uint8_t> rank = 0;
     Op op = Op::Push;
     PrintSeparator separator = PrintSeparator::None;
+
+private:
+    static std::uint32_t checked16(long long value) {
+        if (value < 0 || value > 0xFFFF) throw std::length_error("program exceeds a bytecode field limit");
+        return static_cast<std::uint32_t>(value);
+    }
 };
 
 struct FunctionMetadata {
