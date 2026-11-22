@@ -144,3 +144,40 @@ measured on hardware.
 - Compact numeric `%` arrays (4 B) — would need identical range-check semantics.
 - On-device CYD measurement (`DEBUGBAR`, `tools/ql32-memory-test.py`) after
   the owner flashes a build.
+
+## Stage 2: pooled text pointers, packed flags, narrow fields (47fc269)
+
+`Instruction` 104 -> 48 B on x86-64 (40 B on 32-bit; originally 256 / 160 B).
+Name/literal text is one pointer into a per-sequence `TextPool`; the numeric
+`Push` literal lives in the unused jump-target words; the 12 bool fields are
+bit-fields; `line`, `column`, `basicLine`, `sourceLineTarget`, `argCount`,
+`optionCount` are `uint16` and `rank` is `uint8` (`Narrow<T>` throws instead of
+wrapping). Behavior unchanged: CTest 88/88, golden CLI corpus unchanged.
+
+| Gate | Result |
+| --- | --- |
+| Host CTest (`build/linux`) | 88/88 (built, host-tested) |
+| Size budget test | `sizeof(Instruction) <= 48` |
+| `benchmarks/*.bas` vs 2051fa9 (best of 5, wall) | loop 75.1 -> 75.4 ms, recursion 36.0 -> 35.4, string_concat 39.9 -> 38.0, array_fill 72.2 -> 67.4: no regression (runs are very short) |
+| PlatformIO builds | all four succeed: CYD 1,626,133 B flash / 51,624 RAM; Olimex 1,866,633 / 57,068; TENSTAR 1,586,769 / 50,624; LILYGO 1,704,073 / 54,200 (built) |
+| Olimex hardware, run as before | **verified on hardware (Olimex)** |
+
+Olimex heap used while the task is alive (2051fa9 / e7e0ce8 / 47fc269):
+tiny 7,220 / 5,560 / 4,528 B; 1,200-statement program 1,243,168 / 697,688 /
+332,084 B (**-73% vs baseline**); array-worker 25,640 / 11,192 / 9,824 B.
+Golden output identical for all 17 programs, DIM boundary identical to e7e0ce8,
+MODE switching identical (raw: `bytecode-memory-olimex-stage2-47fc269.json`).
+Board left on `olimex_esp32_sbc_retro` built from 47fc269.
+
+Host corpus (`mandelbrot-benchmark.bas`, 306 instr.): 78,864 -> 35,298 ->
+18,162 B.
+
+### Is 90% reachable?
+
+Per-record: 256 -> 48 B host is -81%; ESP32 160 -> 40 B is -75% (measured by
+type layout). In bytes per program on the board the big program is -73%. The
+assessment's 16 B record is -94% host / -90% ESP32 and is **not reached**.
+Reaching it needs op-specific operand overlays (target/loopId/argCount/rank
+share two words by opcode) plus a pc-keyed source-line table, which touches
+~180 `.line/.column/.basicLine` sites and the debugger; estimated 24 B host /
+16-20 B ESP32. Not done in this stage.
