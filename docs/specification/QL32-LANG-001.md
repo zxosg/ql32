@@ -581,15 +581,17 @@ and the OPL samples noted in [docs/reference](../reference/README.md).
 
 `FREE()` returns a comma-delimited string containing the current free-memory
 estimate in bytes, the largest contiguous free block in bytes, and the number
-of free blocks reported by the allocator, in that order. A platform without
+of free blocks, and the number of allocated blocks reported by the allocator,
+in that order. A platform without
 fragmentation metrics leaves the unavailable fields empty while preserving the
 comma positions. `FREE(0)` returns the free-memory estimate as a number;
 `FREE(1)` returns the largest contiguous free block as a number, and `FREE(2)`
-returns the number of free blocks as a number. ESP32 reports all three values
-for byte-addressable heap. Linux supports only selector 0; selector 1 and 2
+returns the number of free blocks as a number; `FREE(3)` returns the number of
+allocated blocks. ESP32 reports all four values
+for byte-addressable heap. Linux supports only selector 0; selectors 1 to 3
 report that allocator fragmentation metrics are unavailable. Selectors must
-be integer values from 0 through 2. `ql32.inc` defines
-`KFreeTotal`, `KFreeContiguous`, and `KFreeFragments` for the selector values.
+be integer values from 0 through 3. `ql32.inc` defines
+`KFreeTotal`, `KFreeContiguous`, `KFreeFragments`, and `KFreeAllocated` for the selector values.
 Values are platform memory snapshots, not exact counts of memory owned by the
 current BASIC session. The target shell's separate `MEM` command is not
 implemented.
@@ -617,7 +619,21 @@ interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
 `DELETE`, `RENAME`, `FORMAT`, and `CD`. `LIST line` selects one exact line;
 `LIST start TO end` selects an inclusive range, `LIST start TO` continues to
 the final stored line, and `LIST TO end` begins at the first stored line.
-The legacy `LIST start-end` range syntax remains accepted. `RENUMBER` defaults
+The legacy `LIST start-end` range syntax remains accepted. The channel may
+also be written first as `LIST #ch, selector`. QL/32-specific extensions:
+`LIST PROC` / `LIST PROCEDURES` and `LIST FN` / `LIST FUNCTIONS` print one
+signature line (name and parameters, no program lines) per definition in
+program order, and print nothing, without error, when none are defined;
+`LIST PROC name` / `LIST FN name` (case-insensitive, optional `#ch,`) print the
+stored lines from `DEFine` to `END DEFine`, and an unknown name, or a name of
+the other kind, is an error. Definitions are found by scanning stored lines
+whose first statement is the `DEFine` header. `LIST GLOBALS` and
+`LIST LOCALS` print `name = value` lines sorted by name, then array bounds. With
+a DEBUG task attached they read its debug snapshot (LOCALS = innermost call
+frame); otherwise GLOBALS shows the interactive session variables and LOCALS is
+empty. Empty output is not an error. The `GLOBALS` and `LOCALS` debug commands
+are aliases with the same sorted output (no DEBUG task required). `RUN` does not
+expose the finished program's variables to the session. `RENUMBER` defaults
 to start 10 and step 10; `RENUMBER start, step` supplies both values. It
 rewrites numeric `GOTO`, `GO TO`, and `RESTORE` targets when they refer to a
 stored line, and commits only if the renumbered program validates. It rejects
@@ -652,10 +668,18 @@ escape its root. A drive prefix can be used by any operation that accepts a
 storage path, including `LOAD`, `SAVE`, `DIR`, `INCLUDE`, `TASK`, and file
 channels, as well as the file commands below.
 
-`DIR [#channel] [DETAILS] [path]` lists the immediate entries of a directory
-in sorted name order; plain directory names end in `/`. In details mode,
-directories appear as `<name>` and files as `name (N bytes)`. With no path
-either form lists the session's current directory. `CD path$` changes that
+`DIR [#channel] [path|pattern]` lists the immediate entries of a directory
+in the storage adapter's name order; directory names end in `/`. The last path
+component may contain `*` (any run) and `?` (any one character), matched
+case-insensitively. With no path it lists the session's current directory.
+`CAT [#channel] [path|pattern]` (QL32-specific) prints a detailed listing:
+directories first, then files, each group in case-insensitive name order, with
+raw byte sizes right-aligned (`<DIR>` for directories), a
+`N file(s), M dir(s), S bytes` line, and `Total:`, `Used:`, `Free:` byte counts
+for the drive holding the listed path. The space lines are omitted when the
+storage adapter cannot report capacity (`StorageService::space()` returns
+`known=false`). `DIR DETAILS` was replaced by `CAT` and now reports an error.
+Both commands honor the output channel and the pager. `CD path$` changes that
 directory for the current interpreter session. `CD` accepts a quoted path, a
 string variable, or a bare path such as
 `CD ..`; relative paths start at the current directory. `.` and `..` components
@@ -665,7 +689,21 @@ directory on that drive.
 `DELETE lineNumber1,...` deletes the listed program lines atomically. The
 candidate program is validated once after all removals, and a failed edit
 leaves the stored program unchanged. `DELETE path$` removes a file and
-`RENAME path$,newpath$` moves a file. Their paths are resolved relative to the
+`RENAME path$,newpath$` (or `RENAME path$ TO newpath$`) moves a file.
+QL/32-specific file commands (no SMSQ/E compatibility is claimed): `COPY source TO
+destination [FORCE]`, `MOVE source TO destination [FORCE]`, `DELETE path [FORCE]` and
+`RMDIR directory [FORCE]`. Sources may use `*`/`?` wildcards in the leaf name only; a
+source or destination may be `#channel` for `COPY` (file channels as sources; bytes are
+copied unchanged). A destination ending in `/` or naming an existing directory receives
+files under their own names; several sources require a directory destination. `COPY`
+and `MOVE` refuse to overwrite and `RMDIR` refuses non-empty directories unless `FORCE`
+is given; a `DELETE` wildcard matching more than one file asks `Y/N` unless `FORCE`, and
+programs or sessions without a UI fail instead of prompting. Zero wildcard matches is an
+error. Drive roots and the current directory are never removed. Copies stream in
+2048-byte slices through a temporary file, so the scheduler is never blocked; `MOVE`
+across drives is copy, size verification, then source removal. The first failure stops
+the command and reports how many items completed. Directories cannot be copied.
+Previously. Their paths are resolved relative to the
 current directory unless drive-qualified. Rename fails if the destination
 already exists; file deletion applies to files, not directories. `FORMAT path$`
 recursively deletes all files and subdirectories
@@ -693,8 +731,14 @@ Wait mode focuses the child while it runs, then resumes the caller. Child
 failure details are available through `ERR`, `ERR$`, and `ERRX$`. Without wait
 mode, source completion leaves the task at its own interactive prompt with its
 variables, program, graphics window, and channels retained. `TASKS` lists task
-IDs, kind, priority, state, and errors, along with the global instruction
-slice; suspended tasks also show their saved resume priority.
+IDs, source name, priority, state, and errors, along with the global instruction
+slice; suspended tasks also show their saved resume priority. The source name
+(QL/32-specific) is `SUPERVISOR` for the supervisor, otherwise the file passed
+to `TASK` with its directory and extension removed. Names longer than 10
+characters show the first 7 and last 3 characters joined by `..` (for example
+`ffs:/name_long_very_12.bas` is listed as `name_lo.._12`), so a numeric suffix
+stays visible; the column is therefore up to 12 characters wide. Tasks started
+without a file show `(inline)`. `TASKRESULT` reports it as `File:`.
 `PAUSE delay` suspends only the calling task for `delay` milliseconds while
 the scheduler continues running other tasks. The delay must be numeric and in
 `0..4294967295`; fractional values round up to the next millisecond. `PAUSE 0`
@@ -934,6 +978,24 @@ Graphics fail if that endpoint lacks graphics capability. Changing the default
 to `#0` selects `#0` for unqualified output; explicit selectors still use the
 selected handle's active binding. The current runtime still resolves per-session
 routes per operation; direct binding is the approved target architecture.
+`MIRROR #source TO #destination` (QL/32-specific; no SMSQ/E reference)
+adds a session-local text mirror: every text write to the source's resolved
+endpoint (PRINT, WRITE, LIST, DIR, CAT, HELP, diagnostics and prompts) is also
+written to the destination, which may be `#0`, `#1`, a window, serial, file or
+null channel. From the moment the mirror is set up, graphics drawing and state
+commands to a screen or window source (PLOT, LINE, RECT, CIRCLE, TEXT, BLIT, CLS,
+AT, INK, PAPER, OVER, FONT, GFONT) are also executed as-is on each window or
+screen destination, which keeps its own size, position and palette; nothing is
+scaled or copied, out-of-window pixels are clipped, and a destination error
+disables the mirror. WINDOW, CLOSEWINDOW and palette commands are never
+forwarded. INPUT echo is not mirrored; reads are never mirrored. Self-mirroring, chains and cycles are
+rejected, a source has at most 4 mirrors, and tasks do not inherit mirrors.
+Mirror writes never block or fail the program: a failing destination is
+disabled, and a full serial buffer drops bytes (platform serial writer is
+non-blocking) and counts them. A paged listing is mirrored once in full.
+`MIRROR DELETE #destination` removes all mirrors into it, `MIRROR LIST` shows
+relations, drop counts and failures, and closing a channel removes its
+relations.
 Channel handles belong to one interpreter session. A task launched by the
 embedded `TASK` command has its own `#0`, `#1`, and opened handle numbers; a
 number in one session does not select a handle in another. The sessions still
@@ -1298,8 +1360,8 @@ mode. Shell form: `MODE [LIST|name|modeId[,options]]`. See
 
 ### 11.8 Shell and debugger commands (not compiled BASIC statements)
 
-Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `EDIT [n]`, `RENUMBER [start,step]`,
-`DIR`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
+Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `LIST [#ch,] PROC|FN [name]`, `LIST GLOBALS|LOCALS`, `EDIT [n]`, `RENUMBER [start,step]`,
+`DIR`, `CAT`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
 `REBOOT`, `TASKS`, `TASKCHANNELS`, `KILL`, `TASKVIEW`, `WINDOWMODE
 [ISOLATED|SHARED]`, `MODE`, `TASKRESULT`, `LOGON`, `LOGOFF`, `SUSPEND`,
 `RESUME`, `SLICE`, `PRIORITY`, `MUSIC`. Monitor-only: `RECV`, `SEND`, `SCREEN`

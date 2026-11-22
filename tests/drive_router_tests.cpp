@@ -27,6 +27,7 @@ public:
         files.erase(path);
     }
     void remove(const std::string& path) override { files.erase(path); }
+    ql32::runtime::StorageSpace space(const std::string&) override { return {100, 40, 60, true}; }
 
     std::map<std::string, std::string> files;
     std::string name = "entry";
@@ -116,6 +117,8 @@ void testStorageDriveRouting() {
     require(storage.readText("FFS:/same.bas") == "flash", "FFS path did not route to flash");
     require(storage.readText("SDC:/same.bas") == "card", "SDC path did not route to card");
     require(storage.readText("default.bas") == "default card", "unqualified path did not use SDC");
+    require(storage.space("FFS:/").free == 60 && storage.space("SDC:/").total == 100,
+            "router did not forward storage space");
     require(storage.list("FFS:/").front().name == "entry" && ffs.lastListPath == "FFS:/",
             "FFS directory listing used the wrong service");
 

@@ -233,6 +233,7 @@ SMSQ/E compatibility.
 | `OUT` | `OUT channel, value` or `OUT channel, register, value` | Writes a scalar device value or register. `[HARDWARE]` | `OUT gpio%, 1` |
 | `XFER` | `XFER #channel, txAddress, txLength, rxAddress, rxLength` | Performs a raw SPI transaction; I2C supports raw transfer through its adapter. `[HARDWARE]` | `XFER #spi%, tx%, 2, rx%, 2` |
 | `CHANNEL` | `CHANNEL #channel` or `CHANNEL #source TO #destination` | Changes the default output channel or session-local channel route. | `CHANNEL #0` |
+| `MIRROR` | `MIRROR #source TO #destination`, `MIRROR DELETE #destination`, `MIRROR LIST` | QL/32-specific. Copies text written to the source endpoint (`#0`, `#1`, window, serial, file) to the destination too. Text, and for window/screen destinations the drawing and state commands (`PLOT LINE RECT CIRCLE TEXT BLIT CLS AT INK PAPER OVER FONT GFONT`), are routed as-is to the destination, which keeps its own size and palette; `WINDOW`, `CLOSEWINDOW` and palette commands are not forwarded. No INPUT echo. Session-local, max 4 per source, no chains or cycles. A failing destination is disabled; a full CYD serial buffer drops bytes (counted in `MIRROR LIST`). Closing a channel removes its mirrors. | `MIRROR #0 TO #log` |
 | `GETNET` | `GETNET ssid$, password$` | Connects to a Wi-Fi network. `[NETWORK]` | `GETNET ssid$, pass$` |
 | `DISNET` | `DISNET` | Disconnects the network service. `[NETWORK]` | `DISNET` |
 | `BEEP` | `BEEP ms, hz [, waveform]` | Plays a tone and suspends only the calling task for `ms` (1..600000). `hz` 20..10000. Waveform: `"SQUARE"` (default), `"SINE"`, `"TRIANGLE"`, `"SAW"` (rising), `"SAWDOWN"` (falling) or 0..4. QL/32-specific; differs from SMSQ/E `BEEP`. Needs the audio service. `[AUDIO]` | `BEEP 200, 440, "sine"` |
@@ -386,7 +387,7 @@ logical operators.
 | `ERR` | `ERR()` | Current QL/32 error code. | `code% = ERR()` |
 | `ERR$` | `ERR$(code)` | Message for an error code. | `message$ = ERR$(ERR())` |
 | `ERRX$` | `ERRX$()` | Contextual detail for the current task error. | `detail$ = ERRX$()` |
-| `FREE` | `FREE()` or `FREE(selector)` | Returns formatted memory information or selected total/contiguous/fragment values. | `bytes = FREE(0)` |
+| `FREE` | `FREE()` or `FREE(selector)` | Returns formatted memory information or selected total/contiguous/fragment/allocated-block values. | `bytes = FREE(0)` |
 | `CPUFREQ` | `CPUFREQ()` | Current CPU clock in MHz, or zero when unavailable. `[ESP32]` | `mhz% = CPUFREQ()` |
 | `MODE` | `MODE()` | Returns the current display mode. `[DISPLAY]` | `mode% = MODE()` |
 | `SYSINFO$` | `SYSINFO$(selector)` | Returns version, build ID, profile, display, input, storage, or feature summary. Selector constants are in `ql32.inc`; values describe the compiled profile. | `board$ = SYSINFO$(KSysPlatform)` |
@@ -456,19 +457,23 @@ target shell services. Examples use prompt syntax.
 | --- | --- | --- | --- |
 | `HELP` | `HELP` | Lists shell commands, BASIC words, functions, and optional-service notes. | `HELP` |
 | `RUN` | `RUN` | Compiles and executes the numbered program; clears variables for a new run. | `RUN` |
-| `LIST` | `LIST [line [TO [end]]] [#channel]` | Lists all lines, one exact line, or an inclusive line range. `LIST TO end` starts at the first line; `LIST start TO` continues through the last. The legacy `start-end` form remains accepted. | `LIST 10 TO 50` |
+| `LIST` | `LIST [#channel,] [line [TO [end]]] [#channel]`; `LIST [#channel,] PROC\|PROCEDURE\|FN\|FUNCTION [name]`; `LIST GLOBALS\|LOCALS [#channel]` | Lists all lines, one exact line, or an inclusive line range. `LIST TO end` starts at the first line; `LIST start TO` continues through the last. The legacy `start-end` form remains accepted. `LIST PROC`/`LIST FN` without a name print one signature line (name and parameters) per definition, nothing if none exist; with a name they print the lines from `DEFine` to `END DEFine` (unknown name is an error). `LIST GLOBALS`/`LIST LOCALS` print sorted variables (session variables, or the DEBUG task snapshot when attached). | `LIST 10 TO 50` |
 | `EDIT` | `EDIT [lineNumber]` | Opens a numbered program line for replacement. While editing, Up/Down selects the previous/next stored line; Ctrl+Left/Right moves by word. | `EDIT 100` |
 | `RENUMBER` | `RENUMBER [start, step]` | Renumbers stored lines; defaults to start 10 and step 10. Updates numeric `GOTO`/`GO TO` and `RESTORE` references that target existing lines. | `RENUMBER 100, 10` |
 | `NEW` | `NEW` | Clears the stored numbered program. | `NEW` |
 | `LOAD` | `LOAD "path.bas"` | Loads numbered or unnumbered source from storage. | `LOAD "FFS:/demo.bas"` |
 | `SAVE` | `SAVE "path.bas"` | Saves the stored program. | `SAVE "SDC:/demo.bas"` |
-| `DIR` | `DIR [#channel] [DETAILS] [path]` | Lists a directory in sorted name order; `DETAILS` includes file sizes and labels subdirectories. | `DIR DETAILS "FFS:/"` |
+| `DIR` | `DIR [#channel] [path\|pattern]` | Lists a directory in storage order; subdirectories end in `/`. The last path component may use `*` and `?` wildcards (case-insensitive). | `DIR "FFS:/*.bas"` |
+| `CAT` | `CAT [#channel] [path\|pattern]` | Detailed listing: directories first, then files, case-insensitive order, raw byte sizes right-aligned, then file/directory counts and the drive's Total/Used/Free bytes (omitted if the drive cannot report them). QL32-specific. Replaces `DIR DETAILS`. | `CAT "FFS:/"` |
 | `CD` | `CD [path]` | Changes the current directory for this interpreter session. | `CD "SDC:/programs"` |
-| `DELETE` | `DELETE line[, line ...]` or `DELETE path$` | Deletes program lines atomically or removes a file. | `DELETE 10, 20` |
+| `DELETE` | `DELETE line[, line ...]` or `DELETE path$ [FORCE]` | Deletes program lines atomically or removes files (wildcards allowed; more than one match asks for confirmation unless `FORCE`). | `DELETE 10, 20` |
+| `COPY` | `COPY src TO dst [FORCE]` | QL/32-specific. Copies files (wildcards in the leaf) or `#channel` data; refuses overwrite without `FORCE`. A source of `#0` (keyboard) or a hardware serial channel copies input as a non-blocking job until Ctrl-Z (0x1A); Esc cancels. | `COPY "*.bas" TO "SDC:/bak/"` |
+| `MOVE` | `MOVE src TO dst [FORCE]` | QL/32-specific. Moves files; across drives copies, verifies, then removes the source. | `MOVE "a.bas" TO "SDC:/a.bas"` |
+| `RMDIR` | `RMDIR dir [FORCE]` | QL/32-specific. Removes an empty directory; `FORCE` removes recursively. Never removes a drive root or the current directory. | `RMDIR "old" FORCE` |
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |
 | `FORMAT` | `FORMAT path` | Recursively clears the selected directory or volume. Destructive. | `FORMAT "SDC:/"` |
 | `PAGER` | `PAGER ON\|OFF` | Enables or disables per-session pagination of generated listings. | `PAGER ON` |
-| `TASKS` | `TASKS [#channel]` | Lists scheduler tasks and state. Embedded REPL. `[ESP32]` | `TASKS` |
+| `TASKS` | `TASKS [#channel]` | Lists scheduler tasks with source file name (shortened to `name_lo.._12` form), priority and state. Embedded REPL. `[ESP32]` | `TASKS` |
 | `TASKRESULT` | `TASKRESULT id` | Prints available properties for a task. Embedded REPL. `[ESP32]` | `TASKRESULT 2` |
 | `TASKCHANNELS` | `TASKCHANNELS id` | Lists a task's reserved and opened channels. Embedded REPL. `[ESP32]` | `TASKCHANNELS 2` |
 | `LOGON` | `LOGON id` | Routes interactive commands to an idle worker session. Embedded REPL. `[ESP32]` | `LOGON 2` |
@@ -492,8 +497,8 @@ target shell services. Examples use prompt syntax.
 | `NEXT` | `NEXT` | Runs through calls from the current statement while debugging. | `NEXT` |
 | `DEBUG CONTINUE` | `DEBUG CONTINUE` | Resumes the debugger target. | `DEBUG CONTINUE` |
 | `WHERE` | `WHERE` | Shows the paused task's source location. | `WHERE` |
-| `LOCALS` | `LOCALS` | Lists local values and array bounds. | `LOCALS` |
-| `GLOBALS` | `GLOBALS` | Lists session globals and array bounds. | `GLOBALS` |
+| `LOCALS` | `LOCALS` | Alias of `LIST LOCALS`: sorted local values and array bounds. | `LOCALS` |
+| `GLOBALS` | `GLOBALS` | Alias of `LIST GLOBALS`: sorted session globals and array bounds. | `GLOBALS` |
 | `STACK` | `STACK` | Shows the procedure/function call stack. | `STACK` |
 | `EVAL` | `EVAL expression` | Evaluates a side-effect-free expression in the paused task. | `EVAL A+B*2` |
 | `WATCH` | `WATCH expression` | Adds a side-effect-free expression watch. | `WATCH count%` |

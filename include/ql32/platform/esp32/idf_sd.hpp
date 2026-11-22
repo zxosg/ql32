@@ -51,6 +51,8 @@ public:
     std::string readText(const std::string& path) override;
     std::unique_ptr<runtime::StorageReadHandle> openRead(
         const std::string& path) override;
+    std::unique_ptr<runtime::StorageWriteHandle> openWrite(
+        const std::string& path) override;
     void writeText(const std::string& path, const std::string& contents) override;
     void writeTextStream(const std::string& path,
                          const runtime::TextStreamSource& source) override;
@@ -61,6 +63,7 @@ public:
     void remove(const std::string& path) override;
     void removeDirectory(const std::string& path) override;
     void format(const std::string& path) override;
+    runtime::StorageSpace space(const std::string& path) override;
 
 private:
     const IdfSdCard& card_;
