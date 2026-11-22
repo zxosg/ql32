@@ -1185,6 +1185,17 @@ void testSupervisorCanToggleDebugBar() {
             "DEBUGBAR OFF did not disable the overlay");
 }
 
+void testTaskDisplayName() {
+    using ql32::runtime::taskDisplayName;
+    require(taskDisplayName("ffs:/name_long_very_12.bas") == "name_lo.._12", "long name");
+    require(taskDisplayName("worker-1.bas") == "worker-1", "short name");
+    require(taskDisplayName("0123456789.bas") == "0123456789", "exactly 10 characters");
+    require(taskDisplayName("sd:/a/b/01234567890") == "0123456..890", "no extension");
+    require(taskDisplayName("a.b.bas") == "a.b", "only last extension");
+    require(taskDisplayName(".bas") == ".bas", "leading dot is not an extension");
+    require(taskDisplayName("").empty(), "empty name");
+}
+
 void testTasksUsesDefaultAndExplicitPrintChannels() {
     auto channels = std::make_shared<CapturingChannelService>();
     auto graphics = std::make_shared<CapturingGraphicsService>();
@@ -1194,6 +1205,9 @@ void testTasksUsesDefaultAndExplicitPrintChannels() {
     ql32::vm::SessionScheduler scheduler(std::move(services), 32);
     std::ostringstream consoleOutput;
     const auto supervisor = scheduler.launchInteractive(consoleOutput);
+    std::ostringstream workerOutput;
+    scheduler.launchWorker("PAUSE 1000\n", workerOutput, "ffs:/name_long_very_12.bas");
+    scheduler.launchWorker("PAUSE 1000\n", workerOutput);
 
     require(scheduler.submit(supervisor, "sink=OPEN(3)\n"),
             "supervisor could not open a channel for TASKS output");
@@ -1204,6 +1218,11 @@ void testTasksUsesDefaultAndExplicitPrintChannels() {
     require(scheduler.tick(), "scheduler did not execute unqualified TASKS");
     require(graphics->writtenText.find("SLICE 32 instructions") != std::string::npos,
             "TASKS did not default to print channel #1");
+    require(graphics->writtenText.find("SUPERVISOR P=") != std::string::npos &&
+                graphics->writtenText.find("name_lo.._12 P=") != std::string::npos &&
+                graphics->writtenText.find("(inline) P=") != std::string::npos &&
+                graphics->writtenText.find("WORKER") == std::string::npos,
+            "TASKS did not list supervisor, shortened file name and inline task");
 
     require(scheduler.submit(supervisor, "TASKS #2\n"),
             "supervisor did not accept TASKS channel redirection");
@@ -1668,6 +1687,7 @@ int main() {
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();
+    testTaskDisplayName();
     testTasksUsesDefaultAndExplicitPrintChannels();
     testKillConfirmationUsesConsoleChannel();
     testKillRemovesCompletedAndFailedTaskRecords();

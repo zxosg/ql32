@@ -468,7 +468,7 @@ target shell services. Examples use prompt syntax.
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |
 | `FORMAT` | `FORMAT path` | Recursively clears the selected directory or volume. Destructive. | `FORMAT "SDC:/"` |
 | `PAGER` | `PAGER ON\|OFF` | Enables or disables per-session pagination of generated listings. | `PAGER ON` |
-| `TASKS` | `TASKS [#channel]` | Lists scheduler tasks and state. Embedded REPL. `[ESP32]` | `TASKS` |
+| `TASKS` | `TASKS [#channel]` | Lists scheduler tasks with source file name (shortened to `name_lo.._12` form), priority and state. Embedded REPL. `[ESP32]` | `TASKS` |
 | `TASKRESULT` | `TASKRESULT id` | Prints available properties for a task. Embedded REPL. `[ESP32]` | `TASKRESULT 2` |
 | `TASKCHANNELS` | `TASKCHANNELS id` | Lists a task's reserved and opened channels. Embedded REPL. `[ESP32]` | `TASKCHANNELS 2` |
 | `LOGON` | `LOGON id` | Routes interactive commands to an idle worker session. Embedded REPL. `[ESP32]` | `LOGON 2` |

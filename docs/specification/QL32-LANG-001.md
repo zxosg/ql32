@@ -693,8 +693,14 @@ Wait mode focuses the child while it runs, then resumes the caller. Child
 failure details are available through `ERR`, `ERR$`, and `ERRX$`. Without wait
 mode, source completion leaves the task at its own interactive prompt with its
 variables, program, graphics window, and channels retained. `TASKS` lists task
-IDs, kind, priority, state, and errors, along with the global instruction
-slice; suspended tasks also show their saved resume priority.
+IDs, source name, priority, state, and errors, along with the global instruction
+slice; suspended tasks also show their saved resume priority. The source name
+(QL/32-specific) is `SUPERVISOR` for the supervisor, otherwise the file passed
+to `TASK` with its directory and extension removed. Names longer than 10
+characters show the first 7 and last 3 characters joined by `..` (for example
+`ffs:/name_long_very_12.bas` is listed as `name_lo.._12`), so a numeric suffix
+stays visible; the column is therefore up to 12 characters wide. Tasks started
+without a file show `(inline)`. `TASKRESULT` reports it as `File:`.
 `PAUSE delay` suspends only the calling task for `delay` milliseconds while
 the scheduler continues running other tasks. The delay must be numeric and in
 `0..4294967295`; fractional values round up to the next millisecond. `PAUSE 0`
