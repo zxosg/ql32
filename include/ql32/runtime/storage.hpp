@@ -47,6 +47,17 @@ public:
                                std::size_t capacity) = 0;
 };
 
+// Incremental binary writer. Adapters return one so a long copy can be split
+// into bounded slices instead of one blocking call. close() makes the data
+// durable and must be called exactly once on success; destroying the handle
+// without close() abandons the file (the caller removes it).
+class StorageWriteHandle {
+public:
+    virtual ~StorageWriteHandle() = default;
+    virtual void write(const std::uint8_t* data, std::size_t size) = 0;
+    virtual void close() = 0;
+};
+
 class MemoryStorageReadHandle final : public StorageReadHandle {
 public:
     explicit MemoryStorageReadHandle(std::string contents)
@@ -74,6 +85,11 @@ public:
         (void)path;
         throw ServiceError(ServiceErrorCode::Unavailable,
                            "storage: bounded random-access reads are unavailable");
+    }
+    virtual std::unique_ptr<StorageWriteHandle> openWrite(const std::string& path) {
+        (void)path;
+        throw ServiceError(ServiceErrorCode::Unavailable,
+                           "storage: incremental writes are unavailable");
     }
     virtual void writeText(const std::string& path, const std::string& contents) = 0;
     // Adapters override this to stream chunks without assembling the complete

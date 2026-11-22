@@ -465,7 +465,10 @@ target shell services. Examples use prompt syntax.
 | `DIR` | `DIR [#channel] [path\|pattern]` | Lists a directory in storage order; subdirectories end in `/`. The last path component may use `*` and `?` wildcards (case-insensitive). | `DIR "FFS:/*.bas"` |
 | `CAT` | `CAT [#channel] [path\|pattern]` | Detailed listing: directories first, then files, case-insensitive order, raw byte sizes right-aligned, then file/directory counts and the drive's Total/Used/Free bytes (omitted if the drive cannot report them). QL32-specific. Replaces `DIR DETAILS`. | `CAT "FFS:/"` |
 | `CD` | `CD [path]` | Changes the current directory for this interpreter session. | `CD "SDC:/programs"` |
-| `DELETE` | `DELETE line[, line ...]` or `DELETE path$` | Deletes program lines atomically or removes a file. | `DELETE 10, 20` |
+| `DELETE` | `DELETE line[, line ...]` or `DELETE path$ [FORCE]` | Deletes program lines atomically or removes files (wildcards allowed; more than one match asks for confirmation unless `FORCE`). | `DELETE 10, 20` |
+| `COPY` | `COPY src TO dst [FORCE]` | QL/32-specific. Copies files (wildcards in the leaf) or `#channel` data; refuses overwrite without `FORCE`. | `COPY "*.bas" TO "SDC:/bak/"` |
+| `MOVE` | `MOVE src TO dst [FORCE]` | QL/32-specific. Moves files; across drives copies, verifies, then removes the source. | `MOVE "a.bas" TO "SDC:/a.bas"` |
+| `RMDIR` | `RMDIR dir [FORCE]` | QL/32-specific. Removes an empty directory; `FORCE` removes recursively. Never removes a drive root or the current directory. | `RMDIR "old" FORCE` |
 | `RENAME` | `RENAME oldPath, newPath` | Moves/renames a file. | `RENAME "old.bas", "new.bas"` |
 | `FORMAT` | `FORMAT path` | Recursively clears the selected directory or volume. Destructive. | `FORMAT "SDC:/"` |
 | `PAGER` | `PAGER ON\|OFF` | Enables or disables per-session pagination of generated listings. | `PAGER ON` |

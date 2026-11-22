@@ -32,6 +32,35 @@ bool isWithin(const std::filesystem::path& root, const std::filesystem::path& ca
     return true;
 }
 
+class DirectoryWriteHandle final : public runtime::StorageWriteHandle {
+public:
+    explicit DirectoryWriteHandle(const std::filesystem::path& path)
+        : path_(path), file_(path, std::ios::binary | std::ios::trunc) {
+        if (!file_) {
+            std::error_code error(errno, std::generic_category());
+            fail(path, error);
+        }
+    }
+    void write(const std::uint8_t* data, std::size_t size) override {
+        file_.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
+        if (!file_)
+            throw ServiceError(ServiceErrorCode::IoError,
+                               "storage: failed writing " + path_.string());
+    }
+    void close() override {
+        file_.flush();
+        const bool ok = static_cast<bool>(file_);
+        file_.close();
+        if (!ok || file_.fail())
+            throw ServiceError(ServiceErrorCode::IoError,
+                               "storage: failed writing " + path_.string());
+    }
+
+private:
+    std::filesystem::path path_;
+    std::ofstream file_;
+};
+
 class DirectoryReadHandle final : public runtime::StorageReadHandle {
 public:
     explicit DirectoryReadHandle(const std::filesystem::path& path) : file_(path, std::ios::binary) {
@@ -124,6 +153,11 @@ std::string DirectoryStorage::readText(const std::string& path) {
 std::unique_ptr<runtime::StorageReadHandle> DirectoryStorage::openRead(
         const std::string& path) {
     return std::make_unique<DirectoryReadHandle>(resolve(path, false));
+}
+
+std::unique_ptr<runtime::StorageWriteHandle> DirectoryStorage::openWrite(
+        const std::string& path) {
+    return std::make_unique<DirectoryWriteHandle>(resolve(path, true));
 }
 
 void DirectoryStorage::writeText(const std::string& path, const std::string& contents) {

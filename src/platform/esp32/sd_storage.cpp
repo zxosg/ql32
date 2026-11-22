@@ -36,6 +36,31 @@ std::string entryPathRelativeTo(const std::string& directory,
     return fileName(path.c_str());
 }
 
+class SdWriteHandle final : public runtime::StorageWriteHandle {
+public:
+    explicit SdWriteHandle(fs::File file) : file_(std::move(file)) {}
+    ~SdWriteHandle() override {
+        if (file_) file_.close();
+    }
+    void write(const std::uint8_t* data, std::size_t size) override {
+        std::size_t offset = 0;
+        while (offset < size) {
+            const auto written = file_.write(data + offset, size - offset);
+            if (written == 0)
+                throw ServiceError(ServiceErrorCode::IoError,
+                                   "storage: incomplete write");
+            offset += written;
+        }
+    }
+    void close() override {
+        file_.flush();
+        file_.close();
+    }
+
+private:
+    fs::File file_;
+};
+
 class SdReadHandle final : public runtime::StorageReadHandle {
 public:
     explicit SdReadHandle(fs::File file) : file_(std::move(file)), size_(file_.size()) {}
@@ -161,6 +186,17 @@ std::unique_ptr<runtime::StorageReadHandle> SdStorage::openRead(
                            "storage: path names a directory: " + path);
     }
     return std::make_unique<SdReadHandle>(std::move(file));
+}
+
+std::unique_ptr<runtime::StorageWriteHandle> SdStorage::openWrite(
+        const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    fs::File file = filesystem_.open(resolved.c_str(), FILE_WRITE);
+    if (!file)
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: cannot open for writing: " + path);
+    return std::make_unique<SdWriteHandle>(std::move(file));
 }
 
 void SdStorage::writeText(const std::string& path, const std::string& contents) {

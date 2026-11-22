@@ -9,14 +9,17 @@
 namespace ql32::platform::esp32 {
 
 // Routes explicitly qualified FFS:/ and SDC:/ paths to their independent
-// platform adapters. Unqualified paths use the SD card drive.
+// platform adapters. Unqualified paths use the SD card drive unless defaultToFfs is set.
 class DriveRouterStorage final : public runtime::StorageService {
 public:
-    DriveRouterStorage(runtime::StorageService& ffs, runtime::StorageService& sdc)
-        : ffs_(ffs), sdc_(sdc) {}
+    DriveRouterStorage(runtime::StorageService& ffs, runtime::StorageService& sdc,
+                       bool defaultToFfs = false)
+        : ffs_(ffs), sdc_(sdc), defaultToFfs_(defaultToFfs) {}
 
     std::string readText(const std::string& path) override;
     std::unique_ptr<runtime::StorageReadHandle> openRead(
+        const std::string& path) override;
+    std::unique_ptr<runtime::StorageWriteHandle> openWrite(
         const std::string& path) override;
     void writeText(const std::string& path, const std::string& contents) override;
     void writeTextStream(const std::string& path,
@@ -33,6 +36,7 @@ public:
 private:
     runtime::StorageService& ffs_;
     runtime::StorageService& sdc_;
+    bool defaultToFfs_;
     runtime::StorageService& forPath(const std::string& path) const;
 };
 
@@ -40,8 +44,9 @@ private:
 // filesystem-specific channel adapter.
 class DriveRouterChannels final : public runtime::ChannelService {
 public:
-    DriveRouterChannels(runtime::ChannelService& ffs, runtime::ChannelService& sdc)
-        : ffs_(ffs), sdc_(sdc) {}
+    DriveRouterChannels(runtime::ChannelService& ffs, runtime::ChannelService& sdc,
+                        bool defaultToFfs = false)
+        : ffs_(ffs), sdc_(sdc), defaultToFfs_(defaultToFfs) {}
 
     runtime::ChannelId open(runtime::SessionId session, const std::string& path,
                             runtime::ChannelMode mode) override;
@@ -71,6 +76,7 @@ private:
 
     runtime::ChannelService& ffs_;
     runtime::ChannelService& sdc_;
+    bool defaultToFfs_;
     mutable std::mutex mutex_;
     std::unordered_map<runtime::ChannelId, RoutedChannel> channels_;
     runtime::ChannelId nextChannel_ = 1;
