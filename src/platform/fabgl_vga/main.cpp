@@ -911,16 +911,23 @@ void refreshDebugOverlay() {
     const auto freeBytes = boardMemory.freeBytes();
     const auto heap = boardMemory.fragmentationInfo();
     const std::size_t activeTasks = scheduler ? scheduler->activeTaskCount() : 0;
-    char clockText[9] = "--:--:--";
-    if (const auto timestamp = boardClock.unixTimeSeconds()) {
-        const std::time_t value = static_cast<std::time_t>(*timestamp);
-        std::tm parts{};
-        if (gmtime_r(&value, &parts))
-            std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
-                          parts.tm_hour, parts.tm_min, parts.tm_sec);
+    char clockText[16]{};
+    const auto timestamp = boardClock.unixTimeSeconds();
+    std::tm parts{};
+    const std::time_t value = timestamp ? static_cast<std::time_t>(*timestamp) : 0;
+    if (timestamp && gmtime_r(&value, &parts)) {
+        std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
+                      parts.tm_hour, parts.tm_min, parts.tm_sec);
+    } else {
+        // Unsynchronized wall clock: show uptime instead, marked with "UP".
+        const std::uint32_t seconds = now / 1000;
+        std::snprintf(clockText, sizeof(clockText), "UP %02u:%02u:%02u",
+                      static_cast<unsigned>((seconds / 3600) % 100),
+                      static_cast<unsigned>((seconds / 60) % 60),
+                      static_cast<unsigned>(seconds % 60));
     }
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u/%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu TASK:%u/%u %s",
         static_cast<unsigned long long>(freeBytes / 1024),
         static_cast<unsigned long long>(heap ? heap->largestFreeBlockBytes / 1024 : 0),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),

@@ -386,7 +386,7 @@ logical operators.
 | `ERR` | `ERR()` | Current QL/32 error code. | `code% = ERR()` |
 | `ERR$` | `ERR$(code)` | Message for an error code. | `message$ = ERR$(ERR())` |
 | `ERRX$` | `ERRX$()` | Contextual detail for the current task error. | `detail$ = ERRX$()` |
-| `FREE` | `FREE()` or `FREE(selector)` | Returns formatted memory information or selected total/contiguous/fragment values. | `bytes = FREE(0)` |
+| `FREE` | `FREE()` or `FREE(selector)` | Returns formatted memory information or selected total/contiguous/fragment/allocated-block values. | `bytes = FREE(0)` |
 | `CPUFREQ` | `CPUFREQ()` | Current CPU clock in MHz, or zero when unavailable. `[ESP32]` | `mhz% = CPUFREQ()` |
 | `MODE` | `MODE()` | Returns the current display mode. `[DISPLAY]` | `mode% = MODE()` |
 | `SYSINFO$` | `SYSINFO$(selector)` | Returns version, build ID, profile, display, input, storage, or feature summary. Selector constants are in `ql32.inc`; values describe the compiled profile. | `board$ = SYSINFO$(KSysPlatform)` |

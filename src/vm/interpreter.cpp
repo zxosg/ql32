@@ -1793,11 +1793,12 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         std::string values = std::to_string(memory_->freeBytes());
                         if (const auto info = memory_->fragmentationInfo()) {
                             values += "," + std::to_string(info->largestFreeBlockBytes) +"," +
-                                      std::to_string(info->freeBlockCount);
+                                      std::to_string(info->freeBlockCount) + "," +
+                                      std::to_string(info->allocatedBlockCount);
                         } else {
                             // Preserve CSV column positions on platforms that
                             // cannot report allocator fragmentation details.
-                            values += ",,";
+                            values += ",,,";
                         }
                         pushValue(std::move(values));
                         break;
@@ -1805,8 +1806,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     std::uint64_t selector = 0;
                     const auto* number = std::get_if<double>(&arguments[0]);
                     if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
-                        *number < 0 || *number > 2)
-                        runtimeError(instruction, "FREE selector must be 0, 1, or 2");
+                        *number < 0 || *number > 3)
+                        runtimeError(instruction, "FREE selector must be 0, 1, 2, or 3");
                     selector = static_cast<std::uint64_t>(*number);
                     if (selector == 0) {
                         pushValue(static_cast<double>(memory_->freeBytes()));
@@ -1816,7 +1817,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                             throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                 "heap fragmentation metrics unavailable on this platform");
                         const auto value = selector == 1 ? info->largestFreeBlockBytes :
-                                                           info->freeBlockCount;
+                                           selector == 2 ? info->freeBlockCount :
+                                                           info->allocatedBlockCount;
                         pushValue(static_cast<double>(value));
                     }
                     break;
