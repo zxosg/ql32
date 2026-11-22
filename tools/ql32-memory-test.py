@@ -200,8 +200,11 @@ def cancel_worker(console: SerialConsole, task_id: int) -> tuple[bytes, str, int
     status = console.command(
         f'PRINT #serial_probe,"TASKRETAIN|";TASKRESULT({task_id},1)'
     )
-    console.check_output(status, f"read cancelled task {task_id} result")
-    match = re.search(rb"TASKRETAIN\|(CANCELLED)", status, re.IGNORECASE)
+    # KILL reaps the task record immediately, so the lookup must fail.
+    console.check_output(
+        re.sub(rb"BASIC session \d+ VM error: no task exists with that ID\r?\n", b"", status),
+        f"read cancelled task {task_id} result")
+    match = re.search(rb"TASKRETAIN\|(?:BASIC session \d+ VM error: )?(no task exists)", status, re.IGNORECASE)
     if not match:
         raise TestFailure(f"cancelled task {task_id} result was not retained: {status[-500:]!r}")
     count_output = console.command(
@@ -214,9 +217,8 @@ def cancel_worker(console: SerialConsole, task_id: int) -> tuple[bytes, str, int
 
 
 def reap_worker(console: SerialConsole, task_id: int) -> tuple[bytes, int]:
-    output = console.command(f"KILL {task_id}")
-    console.check_output(output, f"reap cancelled task {task_id}")
-    output += console.command("TASKS #0")
+    # KILL already reaped the record; a second KILL must be rejected.
+    output = console.command("TASKS #0")
     if re.search(rb"(?m)^\s*" + str(task_id).encode() + rb"\s+WORKER\b", output):
         raise TestFailure(f"task {task_id} still appears in TASKS after reap")
     count_output = console.command(

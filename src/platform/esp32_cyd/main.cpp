@@ -649,8 +649,9 @@ void setup() {
                 startupProgram = sdStorage.readText("startup.bas");
                 Serial.println("Running Storage:/startup.bas");
             } catch (const ql32::runtime::ServiceError& error) {
-                Serial.printf("Storage startup read error: %s\n", error.what());
-                return;
+                Serial.printf("Storage startup read error: %s; starting without it\n",
+                              error.what());
+                startupProgram.clear();
             }
         } else {
             Serial.println("Storage:/startup.bas not found; starting with a clear display");
@@ -660,11 +661,12 @@ void setup() {
             startupProgram = sdStorage.readText("startup.bas");
             Serial.println("Running SD:/startup.bas");
         } catch (const ql32::runtime::ServiceError& error) {
-            if (error.code() != ql32::runtime::ServiceErrorCode::NotFound) {
-                Serial.printf("Storage startup read error: %s\n", error.what());
-                return;
-            }
-            Serial.println("SD:/startup.bas not found; starting with a clear display");
+            startupProgram.clear();
+            if (error.code() != ql32::runtime::ServiceErrorCode::NotFound)
+                Serial.printf("Storage startup read error: %s; starting without it\n",
+                              error.what());
+            else
+                Serial.println("SD:/startup.bas not found; starting with a clear display");
         }
 #endif
     }
