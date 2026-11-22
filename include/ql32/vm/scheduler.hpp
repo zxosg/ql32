@@ -45,6 +45,7 @@ struct TaskInfo {
     bool paused = false;
     std::size_t openChannels = 0;
     graphics::TaskViewport viewport{};
+    std::string name;
 };
 
 struct Services {
@@ -76,9 +77,12 @@ public:
     SessionScheduler(const SessionScheduler&) = delete;
     SessionScheduler& operator=(const SessionScheduler&) = delete;
 
-    TaskId launch(std::string source, std::ostream& output);
-    TaskId launchWorker(std::string source, std::ostream& output);
-    TaskId launchAndWait(std::string source, std::ostream& output, TaskId parent);
+    // An optional name is the source path; tasks list its short display form.
+    TaskId launch(std::string source, std::ostream& output, std::string name = {});
+    TaskId launchWorker(std::string source, std::ostream& output,
+                        std::string name = {});
+    TaskId launchAndWait(std::string source, std::ostream& output, TaskId parent,
+                         std::string name = {});
     // Creates a persistent interactive session. An optional initial program
     // runs as source before the session begins accepting REPL input.
     TaskId launchInteractive(std::ostream& output, std::string initialProgram = {});

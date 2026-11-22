@@ -28,6 +28,7 @@
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
 #include "ql32/platform/esp32/cpu_frequency.hpp"
+#include "ql32/platform/esp32/drive_router.hpp"
 #include "ql32/ui/graphic_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
@@ -72,10 +73,30 @@ ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
 #if defined(QL32_CYD_USE_SPIFFS)
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS");
+bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SPIFFS.totalBytes();
+    used = SPIFFS.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace);
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
+// Optional removable card, addressed as SDC:/. Unqualified paths stay on FFS:.
+bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdcStorage(SD, "SDC", sdCardSpace);
+ql32::platform::esp32::SdChannels sdcChannels(SD, "SDC");
+ql32::platform::esp32::DriveRouterStorage driveStorage(sdStorage, sdcStorage, true);
+ql32::platform::esp32::DriveRouterChannels driveChannels(sdChannels, sdcChannels, true);
 #else
-ql32::platform::esp32::SdStorage sdStorage(SD, "SDC");
+bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace);
 ql32::platform::esp32::SdChannels sdChannels(SD, "SDC");
 #endif
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;
@@ -183,18 +204,25 @@ void refreshDebugOverlay() {
     const auto freeBytes = boardMemory.freeBytes();
     const auto heap = boardMemory.fragmentationInfo();
     const std::size_t activeTasks = scheduler ? scheduler->activeTaskCount() : 0;
-    char clockText[9] = "--:--:--";
-    if (const auto timestamp = boardClock.unixTimeSeconds()) {
-        const std::time_t value = static_cast<std::time_t>(*timestamp);
-        std::tm parts{};
-        if (gmtime_r(&value, &parts))
-            std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
-                          parts.tm_hour, parts.tm_min, parts.tm_sec);
+    char clockText[16]{};
+    const auto timestamp = boardClock.unixTimeSeconds();
+    std::tm parts{};
+    const std::time_t value = timestamp ? static_cast<std::time_t>(*timestamp) : 0;
+    if (timestamp && gmtime_r(&value, &parts)) {
+        std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
+                      parts.tm_hour, parts.tm_min, parts.tm_sec);
+    } else {
+        // Unsynchronized wall clock: show uptime instead, marked with "UP".
+        const std::uint32_t seconds = now / 1000;
+        std::snprintf(clockText, sizeof(clockText), "UP %02u:%02u:%02u",
+                      static_cast<unsigned>((seconds / 3600) % 100),
+                      static_cast<unsigned>((seconds / 60) % 60),
+                      static_cast<unsigned>(seconds % 60));
     }
     const auto freeK = freeBytes / 1024;
     const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu TASK:%u %s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
@@ -592,6 +620,8 @@ void setup() {
     const bool storageReady = SPIFFS.begin(true);
     if (storageReady && !SPIFFS.exists("/supervisor"))
         (void)SPIFFS.mkdir("/supervisor");
+    Serial.println(SD.begin(ql32::boards::esp32_2432s028::sdChipSelect, sdBus, 4000000,
+                            "/sd", 5) ? "SDC card mounted" : "SDC card not present");
 #else
     sdBus.begin(ql32::boards::esp32_2432s028::sdSck,
                 ql32::boards::esp32_2432s028::sdMiso,
@@ -670,15 +700,29 @@ void setup() {
         services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
             std::move(profile));
     }
+#if defined(QL32_CYD_USE_SPIFFS)
+    services.storage = std::shared_ptr<ql32::runtime::StorageService>(
+        &driveStorage, [](ql32::runtime::StorageService*) {});
+    auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
+        &driveChannels, [](ql32::runtime::ChannelService*) {});
+#else
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
+#endif
     channelRegistry = std::make_shared<ql32::runtime::ChannelRegistry>(
         std::move(fileChannels), [](std::string_view bytes) {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
         }, std::shared_ptr<ql32::runtime::HardwareChannelService>(
             &hardwareAdapter, [](ql32::runtime::HardwareChannelService*) {}), true);
+    channelRegistry->setSerialTryWriter([](std::string_view bytes) -> std::size_t {
+        const std::size_t room = static_cast<std::size_t>(Serial.availableForWrite());
+        const std::size_t count = std::min(room, bytes.size());
+        if (count != 0)
+            Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), count);
+        return count;
+    });
     services.channels = channelRegistry;
     // The CYD speaker amplifier is fed by DAC2 on GPIO26.
     services.music = std::make_shared<ql32::platform::olimex_vga::MusicService>(

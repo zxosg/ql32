@@ -29,13 +29,15 @@ public:
     explicit SchedulerTaskControl(SessionScheduler& scheduler) : scheduler_(scheduler) {}
 
     runtime::TaskId startTask(std::string source, std::ostream& output,
-                              runtime::TaskId caller, std::uint32_t flags) override {
+                              runtime::TaskId caller, std::uint32_t flags,
+                              std::string name) override {
         if ((flags & ~static_cast<std::uint32_t>(runtime::TaskStartWait)) != 0)
             throw runtime::Error(runtime::ErrorCode::InvalidArgument,
                                  "unknown TASK option bits");
         if ((flags & runtime::TaskStartWait) != 0)
-            return scheduler_.launchAndWait(std::move(source), output, caller);
-        return scheduler_.launchWorker(std::move(source), output);
+            return scheduler_.launchAndWait(std::move(source), output, caller,
+                                              std::move(name));
+        return scheduler_.launchWorker(std::move(source), output, std::move(name));
     }
 
     bool killTask(runtime::TaskId id) override {
@@ -121,7 +123,7 @@ public:
                               info.openChannels, info.viewport.originX,
                               info.viewport.originY, info.viewport.canvasWidth,
                               info.viewport.canvasHeight, info.viewport.offsetX,
-                              info.viewport.offsetY});
+                              info.viewport.offsetY, info.name});
         }
         return result;
     }
@@ -135,6 +137,7 @@ private:
 struct SessionScheduler::Task {
     TaskId id = 0;
     std::string source;
+    std::string name;
     std::ostream* output = nullptr;
     std::unique_ptr<Interpreter> interpreter;
     TaskStatus status = TaskStatus::Runnable;
@@ -187,11 +190,13 @@ void SessionScheduler::removeFromSchedule(Task& task) noexcept {
     task.schedulerEligibleThisTick = false;
 }
 
-TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
+TaskId SessionScheduler::launch(std::string source, std::ostream& output,
+                                std::string name) {
     if (nextId_ == 0) throw std::overflow_error("scheduler task IDs exhausted");
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
+    task->name = runtime::taskDisplayName(name);
     task->programExecutionActive = true;
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
@@ -206,11 +211,13 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     return id;
 }
 
-TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) {
+TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output,
+                                      std::string name) {
     if (nextId_ == 0) throw std::overflow_error("scheduler task IDs exhausted");
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
+    task->name = runtime::taskDisplayName(name);
     task->programExecutionActive = true;
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
@@ -229,7 +236,7 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
 }
 
 TaskId SessionScheduler::launchAndWait(std::string source, std::ostream& output,
-                                       TaskId parentId) {
+                                       TaskId parentId, std::string name) {
     Task* parent = nullptr;
     for (auto& task : tasks_)
         if (task->id == parentId) parent = task.get();
@@ -240,7 +247,7 @@ TaskId SessionScheduler::launchAndWait(std::string source, std::ostream& output,
     if (parent->waitingChildId != 0)
         throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
                              "caller is already waiting for a child task");
-    const TaskId childId = launch(std::move(source), output);
+    const TaskId childId = launch(std::move(source), output, std::move(name));
     Task* child = tasks_.back().get();
     parent->waitingChildId = childId;
     child->waitingParentId = parentId;
@@ -1076,7 +1083,11 @@ bool SessionScheduler::kill(TaskId id) {
             tasks_.erase(task);
             return true;
         }
-        return cancel(id);
+        const bool awaited = (*task)->waitingParentId != 0;
+        if (!cancel(id)) return false;
+        // A killed task nobody is waiting on has no result to keep, so drop its record now.
+        if (!awaited) (void)reap(id);
+        return true;
     }
     return false;
 }
@@ -1105,6 +1116,7 @@ std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {
                             current->priority, current->resumePriority,
                             current->paused,
                             current->interpreter ? current->interpreter->openChannelCount() : 0};
+            info.name = current->name;
             if (services_.graphics && current->interpreter)
                 info.viewport = services_.graphics->taskViewport(
                     current->interpreter->graphicsSessionId());
@@ -1123,6 +1135,7 @@ std::vector<TaskInfo> SessionScheduler::tasks() const {
                           current->priority, current->resumePriority,
                           current->paused,
                           current->interpreter ? current->interpreter->openChannelCount() : 0};
+        info.name = current->name;
         if (services_.graphics && current->interpreter)
             info.viewport = services_.graphics->taskViewport(
                 current->interpreter->graphicsSessionId());

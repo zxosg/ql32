@@ -373,6 +373,7 @@ void VirtualHardware::writeText(runtime::SessionId session, runtime::ChannelId i
         throw ServiceError(ServiceErrorCode::Unavailable, "device does not support text output");
     opened.tx.append(text.data(), text.size());
     if (serialLoopback_) {
+        for (char character : text) opened.rx.push_back(static_cast<std::uint8_t>(character));
         std::string line;
         for (char character : text) {
             if (character == '\r' || character == '\n') {

@@ -31,6 +31,7 @@ add_library(ql32_portable
   src/graphics/windowed_service.cpp
   src/runtime/channel_registry.cpp
   src/runtime/buffer.cpp
+  src/runtime/file_ops.cpp
   src/runtime/ui_service.cpp
   src/ui/graphic_presenter.cpp
   src/ui/line_editor.cpp
