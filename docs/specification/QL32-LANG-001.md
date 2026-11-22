@@ -619,7 +619,21 @@ interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
 `DELETE`, `RENAME`, `FORMAT`, and `CD`. `LIST line` selects one exact line;
 `LIST start TO end` selects an inclusive range, `LIST start TO` continues to
 the final stored line, and `LIST TO end` begins at the first stored line.
-The legacy `LIST start-end` range syntax remains accepted. `RENUMBER` defaults
+The legacy `LIST start-end` range syntax remains accepted. The channel may
+also be written first as `LIST #ch, selector`. QL/32-specific extensions:
+`LIST PROC` / `LIST PROCEDURES` and `LIST FN` / `LIST FUNCTIONS` print one
+signature line (name and parameters, no program lines) per definition in
+program order, and print nothing, without error, when none are defined;
+`LIST PROC name` / `LIST FN name` (case-insensitive, optional `#ch,`) print the
+stored lines from `DEFine` to `END DEFine`, and an unknown name, or a name of
+the other kind, is an error. Definitions are found by scanning stored lines
+whose first statement is the `DEFine` header. `LIST GLOBALS` and
+`LIST LOCALS` print `name = value` lines sorted by name, then array bounds. With
+a DEBUG task attached they read its debug snapshot (LOCALS = innermost call
+frame); otherwise GLOBALS shows the interactive session variables and LOCALS is
+empty. Empty output is not an error. The `GLOBALS` and `LOCALS` debug commands
+are aliases with the same sorted output (no DEBUG task required). `RUN` does not
+expose the finished program's variables to the session. `RENUMBER` defaults
 to start 10 and step 10; `RENUMBER start, step` supplies both values. It
 rewrites numeric `GOTO`, `GO TO`, and `RESTORE` targets when they refer to a
 stored line, and commits only if the renumbered program validates. It rejects
@@ -1306,7 +1320,7 @@ mode. Shell form: `MODE [LIST|name|modeId[,options]]`. See
 
 ### 11.8 Shell and debugger commands (not compiled BASIC statements)
 
-Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `EDIT [n]`, `RENUMBER [start,step]`,
+Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `LIST [#ch,] PROC|FN [name]`, `LIST GLOBALS|LOCALS`, `EDIT [n]`, `RENUMBER [start,step]`,
 `DIR`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
 `REBOOT`, `TASKS`, `TASKCHANNELS`, `KILL`, `TASKVIEW`, `WINDOWMODE
 [ISOLATED|SHARED]`, `MODE`, `TASKRESULT`, `LOGON`, `LOGOFF`, `SUSPEND`,
