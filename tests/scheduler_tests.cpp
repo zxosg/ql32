@@ -1282,6 +1282,25 @@ void testKillRemovesCompletedAndFailedTaskRecords() {
             "KILL did not confirm removal of terminal task records");
 }
 
+void testKillReleasesRunningWorkerRecord() {
+    ql32::vm::SessionScheduler scheduler({}, 32);
+    std::ostringstream supervisorOutput;
+    std::ostringstream workerOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    const auto worker = scheduler.launchWorker("REPeat forever\nEND REPeat forever\n",
+                                               workerOutput);
+    for (int tick = 0; tick < 4; ++tick) (void)scheduler.tick();
+    require(scheduler.task(worker)->status != ql32::vm::TaskStatus::Cancelled,
+            "worker did not start running");
+
+    require(scheduler.kill(worker), "KILL of a running worker failed");
+    require(!scheduler.task(worker),
+            "KILL left the cancelled worker record in the scheduler");
+    require(!scheduler.kill(worker), "KILL of a released worker succeeded");
+    require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
+            "KILL changed the supervisor session");
+}
+
 void testTaskSupportsCommandAndFunctionSyntax() {
     auto storage = std::make_shared<ProgramStorage>();
     storage->files["worker.bas"] = "PRINT \"worker ready\"\n";
@@ -1691,6 +1710,7 @@ int main() {
     testTasksUsesDefaultAndExplicitPrintChannels();
     testKillConfirmationUsesConsoleChannel();
     testKillRemovesCompletedAndFailedTaskRecords();
+    testKillReleasesRunningWorkerRecord();
     testTaskSupportsCommandAndFunctionSyntax();
     testCompletedTaskCanBeReapedExplicitly();
     testTaskWaitResumesCallerAndExposesChildStatus();

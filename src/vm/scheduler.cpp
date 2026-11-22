@@ -1083,7 +1083,11 @@ bool SessionScheduler::kill(TaskId id) {
             tasks_.erase(task);
             return true;
         }
-        return cancel(id);
+        const bool awaited = (*task)->waitingParentId != 0;
+        if (!cancel(id)) return false;
+        // A killed task nobody is waiting on has no result to keep, so drop its record now.
+        if (!awaited) (void)reap(id);
+        return true;
     }
     return false;
 }
