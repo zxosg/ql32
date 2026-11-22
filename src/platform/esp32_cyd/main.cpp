@@ -92,6 +92,8 @@ ql32::platform::esp32::SdStorage sdcStorage(SD, "SDC", sdCardSpace);
 ql32::platform::esp32::SdChannels sdcChannels(SD, "SDC");
 ql32::platform::esp32::DriveRouterStorage driveStorage(sdStorage, sdcStorage, true);
 ql32::platform::esp32::DriveRouterChannels driveChannels(sdChannels, sdcChannels, true);
+ql32::runtime::StorageService& monitorStorage = driveStorage;
+ql32::runtime::ChannelService& monitorChannels = driveChannels;
 #else
 bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
     total = SD.totalBytes();
@@ -100,6 +102,8 @@ bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
 }
 ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace);
 ql32::platform::esp32::SdChannels sdChannels(SD, "SDC");
+ql32::runtime::StorageService& monitorStorage = sdStorage;
+ql32::runtime::ChannelService& monitorChannels = sdChannels;
 #endif
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;
 std::unique_ptr<std::ostream> basicOutput;
@@ -382,10 +386,10 @@ void submitInputLine() {
     Serial.println();
     if (inputLine == "@SCREEN" &&
         ql32::platform::esp32::handleMonitorTransferCommand(
-            "SCREEN", sdStorage, sdChannels, Serial,
+            "SCREEN", monitorStorage, monitorChannels, Serial,
             [] { return screenCaptureSource(); })) {
     } else if (remoteDebugger && remoteDebugger->handles(inputLine)) {
-        remoteDebugger->handle(inputLine, *scheduler, sdStorage, *basicOutput,
+        remoteDebugger->handle(inputLine, *scheduler, monitorStorage, *basicOutput,
             [](std::string_view bytes) {
                 Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
                 Serial.flush();
@@ -393,7 +397,7 @@ void submitInputLine() {
     } else if (uiPresenter && uiPresenter->active()) {
         (void)uiPresenter->consumeLine(inputLine);
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
-                   inputLine, sdStorage, sdChannels, Serial,
+                   inputLine, monitorStorage, monitorChannels, Serial,
                    [] { return screenCaptureSource(); })) {
     } else if (scheduler && !inputLine.empty() &&
                !scheduler->submit(scheduler->focusedTask(), inputLine + "\n")) {
