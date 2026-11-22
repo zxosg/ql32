@@ -1726,6 +1726,26 @@ void testAdmissionDisabledByDefault() {
     require(scheduler.cancel(id), "default policy refused a worker");
 }
 
+void testCanvasAdmissionNeedsContiguousBlockPlusHeadroom() {
+    FakeMemory memory;
+    memory.free = 60000;
+    memory.largest = 17000;
+    require(!memory.canvasFailure(38400), "canvas guard fired while disabled");
+    ql32::runtime::AdmissionPolicy policy;
+    policy.canvasGuard = true;
+    policy.canvasHeadroomBytes = 8192;
+    memory.setAdmissionPolicy(policy);
+    const auto refusal = memory.canvasFailure(38400);
+    require(refusal && refusal->find("38400") != std::string::npos &&
+                refusal->find("17000 largest") != std::string::npos,
+            "canvas admission did not refuse a block larger than the largest free block");
+    memory.largest = 50000;
+    require(!memory.canvasFailure(38400), "canvas admission refused a canvas that fits");
+    memory.free = 40000;
+    require(memory.canvasFailure(38400).has_value(),
+            "canvas admission ignored required headroom");
+}
+
 void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
     auto presenter = std::make_shared<ModeFramePresenter>();
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
@@ -1764,6 +1784,7 @@ void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
 int main() {
     testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow();
     testAdmissionDisabledByDefault();
+    testCanvasAdmissionNeedsContiguousBlockPlusHeadroom();
     testRoundRobinSlicesKeepSessionsIndependent();
     testUiWaitDoesNotBlockOtherSessions();
     testOptionalPagerSuspendsOnlyReplAndContinuesTail();

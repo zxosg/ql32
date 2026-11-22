@@ -115,8 +115,9 @@ the same `MemoryService` used by BASIC `FREE()` after each rotation:
 | 4 bit | 125,532 | 125,532 | 125,532 | 125,532 | 125,532 |
 | 8 bit | 87,132 | 87,132 | 87,132 | 87,132 | 87,132 |
 
-On the CYD the debug overlay shows `FREE`, `MAX` (largest block) and `MIN` (lowest
-free heap since boot, QL/32-specific). The serial monitor command `HEAP STATS`
+On the CYD the debug overlay shows `FREE`, `MAX` (largest block), `BLK` (allocated
+block count) and `MIN` (lowest free heap since boot, QL/32-specific); the line
+fills about 52 of the 53 columns of a 320-pixel screen. The serial monitor command `HEAP STATS`
 prints `HEAPSTATS|free|largest|min|loopstack|musicstack|musiciostack|failedalloc|lastfail`
 (stack values are FreeRTOS high-water marks in bytes remaining; music stacks
 are 0 until audio has started), and failed heap allocations are logged on the
