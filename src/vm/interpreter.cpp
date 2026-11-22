@@ -2544,6 +2544,22 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "graphics service unavailable");
                     if (!nullSink) {
+                    // Mirrored destinations receive the same command as-is and keep
+                    // their own attributes; WINDOW and CLOSEWINDOW are never forwarded.
+                    const auto sourceChannel = channel;
+                    std::vector<runtime::ChannelId> graphicsTargets{sourceChannel};
+                    if (instruction.name != "WINDOW" && instruction.name != "CLOSEWINDOW")
+                        for (const auto destination : graphicsMirrorTargets(sourceChannel))
+                            graphicsTargets.push_back(destination);
+                    const bool batchTargets = graphicsTargets.size() > 1 &&
+                        instruction.name != "BLIT";
+                    if (batchTargets) graphics_->beginPresentationBatch(session_id_);
+                    try {
+                    for (std::size_t targetIndex = 0; targetIndex < graphicsTargets.size();
+                         ++targetIndex) {
+                    const auto channel = graphicsTargets[targetIndex];
+                    const bool mirrorTarget = targetIndex != 0;
+                    try {
                     const auto integerArgument = [&](std::size_t index,
                                                      const char* description) {
                         const auto* number = std::get_if<double>(&arguments[index]);
@@ -2792,6 +2808,18 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } else {
                         graphics_->clear(session_id_, channel);
                     }
+                    } catch (...) {
+                        if (!mirrorTarget) throw;
+                        failMirror(sourceChannel, channel, "graphics command failed");
+                    }
+                    }
+                    } catch (...) {
+                        if (batchTargets) {
+                            try { graphics_->endPresentationBatch(session_id_); } catch (...) {}
+                        }
+                        throw;
+                    }
+                    if (batchTargets) graphics_->endPresentationBatch(session_id_);
                     }
                     break;
                 }
@@ -3632,6 +3660,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 runtimeError(instruction, "AT supports only console and screen channels");
             const auto row = static_cast<std::uint32_t>(rowValue - 1);
             const auto column = static_cast<std::uint32_t>(columnValue - 1);
+            for (const auto destination : graphicsMirrorTargets(channel)) {
+                try {
+                    if (graphics_) (void)graphics_->setTextPosition(session_id_, destination,
+                                                                    row, column);
+                } catch (...) {
+                    failMirror(channel, destination, "AT failed");
+                }
+            }
             const bool positioned = graphics_ && graphics_->setTextPosition(session_id_,
                 channel, row, column);
             if (!positioned && channel == 0) {

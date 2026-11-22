@@ -172,7 +172,7 @@ std::string commandHelpListing() {
             << "DELETE path$ removes a file; wildcards remove several (FORCE skips the prompt).\n"
             << "COPY src TO dst [FORCE], MOVE src TO dst [FORCE]: files or #channels; "
             << "FORCE overwrites. RMDIR dir [FORCE] removes a directory (FORCE: recursive).\n"
-            << "MIRROR #src TO #dst copies text output to another channel; "
+            << "MIRROR #src TO #dst copies text and graphics commands to another channel; "
             << "MIRROR DELETE #dst, MIRROR LIST.\n";
     listing << "BASIC statements and commands:\n";
     bool first = true;
@@ -2984,6 +2984,40 @@ void Interpreter::mirrorText(std::ostream& output, runtime::ChannelId source,
         }
     }
     emittingMirror_ = false;
+}
+
+void Interpreter::failMirror(runtime::ChannelId source, runtime::ChannelId destination,
+                             const std::string& reason) {
+    const auto found = mirrors_.find(source);
+    if (found == mirrors_.end()) return;
+    for (auto& mirror : found->second)
+        if (mirror.destination == destination) {
+            mirror.disabled = true;
+            mirror.failure = reason;
+        }
+}
+
+std::vector<runtime::ChannelId> Interpreter::graphicsMirrorTargets(
+        runtime::ChannelId source) {
+    std::vector<runtime::ChannelId> targets;
+    const auto found = mirrors_.find(source);
+    if (found == mirrors_.end() || emittingMirror_) return targets;
+    std::vector<runtime::ChannelInfo> opened;
+    if (channels_) opened = channels_->listOpen(session_id_);
+    for (auto& mirror : found->second) {
+        if (mirror.disabled) continue;
+        const auto destination = mirror.destination;
+        if (destination <= 1) { targets.push_back(destination); continue; }
+        const auto info = std::find_if(opened.begin(), opened.end(),
+            [&](const runtime::ChannelInfo& item) { return item.handle == destination; });
+        if (info == opened.end()) {
+            mirror.disabled = true;
+            mirror.failure = "target closed";
+        } else if (info->type == runtime::ChannelType::Window) {
+            targets.push_back(destination);
+        }
+    }
+    return targets;
 }
 
 void Interpreter::addMirror(runtime::ChannelId source, runtime::ChannelId destination) {

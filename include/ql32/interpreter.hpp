@@ -145,6 +145,10 @@ private:
                        const std::string& text);
     void mirrorText(std::ostream& output, runtime::ChannelId source,
                     const std::string& text);
+    // Live graphics-capable mirror destinations of a source; closed ones are disabled.
+    std::vector<runtime::ChannelId> graphicsMirrorTargets(runtime::ChannelId source);
+    void failMirror(runtime::ChannelId source, runtime::ChannelId destination,
+                    const std::string& reason);
     void addMirror(runtime::ChannelId source, runtime::ChannelId destination);
     void deleteMirrors(runtime::ChannelId destination);
     void removeMirrorsFor(runtime::ChannelId channel);
