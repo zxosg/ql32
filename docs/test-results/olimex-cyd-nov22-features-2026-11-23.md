@@ -18,3 +18,8 @@ Notes
 - `rmdir is unnecessary in SPIFFS` is an ESP VFS log line printed on FFS RMDIR; harmless.
 - Not tested: COPY from console/serial input (Ctrl-Z), heap admission/canvas-resize limits under OOM, tasks/worker canvases on hardware, ISOLATED boot default on Olimex.
 - Earlier-noted intermittent "data block retry limit exceeded" on the first Olimex upload after reset persists.
+
+## Tenstar TS-ESP32-S3 (env ql32_tenstar_esp32s3, /dev/ttyACM0, MAC 3c:0f:02:df:e9:40)
+Built (1,649,581 B flash / 50,704 B RAM), flashed, booted, REPL OK. No SD card (`SDC:` reports not available), so cross-drive tests do not apply.
+Verified on hardware: MKDIR/COPY/MOVE/CAT/wildcard DELETE/RMDIR on FFS; MIRROR to file (readback), LIST, self-mirror rejected, DELETE; YMODEM overwrite 3/3; graphics mirror to a window (owner confirmed visually); small golden program (FOR loop, DIM, SIN, string funcs) correct.
+Not tested: heavier golden programs, touch, music, OOM limits.
