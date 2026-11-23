@@ -43,7 +43,7 @@ changes since then.
   "array allocation limit exceeded"; 2000-element string array OK. Identical to the
   11-22 results.
 - Sound smoke: `MUSIC TEST` runs (late=0, maxGap ~11.6-12.2 ms), `BEEP 200,880`,
-  `VOLUME 128`, `MUSIC STOP/STATUS` raise no errors. Audio was not listened to.
+  `VOLUME 128`, `MUSIC STOP/STATUS` raise no errors. Owner heard VTX (Bosconia1) and YM (MELANNEW) playback and confirmed music OK (2026-11-23).
 - File/seek: WRITE 16 bytes, reopen UPDATE, `FLEN`=16, `#f AT 10` -> `FPOS`=10, read
   "ABCDEF", `#f AT 0` -> `FPOS`=0, delete OK.
 
@@ -59,5 +59,5 @@ No regression; no leak after task kill.
 
 ## Unverified
 
-VGA picture was not visually checked; sound not heard; `olimex_esp32_sbc_fabgl_psram`
+VGA picture was not visually checked; `olimex_esp32_sbc_fabgl_psram`
 and the non-Olimex envs were built but not flashed.
