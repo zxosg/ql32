@@ -532,7 +532,7 @@ bool flashHoldToastShown = false;
 constexpr ql32::ui::SessionId kFlashHoldToastSession = ~ql32::ui::SessionId{0};
 constexpr int kDlgPosRight = 1;
 constexpr int kDlgPosTop = -1;
-constexpr std::uint8_t kHoldToastInk = 2;    // red text
+constexpr std::uint8_t kHoldToastInk = 6;    // yellow text
 constexpr std::uint8_t kHoldToastPaper = 0;  // black background
 constexpr std::int16_t kHoldToastFrame = 6;  // yellow border
 
@@ -547,13 +547,14 @@ void flashHoldBegin(void*) {
         graphics->flushPendingPresentation();
         flashHoldToastShown = toast = true;
     }
-    // The interrupt blinks the red text (red -> black) over the toast region.
+    // The interrupt blinks the yellow text (yellow -> black) over the toast region.
     ql32::platform::olimex_vga::PsramDmaScanout::HoldBlink blink;
     const auto info = toast ? uiPresenter->infoBounds() : ql32::graphics::Rect{};
-    blink.x = static_cast<std::uint32_t>(info.x);
-    blink.y = static_cast<std::uint32_t>(info.y);
-    blink.width = info.width;
-    blink.height = info.height;
+    // Inset past the 1 px frame and 8 px side padding so only the text blinks.
+    blink.x = static_cast<std::uint32_t>(info.x) + 8;
+    blink.y = static_cast<std::uint32_t>(info.y) + 1;
+    blink.width = info.width > 16 ? info.width - 16 : 0;
+    blink.height = info.height > 2 ? info.height - 2 : 0;
     blink.from = kHoldToastInk;
     blink.to = kHoldToastPaper;
     psramDmaScanout.holdBegin(!toast, toast ? &blink : nullptr);

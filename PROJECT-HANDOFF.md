@@ -185,7 +185,7 @@ next adopters; 640x400/480 are exceptions. See
 [results](docs/test-results/olimex-single-framebuffer-2026-11-21.md).
 
 ## Olimex FFS write hold (2026-11-23)
-FFS (SPIFFS) flash writes stall the cache and used to blink the VGA. Writes are bracketed by `BulkWriteScope` (`runtime/bulk_write_gate.hpp`); the scanout keeps an internal-RAM snapshot of the real picture, replayed by an IRAM ISR, with the IPRINT toast (yellow frame, black, red blinking text, top-right) drawn into it. Solid-colour fallback if internal heap margin < 48 KB. SDC and FabGL paths untouched. DMADIAG shows `held-groups`/`snapshot-groups`. Lesson: ISR cost must stay low (heavy ISR broke YMODEM). Open: first-upload-after-reset flake, rare release race. See [note](docs/test-results/olimex-ffs-hold-2026-11-23.md).
+FFS (SPIFFS) flash writes stall the cache and used to blink the VGA. Writes are bracketed by `BulkWriteScope` (`runtime/bulk_write_gate.hpp`); the scanout keeps an internal-RAM snapshot of the real picture, replayed by an IRAM ISR, with the IPRINT toast (yellow frame, black, yellow blinking text, top-right) drawn into it. Solid-colour fallback if internal heap margin < 48 KB. SDC and FabGL paths untouched. DMADIAG shows `held-groups`/`snapshot-groups`. Lesson: ISR cost must stay low (heavy ISR broke YMODEM). Open: first-upload-after-reset flake, rare release race. See [note](docs/test-results/olimex-ffs-hold-2026-11-23.md).
 
 ## Olimex PlatformIO environments
 
