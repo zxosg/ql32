@@ -68,4 +68,8 @@ YMODEM upload of a 146,416 B file, repeated twice per device: FFS 22.2 s and 29.
 SDC 17.0 s and 16.9 s; every upload completed and `FLEN` read back 146,416 (data
 integrity OK, files deleted afterwards). The owner saw the VGA picture blink
 periodically during the transfers, probably once per received/saved block. Not
-yet diagnosed or fixed; FFS and SDC were not observed separately.
+yet diagnosed or fixed.
+
+Separate owner-observed run (same file): SDC upload 16.9 s, **no blink**; FFS (internal
+SPIFFS) upload 26.6 s, **blinks**. The blink is therefore tied to SPIFFS flash writes,
+not to YMODEM/serial receive.
