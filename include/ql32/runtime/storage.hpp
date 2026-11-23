@@ -24,6 +24,8 @@ struct StorageSpace {
     std::uint64_t total = 0;
     std::uint64_t used = 0;
     std::uint64_t free = 0;
+    // Bytes of free space a writer cannot use (e.g. SPIFFS GC reserve).
+    std::uint64_t reserve = 0;
     bool known = false;
 };
 

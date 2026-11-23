@@ -6,7 +6,7 @@
 
 namespace ql32::platform::linux_host {
 
-class DirectoryStorage final : public runtime::StorageService {
+class DirectoryStorage : public runtime::StorageService {
 public:
     explicit DirectoryStorage(std::filesystem::path root);
 

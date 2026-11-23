@@ -132,10 +132,13 @@ std::uint64_t parseFileSize(const std::uint8_t* field, std::size_t length) {
 }
 
 void receiveProtocol(const YModemIo& io, ChannelService& channels, SessionId session,
-                     ChannelId channel, const std::function<void()>& commit) {
+                     ChannelId channel,
+                     const std::function<void(std::uint64_t)>& admit,
+                     const std::function<void(std::uint64_t)>& commit) {
     Packet packet;
     bool headerReceived = false;
     std::uint64_t remaining = 0;
+    std::uint64_t declared = 0;
     std::uint8_t expectedSequence = 1;
     for (unsigned attempt = 0; attempt < kMaxRetries; ++attempt) {
         sendByte(io, kCrcRequest);
@@ -159,6 +162,9 @@ void receiveProtocol(const YModemIo& io, ChannelService& channels, SessionId ses
                 throw std::runtime_error("YMODEM sender provided no file header");
             }
             remaining = parseFileSize(packet.payload.data(), packet.payloadSize);
+            declared = remaining;
+            // Reject before the header ACK so no data is sent or written.
+            admit(declared);
             headerReceived = true;
             sendByte(io, kAck);
             sendByte(io, kCrcRequest);
@@ -223,7 +229,7 @@ void receiveProtocol(const YModemIo& io, ChannelService& channels, SessionId ses
         if (readPacket(io, packet) && packet.sequence == 0 && packet.payload[0] == 0) {
             // The sender treats this ACK as completion, so the file must be
             // closed and installed first.
-            commit();
+            commit(declared);
             sendByte(io, kAck);
             finished = true;
             break;
@@ -333,9 +339,21 @@ void ymodemReceiveFile(const std::string& path, StorageService& storage,
         channel = channels.open(session, temporary, ChannelMode::Write);
         opened = true;
         if (io.ready) io.ready();
-        receiveProtocol(io, channels, session, channel, [&] {
+        receiveProtocol(io, channels, session, channel, [&](std::uint64_t declared) {
+            const StorageSpace space = storage.space(path);
+            const std::uint64_t usable =
+                space.known && space.free > space.reserve ? space.free - space.reserve : 0;
+            if (space.known && declared > usable)
+                throw std::runtime_error("not enough space: need " + std::to_string(declared) +
+                                         ", free " + std::to_string(usable));
+        }, [&](std::uint64_t declared) {
             channels.close(session, channel);
             opened = false;
+            // A write that failed without an error must not be installed.
+            const std::uint64_t stored = storage.size(temporary);
+            if (stored != declared)
+                throw std::runtime_error("stored size " + std::to_string(stored) +
+                                         " does not match declared " + std::to_string(declared));
             const bool hadPrevious = storage.exists(path);
             if (hadPrevious) storage.rename(path, backup);
             try {

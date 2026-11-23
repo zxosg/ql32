@@ -302,6 +302,9 @@ runtime::StorageSpace SdStorage::space(const std::string&) {
     result.total = total;
     result.used = std::min(used, total);
     result.free = total - result.used;
+    // SPIFFS reports free blocks it still refuses to fill (GC needs spare
+    // blocks); measured about 49 KB unusable on a 475 KB volume.
+    if (drive_ == "FFS") result.reserve = std::max<std::uint64_t>(total / 8, 16384);
     result.known = true;
     return result;
 }

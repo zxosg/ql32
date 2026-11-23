@@ -566,6 +566,8 @@ under VGA load were not logged (by ear only: attractor plus VTX clean).
   `build-target.sh cyd` builds the SD-only `esp32_2432s028`; use
   `pio run -e esp32_2432s028_spiffs` for the preferred CYD profile.
 
+YMODEM receive space check (2026-11-23): `RECV` rejects an announced size larger than free space minus a reserve (FFS total/8) before the header ACK, and verifies the stored size of the temp file before install, so a nearly full or fragmented SPIFFS can no longer report success with a truncated file. See [note](docs/test-results/ymodem-space-check-2026-11-23.md).
+
 ## Starting a new session
 
 Read `PROJECT-HANDOFF.md` and `AGENTS.md`, inspect local branch and remote
