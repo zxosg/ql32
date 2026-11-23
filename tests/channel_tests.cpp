@@ -463,6 +463,33 @@ void testCopyFromHardwareSerialUntilCtrlZ() {
     std::filesystem::remove_all(root);
 }
 
+void testPrintSeparatorsOnRoutedChannel() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-separators-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        auto files = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+        auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(files);
+        ql32::Interpreter interpreter(storage, channels);
+        std::ostringstream console;
+        interpreter.executeInteractive("f=OPEN(\"sep.txt\",\"WRITE\")\n", console);
+        interpreter.executeInteractive(
+            "PRINT #f,\"A\"!\"B\"\nPRINT #f,\"A\",\"B\"\nPRINT #f,\"C\"! : PRINT #f,\"D\"\n",
+            console);
+        interpreter.executeInteractive("CLOSE #f\n", console);
+        std::ifstream in(root / "sep.txt", std::ios::binary);
+        const std::string content{std::istreambuf_iterator<char>(in), {}};
+        require(content == "A B\nA       B\nC D\n",
+                "! and , separators ignored the column on a routed channel");
+    } catch (...) {
+        std::filesystem::remove_all(root);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testChannelMirroring() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -669,6 +696,7 @@ int main() {
         testUpdateMode();
         testInputLineAndSessionResume();
         testDefaultAndRoutedOutputChannels();
+        testPrintSeparatorsOnRoutedChannel();
         testChannelMirroring();
         testCopyFromHardwareSerialUntilCtrlZ();
         testChannelBindingSnapshotsEndpoint();

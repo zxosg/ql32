@@ -80,6 +80,7 @@ struct VMExecutionState {
     std::optional<std::chrono::steady_clock::time_point> pauseUntil;
     std::uint64_t printChannel = 1;
     std::size_t printChannelColumn = 0;
+    std::unordered_map<runtime::ChannelId, std::size_t> routedColumns;
     std::optional<runtime::ChannelId> printBatchChannel;
     std::optional<ui::RequestId> pendingUiRequest;
     std::optional<runtime::ChannelId> pendingChannelRead;

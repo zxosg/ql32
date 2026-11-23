@@ -558,7 +558,7 @@ under VGA load were not logged (by ear only: attractor plus VTX clean).
   olimex-retro|cyd`), `ql32-ymodem.py`/`ql32_ymodem.py` (file transfer, BMP
   capture), `ql32_remote_debugger/` (PC debugger/file/image GUI),
   `ql32-memory-test.py` (board memory report), `ql32-olimex-bytecode-memory.py`
-  (Olimex bytecode memory measurement over `/dev/ttyUSB0`),
+  (board bytecode/heap measurement; `--port=`, `--no-mode`), `ql32-golden-device.py` (runs the portable golden programs on a board via TASK and compares with `tests/cli/*.out`),
   `bytecode_footprint.cpp` (host CSV of compiled footprint),
   `run-vm-benchmarks.py` (VM timing of `benchmarks/*.bas` and Mandelbrot),
   `upload-olimex-fs.sh` (stage and upload startup files to the Olimex SPIFFS),
@@ -567,6 +567,8 @@ under VGA load were not logged (by ear only: attractor plus VTX clean).
   `pio run -e esp32_2432s028_spiffs` for the preferred CYD profile.
 
 YMODEM receive space check (2026-11-23): `RECV` rejects an announced size larger than free space minus a reserve (FFS total/8) before the header ACK, and verifies the stored size of the temp file before install, so a nearly full or fragmented SPIFFS can no longer report success with a truncated file. See [note](docs/test-results/ymodem-space-check-2026-11-23.md).
+
+Tenstar follow-ups (2026-11-23): missing FFS files now report "file not found" (SPIFFS returned a childless directory handle); routed channels (serial/file) track the PRINT column so `!` and `,` match the host; Tenstar USB-CDC flushes the prompt; `ql32-memory-test.py` primes one worker before the baseline (PSRAM boards show a one-time 32 KB largest-block step); Tenstar touch/audio/MODE are N/A. Details: `docs/test-results/tenstar-followups-2026-11-23.md`.
 
 ## Starting a new session
 

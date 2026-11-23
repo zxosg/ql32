@@ -914,6 +914,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             state.printChannelColumn += utf8Length(text);
         } else if (!channels_) {
             runtimeError(at, "channel output is unavailable");
+        } else {
+            // Routed channels (serial, file) track the column within the
+            // current PRINT statement so ! and , behave like other channels.
+            std::size_t& column = state.routedColumns[state.printChannel];
+            const auto newline = text.rfind('\n');
+            column = newline == std::string::npos ? column + utf8Length(text)
+                                                  : utf8Length(text.substr(newline + 1));
         }
         emitText(output, state.printChannel, text);
     };
@@ -935,7 +942,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         state.printBatchChannel.reset();
     };
     auto printColumn = [&]() -> std::size_t& {
-        return state.printChannel == 0 ? output_column_ : state.printChannelColumn;
+        if (state.printChannel == 0) return output_column_;
+        if (state.printChannel == 1) return state.printChannelColumn;
+        return state.routedColumns[state.printChannel];
     };
     auto resolveArrayName = [&](const Instruction& instruction) {
         std::string name = instruction.name;
@@ -3628,6 +3637,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             writePrintText("\n", instruction);
             if (state.printChannel == 0) output_column_ = 0;
             else if (state.printChannel == 1) state.printChannelColumn = 0;
+            else state.routedColumns[state.printChannel] = 0;
             finishPrintBatch();
             state.printChannel = 1;
             // A finished output line costs far more wall time than a plain

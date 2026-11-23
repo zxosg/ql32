@@ -12,6 +12,17 @@ namespace {
 using runtime::ServiceError;
 using runtime::ServiceErrorCode;
 
+// SPIFFS has no directories: Arduino's open() returns a "directory" handle for
+// a missing name. A handle without children on FFS is therefore a missing file.
+bool isPhantomDirectory(const std::string& drive, fs::File& directory) {
+    if (drive != "FFS") return false;
+    directory.rewindDirectory();
+    fs::File entry = directory.openNextFile();
+    if (!entry) return true;
+    entry.close();
+    return false;
+}
+
 std::string fileName(const char* path) {
     if (!path) return {};
     const std::string value(path);
@@ -155,7 +166,11 @@ std::string SdStorage::readText(const std::string& path) {
         throw ServiceError(ServiceErrorCode::NotFound,
                            "storage: file not found: " + path);
     if (file.isDirectory()) {
+        const bool phantom = isPhantomDirectory(drive_, file);
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "storage: path names a directory: " + path);
     }
@@ -185,7 +200,11 @@ std::unique_ptr<runtime::StorageReadHandle> SdStorage::openRead(
         throw ServiceError(ServiceErrorCode::NotFound,
                            "storage: file not found: " + path);
     if (file.isDirectory()) {
+        const bool phantom = isPhantomDirectory(drive_, file);
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "storage: path names a directory: " + path);
     }
@@ -323,7 +342,11 @@ std::uintmax_t SdStorage::size(const std::string& path) {
         throw ServiceError(ServiceErrorCode::NotFound,
                            "storage: file not found: " + path);
     if (file.isDirectory()) {
+        const bool phantom = isPhantomDirectory(drive_, file);
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "storage: path names a directory: " + path);
     }

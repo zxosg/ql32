@@ -100,7 +100,18 @@ runtime::ChannelId SdChannels::open(runtime::SessionId session,
                                : ServiceErrorCode::IoError,
                            "channel: cannot open file: " + path);
     if (file.isDirectory()) {
+        // SPIFFS has no directories: a childless "directory" is a missing file.
+        bool phantom = false;
+        if (drive_ == "FFS") {
+            file.rewindDirectory();
+            fs::File entry = file.openNextFile();
+            phantom = !entry;
+            if (entry) entry.close();
+        }
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "channel: cannot open file: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "channel path names a directory: " + path);
     }

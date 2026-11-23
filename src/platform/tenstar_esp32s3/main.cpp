@@ -411,6 +411,9 @@ void advanceScheduler() {
             }
             Serial.print(inputPrompt.c_str());
             if (edit) Serial.print(inputLine.c_str());
+            // Native USB CDC holds a short TX tail until the next write or
+            // frame; flush so the prompt is not delayed until the next command.
+            Serial.flush();
             replPromptShown = true;
         }
     } else {
