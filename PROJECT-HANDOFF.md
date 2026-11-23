@@ -577,3 +577,15 @@ status (`git branch -vv`, `git worktree list`, and `git status` in the main
 checkout for the uncommitted music patch), and continue the first unfinished
 item under “Next work”. Update this file when that item or milestone state
 changes.
+
+## Music player example (2026-11-23)
+
+`examples/music-player/` (README inside): BASIC player for Olimex MODE 2,
+playlist `FFS:/music.lst` made by `tools/ql32-music-scan.py` (DIR is
+shell-only, gap G2). Also fixed a VM bug: `FOR` on a `LOCal` loop variable
+did not update the local (`tests/cli/cli_procedure_locals.bas`). Host-tested:
+player logic with stubbed audio, FOR/LOCal golden. Hardware (Olimex): golden
+16/16, playlist scan (21 SDC files), player menus/playback confirmed by owner
+("it works"). G1/G2/G3 remain unimplemented proposals.
+Owner confirmed the player works via GUI dialogs; per-feature ear checklist
+(pause, volume, stop, each format) is in `docs/test-results/music-player-olimex-2026-11-23.md`.

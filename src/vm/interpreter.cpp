@@ -967,6 +967,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
              value < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
              value > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
             runtimeError(instruction, "Int32 value out of range");
+        if (!callFrames.empty()) {
+            const auto local = callFrames.back().locals.find(instruction.name);
+            if (local != callFrames.back().locals.end()) {
+                local->second = value;
+                return;
+            }
+        }
         variables_[instruction.name] = value;
     };
     auto rangeContains = [](const ForRange& range, double value) {
@@ -3355,9 +3362,17 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             auto found = forStates.find(instruction.loopId());
             if (found == forStates.end()) runtimeError(instruction, "inactive FOR loop");
             ForState& state = found->second;
-            const auto variable = variables_.find(instruction.name);
-            if (variable == variables_.end()) runtimeError(instruction, "missing FOR variable");
-            const double current = numeric(variable->second, instruction);
+            const Value* loopValue = nullptr;
+            if (!callFrames.empty()) {
+                const auto local = callFrames.back().locals.find(instruction.name);
+                if (local != callFrames.back().locals.end()) loopValue = &local->second;
+            }
+            if (!loopValue) {
+                const auto variable = variables_.find(instruction.name);
+                if (variable != variables_.end()) loopValue = &variable->second;
+            }
+            if (!loopValue) runtimeError(instruction, "missing FOR variable");
+            const double current = numeric(*loopValue, instruction);
             const ForRange& range = state.ranges[state.item];
             const double next = range.single ? current :
                 singlePrecision &&

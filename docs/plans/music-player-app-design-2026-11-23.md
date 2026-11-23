@@ -140,3 +140,9 @@ owns the audio so no second task may call `MUSIC` while it runs.
 4. Start folder: `SDC:/music` if present, else `FFS:/`?
 5. Where to keep the program: `examples/music-player/`, plus an upload fixture
    to `FFS:/`?
+
+## Implementation note (v1)
+
+`DIR`/`CAT` are shell-only and cannot be compiled in a program, so v1 reads a
+playlist `FFS:/music.lst` generated from the REPL by `tools/ql32-music-scan.py`.
+See `examples/music-player/README.md`.
