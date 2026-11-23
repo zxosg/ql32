@@ -491,11 +491,13 @@ bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
 ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS", spiffsSpace);
 ql32::platform::esp32::SdChannels flashChannels(SPIFFS, "FFS");
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
-// Internal flash writes stall both cores' cache, so large FFS writes show a
-// steady "busy" screen instead of a stale, torn picture. SDC never holds.
-ql32::runtime::CountedBulkWriteGate flashWriteGate(
-    [](void*) { psramDmaScanout.holdBegin(); },
-    [](void*) { psramDmaScanout.holdEnd(); }, nullptr);
+// Internal flash writes stall both cores' cache, so FFS writes hold the last
+// good picture on screen. The notice is the regular UI info toast (the IPRINT
+// machinery), rendered into the framebuffer before the snapshot is taken.
+// SDC never holds.
+void flashHoldBegin(void*);
+void flashHoldEnd(void*);
+ql32::runtime::CountedBulkWriteGate flashWriteGate(flashHoldBegin, flashHoldEnd, nullptr);
 const bool flashWriteGateAttached = [] {
     flashStorage.setBulkWriteGate(&flashWriteGate);
     flashChannels.setBulkWriteGate(&flashWriteGate);
@@ -522,6 +524,51 @@ std::shared_ptr<ql32::ui::QueuedService> uiService =
 std::shared_ptr<ql32::runtime::MusicService> boardMusicService;
 #endif
 std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_OLIMEX_DMA_DISPLAY)
+// The info toast is composed by the UI/graphics objects owned by the main
+// loop task; other tasks use the scanout's built-in notice instead.
+TaskHandle_t mainLoopTask = nullptr;
+bool flashHoldToastShown = false;
+constexpr ql32::ui::SessionId kFlashHoldToastSession = ~ql32::ui::SessionId{0};
+constexpr int kDlgPosRight = 1;
+constexpr int kDlgPosTop = -1;
+constexpr std::uint8_t kHoldToastInk = 2;    // red text
+constexpr std::uint8_t kHoldToastPaper = 0;  // black background
+constexpr std::int16_t kHoldToastFrame = 6;  // yellow border
+
+void flashHoldBegin(void*) {
+    bool toast = false;
+    if (uiPresenter && graphics && mainLoopTask &&
+        xTaskGetCurrentTaskHandle() == mainLoopTask && !psramDmaScanout.holdPending()) {
+        uiService->showInfo(kFlashHoldToastSession, "Busy, accessing disk", 600000,
+                            kDlgPosRight, kDlgPosTop, kHoldToastInk, kHoldToastPaper, 0,
+                            kHoldToastFrame);
+        uiPresenter->refresh();
+        graphics->flushPendingPresentation();
+        flashHoldToastShown = toast = true;
+    }
+    // The interrupt blinks the red text (red -> black) over the toast region.
+    ql32::platform::olimex_vga::PsramDmaScanout::HoldBlink blink;
+    const auto info = toast ? uiPresenter->infoBounds() : ql32::graphics::Rect{};
+    blink.x = static_cast<std::uint32_t>(info.x);
+    blink.y = static_cast<std::uint32_t>(info.y);
+    blink.width = info.width;
+    blink.height = info.height;
+    blink.from = kHoldToastInk;
+    blink.to = kHoldToastPaper;
+    psramDmaScanout.holdBegin(!toast, toast ? &blink : nullptr);
+}
+
+void flashHoldEnd(void*) { psramDmaScanout.holdEnd(); }
+
+// Called from the main loop: remove the toast once the hold has been released.
+void flashHoldPoll() {
+    if (!flashHoldToastShown || psramDmaScanout.holdPending() || !uiPresenter) return;
+    flashHoldToastShown = false;
+    uiService->cancelSession(kFlashHoldToastSession);
+    uiPresenter->refresh();
+}
+#endif
 std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
 ql32::ui::LineEditor lineEditor;
 std::string inputPrompt;
@@ -959,6 +1006,9 @@ void refreshDebugOverlay() {
 }
 
 void advanceScheduler() {
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_OLIMEX_DMA_DISPLAY)
+    flashHoldPoll();
+#endif
     if (!scheduler) return;
     if (!scheduler->executionPaused()) (void)scheduler->tick();
     if (uiPresenter) uiPresenter->refresh();
@@ -1617,6 +1667,9 @@ void runDmaFramebufferBenchmark() {
 } // namespace
 
 void setup() {
+#if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_OLIMEX_DMA_DISPLAY)
+    mainLoopTask = xTaskGetCurrentTaskHandle();
+#endif
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
     // YMODEM sends 1 KiB packets. Allow a complete packet to queue while the
     // DMA refill worker preempts the serial consumer during high-resolution

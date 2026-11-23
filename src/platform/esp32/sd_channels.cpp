@@ -88,6 +88,10 @@ runtime::ChannelId SdChannels::open(runtime::SessionId session,
     case runtime::ChannelMode::Append: flags = FILE_APPEND; break;
     case runtime::ChannelMode::Update: flags = "r+"; break;
     }
+    // Creating or truncating a file writes flash metadata.
+    runtime::BulkWriteScope hold(mode == runtime::ChannelMode::Write ||
+                                 mode == runtime::ChannelMode::Append
+                                     ? bulkWriteGate_ : nullptr);
     fs::File file = filesystem_.open(resolved.c_str(), flags);
     if (!file)
         throw ServiceError(mode == runtime::ChannelMode::Read ||
@@ -104,8 +108,7 @@ runtime::ChannelId SdChannels::open(runtime::SessionId session,
     std::lock_guard lock(mutex_);
     while (nextId_ == 0 || channels_.find(nextId_) != channels_.end()) ++nextId_;
     const auto id = nextId_++;
-    channels_.emplace(id, OpenChannel{session, mode, std::move(file),
-                                      runtime::BulkWriteTracker(bulkWriteGate_)});
+    channels_.emplace(id, OpenChannel{session, mode, std::move(file)});
     return id;
 }
 
@@ -158,7 +161,7 @@ void SdChannels::writeBytes(runtime::SessionId session, runtime::ChannelId chann
     OpenChannel& opened = owned(session, channel);
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for writing");
-    opened.tracker.add(bytes.size());
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const auto written = opened.file.write(
         reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
     opened.file.flush();
@@ -210,7 +213,7 @@ void SdChannels::write(runtime::SessionId session, runtime::ChannelId channel,
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for writing");
-    opened.tracker.add(text.size());
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const auto written = opened.file.write(
         reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
     opened.file.flush();
@@ -221,8 +224,8 @@ void SdChannels::write(runtime::SessionId session, runtime::ChannelId channel,
 void SdChannels::close(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     opened.file.close();
-    opened.tracker.finish();
     channels_.erase(channel);
 }
 
@@ -230,8 +233,8 @@ void SdChannels::closeSession(runtime::SessionId session) {
     std::lock_guard lock(mutex_);
     for (auto channel = channels_.begin(); channel != channels_.end();) {
         if (channel->second.session == session) {
+            runtime::BulkWriteScope hold(bulkWriteGate_);
             channel->second.file.close();
-            channel->second.tracker.finish();
             channel = channels_.erase(channel);
         } else {
             ++channel;

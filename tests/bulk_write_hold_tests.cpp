@@ -14,44 +14,27 @@ int main() {
     using namespace ql32::runtime;
     using namespace ql32::platform::olimex_vga;
 
-    // Small writes never hold; crossing one SPIFFS block holds exactly once.
+    // Each scope holds once and always releases, including on exceptions;
+    // nested scopes share a single begin/end pair.
     Counts counts;
     CountedBulkWriteGate gate(onBegin, onEnd, &counts);
     {
-        BulkWriteTracker small(&gate);
-        small.add(1000);
-        small.add(2000);
-        assert(!small.held() && counts.begins == 0);
-        BulkWriteTracker big(&gate);
-        big.add(1024); big.add(1024); big.add(2048);
-        assert(big.held() && counts.begins == 1);
-        big.add(1024);
-        assert(counts.begins == 1);
-        // A second concurrent stream shares the one hold.
-        BulkWriteTracker other(&gate);
-        other.add(8192);
-        assert(counts.begins == 1 && gate.activeHolds() == 2);
-        other.finish();
-        assert(counts.ends == 0 && gate.activeHolds() == 1);
+        BulkWriteScope outer(&gate);
+        assert(counts.begins == 1 && gate.activeHolds() == 1);
+        {
+            BulkWriteScope inner(&gate);
+            assert(counts.begins == 1 && gate.activeHolds() == 2);
+        }
+        assert(counts.ends == 0);
     }
-    // Destruction releases (error paths), exactly once.
-    assert(counts.ends == 1 && gate.activeHolds() == 0);
-
-    // finish() is idempotent; a moved tracker keeps a single release.
-    {
-        BulkWriteTracker a(&gate);
-        a.add(4096);
-        BulkWriteTracker b(std::move(a));
-        assert(!a.held() && b.held());
-        b.finish(); b.finish();
-        assert(counts.begins == 2 && counts.ends == 2);
-    }
-    // No gate: tracker is inert.
-    BulkWriteTracker none;
-    none.add(1u << 20);
-    assert(!none.held());
-    // Unbalanced release is ignored.
-    gate.release();
+    assert(counts.begins == 1 && counts.ends == 1 && gate.activeHolds() == 0);
+    try {
+        BulkWriteScope scope(&gate);
+        throw 1;
+    } catch (int) {}
+    assert(counts.begins == 2 && counts.ends == 2);
+    BulkWriteScope inert(nullptr);
+    gate.release();  // unbalanced release is ignored
     assert(counts.ends == 2);
 
     // The hold message lies inside the ring, is centred, and is non-empty,
@@ -81,5 +64,24 @@ int main() {
         assert(firstRow + lastRow >= mode.ringRows - 2 * scale - 2 &&
                firstRow + lastRow <= mode.ringRows + 2 * scale);
     }
+    // Corner notification box: inside the frame, byte-aligned for pixel
+    // ordering, red border, yellow text, black fill.
+    for (const Mode mode : {Mode{320, 100}, Mode{400, 150}}) {
+        const auto box = holdBox(mode.width, mode.ringRows * 2);
+        assert(box.valid() && box.x % 8 == 0 && box.width % 8 == 0);
+        assert(box.x + box.width <= mode.width && box.y + box.height <= mode.ringRows * 2);
+        assert(box.x > mode.width / 2);
+        std::uint32_t yellow = 0, red = 0, black = 0;
+        std::vector<std::uint8_t> codes(box.width);
+        for (std::uint32_t row = 0; row < box.height; ++row) {
+            fillHoldBoxRow(codes.data(), box, row);
+            for (const auto code : codes) {
+                yellow += code == kBoxYellow; red += code == kBoxRed; black += code == kBoxBlack;
+            }
+        }
+        assert(yellow > 100 && red == 2 * box.width + 2 * (box.height - 2) && black > yellow);
+    }
+    assert(!holdBox(100, 100).valid());
     return 0;
+
 }

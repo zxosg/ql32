@@ -49,13 +49,27 @@ public:
     // Start and poll shutdown from the interrupt's allocating core. pollStop
     // never waits for the worker, so a scheduler can run other sessions.
     bool requestStop();
-    // Replace the scanned picture with a steady "busy" screen while internal
-    // flash writes stall the refill task. holdBegin returns once the message
-    // is in the line ring (or after a short timeout); holdEnd restores normal
-    // refill. Both are safe to call when the scanout is not running.
-    void holdBegin();
+    // Freeze the picture while internal flash writes stall the refill task.
+    // With enough free internal RAM the frame is snapshotted and replayed by
+    // the IRAM EOF interrupt with a corner notification; otherwise a solid
+    // "busy" screen fills the line ring. holdBegin returns once the hold is
+    // in effect (or after a short timeout) and is cheap when already held;
+    // holdEnd releases after a short linger so one transfer keeps one hold.
+    // Both are safe to call when the scanout is not running.
+    // drawNotice=false keeps the snapshot as-is (the caller already rendered a
+    // notice into the framebuffer); true draws the built-in corner notice.
+    // blink (optional) names a framebuffer region, 8-pixel aligned in x and
+    // width, whose pixels of colour `from` are shown as `to` every other
+    // ~0.5 s while the picture is held (the interrupt does the toggling).
+    struct HoldBlink {
+        std::uint32_t x = 0, y = 0, width = 0, height = 0;
+        std::uint8_t from = 0, to = 0;
+    };
+    void holdBegin(bool drawNotice = true, const HoldBlink* blink = nullptr);
+    bool holdPending() const noexcept { return holdRequested_ != 0; }
     void holdEnd();
     std::uint32_t heldGroupCount() const noexcept { return heldGroupCount_; }
+    std::uint32_t snapshotGroupCount() const noexcept { return snapshotGroupCount_; }
     bool pollStop();
     // Synchronous convenience for isolated startup diagnostics only.
     bool end();
@@ -154,6 +168,9 @@ private:
     static void psramStressWorker(void* argument);
     void refillCompletedRows();
     void fillHoldRing();
+    void prepareHoldSnapshot(bool drawNotice, const HoldBlink* blink);
+    void releaseHold();
+    void holdRefillRows(std::uint32_t completed);
     void refillRow(std::uint32_t sourceSequence);
     void encodeRow(std::uint32_t sourceRow, std::uint8_t* output) const;
     void encodePacked4Row(const std::uint8_t* source,
@@ -206,6 +223,13 @@ private:
     volatile std::uint32_t holdRequested_ = 0;
     volatile std::uint32_t holdActive_ = 0;
     volatile std::uint32_t heldGroupCount_ = 0;
+    volatile std::uint32_t snapshotGroupCount_ = 0;
+    volatile std::uint32_t holdReleaseAtMs_ = 0;
+    volatile std::uint32_t holdNext_ = 0;
+    std::uint8_t* volatile holdSnapshot_ = nullptr;
+    std::uint8_t* holdOverlay_ = nullptr;
+    volatile std::uint32_t holdBlink_ = 0;
+    std::uint32_t holdBoxX_ = 0, holdBoxY_ = 0, holdBoxW_ = 0, holdBoxH_ = 0;
     unsigned stoppedWorkersRemaining_ = 0;
     BaseType_t interruptCore_ = -1;
     volatile std::uint32_t completedSequence_ = 0;

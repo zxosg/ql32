@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <mutex>
-#include <utility>
 
 namespace ql32::runtime {
 
@@ -45,54 +44,23 @@ private:
     std::size_t count_ = 0;
 };
 
-// Follows one write stream. The gate is held once the stream has written
-// `threshold` bytes (one SPIFFS block, so small saves never hold) and is
-// released by finish() or destruction, including on error paths.
-class BulkWriteTracker {
+// Holds the gate for the duration of one flash-touching operation (open,
+// write+flush, close, rename...). Released on every exit path, including
+// exceptions. Adapters may linger the release so back-to-back operations of
+// one transfer keep a single steady hold.
+class BulkWriteScope {
 public:
-    static constexpr std::size_t kDefaultThreshold = 4096;
-
-    BulkWriteTracker() = default;
-    explicit BulkWriteTracker(BulkWriteGate* gate,
-                              std::size_t threshold = kDefaultThreshold)
-        : gate_(gate), threshold_(threshold) {}
-    BulkWriteTracker(const BulkWriteTracker&) = delete;
-    BulkWriteTracker& operator=(const BulkWriteTracker&) = delete;
-    BulkWriteTracker(BulkWriteTracker&& other) noexcept { *this = std::move(other); }
-    BulkWriteTracker& operator=(BulkWriteTracker&& other) noexcept {
-        if (this != &other) {
-            finish();
-            gate_ = std::exchange(other.gate_, nullptr);
-            threshold_ = other.threshold_;
-            written_ = other.written_;
-            held_ = std::exchange(other.held_, false);
-        }
-        return *this;
+    explicit BulkWriteScope(BulkWriteGate* gate) : gate_(gate) {
+        if (gate_) gate_->hold();
     }
-    ~BulkWriteTracker() { finish(); }
-
-    // Call before the write that adds `bytes`, so the hold is in place before
-    // the flash operation starts.
-    void add(std::size_t bytes) {
-        written_ += bytes;
-        if (gate_ && !held_ && written_ >= threshold_) {
-            held_ = true;
-            gate_->hold();
-        }
+    BulkWriteScope(const BulkWriteScope&) = delete;
+    BulkWriteScope& operator=(const BulkWriteScope&) = delete;
+    ~BulkWriteScope() {
+        if (gate_) gate_->release();
     }
-    void finish() noexcept {
-        if (held_) {
-            held_ = false;
-            if (gate_) gate_->release();
-        }
-    }
-    bool held() const noexcept { return held_; }
 
 private:
-    BulkWriteGate* gate_ = nullptr;
-    std::size_t threshold_ = kDefaultThreshold;
-    std::size_t written_ = 0;
-    bool held_ = false;
+    BulkWriteGate* gate_;
 };
 
 } // namespace ql32::runtime

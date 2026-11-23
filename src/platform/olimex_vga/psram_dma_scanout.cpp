@@ -293,7 +293,8 @@ bool PsramDmaScanout::begin(const char* modeline, int redPin, int greenPin,
     stopRequested_.store(false, std::memory_order_release);
     holdRequested_ = 0;
     holdActive_ = 0;
-    heldGroupCount_ = 0;
+    holdReleaseAtMs_ = 0;
+    heldGroupCount_ = snapshotGroupCount_ = 0;
     completedSequence_ = frameCount_ = eofEventCount_ = refillCount_ = 0;
     lateRefillCount_ = spuriousInterruptCount_ = emptyInterruptCount_ = 0;
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
@@ -471,6 +472,9 @@ void PsramDmaScanout::releaseAllocatedBuffers() noexcept {
         heap_caps_free(slot.pixels);
         slot = {};
     }
+    heap_caps_free(holdSnapshot_);
+    holdSnapshot_ = nullptr;
+    holdOverlay_ = nullptr;
     heap_caps_free(lineRing_);
     heap_caps_free(horizontalBlank_);
     heap_caps_free(verticalBlank_);
@@ -734,12 +738,16 @@ void IRAM_ATTR PsramDmaScanout::handleDmaInterrupt() {
             : refillRows_ - 1;
         const auto nextSequence = sequence + 1;
         if (lineReadySequence_[nextSequence % ringRows_] != nextSequence) {
-            if (holdActive_) ++heldGroupCount_;
+            if (holdActive_ && !holdSnapshot_) ++heldGroupCount_;
             else ++lateRefillCount_;
         }
         completedSequence_ = sequence;
         haveCompletedSequence_ = true;
         ++eofEventCount_;
+        if (holdActive_ && holdSnapshot_) {
+            holdRefillRows(sequence);
+            ++snapshotGroupCount_;
+        }
         frameCount_ = (sequence + 1) / height_;
         if (refillTask_) vTaskNotifyGiveFromISR(refillTask_, &higherPriorityTaskWoken);
     } else {
@@ -836,13 +844,16 @@ void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
     if (!haveCompletedSequence_) return;
     if (holdRequested_) {
         if (!holdActive_) {
-            fillHoldRing();
+            holdNext_ = nextRefillSequence_;
+            if (!holdSnapshot_) fillHoldRing();
             __sync_synchronize();
             holdActive_ = 1;
+        } else if (holdReleaseAtMs_ &&
+                   static_cast<std::int32_t>(millis() - holdReleaseAtMs_) >= 0) {
+            releaseHold();
         }
-        return;
+        if (holdRequested_) return;
     }
-    const bool resuming = holdActive_ != 0;
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     const auto started = micros();
@@ -873,7 +884,6 @@ void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
         ++batchRows;
 #endif
     }
-    if (resuming) { __sync_synchronize(); holdActive_ = 0; }
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     const auto elapsed = static_cast<std::uint32_t>(micros() - started);
@@ -885,8 +895,9 @@ void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
 }
 
 void PsramDmaScanout::fillHoldRing() {
-    const auto background = syncByte(timings_, false, false, 0x10);
-    const auto foreground = syncByte(timings_, false, false, 0x15);
+    // Output bits: red 0x01, green 0x04, blue 0x10.
+    const auto background = syncByte(timings_, false, false, 0x00);
+    const auto foreground = syncByte(timings_, false, false, 0x05);
     for (std::uint32_t slot = 0; slot < ringRows_; ++slot) {
         auto* out = lineRing_ + static_cast<std::size_t>(slot) * width_;
         fillHoldMaskRow(out, width_, ringRows_, slot);
@@ -896,27 +907,152 @@ void PsramDmaScanout::fillHoldRing() {
     }
 }
 
-void PsramDmaScanout::holdBegin() {
+// Snapshot the live frame and the corner notification into internal RAM, only
+// when a safe amount of internal heap remains afterwards. Failure leaves
+// holdSnapshot_ null and the solid-screen hold is used instead.
+void PsramDmaScanout::prepareHoldSnapshot(bool drawNotice, const HoldBlink* blink) {
+    constexpr std::size_t kHeadroomBytes = 48 * 1024;
+    holdSnapshot_ = nullptr;
+    holdBlink_ = 0;
+    if (kFramebufferFormat != PixelFormat::Indexed4 || !framebuffer_.pixels) return;
+    if (width_ % 8 != 0) return;
+    const auto box = holdBox(width_, height_);
+    const bool useBlink = blink && blink->width && blink->height &&
+        blink->x % 8 == 0 && blink->width % 8 == 0 &&
+        blink->x + blink->width <= width_ && blink->y + blink->height <= height_ &&
+        blink->width * blink->height <= 8192;
+    const bool useBox = drawNotice && !useBlink && box.valid();
+    const std::size_t snapshotBytes =
+        static_cast<std::size_t>(framebuffer_.stride) * height_;
+    const std::size_t overlayBytes = useBlink
+        ? static_cast<std::size_t>(blink->width) * blink->height
+        : useBox ? static_cast<std::size_t>(box.width) * box.height : 0;
+    const auto need = snapshotBytes + overlayBytes;
+    constexpr auto caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    if (heap_caps_get_largest_free_block(caps) < need ||
+        heap_caps_get_free_size(caps) < need + kHeadroomBytes)
+        return;
+    auto* buffer = static_cast<std::uint8_t*>(heap_caps_malloc(need, caps));
+    if (!buffer) return;
+    std::memcpy(buffer, framebuffer_.pixels, snapshotBytes);
+    holdOverlay_ = buffer + snapshotBytes;
+    holdBoxX_ = holdBoxY_ = holdBoxW_ = holdBoxH_ = 0;
+    if (useBlink) {
+        // Same pair order as the interrupt's row conversion, with colour
+        // `from` replaced by `to`.
+        const auto remap = [&](std::uint8_t pair) -> std::uint8_t {
+            auto hi = static_cast<std::uint8_t>(pair >> 4);
+            auto lo = static_cast<std::uint8_t>(pair & 0x0F);
+            if (hi == blink->from) hi = blink->to;
+            if (lo == blink->from) lo = blink->to;
+            return static_cast<std::uint8_t>((hi << 4) | lo);
+        };
+        for (std::uint32_t row = 0; row < blink->height; ++row) {
+            const auto* source = buffer +
+                static_cast<std::size_t>(blink->y + row) * framebuffer_.stride +
+                blink->x / 2;
+            auto* out = reinterpret_cast<std::uint16_t*>(
+                holdOverlay_ + static_cast<std::size_t>(row) * blink->width);
+            for (std::uint32_t x = 0; x < blink->width; x += 8) {
+                const auto* pairs = source + x / 2;
+                out[0] = packed4PairOutputLut_[remap(pairs[1])];
+                out[1] = packed4PairOutputLut_[remap(pairs[0])];
+                out[2] = packed4PairOutputLut_[remap(pairs[3])];
+                out[3] = packed4PairOutputLut_[remap(pairs[2])];
+                out += 4;
+            }
+        }
+        holdBoxX_ = blink->x; holdBoxY_ = blink->y;
+        holdBoxW_ = blink->width; holdBoxH_ = blink->height;
+        holdBlink_ = 1;
+    } else if (useBox) {
+        const std::uint8_t colors[3] = {
+            syncByte(timings_, false, false, 0x00),
+            syncByte(timings_, false, false, 0x01),
+            syncByte(timings_, false, false, 0x05)};
+        std::uint8_t codes[kHoldBoxMaxWidth];
+        for (std::uint32_t row = 0; row < box.height; ++row) {
+            fillHoldBoxRow(codes, box, row);
+            auto* out = holdOverlay_ + static_cast<std::size_t>(row) * box.width;
+            for (std::uint32_t x = 0; x < box.width; ++x) out[x] = colors[codes[x]];
+            applyDmaPixelOrder(out, box.width);
+        }
+        holdBoxX_ = box.x; holdBoxY_ = box.y;
+        holdBoxW_ = box.width; holdBoxH_ = box.height;
+    }
+    __sync_synchronize();
+    holdSnapshot_ = buffer;
+}
+
+// Runs in the EOF interrupt (IRAM) while flash writes stall every cache user:
+// touches only internal RAM and never calls flash-resident code.
+void IRAM_ATTR __attribute__((optimize("O3,unroll-loops"))) PsramDmaScanout::holdRefillRows(std::uint32_t completed) {
+    auto next = holdNext_;
+    if (next > completed + 1) next = completed + 1;
+    if (completed + 1 - next > ringRows_) next = completed + 1 - ringRows_;
+    const auto* snapshot = holdSnapshot_;
+    const auto stride = framebuffer_.stride;
+    for (auto sequence = next; sequence <= completed; ++sequence) {
+        const auto target = sequence + ringRows_;
+        const auto row = target % height_;
+        const auto slot = sequence % ringRows_;
+        auto* out = lineRing_ + static_cast<std::size_t>(slot) * width_;
+        const auto* source = snapshot + static_cast<std::size_t>(row) * stride;
+        const auto* in = reinterpret_cast<const std::uint32_t*>(source);
+        auto* dst = reinterpret_cast<std::uint32_t*>(out);
+        const auto* lut = packed4PairOutputLut_;
+        for (std::uint32_t x = 0; x < width_; x += 8) {
+            const std::uint32_t p = *in++;
+            dst[0] = static_cast<std::uint32_t>(lut[(p >> 8) & 0xFF]) |
+                     (static_cast<std::uint32_t>(lut[p & 0xFF]) << 16);
+            dst[1] = static_cast<std::uint32_t>(lut[p >> 24]) |
+                     (static_cast<std::uint32_t>(lut[(p >> 16) & 0xFF]) << 16);
+            dst += 2;
+        }
+        if (row >= holdBoxY_ && row < holdBoxY_ + holdBoxH_ &&
+            (!holdBlink_ || ((frameCount_ >> 5) & 1))) {
+            const auto* overlay = holdOverlay_ +
+                static_cast<std::size_t>(row - holdBoxY_) * holdBoxW_;
+            auto* dest = out + holdBoxX_;
+            for (std::uint32_t x = 0; x < holdBoxW_; ++x) dest[x] = overlay[x];
+        }
+        lineReadySequence_[slot] = target;
+    }
+    holdNext_ = completed + 1;
+}
+
+void PsramDmaScanout::releaseHold() {
+    holdRequested_ = 0;
+    holdReleaseAtMs_ = 0;
+    __sync_synchronize();
+    holdActive_ = 0;
+    auto* buffer = holdSnapshot_;
+    holdSnapshot_ = nullptr;
+    if (buffer) {
+        vTaskDelay(2);  // the interrupt is no longer reading it
+        heap_caps_free(buffer);
+        holdOverlay_ = nullptr;
+    }
+}
+
+void PsramDmaScanout::holdBegin(bool drawNotice, const HoldBlink* blink) {
     if (!refillTask_ || stopPending_ || stopRequested_.load()) return;
+    holdReleaseAtMs_ = 0;
+    if (holdRequested_) return;
+    prepareHoldSnapshot(drawNotice, blink);
     holdRequested_ = 1;
     __sync_synchronize();
     xTaskNotifyGive(refillTask_);
-    for (int waited = 0; waited < 500 &&
-         !holdActive_; ++waited)
+    for (int waited = 0; waited < 500 && !holdActive_; ++waited)
         vTaskDelay(1);
-    // Let one full ring pass display the message before flash goes quiet.
+    // Let one full ring pass display the held content before flash goes quiet.
     vTaskDelay(pdMS_TO_TICKS(40));
 }
 
 void PsramDmaScanout::holdEnd() {
-    if (!holdRequested_) return;
-    holdRequested_ = 0;
-    __sync_synchronize();
-    if (!refillTask_ || stopPending_) return;
-    xTaskNotifyGive(refillTask_);
-    for (int waited = 0; waited < 500 &&
-         holdActive_; ++waited)
-        vTaskDelay(1);
+    // Keep the hold briefly so the next write of the same transfer reuses it.
+    constexpr std::uint32_t kLingerMs = 300;
+    if (holdRequested_) holdReleaseAtMs_ = (millis() + kLingerMs) | 1u;
 }
 
 void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
@@ -1095,13 +1231,14 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(unexpectedInterruptMask_));
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
-    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, held-groups=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u, refill-total-us=%u\n",
+    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, held-groups=%u, snapshot-groups=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u, refill-total-us=%u\n",
                   static_cast<unsigned>(frameCount_),
                   static_cast<unsigned>(haveCompletedSequence_ ? completedSequence_ + 1 : 0),
                   static_cast<unsigned>(eofEventCount_),
                   static_cast<unsigned>(refillCount_),
                   static_cast<unsigned>(lateRefillCount_),
                   static_cast<unsigned>(heldGroupCount_),
+                  static_cast<unsigned>(snapshotGroupCount_),
                   static_cast<unsigned>(spuriousInterruptCount_),
                   static_cast<unsigned>(paletteApplyCount_),
                   static_cast<unsigned>(stressBytesWritten_),
@@ -1118,13 +1255,14 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(refillObsoleteRowsSkipped_),
                   static_cast<unsigned>(refillBatchTotalMicros_));
 #else
-    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, held-groups=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u\n",
+    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, held-groups=%u, snapshot-groups=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u\n",
                   static_cast<unsigned>(frameCount_),
                   static_cast<unsigned>(haveCompletedSequence_ ? completedSequence_ + 1 : 0),
                   static_cast<unsigned>(eofEventCount_),
                   static_cast<unsigned>(refillCount_),
                   static_cast<unsigned>(lateRefillCount_),
                   static_cast<unsigned>(heldGroupCount_),
+                  static_cast<unsigned>(snapshotGroupCount_),
                   static_cast<unsigned>(spuriousInterruptCount_),
                   static_cast<unsigned>(paletteApplyCount_),
                   static_cast<unsigned>(stressBytesWritten_),

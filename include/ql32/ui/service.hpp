@@ -80,6 +80,7 @@ struct InfoToast {
     std::uint8_t ink = 0;
     std::uint8_t paper = 7;
     std::uint8_t displayMode = 0;
+    std::int16_t frame = -1;  // border colour; -1 follows ink
 };
 
 // Requests return immediately. A missing poll result means the owning session
@@ -104,7 +105,8 @@ public:
                           std::uint32_t durationMs, int positionX,
                           int positionY, std::uint8_t ink = 0,
                           std::uint8_t paper = 7,
-                          std::uint8_t displayMode = 0) = 0;
+                          std::uint8_t displayMode = 0,
+                          std::int16_t frame = -1) = 0;
     virtual void showBusy(SessionId session, std::string text,
                           int positionX, int positionY,
                           std::uint8_t ink = 0, std::uint8_t paper = 7,
@@ -137,7 +139,8 @@ public:
     void showInfo(SessionId session, std::string text, std::uint32_t durationMs,
                   int positionX, int positionY, std::uint8_t ink = 0,
                   std::uint8_t paper = 7,
-                  std::uint8_t displayMode = 0) override;
+                  std::uint8_t displayMode = 0,
+                  std::int16_t frame = -1) override;
     void showBusy(SessionId session, std::string text, int positionX,
                   int positionY, std::uint8_t ink = 0,
                   std::uint8_t paper = 7,

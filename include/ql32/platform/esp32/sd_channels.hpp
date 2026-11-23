@@ -45,7 +45,6 @@ private:
         runtime::SessionId session;
         runtime::ChannelMode mode;
         fs::File file;
-        runtime::BulkWriteTracker tracker;
     };
 
     runtime::BulkWriteGate* bulkWriteGate_ = nullptr;

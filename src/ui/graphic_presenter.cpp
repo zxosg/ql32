@@ -523,7 +523,10 @@ void GraphicPresenter::composeRow(std::uint32_t y, std::uint32_t x,
                 row[i] = (infoToast_ && infoToast_->displayMode == 1 && phase) || swap ?
                     infoToast_->paper : infoToast_->ink;
             } else {
-                row[i] = swap ? infoToast_->paper : infoToast_->ink;
+                const auto frame = infoToast_ && infoToast_->frame >= 0 ?
+                    static_cast<graphics::ColorIndex>(infoToast_->frame) :
+                    infoToast_->ink;
+                row[i] = swap ? infoToast_->paper : frame;
             }
         }
     }

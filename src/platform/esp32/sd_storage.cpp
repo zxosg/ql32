@@ -39,12 +39,12 @@ std::string entryPathRelativeTo(const std::string& directory,
 class SdWriteHandle final : public runtime::StorageWriteHandle {
 public:
     SdWriteHandle(fs::File file, runtime::BulkWriteGate* gate)
-        : file_(std::move(file)), tracker_(gate) {}
+        : file_(std::move(file)), gate_(gate) {}
     ~SdWriteHandle() override {
         if (file_) file_.close();
     }
     void write(const std::uint8_t* data, std::size_t size) override {
-        tracker_.add(size);
+        runtime::BulkWriteScope hold(gate_);
         std::size_t offset = 0;
         while (offset < size) {
             const auto written = file_.write(data + offset, size - offset);
@@ -55,14 +55,14 @@ public:
         }
     }
     void close() override {
+        runtime::BulkWriteScope hold(gate_);
         file_.flush();
         file_.close();
-        tracker_.finish();
     }
 
 private:
     fs::File file_;
-    runtime::BulkWriteTracker tracker_;
+    runtime::BulkWriteGate* gate_;
 };
 
 class SdReadHandle final : public runtime::StorageReadHandle {
@@ -196,7 +196,11 @@ std::unique_ptr<runtime::StorageWriteHandle> SdStorage::openWrite(
         const std::string& path) {
     const std::string resolved = resolve(path, false);
     ensureAvailable();
-    fs::File file = filesystem_.open(resolved.c_str(), FILE_WRITE);
+    fs::File file;
+    {
+        runtime::BulkWriteScope hold(bulkWriteGate_);
+        file = filesystem_.open(resolved.c_str(), FILE_WRITE);
+    }
     if (!file)
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: cannot open for writing: " + path);
@@ -204,14 +208,13 @@ std::unique_ptr<runtime::StorageWriteHandle> SdStorage::openWrite(
 }
 
 void SdStorage::writeText(const std::string& path, const std::string& contents) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string resolved = resolve(path, false);
     ensureAvailable();
     fs::File file = filesystem_.open(resolved.c_str(), FILE_WRITE);
     if (!file)
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: cannot open for writing: " + path);
-    runtime::BulkWriteTracker tracker(bulkWriteGate_);
-    tracker.add(contents.size());
     const std::size_t written = file.write(
         reinterpret_cast<const std::uint8_t*>(contents.data()), contents.size());
     file.flush();
@@ -223,6 +226,7 @@ void SdStorage::writeText(const std::string& path, const std::string& contents) 
 
 void SdStorage::writeTextStream(
         const std::string& path, const runtime::TextStreamSource& source) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string resolved = resolve(path, false);
     ensureAvailable();
     fs::File file = filesystem_.open(resolved.c_str(), FILE_WRITE);
@@ -231,10 +235,8 @@ void SdStorage::writeTextStream(
                            "storage: cannot open for writing: " + path);
     class FileSink final : public runtime::TextStreamSink {
     public:
-        FileSink(fs::File& file, runtime::BulkWriteGate* gate)
-            : file_(file), tracker_(gate) {}
+        explicit FileSink(fs::File& file) : file_(file) {}
         void write(std::string_view chunk) override {
-            tracker_.add(chunk.size());
             const auto* data = reinterpret_cast<const std::uint8_t*>(chunk.data());
             std::size_t offset = 0;
             while (offset < chunk.size()) {
@@ -247,8 +249,7 @@ void SdStorage::writeTextStream(
         }
     private:
         fs::File& file_;
-        runtime::BulkWriteTracker tracker_;
-    } sink(file, bulkWriteGate_);
+    } sink(file);
     try {
         source.writeTo(sink);
         file.flush();
@@ -329,6 +330,7 @@ std::uintmax_t SdStorage::size(const std::string& path) {
 }
 
 void SdStorage::rename(const std::string& path, const std::string& newPath) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string source = resolve(path, false);
     const std::string destination = resolve(newPath, false);
     ensureAvailable();
@@ -350,6 +352,7 @@ void SdStorage::rename(const std::string& path, const std::string& newPath) {
 }
 
 void SdStorage::remove(const std::string& path) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string resolved = resolve(path, false);
     ensureAvailable();
     fs::File file = filesystem_.open(resolved.c_str(), FILE_READ);

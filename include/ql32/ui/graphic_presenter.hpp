@@ -33,6 +33,7 @@ public:
     void composeRow(std::uint32_t y, std::uint32_t x,
                     std::vector<graphics::ColorIndex>& row) const;
     graphics::Rect bounds() const noexcept { return bounds_; }
+    graphics::Rect infoBounds() const noexcept { return infoBounds_; }
 
 private:
     struct Row {

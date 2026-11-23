@@ -1,5 +1,6 @@
 #include "ql32/ui/graphic_presenter.hpp"
 
+#include <array>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -337,6 +338,16 @@ void testInfoToastColorsAndBlinkOptions() {
     require(toast && toast->ink == 2 && toast->paper == 6 &&
             toast->displayMode == 0,
             "info service did not retain toast colors and display mode");
+
+    service->showInfo(1, "framed", 3000, -1, 1, 2, 0, 0, 6);
+    ui.refresh();
+    const auto framed = service->currentInfo();
+    require(framed && framed->frame == 6, "info service did not retain frame color");
+    std::array<int, 16> counts{};
+    for (const auto color : capture->latest.pixels)
+        if (color < counts.size()) ++counts[color];
+    require(counts[6] > 0 && counts[2] > 0 && counts[0] > 0,
+            "info toast frame, ink and paper were not drawn in separate colors");
 }
 } // namespace
 

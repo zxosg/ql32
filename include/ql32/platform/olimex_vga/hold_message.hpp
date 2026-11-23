@@ -34,6 +34,12 @@ inline constexpr HoldGlyph kHoldGlyphs[] = {
     {'k', {0x10, 0x10, 0x12, 0x14, 0x18, 0x14, 0x12, 0x00}},
 };
 
+inline const HoldGlyph* findHoldGlyph(char character) noexcept {
+    for (const auto& candidate : kHoldGlyphs)
+        if (candidate.character == character) return &candidate;
+    return nullptr;
+}
+
 constexpr std::uint32_t holdMessageLength() noexcept {
     return static_cast<std::uint32_t>(sizeof(kHoldMessage) - 1);
 }
@@ -58,9 +64,7 @@ inline void fillHoldMaskRow(std::uint8_t* mask, std::uint32_t width,
     const auto glyphRow = (row - top) / scale;
     const auto left = (width - textWidth) / 2;
     for (std::uint32_t index = 0; index < holdMessageLength(); ++index) {
-        const HoldGlyph* glyph = nullptr;
-        for (const auto& candidate : kHoldGlyphs)
-            if (candidate.character == kHoldMessage[index]) glyph = &candidate;
+        const auto* glyph = findHoldGlyph(kHoldMessage[index]);
         if (!glyph) continue;
         const auto bits = glyph->rows[glyphRow];
         for (std::uint32_t column = 0; column < kHoldGlyphColumns; ++column) {
@@ -68,6 +72,47 @@ inline void fillHoldMaskRow(std::uint8_t* mask, std::uint32_t width,
             const auto x = left + (index * kHoldGlyphAdvance + column) * scale;
             for (std::uint32_t dx = 0; dx < scale; ++dx) mask[x + dx] = 1;
         }
+    }
+}
+
+// IPRINT-style corner notification drawn over the frozen picture: red border,
+// black fill, yellow text. Box x and width are multiples of 8 so a row of box
+// pixels can be put into DMA pixel order on its own.
+struct HoldBox {
+    std::uint32_t x = 0, y = 0, width = 0, height = 0;
+    constexpr bool valid() const noexcept { return width != 0; }
+};
+
+enum HoldBoxCode : std::uint8_t { kBoxBlack = 0, kBoxRed = 1, kBoxYellow = 2 };
+inline constexpr std::uint32_t kHoldBoxMaxWidth = 256;
+
+constexpr HoldBox holdBox(std::uint32_t width, std::uint32_t height) noexcept {
+    const auto textWidth = holdMessageLength() * kHoldGlyphAdvance;
+    const auto boxWidth = (textWidth + 16 + 7) / 8 * 8;
+    const auto boxHeight = kHoldGlyphRows + 8;
+    constexpr std::uint32_t margin = 8;
+    if (boxWidth > kHoldBoxMaxWidth || width % 8 != 0 ||
+        width < boxWidth + 2 * margin || height < boxHeight + 2 * margin)
+        return {};
+    return {width - boxWidth - margin, margin, boxWidth, boxHeight};
+}
+
+inline void fillHoldBoxRow(std::uint8_t* codes, const HoldBox& box,
+                           std::uint32_t row) noexcept {
+    const bool edgeRow = row == 0 || row + 1 == box.height;
+    for (std::uint32_t x = 0; x < box.width; ++x)
+        codes[x] = (edgeRow || x == 0 || x + 1 == box.width) ? kBoxRed : kBoxBlack;
+    const auto textWidth = holdMessageLength() * kHoldGlyphAdvance;
+    const auto textTop = (box.height - kHoldGlyphRows) / 2;
+    if (row < textTop || row >= textTop + kHoldGlyphRows) return;
+    const auto left = (box.width - textWidth) / 2;
+    for (std::uint32_t index = 0; index < holdMessageLength(); ++index) {
+        const auto* glyph = findHoldGlyph(kHoldMessage[index]);
+        if (!glyph) continue;
+        const auto bits = glyph->rows[row - textTop];
+        for (std::uint32_t column = 0; column < kHoldGlyphColumns; ++column)
+            if (bits & (1u << (kHoldGlyphColumns - 1 - column)))
+                codes[left + index * kHoldGlyphAdvance + column] = kBoxYellow;
     }
 }
 
