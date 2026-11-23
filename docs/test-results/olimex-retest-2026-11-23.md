@@ -61,3 +61,11 @@ No regression; no leak after task kill.
 
 VGA picture was not visually checked; `olimex_esp32_sbc_fabgl_psram`
 and the non-Olimex envs were built but not flashed.
+
+## File transfer and VGA sync (owner observation, 2026-11-23)
+
+YMODEM upload of a 146,416 B file, repeated twice per device: FFS 22.2 s and 29.9 s,
+SDC 17.0 s and 16.9 s; every upload completed and `FLEN` read back 146,416 (data
+integrity OK, files deleted afterwards). The owner saw the VGA picture blink
+periodically during the transfers, probably once per received/saved block. Not
+yet diagnosed or fixed; FFS and SDC were not observed separately.
