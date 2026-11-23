@@ -38,11 +38,13 @@ std::string entryPathRelativeTo(const std::string& directory,
 
 class SdWriteHandle final : public runtime::StorageWriteHandle {
 public:
-    explicit SdWriteHandle(fs::File file) : file_(std::move(file)) {}
+    SdWriteHandle(fs::File file, runtime::BulkWriteGate* gate)
+        : file_(std::move(file)), tracker_(gate) {}
     ~SdWriteHandle() override {
         if (file_) file_.close();
     }
     void write(const std::uint8_t* data, std::size_t size) override {
+        tracker_.add(size);
         std::size_t offset = 0;
         while (offset < size) {
             const auto written = file_.write(data + offset, size - offset);
@@ -55,10 +57,12 @@ public:
     void close() override {
         file_.flush();
         file_.close();
+        tracker_.finish();
     }
 
 private:
     fs::File file_;
+    runtime::BulkWriteTracker tracker_;
 };
 
 class SdReadHandle final : public runtime::StorageReadHandle {
@@ -196,7 +200,7 @@ std::unique_ptr<runtime::StorageWriteHandle> SdStorage::openWrite(
     if (!file)
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: cannot open for writing: " + path);
-    return std::make_unique<SdWriteHandle>(std::move(file));
+    return std::make_unique<SdWriteHandle>(std::move(file), bulkWriteGate_);
 }
 
 void SdStorage::writeText(const std::string& path, const std::string& contents) {
@@ -206,6 +210,8 @@ void SdStorage::writeText(const std::string& path, const std::string& contents) 
     if (!file)
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: cannot open for writing: " + path);
+    runtime::BulkWriteTracker tracker(bulkWriteGate_);
+    tracker.add(contents.size());
     const std::size_t written = file.write(
         reinterpret_cast<const std::uint8_t*>(contents.data()), contents.size());
     file.flush();
@@ -225,8 +231,10 @@ void SdStorage::writeTextStream(
                            "storage: cannot open for writing: " + path);
     class FileSink final : public runtime::TextStreamSink {
     public:
-        explicit FileSink(fs::File& file) : file_(file) {}
+        FileSink(fs::File& file, runtime::BulkWriteGate* gate)
+            : file_(file), tracker_(gate) {}
         void write(std::string_view chunk) override {
+            tracker_.add(chunk.size());
             const auto* data = reinterpret_cast<const std::uint8_t*>(chunk.data());
             std::size_t offset = 0;
             while (offset < chunk.size()) {
@@ -239,7 +247,8 @@ void SdStorage::writeTextStream(
         }
     private:
         fs::File& file_;
-    } sink(file);
+        runtime::BulkWriteTracker tracker_;
+    } sink(file, bulkWriteGate_);
     try {
         source.writeTo(sink);
         file.flush();

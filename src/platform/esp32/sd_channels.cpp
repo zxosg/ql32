@@ -104,7 +104,8 @@ runtime::ChannelId SdChannels::open(runtime::SessionId session,
     std::lock_guard lock(mutex_);
     while (nextId_ == 0 || channels_.find(nextId_) != channels_.end()) ++nextId_;
     const auto id = nextId_++;
-    channels_.emplace(id, OpenChannel{session, mode, std::move(file)});
+    channels_.emplace(id, OpenChannel{session, mode, std::move(file),
+                                      runtime::BulkWriteTracker(bulkWriteGate_)});
     return id;
 }
 
@@ -157,6 +158,7 @@ void SdChannels::writeBytes(runtime::SessionId session, runtime::ChannelId chann
     OpenChannel& opened = owned(session, channel);
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for writing");
+    opened.tracker.add(bytes.size());
     const auto written = opened.file.write(
         reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
     opened.file.flush();
@@ -208,6 +210,7 @@ void SdChannels::write(runtime::SessionId session, runtime::ChannelId channel,
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for writing");
+    opened.tracker.add(text.size());
     const auto written = opened.file.write(
         reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
     opened.file.flush();
@@ -219,6 +222,7 @@ void SdChannels::close(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
     opened.file.close();
+    opened.tracker.finish();
     channels_.erase(channel);
 }
 
@@ -227,6 +231,7 @@ void SdChannels::closeSession(runtime::SessionId session) {
     for (auto channel = channels_.begin(); channel != channels_.end();) {
         if (channel->second.session == session) {
             channel->second.file.close();
+            channel->second.tracker.finish();
             channel = channels_.erase(channel);
         } else {
             ++channel;

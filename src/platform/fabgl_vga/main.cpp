@@ -490,6 +490,18 @@ bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
 }
 ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS", spiffsSpace);
 ql32::platform::esp32::SdChannels flashChannels(SPIFFS, "FFS");
+#if defined(QL32_OLIMEX_DMA_DISPLAY)
+// Internal flash writes stall both cores' cache, so large FFS writes show a
+// steady "busy" screen instead of a stale, torn picture. SDC never holds.
+ql32::runtime::CountedBulkWriteGate flashWriteGate(
+    [](void*) { psramDmaScanout.holdBegin(); },
+    [](void*) { psramDmaScanout.holdEnd(); }, nullptr);
+const bool flashWriteGateAttached = [] {
+    flashStorage.setBulkWriteGate(&flashWriteGate);
+    flashChannels.setBulkWriteGate(&flashWriteGate);
+    return true;
+}();
+#endif
 #endif
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
 ql32::platform::esp32::IdfSdCard idfSdCard;

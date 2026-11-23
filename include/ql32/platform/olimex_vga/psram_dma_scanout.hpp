@@ -49,6 +49,13 @@ public:
     // Start and poll shutdown from the interrupt's allocating core. pollStop
     // never waits for the worker, so a scheduler can run other sessions.
     bool requestStop();
+    // Replace the scanned picture with a steady "busy" screen while internal
+    // flash writes stall the refill task. holdBegin returns once the message
+    // is in the line ring (or after a short timeout); holdEnd restores normal
+    // refill. Both are safe to call when the scanout is not running.
+    void holdBegin();
+    void holdEnd();
+    std::uint32_t heldGroupCount() const noexcept { return heldGroupCount_; }
     bool pollStop();
     // Synchronous convenience for isolated startup diagnostics only.
     bool end();
@@ -146,6 +153,7 @@ private:
     static void refillWorker(void* argument);
     static void psramStressWorker(void* argument);
     void refillCompletedRows();
+    void fillHoldRing();
     void refillRow(std::uint32_t sourceSequence);
     void encodeRow(std::uint32_t sourceRow, std::uint8_t* output) const;
     void encodePacked4Row(const std::uint8_t* source,
@@ -193,6 +201,11 @@ private:
     SemaphoreHandle_t stoppedWorkers_ = nullptr;
     std::atomic<bool> stopRequested_{false};
     bool stopPending_ = false;
+    // Plain volatiles: read from the IRAM ISR, which must not call out-of-line
+    // atomic helpers (they live in flash).
+    volatile std::uint32_t holdRequested_ = 0;
+    volatile std::uint32_t holdActive_ = 0;
+    volatile std::uint32_t heldGroupCount_ = 0;
     unsigned stoppedWorkersRemaining_ = 0;
     BaseType_t interruptCore_ = -1;
     volatile std::uint32_t completedSequence_ = 0;

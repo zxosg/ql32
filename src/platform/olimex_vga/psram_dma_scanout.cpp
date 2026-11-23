@@ -1,6 +1,7 @@
 #include "ql32/platform/olimex_vga/psram_dma_scanout.hpp"
 #include "ql32/platform/olimex_vga/refill_window.hpp"
 #include "ql32/platform/olimex_vga/dma_pixel_order.hpp"
+#include "ql32/platform/olimex_vga/hold_message.hpp"
 #if defined(QL32_OLIMEX_DMA_TEST_PIXEL_EDGES)
 #include "ql32/graphics/window_manager.hpp"
 #endif
@@ -290,6 +291,9 @@ bool PsramDmaScanout::begin(const char* modeline, int redPin, int greenPin,
     }
     diagnosticMode_ = diagnosticMode;
     stopRequested_.store(false, std::memory_order_release);
+    holdRequested_ = 0;
+    holdActive_ = 0;
+    heldGroupCount_ = 0;
     completedSequence_ = frameCount_ = eofEventCount_ = refillCount_ = 0;
     lateRefillCount_ = spuriousInterruptCount_ = emptyInterruptCount_ = 0;
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
@@ -414,6 +418,8 @@ bool PsramDmaScanout::requestStop() {
     }
     stream_.stop();
     stopRequested_.store(true, std::memory_order_release);
+    holdRequested_ = 0;
+    holdActive_ = 0;
     stopPending_ = true;
     stoppedWorkersRemaining_ = workerCount;
     if (refillTask_) xTaskNotifyGive(refillTask_);
@@ -727,8 +733,10 @@ void IRAM_ATTR PsramDmaScanout::handleDmaInterrupt() {
             ? completedSequence_ + refillRows_
             : refillRows_ - 1;
         const auto nextSequence = sequence + 1;
-        if (lineReadySequence_[nextSequence % ringRows_] != nextSequence)
-            ++lateRefillCount_;
+        if (lineReadySequence_[nextSequence % ringRows_] != nextSequence) {
+            if (holdActive_) ++heldGroupCount_;
+            else ++lateRefillCount_;
+        }
         completedSequence_ = sequence;
         haveCompletedSequence_ = true;
         ++eofEventCount_;
@@ -826,6 +834,15 @@ void PsramDmaScanout::psramStressWorker(void* argument) {
 void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
     if (!kEnableLiveRefill) return;
     if (!haveCompletedSequence_) return;
+    if (holdRequested_) {
+        if (!holdActive_) {
+            fillHoldRing();
+            __sync_synchronize();
+            holdActive_ = 1;
+        }
+        return;
+    }
+    const bool resuming = holdActive_ != 0;
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     const auto started = micros();
@@ -856,6 +873,7 @@ void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
         ++batchRows;
 #endif
     }
+    if (resuming) { __sync_synchronize(); holdActive_ = 0; }
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
     const auto elapsed = static_cast<std::uint32_t>(micros() - started);
@@ -864,6 +882,41 @@ void QL32_REFILL_HOT PsramDmaScanout::refillCompletedRows() {
     if (batchRows > refillBatchMaxRows_) refillBatchMaxRows_ = batchRows;
     if (elapsed > refillBatchMaxMicros_) refillBatchMaxMicros_ = elapsed;
 #endif
+}
+
+void PsramDmaScanout::fillHoldRing() {
+    const auto background = syncByte(timings_, false, false, 0x10);
+    const auto foreground = syncByte(timings_, false, false, 0x15);
+    for (std::uint32_t slot = 0; slot < ringRows_; ++slot) {
+        auto* out = lineRing_ + static_cast<std::size_t>(slot) * width_;
+        fillHoldMaskRow(out, width_, ringRows_, slot);
+        for (std::uint32_t x = 0; x < width_; ++x)
+            out[x] = out[x] ? foreground : background;
+        applyDmaPixelOrder(out, width_);
+    }
+}
+
+void PsramDmaScanout::holdBegin() {
+    if (!refillTask_ || stopPending_ || stopRequested_.load()) return;
+    holdRequested_ = 1;
+    __sync_synchronize();
+    xTaskNotifyGive(refillTask_);
+    for (int waited = 0; waited < 500 &&
+         !holdActive_; ++waited)
+        vTaskDelay(1);
+    // Let one full ring pass display the message before flash goes quiet.
+    vTaskDelay(pdMS_TO_TICKS(40));
+}
+
+void PsramDmaScanout::holdEnd() {
+    if (!holdRequested_) return;
+    holdRequested_ = 0;
+    __sync_synchronize();
+    if (!refillTask_ || stopPending_) return;
+    xTaskNotifyGive(refillTask_);
+    for (int waited = 0; waited < 500 &&
+         holdActive_; ++waited)
+        vTaskDelay(1);
 }
 
 void QL32_REFILL_HOT PsramDmaScanout::refillRow(std::uint32_t consumedSequence) {
@@ -1042,12 +1095,13 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(unexpectedInterruptMask_));
 #if defined(QL32_OLIMEX_DMA_FRAMEBUFFER_BENCHMARK) || \
     defined(QL32_OLIMEX_DMA_REFILL_PROFILE)
-    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u, refill-total-us=%u\n",
+    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, held-groups=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u, refill-batches=%u, refill-max-us=%u, refill-row-max-us=%u, active-slot-overwrites=%u, refill-max-rows=%u, backlog-max-rows=%u, obsolete-skipped=%u, refill-total-us=%u\n",
                   static_cast<unsigned>(frameCount_),
                   static_cast<unsigned>(haveCompletedSequence_ ? completedSequence_ + 1 : 0),
                   static_cast<unsigned>(eofEventCount_),
                   static_cast<unsigned>(refillCount_),
                   static_cast<unsigned>(lateRefillCount_),
+                  static_cast<unsigned>(heldGroupCount_),
                   static_cast<unsigned>(spuriousInterruptCount_),
                   static_cast<unsigned>(paletteApplyCount_),
                   static_cast<unsigned>(stressBytesWritten_),
@@ -1064,12 +1118,13 @@ void PsramDmaScanout::reportStatus() const {
                   static_cast<unsigned>(refillObsoleteRowsSkipped_),
                   static_cast<unsigned>(refillBatchTotalMicros_));
 #else
-    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u\n",
+    Serial.printf("PSRAM VGA scanout stats: frames=%u, rows=%u, EOF-events=%u, refills=%u, late-refills=%u, held-groups=%u, spurious-IRQ=%u, palette-applies=%u, PSRAM-stress-bytes=%u, checksum=%u, frame-clones=%u, clone-bytes=%u, pending-reuses=%u\n",
                   static_cast<unsigned>(frameCount_),
                   static_cast<unsigned>(haveCompletedSequence_ ? completedSequence_ + 1 : 0),
                   static_cast<unsigned>(eofEventCount_),
                   static_cast<unsigned>(refillCount_),
                   static_cast<unsigned>(lateRefillCount_),
+                  static_cast<unsigned>(heldGroupCount_),
                   static_cast<unsigned>(spuriousInterruptCount_),
                   static_cast<unsigned>(paletteApplyCount_),
                   static_cast<unsigned>(stressBytesWritten_),

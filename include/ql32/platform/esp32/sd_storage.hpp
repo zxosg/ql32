@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ql32/runtime/bulk_write_gate.hpp"
 #include "ql32/runtime/storage.hpp"
 
 #include <FS.h>
@@ -38,7 +39,11 @@ public:
     void format(const std::string& path) override;
     runtime::StorageSpace space(const std::string& path) override;
 
+    // Optional: told when a large write begins/ends (internal flash only).
+    void setBulkWriteGate(runtime::BulkWriteGate* gate) noexcept { bulkWriteGate_ = gate; }
+
 private:
+    runtime::BulkWriteGate* bulkWriteGate_ = nullptr;
     fs::FS& filesystem_;
     std::string drive_;
     SpaceProvider spaceProvider_;
