@@ -1,3 +1,4 @@
+#include "ql32/platform/esp32/application_input.hpp"
 #include <Arduino.h>
 #include <SD.h>
 #if defined(QL32_OLIMEX_USE_SPIFFS)
@@ -520,6 +521,11 @@ std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
 ql32::vm::TaskId replTask = 0;
 std::shared_ptr<ql32::ui::QueuedService> uiService =
     std::make_shared<ql32::ui::QueuedService>();
+std::shared_ptr<ql32::input::KeyRouter> applicationKeys = std::make_shared<ql32::input::KeyRouter>();
+ql32::input::SerialDecoder applicationSerialDecoder;
+ql32::platform::esp32::ApplicationProtocolGate applicationProtocol;
+std::uint64_t applicationInputOwner = 0;
+
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
 std::shared_ptr<ql32::runtime::MusicService> boardMusicService;
 #endif
@@ -928,7 +934,18 @@ void submitInputLine() {
     replPromptShown = false;
 }
 
+void refreshApplicationInput() {
+    const auto owner = scheduler && (!uiPresenter || !uiPresenter->active()) ? scheduler->keyInputSession() : 0;
+    const bool ownerChanged = applicationInputOwner != owner;
+    applicationInputOwner = owner;
+    const bool routeChanged = applicationKeys->focus(owner);
+    if (ownerChanged || routeChanged) { applicationSerialDecoder.reset(); applicationProtocol.reset(); }
+    applicationProtocol.flush(millis(), applicationSerialDecoder, *applicationKeys);
+    if (const auto event = applicationSerialDecoder.flush(millis())) applicationKeys->publish(*event);
+}
+
 void receiveSerialCharacter(char character) {
+    refreshApplicationInput();
     // Debugger frames use a raw ASCII line beginning with '@'. Recognize that
     // prefix before either the graphical terminal adapter or the keyboard
     // escape decoder can echo or transform it into REPL keystrokes.
@@ -939,6 +956,15 @@ void receiveSerialCharacter(char character) {
     }
     if (character == '\n' && serialSawCarriageReturn) {
         serialSawCarriageReturn = false;
+        return;
+    }
+    if (applicationInputOwner && !protocolInputLine) {
+        serialSawCarriageReturn = false;
+        applicationProtocol.feed(static_cast<unsigned char>(character), millis(), applicationSerialDecoder,
+            *applicationKeys, [](std::string_view prefix) {
+                protocolInputLine = true;
+                for (char byte : prefix) lineEditor.insertRawCharacter(byte, true);
+            });
         return;
     }
     if (uiPresenter && uiPresenter->graphicActive() && !protocolInputLine) {
@@ -1033,6 +1059,8 @@ void advanceScheduler() {
     if (uiPresenter && !uiPresenter->active() && !uiPresenter->beginNext() &&
         sessionWaitingForUi)
         Serial.println("suspended session has no queued UI request");
+
+    refreshApplicationInput();
 
     const auto focused = scheduler->focusedTask();
     const auto status = scheduler->taskStatus(focused);
@@ -1669,6 +1697,7 @@ void runDmaFramebufferBenchmark() {
 } // namespace
 
 void setup() {
+    uiService->setKeyInput(applicationKeys);
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_OLIMEX_DMA_DISPLAY)
     mainLoopTask = xTaskGetCurrentTaskHandle();
 #endif
@@ -2185,15 +2214,18 @@ void loop() {
     // The counters remain in RAM until the user runs DMADIAG after a test.
 #endif
     while (Serial.available() > 0) {
-        if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
+        if (!applicationInputOwner && !acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
         receiveSerialCharacter(static_cast<char>(Serial.read()));
     }
     if (uiPresenter) uiPresenter->flushSerialEscape(millis());
 
+    refreshApplicationInput();
     if (keyboardInput) {
         const auto event = keyboardInput->poll();
         const bool shortcut = event && handleKeyboardShortcut(*event);
-        if (event && !shortcut && uiPresenter &&
+        if (event && !shortcut && applicationInputOwner) {
+            applicationKeys->publish(*event);
+        } else if (event && !shortcut && uiPresenter &&
             uiPresenter->graphicActive()) {
             (void)uiPresenter->handleKey(*event);
         } else if (event && !shortcut && event->pressed && scheduler &&

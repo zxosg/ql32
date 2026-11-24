@@ -47,6 +47,7 @@ add_library(ql32_host_adapters
   src/platform/linux/directory_channels.cpp
   src/platform/linux/virtual_hardware.cpp
   src/platform/linux/directory_storage.cpp
+  src/platform/linux/console_keys.cpp
   src/platform/linux/console_ui.cpp
   src/platform/linux/system_clock.cpp
   src/platform/linux/memory.cpp

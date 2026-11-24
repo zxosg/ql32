@@ -127,7 +127,7 @@ constexpr std::string_view builtinCommands[] = {
 };
 
 constexpr std::string_view builtinFunctions[] = {
-    "DIRINFO", "DIRINFO$", "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
+    "INKEY", "INKEY$", "DIRINFO", "DIRINFO$", "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
     "MID$", "REPT$", "CODE", "ASC", "CHR$", "LOC", "UPPER$", "LOWER$",
     "STR$", "VAL", "EVAL", "EVAL$",
     "BAND", "BOR", "BXOR", "BNOT", "ROL", "ROR", "SRA", "SRL", "SLA", "SLL",
@@ -311,6 +311,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "MODE") return {1, instruction.expectsValue};
     if (instruction.name == "IPRINT") return {1, false};
     if (instruction.name == "BUSY") return {1, false};
+    if (instruction.name == "INKEY" || instruction.name == "INKEY$") return {0, true};
     if (instruction.name == "DIRINFO" || instruction.name == "DIRINFO$") return {2, true};
     if (instruction.name == "ERR") return {0, true};
     if (instruction.name == "ERR$") return {1, true};
@@ -1057,7 +1058,9 @@ private:
                 const std::size_t passedArguments = instruction.argCount() -
                     static_cast<std::size_t>(instruction.channelArgument) -
                     instruction.optionCount();
-                if (instruction.name == "FREE") {
+                if (instruction.name == "INKEY" || instruction.name == "INKEY$") {
+                    if (passedArguments > 1) error(instruction, "INKEY expects zero or one timeout");
+                } else if (instruction.name == "FREE") {
                     if (passedArguments > 1)
                         error(instruction, "FREE accepts zero or one selector (0, 1, or 2)");
                 } else if (instruction.name == "EOF") {
@@ -3436,6 +3439,8 @@ void Interpreter::closeExecutionChannels() noexcept {
         try { graphics_->flushTextOutputBatches(session_id_); }
         catch (...) { /* Cleanup must not replace the program's result or error. */ }
     }
+    if (channels_) channels_->cancelPendingOperations(session_id_);
+    if (ui_ && ui_->keyInput()) ui_->keyInput()->release(session_id_);
     if (persistentSessionResources_) return;
     if (!channels_) {
         executionChannels_.clear();

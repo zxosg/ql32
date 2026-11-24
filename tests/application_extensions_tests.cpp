@@ -1,4 +1,6 @@
 #include "ql32/interpreter.hpp"
+#include "ql32/input/session.hpp"
+#include "ql32/platform/esp32/application_input.hpp"
 #include <chrono>
 #include "ql32/platform/linux/directory_channels.hpp"
 #include "ql32/platform/linux/directory_storage.hpp"
@@ -93,6 +95,62 @@ PRINT Worker(3)
     for (const std::string source : {"TRAP REPeat x\nEND REPeat x\n", "TRAP TRAP a=1\n", "REPeat x WHILE 1\nEND REPeat x UNTIL 1\n"}) {
         bool rejected=false; try { run(source); } catch (...) { rejected=true; } require(rejected,"invalid syntax accepted");
     }
+}
+void keyboard() {
+    auto ui = std::make_shared<ui::QueuedService>();
+    auto router = std::make_shared<input::KeyRouter>(); ui->setKeyInput(router);
+    Interpreter interpreter({}, {}, ui); router->focus(interpreter.graphicsSessionId());
+    std::ostringstream out;
+    auto status = interpreter.executeSlice(R"(
+DEFine FuNction Once
+ calls=calls+1
+ RETurn 10
+END DEFine Once
+TRAP value=Once()+INKEY(-1)
+PRINT ERR
+PRINT calls
+PRINT value
+)",out,1000);
+    require(status==ExecutionStatus::WaitingChannel,"INKEY did not yield");
+    require(!interpreter.channelReadReady(),"empty keyboard reports ready");
+    router->focus(interpreter.graphicsSessionId()); // platform reattaches focus after execution startup
+    input::KeyEvent event; event.key=input::Key::Character; event.character='A'; router->publish(event);
+    require(interpreter.channelReadReady(),"key did not wake reader");
+    status=interpreter.resumeSlice(out,1000);
+    require(status==ExecutionStatus::Completed && out.str()=="0\n1\n75\n","INKEY expression was replayed or trap lost");
+    Interpreter poller({}, {}, ui); router->focus(poller.graphicsSessionId());
+    std::ostringstream polls;
+    poller.execute("PRINT INKEY(0)\nPRINT INKEY$(0)\nTRAP x=INKEY(0.5)\nPRINT ERR\n",polls);
+    require(polls.str()=="0\n\n5\n","keyboard poll/validation");
+    Interpreter cancelled({}, {}, ui); router->focus(cancelled.graphicsSessionId());
+    runtime::CancellationSource cancellation;
+    status=cancelled.executeResumable("TRAP x=INKEY(-1)\nPRINT 99\n",polls,cancellation.token());
+    require(status==ExecutionStatus::WaitingChannel,"cancel test not waiting");
+    cancellation.requestStop(); bool stopped=false;
+    try { cancelled.resume(polls,cancellation.token()); } catch (...) { stopped=true; }
+    require(stopped && polls.str().find("99")==std::string::npos,"TRAP swallowed cancellation");
+    input::SerialDecoder decoder;
+    require(!decoder.feed(27,0) && !decoder.flush(29),"Escape completed too early");
+    auto escape=decoder.flush(30); require(escape && escape->key==input::Key::Escape,"lone Escape lost");
+    decoder.feed(27,100); decoder.feed('[',101);
+    auto down=decoder.feed('B',102); require(down && down->key==input::Key::Down,"Down decode");
+    decoder.feed(0xc3,200); auto text=decoder.feed(0xa9,201);
+    require(text && text->character==0xe9,"UTF-8 decode");
+    router->focus(100);
+    for(unsigned i=0;i<20;++i) router->publish(event);
+    require(router->dropped()==4,"key queue unbounded");
+    require(!router->poll(101),"cross-session key delivery");
+    router->focus(101); require(!router->poll(101),"keys leaked across focus change");
+    platform::esp32::ApplicationProtocolGate gate;
+    bool protocol=false;
+    gate.feed('@',300,decoder,*router,[&](std::string_view){ protocol=true; });
+    require(!router->poll(101),"serial protocol prefix delivered too early");
+    gate.flush(330,decoder,*router);
+    require(router->poll(101)==64 && !protocol,"ordinary @ key swallowed by monitor framing");
+    for(char byte : std::string("@QL32DBG/1\t"))
+        gate.feed(static_cast<unsigned char>(byte),400,decoder,*router,[&](std::string_view prefix){ protocol=prefix=="@QL32DBG/1\t"; });
+    require(protocol && !router->poll(101),"debugger protocol leaked into application input");
+    require(run("TRAP x=INKEY(-1)\nPRINT ERR\n")=="13\n","missing keyboard failed to trap");
 }
 class GeneratedCursor final : public runtime::DirectoryCursor {
 public:
@@ -227,7 +285,7 @@ END DEFine HandleError
 }
 }
 int main() {
-    try { loopsAndErrors(); directories(); memoryBoundaries(); uiTrapIsolation(); }
+    try { loopsAndErrors(); keyboard(); directories(); memoryBoundaries(); uiTrapIsolation(); }
     catch(const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     return 0;
 }

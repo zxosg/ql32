@@ -796,6 +796,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         state.pendingUiRequest.reset();
         state.pendingChannelRead.reset();
         if (channels_) channels_->cancelPendingOperations(session_id_);
+        if (state.pendingKey && ui_ && ui_->keyInput()) ui_->keyInput()->endWait(session_id_);
+        state.pendingKey.reset();
         state.pauseUntil.reset();
         state.pendingInputVariable.clear();
         state.pendingUiBuilderHandle = 0;
@@ -1077,6 +1079,19 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
         return std::pair<RuntimeArray*, std::size_t>{&array, offset};
     };
 
+    if (state.pendingKey) {
+        auto input = ui_ ? ui_->keyInput() : nullptr;
+        if (!input) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "keyboard input unavailable");
+        auto& pending = *state.pendingKey;
+        if (!pending.ready) pending.ready = input->poll(session_id_);
+        if (!pending.ready && (!pending.deadline || std::chrono::steady_clock::now() < *pending.deadline))
+            return ExecutionStatus::WaitingChannel;
+        const auto key = pending.ready.value_or(0);
+        if (pending.text) pushValue(input::keyText(key));
+        else pushValue(static_cast<double>(key), true);
+        input->endWait(session_id_);
+        state.pendingKey.reset();
+    }
     if (state.pendingUiRequest) {
         if (!ui_) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "UI service unavailable");
         const auto result = ui_->poll(*state.pendingUiRequest);
@@ -1307,7 +1322,29 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         instruction);
                     break;
                 }
-                if (instruction.name == "TASK") {
+                if (instruction.name == "INKEY" || instruction.name == "INKEY$") {
+                    const auto* timeout = arguments.empty() ? nullptr : std::get_if<double>(&arguments[0]);
+                    if (!arguments.empty() && !timeout)
+                        throw runtime::Error(runtime::ErrorCode::TypeMismatch, "INKEY timeout must be numeric");
+                    const double delay = timeout ? *timeout : 0;
+                    if (!std::isfinite(delay) || std::trunc(delay) != delay || delay < -1 || delay > 2147483647)
+                        throw runtime::Error(runtime::ErrorCode::OutOfRange, "invalid INKEY timeout");
+                    if (resolveChannel(0) != 0)
+                        throw runtime::Error(runtime::ErrorCode::UnsupportedOperation, "bound console lacks key input");
+                    auto input = ui_ ? ui_->keyInput() : nullptr;
+                    if (!input) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "keyboard input unavailable");
+                    state.pendingKey.emplace();
+                    state.pendingKey->text = instruction.name == "INKEY$";
+                    if (delay >= 0) state.pendingKey->deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(static_cast<std::int32_t>(delay));
+                    state.pendingKey->ready = input->poll(session_id_);
+                    if (!state.pendingKey->ready && delay != 0) return ExecutionStatus::WaitingChannel;
+                    const auto key = state.pendingKey->ready.value_or(0);
+                    if (state.pendingKey->text) pushValue(input::keyText(key));
+                    else pushValue(static_cast<double>(key), true);
+                    input->endWait(session_id_);
+                    state.pendingKey.reset();
+                } else if (instruction.name == "TASK") {
                     if (!storage_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "storage service unavailable");
@@ -4280,7 +4317,18 @@ void Interpreter::debugResetDiagnostics() noexcept {
     execution_->trace.clear();
 }
 
+bool Interpreter::waitingForKey() const noexcept { return execution_ && execution_->pendingKey.has_value(); }
+
 bool Interpreter::channelReadReady() const {
+    if (execution_ && execution_->pendingKey) {
+        auto& pending = *execution_->pendingKey;
+        try {
+            auto input = ui_ ? ui_->keyInput() : nullptr;
+            if (!input) return true;
+            if (!pending.ready) pending.ready = input->poll(session_id_);
+            return pending.ready || (pending.deadline && std::chrono::steady_clock::now() >= *pending.deadline);
+        } catch (...) { return true; }
+    }
     if (!execution_ || !execution_->pendingChannelRead || !channels_) return false;
     try {
         return channels_->lineAvailable(session_id_, *execution_->pendingChannelRead);

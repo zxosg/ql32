@@ -85,6 +85,7 @@ public:
                  std::function<bool()> dispatchUiRequest = {});
     std::vector<runtime::ChannelInfo> channelInventory() const;
     bool channelReadReady() const;
+    bool waitingForKey() const noexcept;
     std::size_t openChannelCount() const;
     void setErrorContext(runtime::ErrorCode code, std::string detail = {});
     void abortExecution() noexcept;
