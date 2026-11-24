@@ -49,6 +49,8 @@ public:
                        std::int32_t width, std::int32_t height) override;
     void fillRectangle(SessionId session, ChannelId channel, Point topLeft,
                        std::int32_t width, std::int32_t height) override;
+    void copyRegion(SessionId session, ChannelId channel, Rect source,
+                    Point destination, CopyOp op, bool fillVacated) override;
     void circle(SessionId session, Point center, std::int32_t radius) override;
     void circle(SessionId session, ChannelId channel, Point center,
                 std::int32_t radius) override;

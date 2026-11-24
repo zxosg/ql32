@@ -266,6 +266,7 @@ All entries in this subsection require a graphics display service `[DISPLAY]`.
 | `GFONT` | `GFONT [#window,] handle, style` | Selects the graphics `TEXT` font and style. Handle `0` with style `0` restores the platform default. `[DISPLAY]` | `GFONT KFontDefault, 0` |
 | `UNLOADFONT` | `UNLOADFONT handle` | Releases a loaded font. `[DISPLAY]` | `UNLOADFONT font%` |
 | `BLIT` | `BLIT [#window,] image%, x, y[, transparentIndex]` | Draws a QIMG indexed bitmap at pixel coordinates; the optional palette index is transparent. `[DISPLAY]` | `BLIT logo%, 20, 12, 0` |
+| `GCOPY` | `GCOPY [#window,] sx, sy, w, h, dx, dy[, op[, fill]]` | QL/32-specific. Copies a pixel rectangle within a window, clipped, overlap-safe. `op` on palette indices: 0 copy, 1 OR, 2 XOR, 3 AND-NOT (`d & ~s`). Nonzero `fill` paints the vacated source area with PAPER. Mirrored like other drawing commands. `[DISPLAY]` | `GCOPY 0,1,128,63,0,0,0,1` |
 | `UNLOADIMAGE` | `UNLOADIMAGE handle` | Releases a session-owned bitmap and its open file handle. `[DISPLAY]` | `UNLOADIMAGE logo%` |
 
 ### User interface

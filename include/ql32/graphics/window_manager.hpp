@@ -152,6 +152,11 @@ public:
     void setOverMode(OverMode mode) noexcept { overMode_ = mode; }
     void clear();
     void scrollUp(std::uint32_t pixelRows);
+    // Copies source (x,y,width,height) to (destination) inside this canvas,
+    // clipping both rectangles to the canvas. With fillVacated, source pixels
+    // not covered by the destination rectangle are set to paper. Returns the
+    // changed bounds (empty when nothing changed).
+    Rect copyRect(Rect source, Point destination, CopyOp op, bool fillVacated);
     void setPixel(std::int32_t x, std::int32_t y, ColorIndex color);
     void plotPixel(std::int32_t x, std::int32_t y);
     ColorIndex pixel(std::uint32_t x, std::uint32_t y) const;
@@ -174,6 +179,9 @@ private:
     void copyPixelsTo(std::uint32_t y, std::uint32_t x, std::uint32_t width,
                       ColorIndex* destination) const noexcept;
     void plotSpan(std::size_t firstPixel, std::size_t pixelCount);
+    void fillSpan(std::size_t firstPixel, std::size_t pixelCount, ColorIndex color);
+    void copyRow(std::size_t from, std::size_t to, std::size_t count, CopyOp op,
+                 bool sameRow, std::vector<ColorIndex>& scratch);
     Rect renderText(Point topLeft, const std::string& value, bool fillBackground,
                     bool useOverMode, const BitmapFont* font, FontStyle style);
     std::uint8_t* pixelData() noexcept;

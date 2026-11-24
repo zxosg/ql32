@@ -384,6 +384,15 @@ void WindowedService::fillRectangle(SessionId session, ChannelId channel,
     presentRegion(screenRegion(session, channel, topLeft.x, topLeft.y, width, height));
 }
 
+void WindowedService::copyRegion(SessionId session, ChannelId channel, Rect source,
+                                 Point destination, CopyOp op, bool fillVacated) {
+    const auto changed = canvas(session, channel).copyRect(
+        source, destination, op, fillVacated);
+    if (changed.width != 0 && changed.height != 0)
+        presentRegion(screenRegion(session, channel, changed.x, changed.y,
+                                   changed.width, changed.height));
+}
+
 void WindowedService::circle(SessionId session, Point center, std::int32_t radius) {
     circle(session, 1, center, radius);
 }

@@ -61,6 +61,9 @@ struct RgbColor {
 
 enum class UpdateMode : std::uint8_t { Auto, On, Off };
 enum class OverMode : std::uint8_t { Set = 0, Clear = 1, Invert = 2 };
+// Pixel combine for region copies, applied bitwise to palette indices:
+// Copy: d = s; Or: d |= s; Xor: d ^= s; AndNot: d &= ~s.
+enum class CopyOp : std::uint8_t { Copy = 0, Or = 1, Xor = 2, AndNot = 3 };
 
 // Platform-neutral drawing contract. An implementation owns pixel windows and
 // drawing state per session/channel. A task viewport translates and clips its
@@ -156,6 +159,11 @@ public:
             line(session, channel,
                 {static_cast<std::int32_t>(left), static_cast<std::int32_t>(y)},
                 {static_cast<std::int32_t>(right), static_cast<std::int32_t>(y)});
+    }
+    // Copies a rectangle within one window. Overlap is safe: the result is as
+    // if all source pixels were read before any destination pixel changed.
+    virtual void copyRegion(SessionId, ChannelId, Rect, Point, CopyOp, bool) {
+        throw std::runtime_error("region copy unsupported");
     }
     virtual void circle(SessionId session, Point center,
                         std::int32_t radius) = 0;
