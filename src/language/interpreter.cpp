@@ -61,7 +61,7 @@ enum class Kind {
     End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
     Print, At, Data, Read, Restore, Stop, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
     Select, On, Remainder, Remark,
-    For, To, Step, Next, Repeat, Exit, Define, Procedure, Function, Local, Return,
+    For, To, Step, Next, Repeat, While, Until, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
     Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     And, Or, Xor, Not,
@@ -100,6 +100,7 @@ constexpr Keyword keywords[] = {
     {"ELSE", "ELSE", Kind::Else, "ELSE"}, {"END", "END", Kind::EndKeyword, "END"},
     {"FOR", "FOR", Kind::For, "FOR"}, {"TO", "TO", Kind::To, "TO"},
     {"STEP", "STEP", Kind::Step, "STEP"}, {"NEXT", "NEXT", Kind::Next, "NEXT"},
+    {"WHILE", "WHILE", Kind::While, "WHILE"}, {"UNTIL", "UNTIL", Kind::Until, "UNTIL"},
     {"REPEAT", "REP", Kind::Repeat, "REPeat"}, {"EXIT", "EXIT", Kind::Exit, "EXIT"},
     {"DEFINE", "DEF", Kind::Define, "DEFine"},
     {"PROCEDURE", "PROC", Kind::Procedure, "PROCedure"},
@@ -876,7 +877,9 @@ private:
         bool isFor;
         std::vector<std::size_t> nextInstructions;
         std::vector<std::size_t> exitInstructions;
+        std::size_t selectDepth = 0;
     };
+    std::size_t selectDepth_ = 0;
     std::vector<LoopContext> loops_;
     std::size_t nextLoopId_ = 1;
     bool inDefinition_ = false;
@@ -1361,12 +1364,15 @@ private:
             Instruction instruction{Op::LoopNext, 0.0, nameToken.text, keyword.line, keyword.column};
             instruction.target = loop.body;
             instruction.setLoopId(loop.id);
+            instruction.rank = loop.selectDepth;
             code_.push_back(std::move(instruction));
+            loop.nextInstructions.push_back(code_.size() - 1);
             return;
         }
         Instruction instruction{Op::ForNext, 0.0, nameToken.text, keyword.line, keyword.column};
         instruction.target = loop.body;
         instruction.setLoopId(loop.id);
+        instruction.rank = loop.selectDepth;
         instruction.explicitNext = explicitNext;
         code_.push_back(std::move(instruction));
         loop.nextInstructions.push_back(code_.size() - 1);
@@ -1375,6 +1381,7 @@ private:
         LoopContext& loop = findLoop(nameToken);
         Instruction instruction{Op::ExitLoop, 0.0, nameToken.text, keyword.line, keyword.column};
         instruction.setLoopId(loop.id);
+        instruction.rank = loop.selectDepth;
         code_.push_back(std::move(instruction));
         loop.exitInstructions.push_back(code_.size() - 1);
     }
@@ -1477,6 +1484,7 @@ private:
         Instruction begin{Op::SelectBegin, 0.0, {}, keyword.line, keyword.column};
         code_.push_back(std::move(begin));
         controlScopes_.push_back(nextControlScope_++);
+        ++selectDepth_;
         if (!match(Kind::Newline)) error(peek(), "expected end of line after SELECT ON");
         while (match(Kind::Newline)) {}
 
@@ -1536,6 +1544,7 @@ private:
             code_[remainderFalseJump].target = selectEnd;
         for (const std::size_t jump : endJumps) code_[jump].target = selectEnd;
         controlScopes_.pop_back();
+        --selectDepth_;
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
     }
@@ -1668,6 +1677,7 @@ private:
         const std::size_t body = code_.size();
         controlScopes_.push_back(code_[initIndex].loopId());
         loops_.push_back({code_[initIndex].loopId(), variable.text, body, true, {}, {}});
+        loops_.back().selectDepth = selectDepth_;
 
         if (match(Kind::Colon)) {
             // Inline bodies end at NEXT. Nested inline loops are deliberately excluded.
@@ -1722,10 +1732,20 @@ private:
         if (!check(Kind::Identifier)) error(peek(), "expected REPeat loop name");
         const Token name = advance();
         const std::size_t loopId = nextLoopId_++;
+        const std::size_t test = code_.size();
+        const bool preTest = match(Kind::While);
+        std::size_t branch = 0;
+        if (preTest) {
+            expression();
+            branch = code_.size();
+            emit(Op::JumpIfFalse, keyword);
+        }
         const std::size_t body = code_.size();
         controlScopes_.push_back(loopId);
-        loops_.push_back({loopId, name.text, body, false, {}, {}});
+        loops_.push_back({loopId, name.text, preTest ? test : body, false, {}, {}});
+        loops_.back().selectDepth = selectDepth_;
 
+        if (preTest && check(Kind::Colon)) error(peek(), "conditional REPeat requires a block");
         if (match(Kind::Colon)) {
             while (!check(Kind::End) && !check(Kind::Newline)) {
                 if (match(Kind::Colon)) continue;
@@ -1754,10 +1774,24 @@ private:
         if (!check(Kind::Identifier)) error(peek(), "expected name after END REPeat");
         const Token endName = advance();
         if (endName.text != name.text) error(endName, "END REPeat name does not match REPeat");
-        Instruction jump{Op::Jump, 0.0, name.text, keyword.line, keyword.column};
-        jump.target = body;
+        const std::size_t tailTest = code_.size();
+        const bool postTest = match(Kind::Until);
+        const Token testToken = postTest ? previous() : keyword;
+        if (preTest && postTest) error(testToken, "REPeat cannot combine WHILE and UNTIL");
+        if (postTest) {
+            expression();
+            code_[tailTest].statementStart = true;
+            code_[tailTest].basicLine = currentBasicLine_;
+        }
+        Instruction jump{postTest ? Op::JumpIfFalse : Op::Jump, 0.0, name.text,
+                         testToken.line, testToken.column};
+        jump.basicLine = currentBasicLine_;
+        jump.target = preTest ? test : body;
         code_.push_back(std::move(jump));
         const std::size_t exit = code_.size();
+        if (preTest) code_[branch].target = exit;
+        for (const std::size_t index : loops_.back().nextInstructions)
+            code_[index].target = postTest ? tailTest : (preTest ? test : body);
         for (const std::size_t index : loops_.back().exitInstructions)
             code_[index].target = exit;
         loops_.pop_back();

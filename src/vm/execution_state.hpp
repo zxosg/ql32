@@ -18,8 +18,9 @@
 namespace ql32::detail {
 
 struct ForRange { double start = 0; double end = 0; double step = 1; bool single = false; };
-struct ForState { std::vector<ForRange> ranges; std::size_t item = 0; };
+struct ForState { std::size_t callDepth = 0; std::vector<ForRange> ranges; std::size_t item = 0; };
 struct RuntimeFrame {
+    std::size_t selectBase = 0;
     std::size_t returnAddress = 0;
     std::size_t callInstruction = 0;
     int callSourceLine = 0;
@@ -73,7 +74,7 @@ struct MenuBuilder {
 struct VMExecutionState {
     InstructionSequence code;
     std::vector<StackEntry> stack;
-    std::unordered_map<std::size_t, ForState> forStates;
+    std::map<std::pair<std::size_t, std::size_t>, ForState> forStates;
     std::vector<RuntimeFrame> callFrames;
     std::unordered_map<std::string, RuntimeArray> arrays;
     std::vector<SelectState> selectStates;
