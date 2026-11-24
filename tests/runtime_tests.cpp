@@ -784,6 +784,40 @@ void testForRangesEvaluateOnceInSourceOrder() {
             "FOR range expressions were not evaluated once in source order");
 }
 
+void testConditionalRepeat() {
+    auto run = [](const std::string& source) {
+        ql32::Interpreter interpreter;
+        std::ostringstream output;
+        interpreter.execute(source, output);
+        return output.str();
+    };
+    require(run("a=0\n"
+                "REPeat pre WHILE a < 3\n"
+                " a=a+1\n"
+                " SELect ON a\n"
+                " =REMAINDER\n"
+                " NEXT pre\n"
+                " END SELect\n"
+                "END REPeat pre\n"
+                "PRINT a\n"
+                "REPeat post\n"
+                " a=a-1\n"
+                " NEXT post\n"
+                "END REPeat post UNTIL a=0\n"
+                "PRINT a\n"
+                "REPeat zero WHILE 0\n"
+                " PRINT \"never\"\n"
+                "END REPeat zero\n"
+                "PRINT \"ok\"\n") == "3\n0\nok\n",
+            "conditional REPeat WHILE/UNTIL/NEXT behavior");
+    for (const std::string source : {"REPeat x WHILE 1\nEND REPeat x UNTIL 1\n",
+                                      "REPeat x WHILE 1: a=1\n"}) {
+        bool rejected = false;
+        try { run(source); } catch (const std::exception&) { rejected = true; }
+        require(rejected, "invalid conditional REPeat was accepted");
+    }
+}
+
 void testSuperBasicStringSlices() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -1482,6 +1516,7 @@ int main() {
         testForwardCallsAndKnownSemanticErrors();
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
+        testConditionalRepeat();
         testSuperBasicStringSlices();
         testValAndDynamicEvaluation();
         testStringExtractionFunctions();

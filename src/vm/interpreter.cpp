@@ -1433,6 +1433,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     finish.expectsValue = true;
                     code.push_back(std::move(finish));
                     RuntimeFrame frame;
+            frame.selectBase = selectStates.size();
                     frame.returnAddress = pc;
                     frame.callInstruction = pc == 0 ? 0 : pc - 1;
                     frame.callSourceLine = instruction.line;
@@ -3117,6 +3118,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
             RuntimeFrame frame;
+            frame.selectBase = selectStates.size();
             frame.returnAddress = pc;
             frame.callInstruction = pc == 0 ? 0 : pc - 1;
             frame.callSourceLine = instruction.line;
@@ -3355,11 +3357,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             const double initial = state.ranges[state.item].start;
             assignLoopValue(instruction, initial);
-            forStates[instruction.loopId()] = std::move(state);
+            state.callDepth = callFrames.size();
+            forStates[{instruction.loopId(), callFrames.size()}] = std::move(state);
             break;
         }
         case Op::ForNext: {
-            auto found = forStates.find(instruction.loopId());
+            selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
+            auto found = forStates.find({instruction.loopId(), callFrames.size()});
             if (found == forStates.end()) runtimeError(instruction, "inactive FOR loop");
             ForState& state = found->second;
             const Value* loopValue = nullptr;
@@ -3385,7 +3389,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (!range.single && rangeContains(range, next)) {
                 assignLoopValue(instruction, next);
                 for (auto loop = forStates.begin(); loop != forStates.end();) {
-                    if (loop->first > instruction.loopId()) loop = forStates.erase(loop);
+                    if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId()) loop = forStates.erase(loop);
                     else ++loop;
                 }
                 pc = instruction.target;
@@ -3406,22 +3410,24 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             assignLoopValue(instruction, state.ranges[state.item].start);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId()) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
             break;
         }
         case Op::LoopNext:
+            selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId()) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
             break;
         case Op::ExitLoop:
+            selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first >= instruction.loopId()) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first >= instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
@@ -3727,6 +3733,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (item.address >= code.size())
                 runtimeError(instruction, "DATA expression address is invalid");
             RuntimeFrame frame;
+            frame.selectBase = selectStates.size();
             frame.returnAddress = pc;
             frame.callInstruction = pc - 1;
             frame.callSourceLine = instruction.line;
