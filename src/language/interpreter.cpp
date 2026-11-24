@@ -127,7 +127,7 @@ constexpr std::string_view builtinCommands[] = {
 };
 
 constexpr std::string_view builtinFunctions[] = {
-    "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
+    "DIRINFO", "DIRINFO$", "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
     "MID$", "REPT$", "CODE", "ASC", "CHR$", "LOC", "UPPER$", "LOWER$",
     "STR$", "VAL", "EVAL", "EVAL$",
     "BAND", "BOR", "BXOR", "BNOT", "ROL", "ROR", "SRA", "SRL", "SLA", "SLL",
@@ -311,6 +311,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "MODE") return {1, instruction.expectsValue};
     if (instruction.name == "IPRINT") return {1, false};
     if (instruction.name == "BUSY") return {1, false};
+    if (instruction.name == "DIRINFO" || instruction.name == "DIRINFO$") return {2, true};
     if (instruction.name == "ERR") return {0, true};
     if (instruction.name == "ERR$") return {1, true};
     if (instruction.name == "ERRX$") return {0, true};
@@ -2931,6 +2932,7 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
       task_id_(taskId) {
     if (session_id_ == 0)
         session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
+    if (channels_ && storage_) channels_->directoryStorage(storage_);
     randomState_ = (static_cast<std::uint64_t>(session_id_) *
                     0x9e3779b97f4a7c15ULL) ^
                    static_cast<std::uint64_t>(
@@ -5171,8 +5173,12 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
                     status = resume(output);
                     continue;
                 }
-                if (status == ExecutionStatus::WaitingChannel)
-                    throw std::runtime_error("interactive command is waiting for channel input");
+                if (status == ExecutionStatus::WaitingChannel) {
+                    while (!channelReadReady()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    status = resume(output);
+                    continue;
+                }
+                if (status == ExecutionStatus::Yielded) { status = resume(output); continue; }
                 if (status == ExecutionStatus::RunPending)
                     throw std::runtime_error("deferred RUN requires the session scheduler");
                 throw std::runtime_error("interactive command did not complete");

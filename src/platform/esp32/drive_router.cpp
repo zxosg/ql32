@@ -53,6 +53,10 @@ void DriveRouterStorage::writeTextStream(
     forPath(path).writeTextStream(path, source);
 }
 
+std::unique_ptr<runtime::DirectoryCursor> DriveRouterStorage::openDirectory(const std::string& path) {
+    return forPath(path).openDirectory(path);
+}
+
 std::vector<runtime::FileEntry> DriveRouterStorage::list(const std::string& path) {
     return forPath(path).list(path);
 }

@@ -1,4 +1,5 @@
 #include "ql32/platform/esp32/sd_storage.hpp"
+#include "ql32/platform/posix/directory_cursor.hpp"
 
 #include <algorithm>
 #include <array>
@@ -277,6 +278,20 @@ void SdStorage::writeTextStream(
         file.close();
         throw;
     }
+}
+
+std::unique_ptr<runtime::DirectoryCursor> SdStorage::openDirectory(const std::string& path) {
+    ensureAvailable();
+    const auto resolved = resolve(path, true);
+    if (mountPoint_.empty()) throw runtime::Error(runtime::ErrorCode::UnsupportedOperation,
+        "bounded directory iteration requires a configured VFS mount point");
+    if (drive_ == "FFS") {
+        auto prefix = resolved;
+        while (!prefix.empty() && prefix.front() == '/') prefix.erase(prefix.begin());
+        if (!prefix.empty() && prefix.back() != '/') prefix += '/';
+        return std::make_unique<posix::DirectoryCursor>(mountPoint_, std::string{}, false, prefix, true);
+    }
+    return std::make_unique<posix::DirectoryCursor>(mountPoint_ + resolved);
 }
 
 std::vector<runtime::FileEntry> SdStorage::list(const std::string& path) {

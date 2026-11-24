@@ -577,9 +577,9 @@ void testDefaultAndRoutedOutputChannels() {
             interpreter.executeInteractive("10 PRINT \"stored\"\n", console);
             interpreter.executeInteractive("LIST\n", console);
             interpreter.executeInteractive("DIR\n", console);
-            interpreter.execute("CHANNEL #1 TO #0\nPRINT #1,\"console target\"\n",
+            interpreter.executeInteractive("CHANNEL #1 TO #0\nPRINT #1,\"console target\"\n",
                                 console);
-            interpreter.execute("WRITE 1, \"write console target\"\n", console);
+            interpreter.executeInteractive("WRITE 1, \"write console target\"\n", console);
         }
         std::ifstream result(root / "routed.txt", std::ios::binary);
         const std::string contents{std::istreambuf_iterator<char>(result), {}};

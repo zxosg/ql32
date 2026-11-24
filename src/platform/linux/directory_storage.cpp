@@ -1,4 +1,5 @@
 #include "ql32/platform/linux/directory_storage.hpp"
+#include "ql32/platform/posix/directory_cursor.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -215,6 +216,10 @@ void DirectoryStorage::writeTextStream(
     if (!file)
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: streamed write failed");
+}
+
+std::unique_ptr<runtime::DirectoryCursor> DirectoryStorage::openDirectory(const std::string& path) {
+    return std::make_unique<posix::DirectoryCursor>(resolve(path, false).string(), root_.string(), true);
 }
 
 std::vector<runtime::FileEntry> DirectoryStorage::list(const std::string& path) {
