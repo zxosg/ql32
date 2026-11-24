@@ -72,6 +72,7 @@ void externalInputsAndLifetimeTest() {
     auto channels = std::make_shared<runtime::ChannelRegistry>(nullptr,
         runtime::ChannelRegistry::SerialWriter{}, hardware);
     Interpreter interpreter({}, channels);
+    // This test deliberately spans persistent REPL submissions.
     std::ostringstream output;
     interpreter.execute(
         "g=OPEN(5,7,0)\na=OPEN(6,8,12)\nPRINT IN(g);IN(a)\n"

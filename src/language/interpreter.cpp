@@ -838,7 +838,8 @@ public:
                 definition.locals});
         }
         code_.arrays = arrays_;
-        code_.constants = constants_;
+        // Transfer the table: copying all include constants doubles preparation RAM.
+        code_.constants = std::move(constants_);
         return std::move(code_);
     }
 
@@ -849,7 +850,8 @@ public:
         resolveCalls(false);
         code_.functions = enclosingFunctions_;
         code_.arrays = arrays_;
-        code_.constants = constants_;
+        // Transfer the table: copying all include constants doubles preparation RAM.
+        code_.constants = std::move(constants_);
         return std::move(code_);
     }
 
