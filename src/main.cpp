@@ -98,10 +98,16 @@ int main(int argc, char** argv) {
             );
             auto status = interpreter.executeResumable(source, std::cout);
             while (status == ql32::ExecutionStatus::Suspended ||
+                   status == ql32::ExecutionStatus::Yielded ||
+                   status == ql32::ExecutionStatus::WaitingChannel ||
                    status == ql32::ExecutionStatus::WaitingTime) {
                 if (status == ql32::ExecutionStatus::WaitingTime) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(
                         interpreter.requestedPauseDurationMs()));
+                } else if (status == ql32::ExecutionStatus::WaitingChannel) {
+                    while (!interpreter.channelReadReady()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                } else if (status == ql32::ExecutionStatus::Yielded) {
+                    std::this_thread::yield();
                 } else if (!console.dispatchNext()) {
                     throw std::runtime_error("suspended UI request was not queued");
                 }

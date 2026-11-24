@@ -1,4 +1,5 @@
 #include "ql32/platform/esp32/idf_sd.hpp"
+#include "ql32/platform/posix/directory_cursor.hpp"
 
 #include <dirent.h>
 #include <cstring>
@@ -327,6 +328,11 @@ void IdfSdStorage::writeTextStream(
         if (descriptor >= 0) ::close(descriptor);
         throw;
     }
+}
+
+std::unique_ptr<runtime::DirectoryCursor> IdfSdStorage::openDirectory(const std::string& path) {
+    ensureAvailable();
+    return std::make_unique<posix::DirectoryCursor>(resolve(path, true));
 }
 
 std::vector<runtime::FileEntry> IdfSdStorage::list(const std::string& path) {

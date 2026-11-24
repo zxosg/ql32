@@ -588,8 +588,8 @@ const char* opcodeName(Op op) {
 void Interpreter::execute(const std::string& source, std::ostream& output,
                           runtime::CancellationToken stop) {
     auto status = executeResumable(source, output, stop);
-    while (status == ExecutionStatus::WaitingTime) {
-        std::this_thread::sleep_for(
+    while (status == ExecutionStatus::WaitingTime || status == ExecutionStatus::Yielded) {
+        if (status == ExecutionStatus::WaitingTime) std::this_thread::sleep_for(
             std::chrono::milliseconds(requestedPauseDurationMs_));
         status = resume(output, stop);
     }
@@ -613,6 +613,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
     bool preparingProgram = true;
     try {
         execution_ = std::make_unique<detail::VMExecutionState>();
+        execution_->interactiveSubmission = interactiveCommandExecution_;
         if (mayContainInclude(source)) {
             const std::string expanded = detail::expandIncludes(source, storage_.get());
             execution_->code = detail::compileSource(expanded);
@@ -702,12 +703,13 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
     if (!execution_) throw std::runtime_error("interpreter has no suspended execution");
     if (instructionBudget == 0)
         throw std::invalid_argument("instruction budget must be positive");
+    const bool keepChannels = execution_->interactiveSubmission;
     try {
         const auto status = runExecution(output, stop, instructionBudget);
         if (status == ExecutionStatus::Completed) {
             if (ui_) ui_->clearBusy(session_id_);
             execution_.reset();
-            closeExecutionChannels();
+            if (!keepChannels) closeExecutionChannels();
         } else if (status == ExecutionStatus::ProgramStopped) {
             stoppedExecution_ = std::move(execution_);
         }
@@ -715,32 +717,32 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(error.code(), error.detail());
         throw;
     } catch (const runtime::ServiceError& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(error.languageCode(), error.detail());
         throw;
     } catch (const std::bad_alloc&) {
         if (memory_) (void)memory_->releaseEmergencyReserve();
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(runtime::ErrorCode::OutOfMemory, {});
         throw std::runtime_error("out of memory resuming BASIC program");
     } catch (const std::exception& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(runtime::errorCodeFor(error), runtime::extendedErrorText(error));
         throw;
     } catch (...) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(runtime::ErrorCode::GeneralFailure, "unknown BASIC execution failure");
         throw;
     }
@@ -793,6 +795,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (state.pendingUiRequest && ui_) ui_->cancel(*state.pendingUiRequest);
         state.pendingUiRequest.reset();
         state.pendingChannelRead.reset();
+        if (channels_) channels_->cancelPendingOperations(session_id_);
         state.pauseUntil.reset();
         state.pendingInputVariable.clear();
         state.pendingUiBuilderHandle = 0;
@@ -3047,7 +3050,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         if (!std::isfinite(*deviceNumber) ||
                             std::trunc(*deviceNumber) != *deviceNumber ||
                             *deviceNumber < static_cast<double>(runtime::ChannelDevice::File) ||
-                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Touch))
+                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Directory))
                             runtimeError(instruction, "invalid OPEN device kind");
                         device = static_cast<runtime::ChannelDevice>(
                             static_cast<std::uint64_t>(*deviceNumber));
@@ -3063,10 +3066,30 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         parameters.emplace_back(textArgument(1));
                     }
                     try {
-                        const auto id = channels_->openTypedDevice(session_id_, device, parameters);
-                        if (!interactiveCommandExecution_)
-                            executionChannels_.push_back(id);
-                        pushValue(static_cast<double>(id));
+                        std::optional<runtime::ChannelId> opened;
+                        if (device == runtime::ChannelDevice::Directory) {
+                            if (arguments.size() != 4) throw runtime::Error(runtime::ErrorCode::InvalidArgument, "directory OPEN requires path, wildcard and options");
+                            const auto* mask = std::get_if<double>(&arguments[3]);
+                            if (!mask) throw runtime::Error(runtime::ErrorCode::TypeMismatch, "directory options must be numeric");
+                            if (!std::isfinite(*mask) || std::trunc(*mask) != *mask || *mask < 0 || *mask > 2147483647)
+                                throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid directory options");
+                            opened = channels_->pollDirectoryOpen(session_id_, textArgument(1), textArgument(2), static_cast<std::uint32_t>(*mask));
+                            if (!opened) {
+                                // Retry only CALL, with the already evaluated operands.
+                                stack.reserve(stack.size() + arguments.size());
+                                for (auto& argument : arguments) stack.push_back(std::move(argument));
+                                --pc; return ExecutionStatus::Yielded;
+                            }
+                        } else opened = channels_->openTypedDevice(session_id_, device, parameters);
+                        const auto id = *opened;
+                        try {
+                            if (!state.interactiveSubmission) executionChannels_.push_back(id);
+                            pushValue(static_cast<double>(id));
+                        } catch (...) {
+                            executionChannels_.erase(std::remove(executionChannels_.begin(), executionChannels_.end(), id), executionChannels_.end());
+                            try { channels_->close(session_id_, id); } catch (...) {}
+                            throw;
+                        }
                     } catch (const runtime::ServiceError& error) {
                         if (error.code() != runtime::ServiceErrorCode::ResourceBusy) throw;
                         pushValue(-static_cast<double>(runtime::ErrorCode::ResourceBusy));
@@ -3120,6 +3143,16 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     } catch (const runtime::ServiceError& error) {
                         pushValue(-static_cast<double>(error.languageCode()));
                     }
+                } else if (instruction.name == "DIRINFO" || instruction.name == "DIRINFO$") {
+                    if (!channels_) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "channel service unavailable");
+                    const auto channel = resolveChannel(channelArgument(0));
+                    const auto* selectorValue = std::get_if<double>(&arguments[1]);
+                    if (!selectorValue) throw runtime::Error(runtime::ErrorCode::TypeMismatch, "DIRINFO selector must be numeric");
+                    if (!std::isfinite(*selectorValue) || std::trunc(*selectorValue) != *selectorValue || *selectorValue < 1 || *selectorValue > 5)
+                        throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid DIRINFO selector");
+                    const auto selector = static_cast<unsigned>(*selectorValue);
+                    if (instruction.name == "DIRINFO$") pushValue(channels_->directoryInfoText(session_id_, channel, static_cast<unsigned>(selector)));
+                    else pushValue(channels_->directoryInfo(session_id_, channel, static_cast<unsigned>(selector), singlePrecision));
                 } else if (instruction.name == "FPOS" || instruction.name == "FLEN") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -3138,6 +3171,15 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     const auto inputChannel = resolveChannel(channel);
                     if (inputChannel <= 1)
                         runtimeError(instruction, "selected channel does not support line input");
+                    if (channels_->isDirectoryChannel(session_id_, inputChannel)) {
+                        if (!channels_->directoryReady(session_id_, inputChannel)) {
+                            stack.emplace_back(static_cast<double>(inputChannel)); --pc;
+                            return ExecutionStatus::Yielded;
+                        }
+                        pushValue(std::string(channels_->directoryName(session_id_, inputChannel)));
+                        channels_->commitDirectoryRead(session_id_, inputChannel);
+                        break;
+                    }
                     const auto line = channels_->readLine(session_id_, inputChannel);
                     if (!line && channels_->isHardwareChannel(session_id_, inputChannel)) {
                         state.pendingChannelRead = inputChannel;
@@ -3158,6 +3200,11 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         const auto inputChannel = resolveChannel(channel);
                         if (inputChannel <= 1)
                             runtimeError(instruction, "selected channel does not support EOF");
+                        if (channels_->isDirectoryChannel(session_id_, inputChannel) &&
+                            !channels_->directoryReady(session_id_, inputChannel)) {
+                            stack.emplace_back(static_cast<double>(inputChannel)); --pc;
+                            return ExecutionStatus::Yielded;
+                        }
                         pushValue(channels_->atEnd(session_id_, inputChannel) ? 1.0 : 0.0);
                     }
                 } else if (instruction.name == "WRITE") {

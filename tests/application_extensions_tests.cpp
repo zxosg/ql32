@@ -1,5 +1,8 @@
 #include "ql32/interpreter.hpp"
 #include <chrono>
+#include "ql32/platform/linux/directory_channels.hpp"
+#include "ql32/platform/linux/directory_storage.hpp"
+#include "ql32/platform/posix/directory_cursor.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -91,6 +94,58 @@ PRINT Worker(3)
         bool rejected=false; try { run(source); } catch (...) { rejected=true; } require(rejected,"invalid syntax accepted");
     }
 }
+class GeneratedCursor final : public runtime::DirectoryCursor {
+public:
+    explicit GeneratedCursor(bool fail = false) : fail_(fail) {}
+    runtime::DirectoryCursorResult next(runtime::DirectoryEntry& entry) override {
+        if (fail_) { rejectAllocations = true; throw std::bad_alloc(); }
+        if (position_ == 1000) return runtime::DirectoryCursorResult::End;
+        entry.name = "track" + std::to_string(position_);
+        entry.metadata = {}; entry.metadata.size = position_++; entry.metadata.known = 1;
+        return runtime::DirectoryCursorResult::Entry;
+    }
+private:
+    unsigned position_ = 0;
+    bool fail_;
+};
+class FailingCursorStorage final : public runtime::StorageService {
+public:
+    std::unique_ptr<runtime::DirectoryCursor> openDirectory(const std::string&) override { return std::make_unique<GeneratedCursor>(true); }
+    std::string readText(const std::string&) override { return {}; }
+    void writeText(const std::string&,const std::string&) override {}
+    std::vector<runtime::FileEntry> list(const std::string&) override { throw std::logic_error("unbounded list used"); }
+    bool exists(const std::string&) override { return false; }
+    std::uintmax_t size(const std::string&) override { return 0; }
+    void rename(const std::string&,const std::string&) override {}
+    void remove(const std::string&) override {}
+};
+void memoryBoundaries() {
+    runtime::DirectoryLimits limits; limits.batch = 1;
+    runtime::DirectoryStream stream(std::make_unique<GeneratedCursor>(),"*",0,limits);
+    while(!stream.prepare()) {}
+    unsigned count=0;
+    for (;;) {
+        while(!stream.ready()) {}
+        if (stream.atEnd()) break;
+        require(!stream.nextName().empty() && stream.snapshotBytes()==0,"stream allocated snapshot storage");
+        stream.commitRead(); ++count;
+    }
+    require(count==1000 && stream.info(2,false)==999,"large streaming enumeration");
+    auto storage=std::make_shared<FailingCursorStorage>();
+    auto channels=std::make_shared<runtime::ChannelRegistry>(nullptr);
+    Interpreter interpreter(storage,channels); std::ostringstream out;
+    auto status=interpreter.executeSlice("TRAP d=OPEN(14,\"/\",\"*\",2)\nPRINT ERR\n",out,1);
+    bool injected=false;
+    try {
+        for(unsigned turn=0;turn<100 && status!=ExecutionStatus::Completed;++turn) {
+            if(rejectAllocations) { injected=true; rejectAllocations=false; }
+            status=interpreter.resumeSlice(out,1);
+        }
+    } catch (...) { rejectAllocations=false; throw; }
+    rejectAllocations=false;
+    require(injected && status==ExecutionStatus::Completed && out.str()=="8\n", "out-of-memory recovery allocated or failed to resume");
+    require(channels->listOpen(interpreter.graphicsSessionId()).empty(),"allocation failure published a directory handle");
+}
 void uiTrapIsolation() {
     auto broker=std::make_shared<ui::QueuedService>();
     Interpreter interpreter({}, {}, broker); std::ostringstream out;
@@ -105,9 +160,74 @@ void uiTrapIsolation() {
     require(info && info->text=="working","trap recovery cancelled unrelated session UI state");
     interpreter.abortExecution();
 }
+struct TemporaryDirectory {
+    std::filesystem::path path = std::filesystem::temp_directory_path()/("ql32-application-extension-tests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    TemporaryDirectory() { std::filesystem::remove_all(path); std::filesystem::create_directory(path); }
+    ~TemporaryDirectory() { std::filesystem::remove_all(path); }
+};
+void directories() {
+    TemporaryDirectory temporary;
+    std::ofstream(temporary.path/"b.mod") << "bb";
+    std::ofstream(temporary.path/"A.mod") << "a";
+    std::ofstream(temporary.path/"other.txt") << "x";
+    std::filesystem::create_directory(temporary.path/"folder");
+    auto storage=std::make_shared<platform::linux_host::DirectoryStorage>(temporary.path);
+    auto files=std::make_shared<platform::linux_host::DirectoryChannels>(temporary.path);
+    auto channels=std::make_shared<runtime::ChannelRegistry>(files);
+    Interpreter interpreter(storage,channels); std::ostringstream out;
+    auto status=interpreter.executeResumable(R"(
+d=OPEN(14,"/","*.mod",3)
+REPeat entries WHILE EOF(d)=0
+ name$=READ$(d)
+ PRINT name$
+END REPeat entries
+PRINT EOF(d)
+PRINT DIRINFO(d,2)
+CLOSE d
+TRAP d=OPEN(14,"/","*",6)
+PRINT ERR
+)",out);
+    unsigned yields=0;
+    while(status==ExecutionStatus::Yielded) { ++yields; status=interpreter.resume(out); }
+    require(status==ExecutionStatus::Completed && out.str()=="folder\nA.mod\nb.mod\n1\n2\n2\n","directory sorting/filter/metadata/options");
+    // A filtered stream scans multiple batches, yielding without returning EOF prematurely.
+    for(unsigned i=0;i<60;++i) std::ofstream(temporary.path/("skip"+std::to_string(i)+".txt"));
+    Interpreter stream(storage,channels); std::ostringstream streamOut;
+    stream.execute("d=OPEN(14,\"/\",\"no-match\",0)\nPRINT EOF(d)\nTRAP n$=READ$(d)\nPRINT ERR\nCLOSE d\n",streamOut);
+    require(streamOut.str()=="1\n12\n","streaming EOF or empty directory");
+    auto limited=std::make_shared<runtime::ChannelRegistry>(files);
+    runtime::DirectoryLimits limits; limits.maxEntries=2; limits.batch=1;
+    limited->directoryLimits(limits);
+    Interpreter budget(storage,limited); std::ostringstream budgetOut;
+    budget.execute("TRAP d=OPEN(14,\"/\",\"*\",2)\nPRINT ERR\nPRINT GETCHANNEL(0)\nTRAP d=OPEN(14,\"/\",\"*\",0)\nPRINT ERR\nCLOSE d\n",budgetOut);
+    require(budgetOut.str()=="18\n2\n0\n","quota failure leaked channel or prevented streaming fallback");
+    Interpreter repl(storage,channels); std::ostringstream replOut;
+    status=repl.executeInteractiveResumable("d=OPEN(14,\"/\",\"*\",2)\n",replOut);
+    while(status==ExecutionStatus::Yielded) status=repl.resume(replOut);
+    require(status==ExecutionStatus::Completed && repl.openChannelCount()==1,"yielded REPL OPEN lost its channel");
+    repl.executeInteractive("CLOSE d\n",replOut);
+    Interpreter print(storage,channels); std::ostringstream printOut;
+    print.execute(R"(
+f=OPEN(1,"trap-print.txt","WRITE")
+PRINT #f,"before";HandleError();"after"
+CLOSE f
+DEFine FuNction HandleError
+ TRAP x=1/0
+ RETurn 2
+END DEFine HandleError
+)",printOut);
+    require(storage->readText("trap-print.txt")=="before2after\n" && printOut.str().empty(),"inner trap damaged caller PRINT state");
+    require(runtime::directoryWildcardMatch("café.MOD","caf?.mod"),"wildcard UTF-8 scalar matching");
+    require(!runtime::directoryWildcardMatch("ab","?"),"wildcard question matching");
+    Interpreter arguments({},channels); std::ostringstream argumentOut;
+    arguments.execute("n=OPEN(3)\nTRAP OUT n,\"bad\"\nPRINT ERR\nTRAP value=IN(n,\"bad\")\nPRINT ERR\nb=ALLOC(2)\nTRAP value=IOREAD(n,\"bad\",b)\nPRINT ERR\nCLOSE n\nDEALLOC b\n",argumentOut);
+    require(argumentOut.str()=="4\n4\n4\n","device argument type errors escaped TRAP");
+    // SPIFFS virtual-flat VFS behavior additionally needs board acceptance.
+    require(channels->listOpen(interpreter.graphicsSessionId()).empty(),"directory channel not closed");
+}
 }
 int main() {
-    try { loopsAndErrors(); uiTrapIsolation(); }
+    try { loopsAndErrors(); directories(); memoryBoundaries(); uiTrapIsolation(); }
     catch(const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     return 0;
 }

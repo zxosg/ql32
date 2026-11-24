@@ -16,6 +16,7 @@ public:
     // a provider returning {total, used} bytes.
     using SpaceProvider = bool (*)(std::uint64_t& total, std::uint64_t& used);
 
+    // mountPoint is the VFS path (e.g. "/sd") used by bounded directory iteration.
     explicit SdStorage(fs::FS& filesystem, std::string drive = "SDC",
                        SpaceProvider spaceProvider = nullptr, std::string mountPoint = {})
         : filesystem_(filesystem), drive_(std::move(drive)),
@@ -29,6 +30,7 @@ public:
     void writeText(const std::string& path, const std::string& contents) override;
     void writeTextStream(const std::string& path,
                          const runtime::TextStreamSource& source) override;
+    std::unique_ptr<runtime::DirectoryCursor> openDirectory(const std::string& path) override;
     std::vector<runtime::FileEntry> list(const std::string& path) override;
     bool exists(const std::string& path) override;
     std::uintmax_t size(const std::string& path) override;

@@ -29,6 +29,7 @@ add_library(ql32_portable
   src/graphics/font.cpp
   src/graphics/window_manager.cpp
   src/graphics/windowed_service.cpp
+  src/runtime/directory.cpp
   src/runtime/channel_registry.cpp
   src/runtime/buffer.cpp
   src/runtime/file_ops.cpp
