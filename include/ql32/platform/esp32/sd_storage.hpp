@@ -17,9 +17,9 @@ public:
     using SpaceProvider = bool (*)(std::uint64_t& total, std::uint64_t& used);
 
     explicit SdStorage(fs::FS& filesystem, std::string drive = "SDC",
-                       SpaceProvider spaceProvider = nullptr)
+                       SpaceProvider spaceProvider = nullptr, std::string mountPoint = {})
         : filesystem_(filesystem), drive_(std::move(drive)),
-          spaceProvider_(spaceProvider) {}
+          spaceProvider_(spaceProvider), mountPoint_(std::move(mountPoint)) {}
 
     std::string readText(const std::string& path) override;
     std::unique_ptr<runtime::StorageReadHandle> openRead(
@@ -47,6 +47,7 @@ private:
     fs::FS& filesystem_;
     std::string drive_;
     SpaceProvider spaceProvider_;
+    std::string mountPoint_;
     void ensureAvailable();
     std::string resolve(const std::string& path, bool allowRoot) const;
 };

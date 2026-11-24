@@ -3,6 +3,8 @@
 #include "../language/bytecode.hpp"
 #include "ql32/ui/service.hpp"
 
+#include <array>
+#include <map>
 #include <cstddef>
 #include <cstdint>
 #include <chrono>

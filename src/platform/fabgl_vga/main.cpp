@@ -480,7 +480,7 @@ bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
     used = SD.usedBytes();
     return total != 0;
 }
-ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace);
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace, "/sd");
 ql32::platform::esp32::SdChannels sdChannels(SD);
 #if defined(QL32_OLIMEX_USE_SPIFFS)
 bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
@@ -488,7 +488,7 @@ bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
     used = SPIFFS.usedBytes();
     return total != 0;
 }
-ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS", spiffsSpace);
+ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS", spiffsSpace, "/spiffs");
 ql32::platform::esp32::SdChannels flashChannels(SPIFFS, "FFS");
 #if defined(QL32_OLIMEX_DMA_DISPLAY)
 // Internal flash writes stall both cores' cache, so FFS writes hold the last
@@ -1013,6 +1013,7 @@ void advanceScheduler() {
     if (!scheduler) return;
     if (!scheduler->executionPaused()) (void)scheduler->tick();
     if (uiPresenter) uiPresenter->refresh();
+
     refreshDebugOverlay();
 
     scheduler->visitTaskErrors([](ql32::vm::TaskId id, const char* error, void*) {

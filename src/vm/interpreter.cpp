@@ -793,7 +793,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (const auto* number = std::get_if<double>(&value))
             stack.emplace_back(preserveInteger ? *number :
                                quantizeNumeric(*number, activeInstruction));
-        else stack.emplace_back(std::get<std::string>(value));
+        else stack.emplace_back(std::move(std::get<std::string>(value)));
     };
     auto storeInputValue = [&](const std::string& name, const std::string& text,
                                const Instruction& at) {

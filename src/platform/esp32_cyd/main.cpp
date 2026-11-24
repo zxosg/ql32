@@ -80,7 +80,7 @@ bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
     used = SPIFFS.usedBytes();
     return total != 0;
 }
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace);
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace, "/spiffs");
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
 // Optional removable card, addressed as SDC:/. Unqualified paths stay on FFS:.
 bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
@@ -88,7 +88,7 @@ bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
     used = SD.usedBytes();
     return total != 0;
 }
-ql32::platform::esp32::SdStorage sdcStorage(SD, "SDC", sdCardSpace);
+ql32::platform::esp32::SdStorage sdcStorage(SD, "SDC", sdCardSpace, "/sd");
 ql32::platform::esp32::SdChannels sdcChannels(SD, "SDC");
 ql32::platform::esp32::DriveRouterStorage driveStorage(sdStorage, sdcStorage, true);
 ql32::platform::esp32::DriveRouterChannels driveChannels(sdChannels, sdcChannels, true);
@@ -100,7 +100,7 @@ bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
     used = SD.usedBytes();
     return total != 0;
 }
-ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace);
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace, "/sd");
 ql32::platform::esp32::SdChannels sdChannels(SD, "SDC");
 ql32::runtime::StorageService& monitorStorage = sdStorage;
 ql32::runtime::ChannelService& monitorChannels = sdChannels;
@@ -494,6 +494,7 @@ void advanceScheduler() {
     (void)scheduler->tick();
     refreshDebugOverlay();
     if (uiPresenter) uiPresenter->refresh();
+
 
     scheduler->visitTaskErrors([](ql32::vm::TaskId id, const char* error, void* context) {
         Serial.printf("BASIC session %llu VM error: %s\n",
