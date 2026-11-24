@@ -320,6 +320,21 @@ image before drawing, batch the presentation, obey `GUPDATE`, and restore the
 caller's current ink. Image readers and handles belong to the interpreter
 session and are released when it is destroyed. QIMG v1 is not supported.
 
+`GCOPY [#channel,] sx,sy,w,h,dx,dy[,op[,fill]]` copies the pixel rectangle
+`(sx,sy,w,h)` to `(dx,dy)` within one window (QL/32-specific; SuperBASIC,
+SMSQ/E and QPC have no rectangle-copy command). Coordinates are window-relative
+pixels with the origin at the top left. Source and destination are clipped
+independently to the window; zero `w` or `h` is a no-op and a negative size is
+an error. `op` combines source and destination palette indices bitwise:
+0 = copy (default), 1 = OR (`d | s`), 2 = XOR (`d ^ s`), 3 = invert-and
+(`d & ~s`); other values are an error. The result is always as if every source
+pixel were read before any destination pixel changed, so overlapping copies are
+safe for all ops (op 0 is a `memmove`-style fast path; rows are walked in the
+safe direction). A nonzero `fill` paints the vacated part of the source
+(outside the destination) with PAPER. INK, OVER and the cursor are unaffected.
+Only the changed rectangle is presented. Smooth list scroll up by one pixel row:
+`GCOPY 0,1,w,h-1,0,0,0,1`.
+
 Numbers print using locale-independent shortest round-trip decimal notation;
 zero, including negative zero, prints as `0`. Strings print as their contents.
 There is no implicit padding or number-to-string conversion outside PRINT.
@@ -991,7 +1006,7 @@ adds a session-local text mirror: every text write to the source's resolved
 endpoint (PRINT, WRITE, LIST, DIR, CAT, HELP, diagnostics and prompts) is also
 written to the destination, which may be `#0`, `#1`, a window, serial, file or
 null channel. From the moment the mirror is set up, graphics drawing and state
-commands to a screen or window source (PLOT, LINE, RECT, CIRCLE, TEXT, BLIT, CLS,
+commands to a screen or window source (PLOT, LINE, RECT, CIRCLE, TEXT, BLIT, GCOPY, CLS,
 AT, INK, PAPER, OVER, FONT, GFONT) are also executed as-is on each window or
 screen destination, which keeps its own size, position and palette; nothing is
 scaled or copied, out-of-window pixels are clipped, and a destination error
@@ -1342,7 +1357,7 @@ Tasks: `TASK`, `TASKRESULT`, `GETTASK`. System: `SYSINFO$(selector)`,
 | --- | --- |
 | `INK c`, `PAPER c`, `OVER m`, `FLASH ...`, `RGB(r,g,b)` | Colour state; `RGB` returns a packed colour. |
 | `PLOT x,y`, `LINE x1,y1,x2,y2`, `RECT x,y,w,h`, `CIRCLE x,y,r`, `TEXT x,y,text$` | Drawing into the selected window. |
-| `CLS`, `ROTATE deg`, `TILE`, `GUPDATE`, `BLIT ...` | Section 9 / API M3. `GUPDATE` batches present. |
+| `CLS`, `ROTATE deg`, `TILE`, `GUPDATE`, `BLIT ...`, `GCOPY ...` | Section 9 / API M3. `GUPDATE` batches present. |
 | `WINDOW x,y,w,h`, `CLOSEWINDOW` | Section 9 / API M3-M4. |
 | `PALETTE i,rgb`, `PALROT`, `PALSHIFT`, `PALFADE`, `GPALETTE$(i)`, `GPALETTESIZE()` | Indexed palette; 16 entries on retro/PSRAM-DMA profiles. |
 | `FONT`, `GFONT`, `LOADFONT(path$)`, `GETFONT(...)`, `UNLOADFONT` | Fonts. |

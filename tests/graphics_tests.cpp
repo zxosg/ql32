@@ -117,6 +117,12 @@ public:
                        std::int32_t width, std::int32_t height) override {
         events.push_back({"RECT", session, topLeft, {}, width, height, {}, channel, true});
     }
+    void copyRegion(SessionId session, ChannelId channel, Rect source,
+                    Point destination, CopyOp op, bool fill) override {
+        events.push_back({"GCOPY", session, {source.x, source.y}, destination,
+                          static_cast<int>(source.width), static_cast<int>(source.height),
+                          std::to_string(static_cast<int>(op)), channel, fill});
+    }
     void fillCircle(SessionId session, ChannelId channel, Point center,
                     std::int32_t radius) override {
         events.push_back({"CIRCLE", session, center, {}, radius, 0, {}, channel, true});
@@ -2148,6 +2154,130 @@ void testTextCellsFillCharacterGapsWithPaper() {
     require(sawInk, "text glyph did not use the active ink color");
 }
 
+// Reference model: snapshot the clipped source, then combine into the destination.
+std::vector<int> modelCopy(std::vector<int> pixels, int width, int height, int sx, int sy,
+                           int w, int h, int dx, int dy, int op, bool fill, int paper) {
+    const auto before = pixels;
+    for (int j = 0; j < h; ++j)
+        for (int i = 0; i < w; ++i) {
+            const int fx = sx + i, fy = sy + j, tx = dx + i, ty = dy + j;
+            if (fx < 0 || fy < 0 || fx >= width || fy >= height ||
+                tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
+            const int source = before[fy * width + fx];
+            int& target = pixels[ty * width + tx];
+            target = op == 0 ? source : op == 1 ? (target | source) :
+                     op == 2 ? (target ^ source) : (target & ~source);
+        }
+    if (fill && (dx != sx || dy != sy))
+        for (int j = 0; j < h; ++j)
+            for (int i = 0; i < w; ++i) {
+                const int fx = sx + i, fy = sy + j;
+                if (fx < 0 || fy < 0 || fx >= width || fy >= height) continue;
+                const bool covered = fx >= dx && fx < dx + w && fy >= dy && fy < dy + h;
+                if (!covered) pixels[fy * width + fx] = paper;
+            }
+    return pixels;
+}
+
+void testCanvasCopyRectMatchesModelForAllDepthsAndOps() {
+    std::uint32_t seed = 12345;
+    const auto next = [&](int limit) {
+        seed = seed * 1664525u + 1013904223u;
+        return static_cast<int>((seed >> 8) % static_cast<std::uint32_t>(limit));
+    };
+    const PixelDepth depths[] = {PixelDepth::One, PixelDepth::Four, PixelDepth::Eight};
+    for (const auto depth : depths) {
+        const int colors = depth == PixelDepth::One ? 2 : depth == PixelDepth::Four ? 16 : 256;
+        for (int round = 0; round < 600; ++round) {
+            const int width = 1 + next(23), height = 1 + next(9);
+            IndexedCanvas canvas(static_cast<std::uint32_t>(width),
+                                 static_cast<std::uint32_t>(height), depth);
+            const int paper = next(colors);
+            canvas.setPaper(static_cast<ColorIndex>(paper));
+            std::vector<int> model(static_cast<std::size_t>(width) * height);
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x) {
+                    model[y * width + x] = next(colors);
+                    canvas.setPixel(x, y, static_cast<ColorIndex>(model[y * width + x]));
+                }
+            const int sx = next(width + 8) - 4, sy = next(height + 6) - 3;
+            const int w = next(width + 4), h = next(height + 3);
+            const int dx = round % 3 == 0 ? sx + next(5) - 2 : next(width + 8) - 4;
+            const int dy = round % 4 == 0 ? sy : next(height + 6) - 3;
+            const int op = next(4);
+            const bool fill = next(2) == 1;
+            const auto expected = modelCopy(model, width, height, sx, sy, w, h, dx, dy,
+                                            op, fill, paper);
+            const auto changed = canvas.copyRect(
+                {sx, sy, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h)},
+                {dx, dy}, static_cast<CopyOp>(op), fill);
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x) {
+                    require(canvas.pixel(x, y) == expected[y * width + x],
+                            "copyRect differs from the snapshot reference model");
+                    if (expected[y * width + x] != model[y * width + x])
+                        require(x >= changed.x && y >= changed.y &&
+                                x < changed.x + static_cast<int>(changed.width) &&
+                                y < changed.y + static_cast<int>(changed.height),
+                                "copyRect dirty bounds miss a changed pixel");
+                }
+        }
+    }
+}
+
+void testGcopyScrollsTextListSmoothly() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(16, 12, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute("PAPER 0\nCLS\nINK 5\nRECT 0,0,16,3,1\nINK 9\nRECT 0,3,16,3,1\n", output);
+    const auto id = graphics->windowManager().compositionOrder().front().id;
+    const auto& canvas = graphics->windowManager().canvas(id);
+    // Scroll the list up one pixel row at a time, vacated bottom row painted with paper.
+    for (int step = 1; step <= 3; ++step)
+        interpreter.execute("GCOPY 0,1,16,11,0,0,0,1\n", output);
+    for (std::uint32_t x = 0; x < 16; ++x) {
+        require(canvas.pixel(x, 0) == 9 && canvas.pixel(x, 2) == 9,
+                "GCOPY scroll did not move the list up");
+        require(canvas.pixel(x, 3) == 0 && canvas.pixel(x, 11) == 0,
+                "GCOPY scroll did not fill the vacated rows with paper");
+    }
+    // Scroll back down by 2 rows with OR, which leaves other pixels untouched.
+    interpreter.execute("GCOPY 0,0,16,10,0,2,1\n", output);
+    require(canvas.pixel(0, 2) == 9 && canvas.pixel(0, 4) == 9 && canvas.pixel(0, 5) == 0,
+            "GCOPY overlapping OR did not read source rows before they changed");
+    const auto before = presenter->presentCount;
+    interpreter.execute("GCOPY 0,1,16,11,0,0\n", output);
+    require(presenter->presentCount == before + 1, "GCOPY must present exactly once");
+
+    bool rejected = false;
+    try { interpreter.execute("GCOPY 0,0,4,4,1,1,4\n", output); }
+    catch (const std::exception&) { rejected = true; }
+    require(rejected, "GCOPY accepted an invalid operation");
+    rejected = false;
+    try { interpreter.execute("GCOPY 0,0,-1,4,1,1\n", output); }
+    catch (const std::exception&) { rejected = true; }
+    require(rejected, "GCOPY accepted a negative size");
+}
+
+void testGcopyForwardedToMirrorDestinations() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(nullptr);
+    ql32::Interpreter interpreter({}, channels, {}, graphics);
+    std::ostringstream output;
+    interpreter.executeInteractive("w=OPEN(4)\nMIRROR #1 TO #w\n", output);
+    interpreter.executeInteractive("GCOPY 0,8,30,40,0,0,2,1\n", output);
+    int count1 = 0, count2 = 0;
+    for (const auto& event : graphics->events) {
+        if (event.name != "GCOPY") continue;
+        require(event.text == "2" && event.filled && event.a == 30 && event.b == 40 &&
+                    event.first.y == 8,
+                "GCOPY arguments were not forwarded as-is");
+        (event.channel == 1 ? count1 : count2)++;
+    }
+    require(count1 == 1 && count2 == 1, "GCOPY was not forwarded to the mirror destination");
+}
+
 void testMirrorForwardsGraphicsAsIsToDestination() {
     auto graphics = std::make_shared<RecordingGraphics>();
     auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(nullptr);
@@ -2608,6 +2738,9 @@ int main() {
     testProgrammableGlobalPalette();
     testProgramControlledPaletteTransforms();
     testIndexedBitmapLoadBlitAndRelease();
+    testCanvasCopyRectMatchesModelForAllDepthsAndOps();
+    testGcopyScrollsTextListSmoothly();
+    testGcopyForwardedToMirrorDestinations();
     testSuperBasicLineCursorForms();
     testGraphicsUpdateSkipCommandDispatch();
     testUiInteractionResetsGraphicsUpdateStateAndKeepsIt();

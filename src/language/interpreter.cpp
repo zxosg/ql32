@@ -116,7 +116,7 @@ constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "IPRINT", "BUSY", "DTEXT", "DEDIT", "DINT", "DFLOAT",
     "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "MENABLE", "GETNET", "DISNET",
     "INK", "PAPER", "OVER", "PALETTE", "PALROT", "PALSHIFT", "PALFADE",
-    "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
+    "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT", "GCOPY",
     "FONT", "GFONT", "UNLOADFONT",
     "CLS", "ROTATE", "WINDOW",
     "CLOSEWINDOW", "GUPDATE", "MODE", "TILE", "KILL", "TASKVIEW", "BLIT", "UNLOADIMAGE",
@@ -374,6 +374,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "PLOT") return {2, false};
     if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
     if (instruction.name == "CIRCLE") return {3, false};
+    if (instruction.name == "GCOPY") return {6, false};
     if (instruction.name == "TEXT") return {3, false};
     if (instruction.name == "FONT" || instruction.name == "GFONT") return {2, false};
     if (instruction.name == "UNLOADFONT") return {1, false};
@@ -1115,6 +1116,10 @@ private:
                 } else if (instruction.name == "RECT") {
                     if (passedArguments < 4 || passedArguments > 5)
                         error(instruction, "RECT expects x, y, width, height, and optional fill flag");
+                } else if (instruction.name == "GCOPY") {
+                    if (passedArguments < 6 || passedArguments > 8)
+                        error(instruction,
+                            "GCOPY expects sx, sy, width, height, dx, dy, and optional op and fill flag");
                 } else if (instruction.name == "CIRCLE") {
                     if (passedArguments < 3 || passedArguments > 4)
                         error(instruction, "CIRCLE expects x, y, radius, and optional fill flag");
@@ -2341,6 +2346,7 @@ private:
                 name.text == "PLOT" ||
                 name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
+                name.text == "GCOPY" ||
                 name.text == "BLIT" ||
                 name.text == "FONT" || name.text == "GFONT" ||
                 name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW" ||

@@ -588,6 +588,162 @@ void IndexedCanvas::scrollUp(std::uint32_t pixelRows) {
             writePixel(static_cast<std::size_t>(y) * width_ + x, paper_);
 }
 
+void IndexedCanvas::fillSpan(std::size_t firstPixel, std::size_t pixelCount,
+                             ColorIndex color) {
+    if (pixelCount == 0) return;
+    auto* pixels = pixelData();
+    if (depth_ == PixelDepth::Eight) {
+        std::memset(pixels + firstPixel, color, pixelCount);
+        return;
+    }
+    const std::size_t perByte = depth_ == PixelDepth::Four ? 2 : 8;
+    auto index = firstPixel;
+    auto remaining = pixelCount;
+    while (remaining != 0 && (index % perByte) != 0) {
+        writePixel(index++, color);
+        --remaining;
+    }
+    const auto bytes = remaining / perByte;
+    if (bytes != 0) {
+        const auto packed = depth_ == PixelDepth::Four
+            ? static_cast<std::uint8_t>((color << 4u) | color)
+            : static_cast<std::uint8_t>(color ? 0xFFu : 0x00u);
+        std::memset(pixels + index / perByte, packed, bytes);
+        index += bytes * perByte;
+        remaining -= bytes * perByte;
+    }
+    while (remaining-- != 0) writePixel(index++, color);
+}
+
+namespace {
+inline ColorIndex combine(CopyOp op, ColorIndex destination, ColorIndex source) noexcept {
+    switch (op) {
+    case CopyOp::Copy: return source;
+    case CopyOp::Or: return static_cast<ColorIndex>(destination | source);
+    case CopyOp::Xor: return static_cast<ColorIndex>(destination ^ source);
+    case CopyOp::AndNot: return static_cast<ColorIndex>(destination & ~source);
+    }
+    return source;
+}
+} // namespace
+
+// Copies one row segment of `count` pixels between pixel indices. `sameRow`
+// means both segments lie in one row and may overlap.
+void IndexedCanvas::copyRow(std::size_t from, std::size_t to, std::size_t count,
+                            CopyOp op, bool sameRow, std::vector<ColorIndex>& scratch) {
+    auto* pixels = pixelData();
+    if (depth_ == PixelDepth::Eight && op == CopyOp::Copy) {
+        std::memmove(pixels + to, pixels + from, count);
+        return;
+    }
+    const std::size_t perByte = depth_ == PixelDepth::Eight ? 1 :
+        depth_ == PixelDepth::Four ? 2 : 8;
+    const bool aligned = (from % perByte) == (to % perByte);
+    const bool disjoint = !sameRow || from + count <= to || to + count <= from;
+    if (aligned && disjoint) {
+        auto source = from;
+        auto destination = to;
+        auto remaining = count;
+        while (remaining != 0 && (destination % perByte) != 0) {
+            writePixel(destination, combine(op, readPixel(destination), readPixel(source)));
+            ++source; ++destination; --remaining;
+        }
+        const auto bytes = remaining / perByte;
+        if (bytes != 0) {
+            auto* d = pixels + destination / perByte;
+            const auto* s = pixels + source / perByte;
+            if (op == CopyOp::Copy) std::memcpy(d, s, bytes);
+            else if (op == CopyOp::Or) for (std::size_t i = 0; i < bytes; ++i) d[i] |= s[i];
+            else if (op == CopyOp::Xor) for (std::size_t i = 0; i < bytes; ++i) d[i] ^= s[i];
+            else for (std::size_t i = 0; i < bytes; ++i)
+                d[i] = static_cast<std::uint8_t>(d[i] & ~s[i]);
+            source += bytes * perByte;
+            destination += bytes * perByte;
+            remaining -= bytes * perByte;
+        }
+        while (remaining != 0) {
+            writePixel(destination, combine(op, readPixel(destination), readPixel(source)));
+            ++source; ++destination; --remaining;
+        }
+        return;
+    }
+    // Unaligned nibbles/bits or overlapping row: snapshot the source row first.
+    scratch.resize(count);
+    const auto y = static_cast<std::uint32_t>(from / width_);
+    copyPixelsTo(y, static_cast<std::uint32_t>(from % width_), static_cast<std::uint32_t>(count),
+                 scratch.data());
+    for (std::size_t i = 0; i < count; ++i)
+        writePixel(to + i, combine(op, readPixel(to + i), scratch[i]));
+}
+
+Rect IndexedCanvas::copyRect(Rect source, Point destination, CopyOp op,
+                             bool fillVacated) {
+    if (source.width == 0 || source.height == 0 || width_ == 0 || height_ == 0) return {};
+    const std::int64_t sx = source.x, sy = source.y;
+    const std::int64_t dx = destination.x, dy = destination.y;
+    // Offsets inside the rectangle for which both source and destination exist.
+    const auto first = [](std::int64_t a, std::int64_t b) {
+        return std::max<std::int64_t>({0, -a, -b});
+    };
+    const auto last = [](std::int64_t a, std::int64_t b, std::int64_t extent,
+                         std::int64_t size) {
+        return std::min<std::int64_t>({extent, size - a, size - b});
+    };
+    const auto i0 = first(sx, dx), i1 = last(sx, dx, source.width, width_);
+    const auto j0 = first(sy, dy), j1 = last(sy, dy, source.height, height_);
+    Rect changed{};
+    const auto unite = [&](std::int64_t x, std::int64_t y, std::int64_t w, std::int64_t h) {
+        if (w <= 0 || h <= 0) return;
+        if (changed.width == 0) {
+            changed = {static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+                       static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h)};
+            return;
+        }
+        const auto left = std::min<std::int64_t>(changed.x, x);
+        const auto top = std::min<std::int64_t>(changed.y, y);
+        const auto right = std::max<std::int64_t>(changed.x + changed.width, x + w);
+        const auto bottom = std::max<std::int64_t>(changed.y + changed.height, y + h);
+        changed = {static_cast<std::int32_t>(left), static_cast<std::int32_t>(top),
+                   static_cast<std::uint32_t>(right - left),
+                   static_cast<std::uint32_t>(bottom - top)};
+    };
+    const bool moved = dx != sx || dy != sy;
+    if (i1 > i0 && j1 > j0 && (moved || op != CopyOp::Copy)) {
+        const auto count = static_cast<std::size_t>(i1 - i0);
+        std::vector<ColorIndex> scratch;
+        const bool bottomUp = dy > sy;
+        for (std::int64_t n = 0; n < j1 - j0; ++n) {
+            const auto j = bottomUp ? j1 - 1 - n : j0 + n;
+            const auto from = static_cast<std::size_t>(sy + j) * width_ +
+                              static_cast<std::size_t>(sx + i0);
+            const auto to = static_cast<std::size_t>(dy + j) * width_ +
+                            static_cast<std::size_t>(dx + i0);
+            copyRow(from, to, count, op, dy == sy, scratch);
+        }
+        unite(dx + i0, dy + j0, i1 - i0, j1 - j0);
+    }
+    if (fillVacated && moved && std::min<std::int64_t>(width_, sx + source.width) > std::max<std::int64_t>(0, sx) &&
+        std::min<std::int64_t>(height_, sy + source.height) > std::max<std::int64_t>(0, sy)) {
+        // Source pixels (clipped to the canvas) outside the destination rectangle.
+        const auto left = std::max<std::int64_t>(0, sx);
+        const auto top = std::max<std::int64_t>(0, sy);
+        const auto right = std::min<std::int64_t>(width_, sx + source.width);
+        const auto bottom = std::min<std::int64_t>(height_, sy + source.height);
+        for (auto y = top; y < bottom; ++y) {
+            const auto row = static_cast<std::size_t>(y) * width_;
+            const bool inside = y >= dy && y < dy + source.height;
+            const auto holeLeft = inside ? std::clamp<std::int64_t>(dx, left, right) : right;
+            const auto holeRight = inside ? std::clamp<std::int64_t>(dx + source.width, left, right) : right;
+            fillSpan(row + static_cast<std::size_t>(left),
+                     static_cast<std::size_t>(holeLeft - left), paper_);
+            fillSpan(row + static_cast<std::size_t>(holeRight),
+                     static_cast<std::size_t>(right - holeRight), paper_);
+        }
+        unite(left, top, right - left, bottom - top);
+    }
+    return changed;
+}
+
 void IndexedCanvas::setPixel(std::int32_t x, std::int32_t y, ColorIndex color) {
     if (color >= paletteSize()) throw std::out_of_range("pixel index exceeds window palette");
     if (x < 0 || y < 0 || static_cast<std::uint32_t>(x) >= width_ ||

@@ -2546,6 +2546,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     instruction.name == "LINE" ||
                     instruction.name == "RECT" ||
                     instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
+                    instruction.name == "GCOPY" ||
                     instruction.name == "BLIT" ||
                     instruction.name == "FONT" || instruction.name == "GFONT" ||
                     instruction.name == "CLS" || instruction.name == "WINDOW" ||
@@ -2800,6 +2801,32 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         else
                             graphics_->rectangle(session_id_, channel,
                                                  topLeft, width, height);
+                    } else if (instruction.name == "GCOPY") {
+                        const auto source = graphics::Point{
+                            pixelArgument(0, "pixel coordinate out of range"),
+                            pixelArgument(1, "pixel coordinate out of range")};
+                        const auto width = pixelArgument(2, "copy size must be nonnegative");
+                        const auto height = pixelArgument(3, "copy size must be nonnegative");
+                        if (width < 0 || height < 0)
+                            runtimeError(instruction, "copy size must be nonnegative");
+                        const auto destination = graphics::Point{
+                            pixelArgument(4, "pixel coordinate out of range"),
+                            pixelArgument(5, "pixel coordinate out of range")};
+                        auto op = graphics::CopyOp::Copy;
+                        if (arguments.size() > 6) {
+                            const auto value = integerArgument(6,
+                                "copy operation must be 0 (copy), 1 (or), 2 (xor), or 3 (and-not)");
+                            if (value < 0 || value > 3)
+                                runtimeError(instruction,
+                                    "copy operation must be 0 (copy), 1 (or), 2 (xor), or 3 (and-not)");
+                            op = static_cast<graphics::CopyOp>(value);
+                        }
+                        const bool fillVacated = arguments.size() > 7 && fillRequested(7);
+                        if (width != 0 && height != 0)
+                            graphics_->copyRegion(session_id_, channel,
+                                {source.x, source.y, static_cast<std::uint32_t>(width),
+                                 static_cast<std::uint32_t>(height)},
+                                destination, op, fillVacated);
                     } else if (instruction.name == "CIRCLE") {
                         const auto center = pointArguments();
                         const auto radius = pixelArgument(2, "circle radius must be nonnegative");
