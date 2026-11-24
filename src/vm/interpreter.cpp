@@ -78,6 +78,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         if (instruction.line < 1 || instruction.column < 1)
             invalid(instruction, "source location is invalid");
         switch (instruction.op) {
+        case Op::TrapBegin:
         case Op::Jump:
         case Op::JumpIfFalse:
         case Op::LoopNext:
@@ -145,6 +146,8 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Restore:
         case Op::Stop:
         case Op::Input:
+        case Op::TrapEnd:
+        case Op::Raise:
         case Op::Pause:
         case Op::Return:
         case Op::FunctionEnd:
@@ -257,6 +260,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
                        static_cast<std::size_t>(instruction.channelArgument) +
                        static_cast<std::size_t>(instruction.clearTarget);
             break;
+        case Op::Raise:
         case Op::Pause:
             consumed = 1;
             break;
@@ -292,6 +296,8 @@ void verifyBytecode(const detail::InstructionSequence& code) {
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd);
             produced = 1;
             break;
+        case Op::TrapBegin:
+        case Op::TrapEnd:
         case Op::Jump:
         case Op::ForNext:
         case Op::LoopNext:
@@ -306,6 +312,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         }
         if (depth < consumed) invalid(instruction, "operand stack underflow");
         const std::size_t after = depth - consumed + produced;
+        if (instruction.op == Op::TrapBegin) merge(instruction.target, after, instruction);
         if (instruction.op == Op::Return || instruction.op == Op::FunctionEnd) {
             if (after != 0) invalid(instruction, "definition exits with values on the stack");
             continue;
@@ -328,7 +335,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
 double numeric(const Value& value, const Instruction& at) {
     if (const auto* number = std::get_if<double>(&value)) return *number;
     const int line = at.basicLine != 0 ? at.basicLine : at.line;
-    throw std::runtime_error("line " + std::to_string(line) + ", column " +
+    throw runtime::Error(runtime::ErrorCode::TypeMismatch, "line " + std::to_string(line) + ", column " +
                              std::to_string(at.column) + ": numeric value required");
 }
 
@@ -519,8 +526,8 @@ const char* opcodeName(Op op) {
 void Interpreter::execute(const std::string& source, std::ostream& output,
                           runtime::CancellationToken stop) {
     auto status = executeResumable(source, output, stop);
-    while (status == ExecutionStatus::WaitingTime) {
-        std::this_thread::sleep_for(
+    while (status == ExecutionStatus::WaitingTime || status == ExecutionStatus::Yielded) {
+        if (status == ExecutionStatus::WaitingTime) std::this_thread::sleep_for(
             std::chrono::milliseconds(requestedPauseDurationMs_));
         status = resume(output, stop);
     }
@@ -544,6 +551,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
     bool preparingProgram = true;
     try {
         execution_ = std::make_unique<detail::VMExecutionState>();
+        execution_->interactiveSubmission = interactiveCommandExecution_;
         if (mayContainInclude(source)) {
             const std::string expanded = detail::expandIncludes(source, storage_.get());
             execution_->code = detail::compileSource(expanded);
@@ -680,6 +688,70 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                                            runtime::CancellationToken stop,
                                            std::size_t instructionBudget) {
     auto& state = *execution_;
+    state.sliceInstructions = 0;
+    for (;;) {
+        runtime::ErrorCode caught = runtime::ErrorCode::None;
+        // Reserve is allocated before installing the first protected statement.
+        // Capturing an allocation error never requires a new diagnostic allocation.
+        char detail[97]{};
+        auto capture = [&](std::string_view message) {
+            std::size_t size = std::min<std::size_t>(96, message.size());
+            while (size < message.size() && size &&
+                   (static_cast<unsigned char>(message[size]) & 0xc0) == 0x80) --size;
+            std::copy_n(message.data(), size, detail);
+        };
+        try {
+            const auto remaining = instructionBudget == 0 ? 0 :
+                instructionBudget - std::min(instructionBudget, state.sliceInstructions);
+            if (instructionBudget && remaining == 0) return ExecutionStatus::Yielded;
+            return runExecutionBody(output, stop, remaining);
+        } catch (const runtime::Error& error) {
+            // Program compilation occurs before protection is installed.
+            // EVAL parsing happens at runtime and is a catchable operation.
+            if (error.code() == runtime::ErrorCode::TaskCancelled) throw;
+            caught = error.code(); capture(error.detail());
+            if (!state.traps || !state.traps->count) throw;
+        } catch (const runtime::ServiceError& error) {
+            caught = error.languageCode(); capture(error.detail());
+            if (!state.traps || !state.traps->count) throw;
+        } catch (const std::bad_alloc&) {
+            caught = runtime::ErrorCode::OutOfMemory;
+            if (!state.traps || !state.traps->count) throw;
+        }
+        const auto saved = state.traps->records[--state.traps->count];
+        state.stack.resize(saved.stackDepth);
+        state.callFrames.resize(saved.callDepth);
+        state.selectStates.resize(saved.selectDepth);
+        for (auto it = state.forStates.begin(); it != state.forStates.end();) {
+            if (it->second.callDepth > saved.callDepth) it = state.forStates.erase(it);
+            else ++it;
+        }
+        if (state.code.size() > saved.codeSize)
+            state.code.erase(state.code.begin() + saved.codeSize, state.code.end());
+        if (state.pendingUiRequest && ui_) ui_->cancel(*state.pendingUiRequest);
+        state.pendingUiRequest.reset();
+        state.pendingChannelRead.reset();
+        if (channels_) channels_->cancelPendingOperations(session_id_);
+        if (state.pendingKey && ui_ && ui_->keyInput()) ui_->keyInput()->endWait(session_id_);
+        state.pendingKey.reset();
+        state.pauseUntil.reset();
+        state.pendingInputVariable.clear();
+        state.pendingUiBuilderHandle = 0;
+        state.printChannel = saved.printChannel;
+        state.printChannelColumn = saved.printColumn;
+        state.pc = saved.continuation;
+        errorCode_ = caught;
+        std::copy_n(detail, sizeof detail, trappedDetail_);
+        hasTrappedDetail_ = true;
+        errorDetail_.clear();
+    }
+}
+
+ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
+                                           runtime::CancellationToken stop,
+                                           std::size_t instructionBudget) {
+    if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
+    auto& state = *execution_;
     auto& code = state.code;
     auto& stack = state.stack;
     auto& forStates = state.forStates;
@@ -730,7 +802,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (const auto* number = std::get_if<double>(&value))
             stack.emplace_back(preserveInteger ? *number :
                                quantizeNumeric(*number, activeInstruction));
-        else stack.emplace_back(std::get<std::string>(value));
+        else stack.emplace_back(std::move(std::get<std::string>(value)));
     };
     auto storeInputValue = [&](const std::string& name, const std::string& text,
                                const Instruction& at) {
@@ -741,7 +813,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             char* end = nullptr;
             const double number = std::strtod(text.c_str(), &end);
             if (text.empty() || end != text.c_str() + text.size() || !std::isfinite(number))
-                runtimeError(at, "numeric input required");
+                throw runtime::Error(runtime::ErrorCode::TypeMismatch,
+                    "line " + std::to_string(at.basicLine != 0 ? at.basicLine : at.line) +
+                    ", column " + std::to_string(at.column) + ": numeric input required");
             if (!name.empty() && name.back() == '%' &&
                 (std::trunc(number) != number ||
                  number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
@@ -893,7 +967,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
              value < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
              value > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
             runtimeError(instruction, "Int32 value out of range");
-        variables_[instruction.name] = value;
+        if (!callFrames.empty() && callFrames.back().locals.count(instruction.name))
+            callFrames.back().locals[instruction.name] = value;
+        else variables_[instruction.name] = value;
     };
     auto rangeContains = [](const ForRange& range, double value) {
         if (range.single) return true;
@@ -904,7 +980,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (found == arrays.end()) runtimeError(instruction, "array is not dimensioned");
         RuntimeArray& array = found->second;
         if (array.lengths.size() != instruction.rank)
-            throw std::runtime_error("line " + std::to_string(instruction.line) +
+            throw runtime::Error(runtime::ErrorCode::InvalidArgument, "line " + std::to_string(instruction.line) +
                 ", column " + std::to_string(instruction.column) +
                 ": incorrect array rank (expected " + std::to_string(instruction.rank) +
                 ", actual " + std::to_string(array.lengths.size()) + ")");
@@ -923,8 +999,21 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         return std::pair<RuntimeArray*, std::size_t>{&array, offset};
     };
 
+    if (state.pendingKey) {
+        auto input = ui_ ? ui_->keyInput() : nullptr;
+        if (!input) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "keyboard input unavailable");
+        auto& pending = *state.pendingKey;
+        if (!pending.ready) pending.ready = input->poll(session_id_);
+        if (!pending.ready && (!pending.deadline || std::chrono::steady_clock::now() < *pending.deadline))
+            return ExecutionStatus::WaitingChannel;
+        const auto key = pending.ready.value_or(0);
+        if (pending.text) pushValue(input::keyText(key));
+        else pushValue(static_cast<double>(key), true);
+        input->endWait(session_id_);
+        state.pendingKey.reset();
+    }
     if (state.pendingUiRequest) {
-        if (!ui_) throw std::runtime_error("UI service unavailable");
+        if (!ui_) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "UI service unavailable");
         const auto result = ui_->poll(*state.pendingUiRequest);
         if (!result) return ExecutionStatus::Suspended;
         if (state.pendingUiKind == ui::RequestKind::Confirm)
@@ -952,7 +1041,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         } else if (state.pendingUiKind == ui::RequestKind::Input) {
             if (result->kind != ui::ResultKind::Submitted || result->fields.empty() ||
                 !std::holds_alternative<std::string>(result->fields.front()))
-                throw std::runtime_error("input cancelled");
+                throw runtime::Error(runtime::ErrorCode::TaskCancelled, "input cancelled");
             storeInputValue(state.pendingInputVariable,
                             std::get<std::string>(result->fields.front()),
                             code.at(state.pc == 0 ? 0 : state.pc - 1));
@@ -985,6 +1074,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         const auto& instruction = code[pc++];
         activeInstruction = &instruction;
         ++instructionsExecuted;
+        ++state.sliceInstructions;
         if (state.diagnosticsEnabled) ++state.bytecodes;
         if (state.traceEnabled) {
             state.trace.push_back(std::to_string(instruction.line) + ":" +
@@ -995,6 +1085,34 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (state.debugMode != runtime::DebugResumeMode::Continue &&
             !state.stepStarted) state.stepStarted = true;
         switch (instruction.op) {
+        case Op::TrapBegin:
+            if (!state.traps) {
+                state.traps = std::make_unique<detail::TrapState>();
+            }
+            if (state.traps->count == state.traps->records.size())
+                throw runtime::Error(runtime::ErrorCode::TaskLimit, "TRAP nesting limit reached");
+            state.traps->records[state.traps->count++] = {
+                stack.size(), callFrames.size(), selectStates.size(), code.size(), instruction.target,
+                state.printChannel, state.printChannelColumn};
+            errorCode_ = runtime::ErrorCode::None;
+            hasTrappedDetail_ = false;
+            errorDetail_.clear();
+            break;
+        case Op::TrapEnd:
+            if (!state.traps || !state.traps->count)
+                throw std::logic_error("internal VM trap underflow");
+            --state.traps->count;
+            errorCode_ = runtime::ErrorCode::None;
+            hasTrappedDetail_ = false;
+            errorDetail_.clear();
+            break;
+        case Op::Raise: {
+            const double number = numeric(pop(), instruction);
+            if (!std::isfinite(number) || std::trunc(number) != number ||
+                number < 1 || number > 21 || number == 17)
+                throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid RAISE code");
+            throw runtime::Error(static_cast<runtime::ErrorCode>(static_cast<int>(number)), "RAISE");
+        }
         case Op::Stop:
             return ExecutionStatus::ProgramStopped;
         case Op::Call: {
@@ -1014,7 +1132,29 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                 arguments.erase(arguments.begin());
             }
             if (instruction.builtin) {
-                if (instruction.name == "TASK") {
+                if (instruction.name == "INKEY" || instruction.name == "INKEY$") {
+                    const auto* timeout = arguments.empty() ? nullptr : std::get_if<double>(&arguments[0]);
+                    if (!arguments.empty() && !timeout)
+                        throw runtime::Error(runtime::ErrorCode::TypeMismatch, "INKEY timeout must be numeric");
+                    const double delay = timeout ? *timeout : 0;
+                    if (!std::isfinite(delay) || std::trunc(delay) != delay || delay < -1 || delay > 2147483647)
+                        throw runtime::Error(runtime::ErrorCode::OutOfRange, "invalid INKEY timeout");
+                    if (resolveChannel(0) != 0)
+                        throw runtime::Error(runtime::ErrorCode::UnsupportedOperation, "bound console lacks key input");
+                    auto input = ui_ ? ui_->keyInput() : nullptr;
+                    if (!input) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "keyboard input unavailable");
+                    state.pendingKey.emplace();
+                    state.pendingKey->text = instruction.name == "INKEY$";
+                    if (delay >= 0) state.pendingKey->deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(static_cast<std::int32_t>(delay));
+                    state.pendingKey->ready = input->poll(session_id_);
+                    if (!state.pendingKey->ready && delay != 0) return ExecutionStatus::WaitingChannel;
+                    const auto key = state.pendingKey->ready.value_or(0);
+                    if (state.pendingKey->text) pushValue(input::keyText(key));
+                    else pushValue(static_cast<double>(key), true);
+                    input->endWait(session_id_);
+                    state.pendingKey.reset();
+                } else if (instruction.name == "TASK") {
                     if (!storage_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "storage service unavailable");
@@ -1182,7 +1322,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     break;
                 }
                 if (instruction.name == "ERRX$") {
-                    pushValue(errorDetail_);
+                    pushValue(errorDetail());
                     break;
                 }
                 if (instruction.name == "VAL") {
@@ -1242,6 +1382,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     finish.expectsValue = true;
                     code.push_back(std::move(finish));
                     RuntimeFrame frame;
+            frame.selectBase = selectStates.size();
                     frame.returnAddress = pc;
                     frame.callInstruction = pc == 0 ? 0 : pc - 1;
                     frame.callSourceLine = instruction.line;
@@ -2350,6 +2491,12 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (const auto* text = std::get_if<std::string>(&arguments[index])) return *text;
                     runtimeError(instruction, "string value required");
                 };
+                const auto numericDeviceArgument = [&](std::size_t index) {
+                    const auto* value = std::get_if<double>(&arguments[index]);
+                    if (!value) throw runtime::Error(runtime::ErrorCode::TypeMismatch,
+                        "numeric device argument required");
+                    return *value;
+                };
                 const auto channelArgument = [&](std::size_t index) {
                     const auto* number = std::get_if<double>(&arguments[index]);
                     if (!number) runtimeError(instruction, "numeric value required");
@@ -2407,14 +2554,14 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         if (!std::isfinite(*deviceNumber) ||
                             std::trunc(*deviceNumber) != *deviceNumber ||
                             *deviceNumber < static_cast<double>(runtime::ChannelDevice::File) ||
-                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Touch))
+                            *deviceNumber > static_cast<double>(runtime::ChannelDevice::Directory))
                             runtimeError(instruction, "invalid OPEN device kind");
                         device = static_cast<runtime::ChannelDevice>(
                             static_cast<std::uint64_t>(*deviceNumber));
                         for (std::size_t index = 1; index < arguments.size(); ++index) {
                             if (const auto* text = std::get_if<std::string>(&arguments[index]))
                                 parameters.emplace_back(*text);
-                            else parameters.emplace_back(std::get<double>(arguments[index]));
+                            else parameters.emplace_back(numericDeviceArgument(index));
                         }
                     } else {
                         if (arguments.size() != 2)
@@ -2422,16 +2569,36 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         parameters.emplace_back(textArgument(0));
                         parameters.emplace_back(textArgument(1));
                     }
-                    const auto id = channels_->openTypedDevice(session_id_, device, parameters);
-                    if (!interactiveCommandExecution_)
-                        executionChannels_.push_back(id);
-                    pushValue(static_cast<double>(id));
+                    std::optional<runtime::ChannelId> opened;
+                    if (device == runtime::ChannelDevice::Directory) {
+                        if (arguments.size() != 4) throw runtime::Error(runtime::ErrorCode::InvalidArgument, "directory OPEN requires path, wildcard and options");
+                        const auto* mask = std::get_if<double>(&arguments[3]);
+                        if (!mask) throw runtime::Error(runtime::ErrorCode::TypeMismatch, "directory options must be numeric");
+                        if (!std::isfinite(*mask) || std::trunc(*mask) != *mask || *mask < 0 || *mask > 2147483647)
+                            throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid directory options");
+                        opened = channels_->pollDirectoryOpen(session_id_, textArgument(1), textArgument(2), static_cast<std::uint32_t>(*mask));
+                        if (!opened) {
+                            // Retry only CALL, with the already evaluated operands.
+                            stack.reserve(stack.size() + arguments.size());
+                            for (auto& argument : arguments) stack.push_back(std::move(argument));
+                            --pc; return ExecutionStatus::Yielded;
+                        }
+                    } else opened = channels_->openTypedDevice(session_id_, device, parameters);
+                    const auto id = *opened;
+                    try {
+                        if (!state.interactiveSubmission) executionChannels_.push_back(id);
+                        pushValue(static_cast<double>(id));
+                    } catch (...) {
+                        executionChannels_.erase(std::remove(executionChannels_.begin(), executionChannels_.end(), id), executionChannels_.end());
+                        try { channels_->close(session_id_, id); } catch (...) {}
+                        throw;
+                    }
                 } else if (instruction.name == "IN") {
                     if (!channels_) throw runtime::ServiceError(
                         runtime::ServiceErrorCode::Unavailable, "channel service unavailable");
                     const auto channel = resolveChannel(channelArgument(0));
                     std::optional<double> reg;
-                    if (arguments.size() == 2) reg = std::get<double>(arguments[1]);
+                    if (arguments.size() == 2) reg = numericDeviceArgument(1);
                     pushValue(channels_->readValue(session_id_, channel, reg));
                 } else if (instruction.name == "ALLOC") {
                     const auto size = integerArgument(0, "ALLOC size must be a positive integer",
@@ -2453,7 +2620,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto channel = resolveChannel(channelArgument(0));
                         const bool hasRegister = arguments.size() == 3;
                         const std::optional<double> reg = hasRegister ?
-                            std::optional<double>(std::get<double>(arguments[1])) : std::nullopt;
+                            std::optional<double>(numericDeviceArgument(1)) : std::nullopt;
                         const std::size_t addressIndex = hasRegister ? 2 : 1;
                         const auto address = integerArgument(addressIndex,
                             "invalid buffer address", 0, 9007199254740991.0);
@@ -2475,6 +2642,16 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     } catch (const runtime::ServiceError& error) {
                         pushValue(-static_cast<double>(error.languageCode()));
                     }
+                } else if (instruction.name == "DIRINFO" || instruction.name == "DIRINFO$") {
+                    if (!channels_) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "channel service unavailable");
+                    const auto channel = resolveChannel(channelArgument(0));
+                    const auto* selectorValue = std::get_if<double>(&arguments[1]);
+                    if (!selectorValue) throw runtime::Error(runtime::ErrorCode::TypeMismatch, "DIRINFO selector must be numeric");
+                    if (!std::isfinite(*selectorValue) || std::trunc(*selectorValue) != *selectorValue || *selectorValue < 1 || *selectorValue > 5)
+                        throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid DIRINFO selector");
+                    const auto selector = static_cast<unsigned>(*selectorValue);
+                    if (instruction.name == "DIRINFO$") pushValue(channels_->directoryInfoText(session_id_, channel, static_cast<unsigned>(selector)));
+                    else pushValue(channels_->directoryInfo(session_id_, channel, static_cast<unsigned>(selector), singlePrecision));
                 } else if (instruction.name == "READ$") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2483,6 +2660,15 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto inputChannel = resolveChannel(channel);
                     if (inputChannel <= 1)
                         runtimeError(instruction, "selected channel does not support line input");
+                    if (channels_->isDirectoryChannel(session_id_, inputChannel)) {
+                        if (!channels_->directoryReady(session_id_, inputChannel)) {
+                            stack.emplace_back(static_cast<double>(inputChannel)); --pc;
+                            return ExecutionStatus::Yielded;
+                        }
+                        pushValue(std::string(channels_->directoryName(session_id_, inputChannel)));
+                        channels_->commitDirectoryRead(session_id_, inputChannel);
+                        break;
+                    }
                     const auto line = channels_->readLine(session_id_, inputChannel);
                     if (!line && channels_->isHardwareChannel(session_id_, inputChannel)) {
                         state.pendingChannelRead = inputChannel;
@@ -2503,6 +2689,11 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto inputChannel = resolveChannel(channel);
                         if (inputChannel <= 1)
                             runtimeError(instruction, "selected channel does not support EOF");
+                        if (channels_->isDirectoryChannel(session_id_, inputChannel) &&
+                            !channels_->directoryReady(session_id_, inputChannel)) {
+                            stack.emplace_back(static_cast<double>(inputChannel)); --pc;
+                            return ExecutionStatus::Yielded;
+                        }
                         pushValue(channels_->atEnd(session_id_, inputChannel) ? 1.0 : 0.0);
                     }
                 } else if (instruction.name == "WRITE") {
@@ -2548,8 +2739,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto channel = resolveChannel(channelArgument(0));
                     const bool hasRegister = arguments.size() == 3;
                     const std::optional<double> reg = hasRegister ?
-                        std::optional<double>(std::get<double>(arguments[1])) : std::nullopt;
-                    const double value = std::get<double>(arguments[hasRegister ? 2 : 1]);
+                        std::optional<double>(numericDeviceArgument(1)) : std::nullopt;
+                    const double value = numericDeviceArgument(hasRegister ? 2 : 1);
                     channels_->writeValue(session_id_, channel, value, reg);
                 } else if (instruction.name == "XFER") {
                     if (!channels_ || !selectedChannel)
@@ -2578,6 +2769,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             if (callFrames.size() >= 256) runtimeError(instruction, "call stack limit exceeded");
             RuntimeFrame frame;
+            frame.selectBase = selectStates.size();
             frame.returnAddress = pc;
             frame.callInstruction = pc == 0 ? 0 : pc - 1;
             frame.callSourceLine = instruction.line;
@@ -2643,6 +2835,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     runtimeError(instruction, "EVAL expression must return a number");
                 }
             }
+            selectStates.resize(frame.selectBase);
+            for (auto loop = forStates.begin(); loop != forStates.end();) {
+                if (loop->second.callDepth == callFrames.size()) loop = forStates.erase(loop);
+                else ++loop;
+            }
+            if (state.traps) while (state.traps->count &&
+                state.traps->records[state.traps->count - 1].callDepth >= callFrames.size()) --state.traps->count;
             callFrames.pop_back();
             if (dynamicEvaluation && !dataRead)
                 code.erase(code.begin() + static_cast<std::ptrdiff_t>(dynamicCodeStart),
@@ -2802,15 +3001,19 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             const double initial = state.ranges[state.item].start;
             assignLoopValue(instruction, initial);
-            forStates[instruction.loopId] = std::move(state);
+            state.callDepth = callFrames.size();
+            forStates[{instruction.loopId, callFrames.size()}] = std::move(state);
             break;
         }
         case Op::ForNext: {
-            auto found = forStates.find(instruction.loopId);
+            selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
+            auto found = forStates.find({instruction.loopId, callFrames.size()});
             if (found == forStates.end()) runtimeError(instruction, "inactive FOR loop");
             ForState& state = found->second;
-            const auto variable = variables_.find(instruction.name);
-            if (variable == variables_.end()) runtimeError(instruction, "missing FOR variable");
+            auto& scope = !callFrames.empty() && callFrames.back().locals.count(instruction.name)
+                ? callFrames.back().locals : variables_;
+            const auto variable = scope.find(instruction.name);
+            if (variable == scope.end()) runtimeError(instruction, "missing FOR variable");
             const double current = numeric(variable->second, instruction);
             const ForRange& range = state.ranges[state.item];
             const double next = range.single ? current :
@@ -2824,7 +3027,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (!range.single && rangeContains(range, next)) {
                 assignLoopValue(instruction, next);
                 for (auto loop = forStates.begin(); loop != forStates.end();) {
-                    if (loop->first > instruction.loopId) loop = forStates.erase(loop);
+                    if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId) loop = forStates.erase(loop);
                     else ++loop;
                 }
                 pc = instruction.target;
@@ -2845,22 +3048,24 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             }
             assignLoopValue(instruction, state.ranges[state.item].start);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
             break;
         }
         case Op::LoopNext:
+            selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first > instruction.loopId) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
             break;
         case Op::ExitLoop:
+            selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->first >= instruction.loopId) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first >= instruction.loopId) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
@@ -2904,7 +3109,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             Value value = pop();
             if (!instruction.name.empty() && instruction.name.back() == '$') {
                 if (!std::holds_alternative<std::string>(value))
-                    throw std::runtime_error("line " + std::to_string(instruction.line) +
+                    throw runtime::Error(runtime::ErrorCode::TypeMismatch, "line " + std::to_string(instruction.line) +
                                              ", column " + std::to_string(instruction.column) +
                                              ": string value required");
             } else {
@@ -2913,7 +3118,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (std::trunc(number) != number ||
                         number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
                         number > static_cast<double>(std::numeric_limits<std::int32_t>::max()))
-                        throw std::runtime_error("line " + std::to_string(instruction.line) +
+                        throw runtime::Error(runtime::ErrorCode::OutOfRange, "line " + std::to_string(instruction.line) +
                                                  ", column " + std::to_string(instruction.column) +
                                                  ": Int32 value out of range");
                 }
@@ -3143,6 +3348,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (item.address >= code.size())
                 runtimeError(instruction, "DATA expression address is invalid");
             RuntimeFrame frame;
+            frame.selectBase = selectStates.size();
             frame.returnAddress = pc;
             frame.callInstruction = pc - 1;
             frame.callSourceLine = instruction.line;
@@ -3414,7 +3620,18 @@ void Interpreter::debugResetDiagnostics() noexcept {
     execution_->trace.clear();
 }
 
+bool Interpreter::waitingForKey() const noexcept { return execution_ && execution_->pendingKey.has_value(); }
+
 bool Interpreter::channelReadReady() const {
+    if (execution_ && execution_->pendingKey) {
+        auto& pending = *execution_->pendingKey;
+        try {
+            auto input = ui_ ? ui_->keyInput() : nullptr;
+            if (!input) return true;
+            if (!pending.ready) pending.ready = input->poll(session_id_);
+            return pending.ready || (pending.deadline && std::chrono::steady_clock::now() >= *pending.deadline);
+        } catch (...) { return true; }
+    }
     if (!execution_ || !execution_->pendingChannelRead || !channels_) return false;
     try {
         return channels_->lineAvailable(session_id_, *execution_->pendingChannelRead);

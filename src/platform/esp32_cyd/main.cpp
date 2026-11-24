@@ -1,3 +1,4 @@
+#include "ql32/platform/esp32/application_input.hpp"
 #include <Arduino.h>
 #include <Adafruit_ILI9341.h>
 #include <SD.h>
@@ -71,10 +72,10 @@ ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
 #if defined(QL32_CYD_USE_SPIFFS)
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS");
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", "/spiffs");
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
 #else
-ql32::platform::esp32::SdStorage sdStorage(SD, "SDC");
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", "/sd");
 ql32::platform::esp32::SdChannels sdChannels(SD, "SDC");
 #endif
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;
@@ -83,6 +84,11 @@ std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
 ql32::vm::TaskId replTask = 0;
 std::shared_ptr<ql32::ui::QueuedService> uiService =
     std::make_shared<ql32::ui::QueuedService>();
+std::shared_ptr<ql32::input::KeyRouter> applicationKeys = std::make_shared<ql32::input::KeyRouter>();
+ql32::input::SerialDecoder applicationSerialDecoder;
+ql32::platform::esp32::ApplicationProtocolGate applicationProtocol;
+std::uint64_t applicationInputOwner = 0;
+
 std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
 std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
 std::string inputLine;
@@ -375,9 +381,26 @@ void submitInputLine() {
     if (!isProtocolRequest) replPromptShown = false;
 }
 
+void refreshApplicationInput() {
+    const auto owner = scheduler && (!uiPresenter || !uiPresenter->active()) ? scheduler->keyInputSession() : 0;
+    const bool ownerChanged = applicationInputOwner != owner;
+    applicationInputOwner = owner;
+    const bool routeChanged = applicationKeys->focus(owner);
+    if (ownerChanged || routeChanged) { applicationSerialDecoder.reset(); applicationProtocol.reset(); }
+    applicationProtocol.flush(millis(), applicationSerialDecoder, *applicationKeys);
+    if (const auto event = applicationSerialDecoder.flush(millis())) applicationKeys->publish(*event);
+}
+
 void receiveSerialCharacter(char character) {
+    refreshApplicationInput();
     if (character == '\n' && serialSawCarriageReturn) {
         serialSawCarriageReturn = false;
+        return;
+    }
+    if (applicationInputOwner && !protocolInputLine) {
+        serialSawCarriageReturn = false;
+        applicationProtocol.feed(static_cast<unsigned char>(character), millis(), applicationSerialDecoder,
+            *applicationKeys, [](std::string_view prefix) { for (char byte : prefix) appendInputCharacter(byte); });
         return;
     }
     if (uiPresenter && uiPresenter->graphicActive() && !protocolInputLine) {
@@ -456,6 +479,7 @@ void advanceScheduler() {
     refreshDebugOverlay();
     if (uiPresenter) uiPresenter->refresh();
 
+
     scheduler->visitTaskErrors([](ql32::vm::TaskId id, const char* error, void* context) {
         Serial.printf("BASIC session %llu VM error: %s\n",
                       static_cast<unsigned long long>(id), error);
@@ -467,6 +491,8 @@ void advanceScheduler() {
     if (uiPresenter && !uiPresenter->active() && !uiPresenter->beginNext() &&
         sessionWaitingForUi)
         Serial.println("suspended session has no queued UI request");
+
+    refreshApplicationInput();
 
     const auto focused = scheduler->focusedTask();
     const auto status = scheduler->taskStatus(focused);
@@ -503,6 +529,7 @@ void advanceScheduler() {
 } // namespace
 
 void setup() {
+    uiService->setKeyInput(applicationKeys);
     Serial.begin(115200);
     if (!boardMemory.initializeEmergencyReserve(
             ql32::platform::esp32::defaultEmergencyReserveBytes)) {
@@ -683,7 +710,7 @@ void loop() {
     while (Serial.available() > 0) {
         // The PC debugger must be able to control a paused worker even while
         // the focused BASIC task is running or waiting for a UI response.
-        if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
+        if (!applicationInputOwner && !acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
         receiveSerialCharacter(static_cast<char>(Serial.read()));
     }
     pollTouch();

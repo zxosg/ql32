@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+#include "ql32/input/session.hpp"
 #include <cstdint>
 #include <chrono>
 #include <deque>
@@ -87,6 +89,7 @@ struct InfoToast {
 class Service {
 public:
     virtual ~Service() = default;
+    virtual std::shared_ptr<input::SessionKeyboard> keyInput() { return {}; }
     virtual RequestId beginAlert(SessionId session, std::string title,
                                  std::string message) = 0;
     virtual RequestId beginConfirm(SessionId session, std::string title,
@@ -121,6 +124,8 @@ public:
 // adapter. The adapter takes queued requests and resolves them after user input.
 class QueuedService final : public Service {
 public:
+    void setKeyInput(std::shared_ptr<input::SessionKeyboard> input) { keyInput_ = std::move(input); }
+    std::shared_ptr<input::SessionKeyboard> keyInput() override { return keyInput_; }
     RequestId beginAlert(SessionId session, std::string title,
                          std::string message) override;
     RequestId beginConfirm(SessionId session, std::string title,
@@ -158,6 +163,7 @@ public:
     bool isOutstanding(RequestId request);
 
 private:
+    std::shared_ptr<input::SessionKeyboard> keyInput_;
     struct PendingRequest {
         Request request;
         bool dispatched = false;

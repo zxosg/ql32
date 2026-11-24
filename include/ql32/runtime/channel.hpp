@@ -14,6 +14,7 @@
 #include <variant>
 
 #include "ql32/runtime/storage.hpp"
+#include "ql32/runtime/directory.hpp"
 
 namespace ql32::runtime {
 
@@ -26,12 +27,12 @@ using ChannelId = std::uint64_t;
 
 enum class ChannelMode { Read, Write, Append };
 
-enum class ChannelType { Console, Window, File, Serial, Network, Null, Hardware, Touch };
+enum class ChannelType { Console, Window, File, Serial, Network, Null, Hardware, Touch, Directory };
 
 enum class ChannelDevice : std::uint64_t {
     File = 1, Serial = 2, Null = 3, Window = 4, Gpio = 5, Adc = 6,
     Spi = 7, I2c = 8, Parallel = 9, Infrared = 10, CapTouch = 11, Timer = 12,
-    Touch = 13
+    Touch = 13, Directory = 14
 };
 
 enum class TouchEventType : std::uint8_t { Down = 1, Move = 2, Up = 3, Cancel = 4 };
@@ -60,6 +61,7 @@ inline const char* channelTypeName(ChannelType type) noexcept {
     case ChannelType::Null: return "NULL";
     case ChannelType::Hardware: return "HARDWARE";
     case ChannelType::Touch: return "TOUCH";
+    case ChannelType::Directory: return "DIRECTORY";
     }
     return "UNKNOWN";
 }
@@ -69,6 +71,22 @@ inline const char* channelTypeName(ChannelType type) noexcept {
 class ChannelService {
 public:
     virtual ~ChannelService() = default;
+    virtual void directoryStorage(std::shared_ptr<StorageService>) {}
+    virtual std::optional<ChannelId> pollDirectoryOpen(SessionId, const std::string&,
+                                                       const std::string&, std::uint32_t) {
+        throw Error(ErrorCode::UnsupportedOperation, "directory channels unavailable");
+    }
+    virtual void cancelPendingOperations(SessionId) noexcept {}
+    virtual bool isDirectoryChannel(SessionId, ChannelId) const { return false; }
+    virtual bool directoryReady(SessionId, ChannelId) { return false; }
+    virtual std::string_view directoryName(SessionId, ChannelId) { return {}; }
+    virtual void commitDirectoryRead(SessionId, ChannelId) noexcept {}
+    virtual double directoryInfo(SessionId, ChannelId, unsigned, bool) {
+        throw Error(ErrorCode::UnsupportedOperation, "directory metadata unavailable");
+    }
+    virtual std::string directoryInfoText(SessionId, ChannelId, unsigned) {
+        throw Error(ErrorCode::UnsupportedOperation, "directory metadata unavailable");
+    }
     virtual ChannelId open(SessionId session, const std::string& path,
                            ChannelMode mode) = 0;
     virtual ChannelId openDevice(SessionId session, ChannelDevice device,
@@ -179,6 +197,18 @@ public:
                              std::shared_ptr<HardwareChannelService> hardware = {},
                              bool touchAvailable = false);
     ~ChannelRegistry() override;
+    void directoryStorage(std::shared_ptr<StorageService> storage) override { storage_ = std::move(storage); }
+    std::optional<ChannelId> pollDirectoryOpen(SessionId, const std::string&,
+                                               const std::string&, std::uint32_t) override;
+    void cancelPendingOperations(SessionId) noexcept override;
+    bool isDirectoryChannel(SessionId, ChannelId) const override;
+    bool directoryReady(SessionId, ChannelId) override;
+    std::string_view directoryName(SessionId, ChannelId) override;
+    void commitDirectoryRead(SessionId, ChannelId) noexcept override;
+    double directoryInfo(SessionId, ChannelId, unsigned, bool) override;
+    std::string directoryInfoText(SessionId, ChannelId, unsigned) override;
+    void directoryLimits(DirectoryLimits limits);
+
 
     ChannelId open(SessionId session, const std::string& path,
                    ChannelMode mode) override;
@@ -220,7 +250,11 @@ private:
         SessionId session = 0;
         ChannelType type = ChannelType::File;
         ChannelId backend = 0;
+        std::shared_ptr<DirectoryStream> directory;
     };
+    std::shared_ptr<StorageService> storage_;
+    DirectoryLimits directoryLimits_;
+    std::unordered_map<SessionId, std::shared_ptr<DirectoryStream>> pendingDirectories_;
     std::shared_ptr<ChannelService> files_;
     SerialWriter serialWriter_;
     std::shared_ptr<HardwareChannelService> hardware_;

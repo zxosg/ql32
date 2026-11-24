@@ -1,3 +1,4 @@
+#include "ql32/platform/esp32/application_input.hpp"
 #include <Arduino.h>
 #include <SD.h>
 #if defined(QL32_OLIMEX_USE_SPIFFS)
@@ -382,10 +383,10 @@ ql32::platform::esp32::ArduinoHardware hardwareAdapter(
      2
 #endif
     });
-ql32::platform::esp32::SdStorage sdStorage(SD);
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", "/sd");
 ql32::platform::esp32::SdChannels sdChannels(SD);
 #if defined(QL32_OLIMEX_USE_SPIFFS)
-ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS");
+ql32::platform::esp32::SdStorage flashStorage(SPIFFS, "FFS", "/spiffs");
 ql32::platform::esp32::SdChannels flashChannels(SPIFFS, "FFS");
 #endif
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
@@ -403,6 +404,11 @@ std::unique_ptr<ql32::vm::SessionScheduler> scheduler;
 ql32::vm::TaskId replTask = 0;
 std::shared_ptr<ql32::ui::QueuedService> uiService =
     std::make_shared<ql32::ui::QueuedService>();
+std::shared_ptr<ql32::input::KeyRouter> applicationKeys = std::make_shared<ql32::input::KeyRouter>();
+ql32::input::SerialDecoder applicationSerialDecoder;
+ql32::platform::esp32::ApplicationProtocolGate applicationProtocol;
+std::uint64_t applicationInputOwner = 0;
+
 std::unique_ptr<ql32::ui::GraphicPresenter> uiPresenter;
 std::unique_ptr<ql32::platform::esp32::RemoteDebugProtocol> remoteDebugger;
 ql32::ui::LineEditor lineEditor;
@@ -653,9 +659,29 @@ void submitInputLine() {
     replPromptShown = false;
 }
 
+void refreshApplicationInput() {
+    const auto owner = scheduler && (!uiPresenter || !uiPresenter->active()) ? scheduler->keyInputSession() : 0;
+    const bool ownerChanged = applicationInputOwner != owner;
+    applicationInputOwner = owner;
+    const bool routeChanged = applicationKeys->focus(owner);
+    if (ownerChanged || routeChanged) { applicationSerialDecoder.reset(); applicationProtocol.reset(); }
+    applicationProtocol.flush(millis(), applicationSerialDecoder, *applicationKeys);
+    if (const auto event = applicationSerialDecoder.flush(millis())) applicationKeys->publish(*event);
+}
+
 void receiveSerialCharacter(char character) {
+    refreshApplicationInput();
     if (character == '\n' && serialSawCarriageReturn) {
         serialSawCarriageReturn = false;
+        return;
+    }
+    if (applicationInputOwner && !protocolInputLine) {
+        serialSawCarriageReturn = false;
+        applicationProtocol.feed(static_cast<unsigned char>(character), millis(), applicationSerialDecoder,
+            *applicationKeys, [](std::string_view prefix) {
+                protocolInputLine = true;
+                for (char byte : prefix) lineEditor.insertRawCharacter(byte, true);
+            });
         return;
     }
     if (uiPresenter && uiPresenter->graphicActive() && !protocolInputLine) {
@@ -724,6 +750,7 @@ void advanceScheduler() {
     if (!scheduler) return;
     if (!scheduler->executionPaused()) (void)scheduler->tick();
     if (uiPresenter) uiPresenter->refresh();
+
     refreshDebugOverlay();
 
     scheduler->visitTaskErrors([](ql32::vm::TaskId id, const char* error, void*) {
@@ -743,6 +770,8 @@ void advanceScheduler() {
     if (uiPresenter && !uiPresenter->active() && !uiPresenter->beginNext() &&
         sessionWaitingForUi)
         Serial.println("suspended session has no queued UI request");
+
+    refreshApplicationInput();
 
     const auto focused = scheduler->focusedTask();
     const auto status = scheduler->taskStatus(focused);
@@ -814,6 +843,7 @@ bool handleKeyboardShortcut(const ql32::input::KeyEvent& event) {
 } // namespace
 
 void setup() {
+    uiService->setKeyInput(applicationKeys);
     Serial.begin(115200);
 #if defined(QL32_OLIMEX_PSRAM)
     if (!psramFound()) {
@@ -1073,15 +1103,18 @@ void setup() {
 
 void loop() {
     while (Serial.available() > 0) {
-        if (!acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
+        if (!applicationInputOwner && !acceptsInput() && !protocolInputLine && Serial.peek() != '@') break;
         receiveSerialCharacter(static_cast<char>(Serial.read()));
     }
     if (uiPresenter) uiPresenter->flushSerialEscape(millis());
 
+    refreshApplicationInput();
     if (keyboardInput) {
         const auto event = keyboardInput->poll();
         const bool shortcut = event && handleKeyboardShortcut(*event);
-        if (event && !shortcut && uiPresenter &&
+        if (event && !shortcut && applicationInputOwner) {
+            applicationKeys->publish(*event);
+        } else if (event && !shortcut && uiPresenter &&
             uiPresenter->graphicActive()) {
             (void)uiPresenter->handleKey(*event);
         } else if (event && !shortcut && event->pressed && scheduler &&

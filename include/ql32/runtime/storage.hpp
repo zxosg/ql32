@@ -14,6 +14,26 @@
 
 namespace ql32::runtime {
 
+struct DirectoryMetadata {
+    std::uint64_t size = 0;
+    // YYYYMMDDhhmmss, filesystem wall clock; zero is unknown.
+    std::uint64_t modified = 0;
+    std::uint8_t flags = 0, known = 0;
+    bool directory = false;
+};
+struct DirectoryEntry {
+    std::string name;
+    DirectoryMetadata metadata;
+};
+enum class DirectoryCursorResult { Entry, End, Pending };
+class DirectoryCursor {
+public:
+    virtual ~DirectoryCursor() = default;
+    // At most one primitive step per call; Entry/End/Pending are distinct, and failures throw typed errors.
+    virtual DirectoryCursorResult next(DirectoryEntry& entry) = 0;
+};
+
+
 struct FileEntry {
     std::string name;
     std::uintmax_t size = 0;
@@ -126,6 +146,10 @@ public:
         if (hadOriginal) {
             try { remove(backup); } catch (...) {}
         }
+    }
+    // No full-list fallback: adapters must implement a bounded native cursor.
+    virtual std::unique_ptr<DirectoryCursor> openDirectory(const std::string&) {
+        throw Error(ErrorCode::UnsupportedOperation, "storage has no bounded directory cursor");
     }
     virtual std::vector<FileEntry> list(const std::string& path) = 0;
     virtual bool exists(const std::string& path) = 0;

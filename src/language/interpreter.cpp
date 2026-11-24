@@ -49,7 +49,7 @@ enum class Kind {
     End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
     Print, At, Data, Read, Restore, Stop, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
     Select, On, Remainder, Remark,
-    For, To, Step, Next, Repeat, Exit, Define, Procedure, Function, Local, Return,
+    For, To, Step, Next, Repeat, While, Until, Trap, Raise, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
     Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     And, Or, Xor, Not,
@@ -88,6 +88,8 @@ constexpr Keyword keywords[] = {
     {"ELSE", "ELSE", Kind::Else, "ELSE"}, {"END", "END", Kind::EndKeyword, "END"},
     {"FOR", "FOR", Kind::For, "FOR"}, {"TO", "TO", Kind::To, "TO"},
     {"STEP", "STEP", Kind::Step, "STEP"}, {"NEXT", "NEXT", Kind::Next, "NEXT"},
+    {"WHILE", "WHILE", Kind::While, "WHILE"}, {"UNTIL", "UNTIL", Kind::Until, "UNTIL"},
+    {"TRAP", "TRAP", Kind::Trap, "TRAP"}, {"RAISE", "RAISE", Kind::Raise, "RAISE"},
     {"REPEAT", "REP", Kind::Repeat, "REPeat"}, {"EXIT", "EXIT", Kind::Exit, "EXIT"},
     {"DEFINE", "DEF", Kind::Define, "DEFine"},
     {"PROCEDURE", "PROC", Kind::Procedure, "PROCedure"},
@@ -111,7 +113,7 @@ constexpr std::string_view builtinCommands[] = {
 };
 
 constexpr std::string_view builtinFunctions[] = {
-    "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
+    "INKEY", "INKEY$", "DIRINFO", "DIRINFO$", "TASK", "TASKRESULT", "ERR", "ERR$", "ERRX$", "LEN", "LEFT$", "RIGHT$",
     "MID$", "REPT$", "CODE", "ASC", "CHR$", "LOC", "UPPER$", "LOWER$",
     "STR$", "VAL", "EVAL", "EVAL$",
     "BAND", "BOR", "BXOR", "BNOT", "ROL", "ROR", "SRA", "SRL", "SLA", "SLL",
@@ -236,6 +238,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "TASKRESULT") return {2, true};
     if (instruction.name == "IPRINT") return {1, false};
     if (instruction.name == "BUSY") return {1, false};
+    if (instruction.name == "INKEY" || instruction.name == "INKEY$") return {0, true};
+    if (instruction.name == "DIRINFO" || instruction.name == "DIRINFO$") return {2, true};
     if (instruction.name == "ERR") return {0, true};
     if (instruction.name == "ERR$") return {1, true};
     if (instruction.name == "ERRX$") return {0, true};
@@ -632,7 +636,8 @@ public:
                 definition.locals});
         }
         code_.arrays = arrays_;
-        code_.constants = constants_;
+        // Transfer the table: copying all include constants doubles preparation RAM.
+        code_.constants = std::move(constants_);
         return std::move(code_);
     }
 
@@ -642,7 +647,8 @@ public:
         resolveCalls(false);
         code_.functions = enclosingFunctions_;
         code_.arrays = arrays_;
-        code_.constants = constants_;
+        // Transfer the table: copying all include constants doubles preparation RAM.
+        code_.constants = std::move(constants_);
         return std::move(code_);
     }
 
@@ -666,7 +672,9 @@ private:
         bool isFor;
         std::vector<std::size_t> nextInstructions;
         std::vector<std::size_t> exitInstructions;
+        std::size_t selectDepth = 0;
     };
+    std::size_t selectDepth_ = 0;
     std::vector<LoopContext> loops_;
     std::size_t nextLoopId_ = 1;
     bool inDefinition_ = false;
@@ -780,7 +788,9 @@ private:
     const Token& advance() { if (!check(Kind::End)) ++current_; return previous(); }
     bool isLineNumber() const {
         return current_ + 1 < tokens_.size() &&
-               (tokens_[current_ + 1].kind == Kind::Print ||
+               (tokens_[current_ + 1].kind == Kind::Trap ||
+                tokens_[current_ + 1].kind == Kind::Raise ||
+                tokens_[current_ + 1].kind == Kind::Print ||
                 tokens_[current_ + 1].kind == Kind::At ||
                 tokens_[current_ + 1].kind == Kind::Data ||
                 tokens_[current_ + 1].kind == Kind::Read ||
@@ -833,7 +843,9 @@ private:
                 const std::size_t passedArguments = instruction.argCount -
                     static_cast<std::size_t>(instruction.channelArgument) -
                     instruction.optionCount;
-                if (instruction.name == "FREE") {
+                if (instruction.name == "INKEY" || instruction.name == "INKEY$") {
+                    if (passedArguments > 1) error(instruction, "INKEY expects zero or one timeout");
+                } else if (instruction.name == "FREE") {
                     if (passedArguments > 1)
                         error(instruction, "FREE accepts zero or one selector (0, 1, or 2)");
                 } else if (instruction.name == "EOF") {
@@ -1102,12 +1114,15 @@ private:
             Instruction instruction{Op::LoopNext, 0.0, nameToken.text, keyword.line, keyword.column};
             instruction.target = loop.body;
             instruction.loopId = loop.id;
+            instruction.rank = loop.selectDepth;
             code_.push_back(std::move(instruction));
+            loop.nextInstructions.push_back(code_.size() - 1);
             return;
         }
         Instruction instruction{Op::ForNext, 0.0, nameToken.text, keyword.line, keyword.column};
         instruction.target = loop.body;
         instruction.loopId = loop.id;
+        instruction.rank = loop.selectDepth;
         instruction.explicitNext = explicitNext;
         code_.push_back(std::move(instruction));
         loop.nextInstructions.push_back(code_.size() - 1);
@@ -1116,6 +1131,7 @@ private:
         LoopContext& loop = findLoop(nameToken);
         Instruction instruction{Op::ExitLoop, 0.0, nameToken.text, keyword.line, keyword.column};
         instruction.loopId = loop.id;
+        instruction.rank = loop.selectDepth;
         code_.push_back(std::move(instruction));
         loop.exitInstructions.push_back(code_.size() - 1);
     }
@@ -1218,6 +1234,7 @@ private:
         Instruction begin{Op::SelectBegin, 0.0, {}, keyword.line, keyword.column};
         code_.push_back(std::move(begin));
         controlScopes_.push_back(nextControlScope_++);
+        ++selectDepth_;
         if (!match(Kind::Newline)) error(peek(), "expected end of line after SELECT ON");
         while (match(Kind::Newline)) {}
 
@@ -1277,6 +1294,7 @@ private:
             code_[remainderFalseJump].target = selectEnd;
         for (const std::size_t jump : endJumps) code_[jump].target = selectEnd;
         controlScopes_.pop_back();
+        --selectDepth_;
         if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End))
             error(peek(), "expected end of statement");
     }
@@ -1409,6 +1427,7 @@ private:
         const std::size_t body = code_.size();
         controlScopes_.push_back(code_[initIndex].loopId);
         loops_.push_back({code_[initIndex].loopId, variable.text, body, true, {}, {}});
+        loops_.back().selectDepth = selectDepth_;
 
         if (match(Kind::Colon)) {
             // Inline bodies end at NEXT. Nested inline loops are deliberately excluded.
@@ -1463,10 +1482,20 @@ private:
         if (!check(Kind::Identifier)) error(peek(), "expected REPeat loop name");
         const Token name = advance();
         const std::size_t loopId = nextLoopId_++;
+        const std::size_t test = code_.size();
+        const bool preTest = match(Kind::While);
+        std::size_t branch = 0;
+        if (preTest) {
+            expression();
+            branch = code_.size();
+            emit(Op::JumpIfFalse, keyword);
+        }
         const std::size_t body = code_.size();
         controlScopes_.push_back(loopId);
-        loops_.push_back({loopId, name.text, body, false, {}, {}});
+        loops_.push_back({loopId, name.text, preTest ? test : body, false, {}, {}});
+        loops_.back().selectDepth = selectDepth_;
 
+        if (preTest && check(Kind::Colon)) error(peek(), "conditional REPeat requires a block");
         if (match(Kind::Colon)) {
             while (!check(Kind::End) && !check(Kind::Newline)) {
                 if (match(Kind::Colon)) continue;
@@ -1495,10 +1524,24 @@ private:
         if (!check(Kind::Identifier)) error(peek(), "expected name after END REPeat");
         const Token endName = advance();
         if (endName.text != name.text) error(endName, "END REPeat name does not match REPeat");
-        Instruction jump{Op::Jump, 0.0, name.text, keyword.line, keyword.column};
-        jump.target = body;
+        const std::size_t tailTest = code_.size();
+        const bool postTest = match(Kind::Until);
+        const Token testToken = postTest ? previous() : keyword;
+        if (preTest && postTest) error(testToken, "REPeat cannot combine WHILE and UNTIL");
+        if (postTest) {
+            expression();
+            code_[tailTest].statementStart = true;
+            code_[tailTest].basicLine = currentBasicLine_;
+        }
+        Instruction jump{postTest ? Op::JumpIfFalse : Op::Jump, 0.0, name.text,
+                         testToken.line, testToken.column};
+        jump.basicLine = currentBasicLine_;
+        jump.target = preTest ? test : body;
         code_.push_back(std::move(jump));
         const std::size_t exit = code_.size();
+        if (preTest) code_[branch].target = exit;
+        for (const std::size_t index : loops_.back().nextInstructions)
+            code_[index].target = postTest ? tailTest : (preTest ? test : body);
         for (const std::size_t index : loops_.back().exitInstructions)
             code_[index].target = exit;
         loops_.pop_back();
@@ -1539,6 +1582,29 @@ private:
         }
     }
     void statementBody(bool moduleScope) {
+        if (match(Kind::Trap)) {
+            const Token keyword = previous();
+            if (check(Kind::Trap) || check(Kind::If) || check(Kind::For) ||
+                check(Kind::Repeat) || check(Kind::Select) || check(Kind::Define) ||
+                check(Kind::Dim) || check(Kind::Const) || check(Kind::Option) ||
+                check(Kind::Data) || check(Kind::Local) || check(Kind::Return) ||
+                check(Kind::Stop) || check(Kind::Next) || check(Kind::Exit) ||
+                check(Kind::Go) || check(Kind::Goto) || check(Kind::EndKeyword) ||
+                (check(Kind::BuiltinCommand) && peek().text == "KILL"))
+                error(peek(), "TRAP requires one simple executable statement");
+            const std::size_t begin = code_.size();
+            emit(Op::TrapBegin, keyword);
+            statementBody(false);
+            emit(Op::TrapEnd, keyword);
+            code_[begin].target = code_.size();
+            return;
+        }
+        if (match(Kind::Raise)) {
+            const Token keyword = previous();
+            expression();
+            emit(Op::Raise, keyword);
+            return;
+        }
         if (check(Kind::Option)) {
             const Token keyword = advance();
             if (!moduleScope || inDefinition_)
@@ -2458,6 +2524,7 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
       task_id_(taskId) {
     if (session_id_ == 0)
         session_id_ = nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed);
+    if (channels_ && storage_) channels_->directoryStorage(storage_);
     randomState_ = (static_cast<std::uint64_t>(session_id_) *
                     0x9e3779b97f4a7c15ULL) ^
                    static_cast<std::uint64_t>(
@@ -2465,6 +2532,7 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
 }
 
 void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
+    hasTrappedDetail_ = false;
     errorCode_ = code;
     errorDetail_ = std::move(detail);
 }
@@ -2694,6 +2762,8 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
 }
 
 void Interpreter::closeExecutionChannels() noexcept {
+    if (channels_) channels_->cancelPendingOperations(session_id_);
+    if (ui_ && ui_->keyInput()) ui_->keyInput()->release(session_id_);
     if (!channels_) {
         executionChannels_.clear();
         return;
@@ -2729,8 +2799,8 @@ std::string detail::expandIncludes(const std::string& source,
 
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
     auto status = executeInteractiveResumable(source, output);
-    while (status == ExecutionStatus::WaitingTime) {
-        std::this_thread::sleep_for(
+    while (status == ExecutionStatus::WaitingTime || status == ExecutionStatus::Yielded) {
+        if (status == ExecutionStatus::WaitingTime) std::this_thread::sleep_for(
             std::chrono::milliseconds(requestedPauseDurationMs_));
         status = resume(output);
     }
@@ -3793,8 +3863,12 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
                     status = resume(output);
                     continue;
                 }
-                if (status == ExecutionStatus::WaitingChannel)
-                    throw std::runtime_error("interactive command is waiting for channel input");
+                if (status == ExecutionStatus::WaitingChannel) {
+                    while (!channelReadReady()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    status = resume(output);
+                    continue;
+                }
+                if (status == ExecutionStatus::Yielded) { status = resume(output); continue; }
                 if (status == ExecutionStatus::RunPending)
                     throw std::runtime_error("deferred RUN requires the session scheduler");
                 throw std::runtime_error("interactive command did not complete");

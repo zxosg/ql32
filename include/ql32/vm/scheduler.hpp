@@ -82,6 +82,7 @@ public:
     bool logon(TaskId id);
     TaskId logoff();
     TaskId focusedTask() const noexcept;
+    runtime::SessionId keyInputSession() const noexcept;
     bool suspendTask(TaskId id) noexcept;
     bool resumeTask(TaskId id) noexcept;
     std::optional<bool> toggleTaskPaused(TaskId id) noexcept;

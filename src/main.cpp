@@ -1,4 +1,5 @@
 #include "ql32/interpreter.hpp"
+#include "ql32/platform/linux/console_keys.hpp"
 #include "ql32/platform/linux/directory_channels.hpp"
 #include "ql32/platform/linux/virtual_hardware.hpp"
 #include "ql32/platform/linux/directory_storage.hpp"
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
                     std::cout.flush();
                 }, hardware);
             auto ui = std::make_shared<ql32::ui::QueuedService>();
+            ui->setKeyInput(std::make_shared<ql32::platform::linux_host::ConsoleKeys>());
             auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
                 "ql32-screen.ppm");
             auto graphics = std::make_shared<ql32::graphics::WindowedService>(
@@ -79,6 +81,7 @@ int main(int argc, char** argv) {
                 std::cout.flush();
             }, hardware);
         auto ui = std::make_shared<ql32::ui::QueuedService>();
+            ui->setKeyInput(std::make_shared<ql32::platform::linux_host::ConsoleKeys>());
         auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
             "ql32-screen.ppm");
         std::shared_ptr<ql32::graphics::Service> graphics;
@@ -98,10 +101,16 @@ int main(int argc, char** argv) {
             );
             auto status = interpreter.executeResumable(source, std::cout);
             while (status == ql32::ExecutionStatus::Suspended ||
+                   status == ql32::ExecutionStatus::Yielded ||
+                   status == ql32::ExecutionStatus::WaitingChannel ||
                    status == ql32::ExecutionStatus::WaitingTime) {
                 if (status == ql32::ExecutionStatus::WaitingTime) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(
                         interpreter.requestedPauseDurationMs()));
+                } else if (status == ql32::ExecutionStatus::WaitingChannel) {
+                    while (!interpreter.channelReadReady()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                } else if (status == ql32::ExecutionStatus::Yielded) {
+                    std::this_thread::yield();
                 } else if (!console.dispatchNext()) {
                     throw std::runtime_error("suspended UI request was not queued");
                 }

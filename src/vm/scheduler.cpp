@@ -1043,6 +1043,17 @@ std::size_t SessionScheduler::activeTaskCount() const noexcept {
     return count;
 }
 
+runtime::SessionId SessionScheduler::keyInputSession() const noexcept {
+    for (const auto& task : tasks_) {
+        if (task->id != focusedTaskId_ || !task->interpreter) continue;
+        if (task->status == TaskStatus::Runnable || task->status == TaskStatus::WaitingChannel ||
+            task->status == TaskStatus::WaitingTime || task->status == TaskStatus::WaitingTask ||
+            task->status == TaskStatus::DebugPaused)
+            return task->interpreter->graphicsSessionId();
+    }
+    return 0;
+}
+
 bool SessionScheduler::hasWaitingUiTask() const noexcept {
     for (const auto& current : tasks_)
         if (current->status == TaskStatus::WaitingUi) return true;

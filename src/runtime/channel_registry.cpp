@@ -159,6 +159,7 @@ ChannelId ChannelRegistry::openTypedDevice(SessionId session, ChannelDevice devi
 double ChannelRegistry::readValue(SessionId session, ChannelId channel,
                                   std::optional<double> reg) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     if (opened.type != ChannelType::Hardware || !hardware_) unsupported("scalar input");
     return hardware_->readValue(session, opened.backend, reg);
 }
@@ -166,6 +167,7 @@ double ChannelRegistry::readValue(SessionId session, ChannelId channel,
 void ChannelRegistry::writeValue(SessionId session, ChannelId channel, double value,
                                  std::optional<double> reg) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     if (opened.type != ChannelType::Hardware || !hardware_) unsupported("scalar output");
     hardware_->writeValue(session, opened.backend, value, reg);
 }
@@ -175,6 +177,7 @@ std::size_t ChannelRegistry::readDeviceBytes(SessionId session, ChannelId channe
                                              std::uint8_t* buffer,
                                              std::size_t capacity) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     if (opened.type != ChannelType::Hardware || !hardware_) unsupported("device byte input");
     return hardware_->readBytes(session, opened.backend, reg, buffer, capacity);
 }
@@ -184,6 +187,7 @@ void ChannelRegistry::writeDeviceBytes(SessionId session, ChannelId channel,
                                        const std::uint8_t* buffer,
                                        std::size_t length) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     if (opened.type != ChannelType::Hardware || !hardware_) unsupported("device byte output");
     hardware_->writeBytes(session, opened.backend, reg, buffer, length);
 }
@@ -192,6 +196,7 @@ void ChannelRegistry::transfer(SessionId session, ChannelId channel,
                                const std::uint8_t* tx, std::size_t txLength,
                                std::uint8_t* rx, std::size_t rxLength) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     if (opened.type != ChannelType::Hardware || !hardware_) unsupported("transfer");
     hardware_->transfer(session, opened.backend, tx, txLength, rx, rxLength);
 }
@@ -199,6 +204,8 @@ void ChannelRegistry::transfer(SessionId session, ChannelId channel,
 std::optional<std::string> ChannelRegistry::readLine(SessionId session,
                                                      ChannelId channel) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.type == ChannelType::Directory)
+        throw Error(ErrorCode::UnsupportedOperation, "directory input requires READ$");
     if (opened.type == ChannelType::File) return files_->readLine(session, opened.backend);
     if (opened.type == ChannelType::Hardware && hardware_)
         return hardware_->readLine(session, opened.backend);
@@ -234,6 +241,7 @@ bool ChannelRegistry::isHardwareChannel(SessionId session, ChannelId channel) co
 std::string ChannelRegistry::readBytes(SessionId session, ChannelId channel,
                                        std::size_t count) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     if (opened.type == ChannelType::File) return files_->readBytes(session, opened.backend, count);
     if (opened.type == ChannelType::Hardware && hardware_) {
         std::string bytes(count, '\0');
@@ -248,6 +256,7 @@ std::string ChannelRegistry::readBytes(SessionId session, ChannelId channel,
 void ChannelRegistry::writeBytes(SessionId session, ChannelId channel,
                                  std::string_view bytes) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     switch (opened.type) {
     case ChannelType::File:
         files_->writeBytes(session, opened.backend, bytes);
@@ -268,12 +277,14 @@ void ChannelRegistry::writeBytes(SessionId session, ChannelId channel,
 void ChannelRegistry::seek(SessionId session, ChannelId channel,
                            std::uint64_t offset) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     if (opened.type != ChannelType::File) unsupported("seeking");
     files_->seek(session, opened.backend, offset);
 }
 
 bool ChannelRegistry::atEnd(SessionId session, ChannelId channel) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) return opened.directory->atEnd();
     if (opened.type != ChannelType::File) unsupported("EOF checks");
     return files_->atEnd(session, opened.backend);
 }
@@ -281,6 +292,7 @@ bool ChannelRegistry::atEnd(SessionId session, ChannelId channel) {
 void ChannelRegistry::write(SessionId session, ChannelId channel,
                             const std::string& text) {
     const Endpoint opened = endpoint(session, channel);
+    if (opened.directory) throw Error(ErrorCode::UnsupportedOperation, "operation unsupported on directory channel");
     switch (opened.type) {
     case ChannelType::File:
         files_->write(session, opened.backend, text);
@@ -309,6 +321,7 @@ void ChannelRegistry::close(SessionId session, ChannelId channel) {
 }
 
 void ChannelRegistry::closeSession(SessionId session) {
+    cancelPendingOperations(session);
     if (files_) files_->closeSession(session);
     if (hardware_) hardware_->closeSession(session);
     std::lock_guard lock(mutex_);
@@ -360,6 +373,79 @@ void ChannelRegistry::publishTouch(SessionId session, const TouchEvent& event) {
         }
         events.push_back(event);
     }
+}
+
+void ChannelRegistry::directoryLimits(DirectoryLimits limits) {
+    std::lock_guard lock(mutex_);
+    if (!endpoints_.empty() || !pendingDirectories_.empty())
+        throw Error(ErrorCode::InvalidArgument, "configure directory limits before opening channels");
+    directoryLimits_ = limits;
+}
+std::optional<ChannelId> ChannelRegistry::pollDirectoryOpen(SessionId session,
+        const std::string& path, const std::string& pattern, std::uint32_t options) {
+    // Scheduler serializes service jobs; no filesystem call is made with the
+    // registry mutex held. Each pending job is owned by exactly one session.
+    if (!storage_) throw Error(ErrorCode::ServiceUnavailable, "directory storage unavailable");
+    auto job = pendingDirectories_.find(session);
+    if (job == pendingDirectories_.end()) {
+        std::size_t channels = 0, localBytes = 0, systemBytes = 0;
+        for (const auto& item : endpoints_) {
+            if (!item.second.directory) continue;
+            const auto bytes = item.second.directory->snapshotBytes();
+            systemBytes += bytes;
+            if (item.second.session == session) { ++channels; localBytes += bytes; }
+        }
+        for (const auto& item : pendingDirectories_) systemBytes += item.second->snapshotBytes();
+        if (channels >= directoryLimits_.maxChannels)
+            throw Error(ErrorCode::TaskLimit, "directory channel limit reached");
+        const std::size_t bytes = (options & 126u) ? directoryLimits_.snapshotBytes : 0;
+        if (localBytes + bytes > directoryLimits_.perSessionBytes || systemBytes + bytes > directoryLimits_.systemBytes)
+            throw Error(ErrorCode::TaskLimit, "directory snapshot memory limit reached");
+        if (path.size() > 1023) throw Error(ErrorCode::InvalidPath, "directory path too long");
+        // Validate masks/patterns before touching storage or allocating a snapshot.
+        const auto sort = options & 126u;
+        if ((options & ~127u) || (sort && (sort & (sort - 1))) || pattern.size() > 255 || pattern.find_first_of("/\\:") != std::string::npos)
+            throw Error(ErrorCode::InvalidArgument, "invalid directory options or wildcard");
+        auto cursor = storage_->openDirectory(path);
+        auto listing = std::make_shared<DirectoryStream>(std::move(cursor), pattern, options, directoryLimits_);
+        job = pendingDirectories_.emplace(session, std::move(listing)).first;
+    }
+    try {
+        if (!job->second->prepare()) return std::nullopt;
+        const auto handle = allocate(session, ChannelType::Directory);
+        endpoints_.at(handle).directory = job->second;
+        pendingDirectories_.erase(job);
+        return handle;
+    } catch (...) { pendingDirectories_.erase(session); throw; }
+}
+void ChannelRegistry::cancelPendingOperations(SessionId session) noexcept { pendingDirectories_.erase(session); }
+bool ChannelRegistry::isDirectoryChannel(SessionId session, ChannelId channel) const {
+    return endpoint(session, channel).type == ChannelType::Directory;
+}
+bool ChannelRegistry::directoryReady(SessionId session, ChannelId channel) {
+    const auto opened = endpoint(session, channel);
+    if (!opened.directory) throw Error(ErrorCode::UnsupportedOperation, "not a directory channel");
+    return opened.directory->ready();
+}
+std::string_view ChannelRegistry::directoryName(SessionId session, ChannelId channel) {
+    const auto opened = endpoint(session, channel);
+    if (!opened.directory) throw Error(ErrorCode::UnsupportedOperation, "not a directory channel");
+    return opened.directory->nextName();
+}
+void ChannelRegistry::commitDirectoryRead(SessionId session, ChannelId channel) noexcept {
+    const auto found = endpoints_.find(channel);
+    if (found != endpoints_.end() && found->second.session == session && found->second.directory)
+        found->second.directory->commitRead();
+}
+double ChannelRegistry::directoryInfo(SessionId session, ChannelId channel, unsigned selector, bool single) {
+    const auto opened = endpoint(session, channel);
+    if (!opened.directory) throw Error(ErrorCode::UnsupportedOperation, "not a directory channel");
+    return opened.directory->info(selector, single);
+}
+std::string ChannelRegistry::directoryInfoText(SessionId session, ChannelId channel, unsigned selector) {
+    const auto opened = endpoint(session, channel);
+    if (!opened.directory) throw Error(ErrorCode::UnsupportedOperation, "not a directory channel");
+    return opened.directory->infoText(selector);
 }
 
 } // namespace ql32::runtime

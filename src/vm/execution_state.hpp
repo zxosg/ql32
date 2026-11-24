@@ -3,6 +3,8 @@
 #include "../language/bytecode.hpp"
 #include "ql32/ui/service.hpp"
 
+#include <array>
+#include <map>
 #include <cstddef>
 #include <cstdint>
 #include <chrono>
@@ -16,8 +18,9 @@
 namespace ql32::detail {
 
 struct ForRange { double start = 0; double end = 0; double step = 1; bool single = false; };
-struct ForState { std::vector<ForRange> ranges; std::size_t item = 0; };
+struct ForState { std::size_t callDepth = 0; std::vector<ForRange> ranges; std::size_t item = 0; };
 struct RuntimeFrame {
+    std::size_t selectBase = 0;
     std::size_t returnAddress = 0;
     std::size_t callInstruction = 0;
     int callSourceLine = 0;
@@ -55,10 +58,28 @@ struct MenuBuilder {
     bool hasResult = false;
 };
 
+struct TrapRecord {
+    std::size_t stackDepth, callDepth, selectDepth, codeSize, continuation;
+    runtime::ChannelId printChannel;
+    std::size_t printColumn;
+};
+struct TrapState {
+    std::array<TrapRecord, 8> records{};
+    std::size_t count = 0;
+};
+struct PendingKey {
+    std::optional<std::chrono::steady_clock::time_point> deadline;
+    std::optional<std::int32_t> ready;
+    bool text = false;
+};
 struct VMExecutionState {
+    std::optional<PendingKey> pendingKey;
+    bool interactiveSubmission = false;
+    std::unique_ptr<TrapState> traps;
+    std::size_t sliceInstructions = 0;
     InstructionSequence code;
     std::vector<StackEntry> stack;
-    std::unordered_map<std::size_t, ForState> forStates;
+    std::map<std::pair<std::size_t, std::size_t>, ForState> forStates;
     std::vector<RuntimeFrame> callFrames;
     std::unordered_map<std::string, RuntimeArray> arrays;
     std::vector<SelectState> selectStates;

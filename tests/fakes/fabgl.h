@@ -53,6 +53,16 @@ private:
     std::deque<VirtualKeyItem> queue;
 };
 
+struct RGBA8888 {
+    std::uint8_t R=0, G=0, B=0, A=255;
+    RGBA8888() = default;
+    RGBA8888(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) : R(r), G(g), B(b), A(a) {}
+};
+enum class PixelFormat { RGBA8888 };
+struct Bitmap {
+    int width, height;
+    Bitmap(int w, int h, const RGBA8888*, PixelFormat) : width(w), height(h) {}
+};
 class Canvas {
 public:
     int width = 320;
@@ -84,6 +94,7 @@ public:
     void endUpdate() { ++updateCount; }
     void waitCompletion(bool) { ++completionCount; }
     void setPixel(int, int, RGB888 const&) { ++pixelCount; }
+    void drawBitmap(int, int, const Bitmap* bitmap) { pixelCount += bitmap->width * bitmap->height; }
     void setPenColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) {
         penRed = red; penGreen = green; penBlue = blue;
     }

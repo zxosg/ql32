@@ -18,6 +18,7 @@ add_library(ql32_portable
   src/graphics/font.cpp
   src/graphics/window_manager.cpp
   src/graphics/windowed_service.cpp
+  src/runtime/directory.cpp
   src/runtime/channel_registry.cpp
   src/runtime/buffer.cpp
   src/runtime/ui_service.cpp
@@ -34,6 +35,7 @@ add_library(ql32_host_adapters
   src/platform/linux/directory_channels.cpp
   src/platform/linux/virtual_hardware.cpp
   src/platform/linux/directory_storage.cpp
+  src/platform/linux/console_keys.cpp
   src/platform/linux/console_ui.cpp
   src/platform/linux/system_clock.cpp
   src/platform/linux/memory.cpp
@@ -53,6 +55,9 @@ target_link_libraries(ql32 PRIVATE ql32_host)
 
 if(QL32_BUILD_TESTS)
   enable_testing()
+  add_executable(ql32_application_extensions_tests tests/application_extensions_tests.cpp)
+  target_link_libraries(ql32_application_extensions_tests PRIVATE ql32_host)
+  add_test(NAME ql32_application_extensions_tests COMMAND ql32_application_extensions_tests)
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_Interpreter_FOUND)
     add_test(NAME ql32_font_converter_tests

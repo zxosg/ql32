@@ -23,7 +23,7 @@ enum class Op {
     Input, JumpIfFalse, Jump,
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
     DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd,
-    Pause
+    Pause, TrapBegin, TrapEnd, Raise
 };
 
 struct ForItemSpec {

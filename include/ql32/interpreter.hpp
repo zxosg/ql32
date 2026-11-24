@@ -76,6 +76,7 @@ public:
                  std::function<bool()> dispatchUiRequest = {});
     std::vector<runtime::ChannelInfo> channelInventory() const;
     bool channelReadReady() const;
+    bool waitingForKey() const noexcept;
     std::size_t openChannelCount() const;
     void setErrorContext(runtime::ErrorCode code, std::string detail = {});
     void abortExecution() noexcept;
@@ -103,7 +104,10 @@ public:
     bool hasPendingInteractivePager() const noexcept;
     ExecutionStatus resumeInteractivePager(std::ostream& output);
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
-    const std::string& errorDetail() const noexcept { return errorDetail_; }
+    const std::string& errorDetail() const {
+        if (hasTrappedDetail_) errorDetail_.assign(trappedDetail_);
+        return errorDetail_;
+    }
     void clear();
     std::uint32_t requestedPauseDurationMs() const noexcept {
         return requestedPauseDurationMs_;
@@ -112,6 +116,8 @@ public:
 private:
     ExecutionStatus runExecution(std::ostream& output, runtime::CancellationToken stop,
                                  std::size_t instructionBudget = 0);
+    ExecutionStatus runExecutionBody(std::ostream& output, runtime::CancellationToken stop,
+                                     std::size_t instructionBudget);
     void writePagerPage(std::ostream& output, std::size_t lineCount);
     void clearPager() noexcept;
     runtime::ChannelId resolveChannel(runtime::ChannelId channel) const;
@@ -157,7 +163,9 @@ private:
     std::uint32_t requestedPauseDurationMs_ = 0;
     std::uint64_t randomState_ = 0;
     runtime::ErrorCode errorCode_ = runtime::ErrorCode::None;
-    std::string errorDetail_;
+    mutable std::string errorDetail_;
+    char trappedDetail_[97]{};
+    bool hasTrappedDetail_ = false;
     std::unique_ptr<detail::VMExecutionState> execution_;
     std::unique_ptr<detail::VMExecutionState> stoppedExecution_;
     bool debuggerAttached_ = false;
