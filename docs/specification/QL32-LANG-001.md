@@ -3,6 +3,8 @@
 **Document ID:** QL32-LANG-001  
 **Version:** 0.7 (M1 language contract)
 **Status:** Approved profile; M1 acceptance complete on Linux; source inclusion, GOTO, module constants, and module options implemented and host-tested
+
+Application language additions are specified in [QL32-LANG-002](QL32-LANG-002-application-features.md): conditional named `REPeat` using `WHILE`/`UNTIL`, statement `TRAP` and `RAISE`, millisecond `INKEY`/`INKEY$`, and bounded directory channels with `DIRINFO`/`DIRINFO$`. Their portable implementation is available; embedded runtime acceptance remains a separate gate.
 **Sources:** [reference index](../reference/README.md), [language decision](../decisions/ADR-002-language-profile.md)
 
 ## 1. Language profile
