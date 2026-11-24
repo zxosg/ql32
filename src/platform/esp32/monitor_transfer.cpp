@@ -2,7 +2,11 @@
 
 #include "ql32/runtime/ymodem.hpp"
 
+#include "ql32/platform/esp32/diagnostics.hpp"
 #include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <cstdio>
 
 #include <algorithm>
 #include <cctype>
@@ -56,9 +60,32 @@ bool handleMonitorTransferCommand(std::string_view input,
     const std::string command = uppercase(line.substr(0, separator));
     if (command == "HEAP") {
 #if defined(QL32_HEAP_DIAGNOSTICS)
-        if (separator != std::string::npos &&
-            !trim(line.substr(separator + 1)).empty()) {
-            serial.println("Usage: HEAP");
+        const std::string arg = separator == std::string::npos ? std::string() :
+            uppercase(trim(line.substr(separator + 1)));
+        if (arg == "STATS") {
+            multi_heap_info_t info{};
+            heap_caps_get_info(&info, MALLOC_CAP_8BIT);
+            auto& d = ql32::platform::esp32::diagnostics();
+            auto stack = [](void* h) {
+                return h ? static_cast<unsigned>(uxTaskGetStackHighWaterMark(
+                               static_cast<TaskHandle_t>(h))) : 0u;
+            };
+            char buf[200];
+            std::snprintf(buf, sizeof(buf),
+                "HEAPSTATS|free=%u|largest=%u|min=%u|loopstack=%u|musicstack=%u|"
+                "musiciostack=%u|failedalloc=%u|lastfail=%u",
+                static_cast<unsigned>(info.total_free_bytes),
+                static_cast<unsigned>(info.largest_free_block),
+                static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT)),
+                static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
+                stack(d.musicTask.load()), stack(d.musicIoTask.load()),
+                static_cast<unsigned>(d.failedAllocations.load()),
+                static_cast<unsigned>(d.lastFailedAllocBytes.load()));
+            serial.println(buf);
+            return true;
+        }
+        if (!arg.empty()) {
+            serial.println("Usage: HEAP [STATS]");
             return true;
         }
         serial.println("HEAPDUMP|BEGIN");

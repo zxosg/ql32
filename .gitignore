@@ -8,3 +8,6 @@
 *.swp
 *.swo
 
+
+# Local Python environment
+.venv/

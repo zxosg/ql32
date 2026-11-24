@@ -9,6 +9,7 @@
 #include <functional>
 #include <list>
 #include <map>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -44,6 +45,40 @@ enum class CanvasResizePhase : std::uint8_t {
 using CanvasResizeObserver =
     std::function<void(CanvasResizePhase, std::size_t, std::size_t)>;
 
+// Optional low-level raster hooks for a platform adapter. The view describes
+// the canvas's existing packed storage; implementations must return false
+// without changing it when an operation is unsupported.
+struct CanvasBufferView {
+    std::uint8_t* pixels = nullptr;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    // Byte stride between rows, or zero when this canvas packs rows across a
+    // byte boundary and cannot be represented as a row-aligned view.
+    std::uint32_t stride = 0;
+    PixelDepth depth = PixelDepth::Four;
+    ColorIndex ink = 0;
+    ColorIndex paper = 0;
+    OverMode overMode = OverMode::Set;
+};
+
+class CanvasRasterOps {
+public:
+    virtual ~CanvasRasterOps() = default;
+    virtual bool clear(CanvasBufferView) const noexcept { return false; }
+    virtual bool setPixel(CanvasBufferView, std::int32_t, std::int32_t,
+                          ColorIndex) const noexcept { return false; }
+    virtual bool plotPixel(CanvasBufferView, std::int32_t,
+                           std::int32_t) const noexcept { return false; }
+    virtual bool line(CanvasBufferView, Point, Point) const noexcept { return false; }
+    virtual bool fillRectangle(CanvasBufferView, Point, std::int32_t,
+                               std::int32_t) const noexcept { return false; }
+    virtual bool circle(CanvasBufferView, Point, std::int32_t,
+                        bool) const noexcept { return false; }
+    virtual bool scrollUp(CanvasBufferView, std::uint32_t) const noexcept {
+        return false;
+    }
+};
+
 // Independently allocated retained canvas pixels. Handles remain stable when
 // one canvas is resized or released.
 class CanvasArena {
@@ -55,6 +90,19 @@ public:
     std::uint64_t allocate(std::size_t bytes);
     void release(std::uint64_t handle) noexcept;
     void replace(std::uint64_t handle, std::vector<std::uint8_t>&& bytes);
+    std::size_t capacity(std::uint64_t handle) const noexcept;
+    // Resizes within the existing allocation; never reallocates.
+    bool resizeInPlace(std::uint64_t handle, std::size_t bytes) noexcept;
+    // Returns spare capacity to the allocator when it is worth the transient copy.
+    void trim(std::uint64_t handle) noexcept;
+    // Frees the block and allocates a zeroed one; contents are lost. On
+    // failure the previous size is restored (zeroed) and the error rethrown.
+    void reallocateDiscard(std::uint64_t handle, std::size_t bytes);
+    // Platform probe returning the largest free allocation in bytes.
+    void setMemoryProbe(std::function<std::size_t()> probe) {
+        memoryProbe_ = std::move(probe);
+    }
+    bool lowMemoryFor(std::size_t bytes) const;
     void setResizeObserver(CanvasResizeObserver observer) {
         resizeObserver_ = std::move(observer);
     }
@@ -72,13 +120,16 @@ private:
     std::uint64_t nextHandle_ = 1;
     std::list<Block> blocks_;
     CanvasResizeObserver resizeObserver_;
+    std::function<std::size_t()> memoryProbe_;
 };
 
 // Retained indexed canvas with packed 1-, 4-, or 8-bit pixels.
 class IndexedCanvas {
 public:
     IndexedCanvas(std::uint32_t width, std::uint32_t height,
-                  PixelDepth depth = PixelDepth::Four);
+                  PixelDepth depth = PixelDepth::Four,
+                  // Non-owning; the operations object must outlive this canvas.
+                  const CanvasRasterOps* rasterOps = nullptr);
     ~IndexedCanvas();
     IndexedCanvas(const IndexedCanvas&) = delete;
     IndexedCanvas& operator=(const IndexedCanvas&) = delete;
@@ -93,6 +144,7 @@ public:
     ColorIndex paper() const noexcept { return paper_; }
     OverMode overMode() const noexcept { return overMode_; }
     std::size_t storageBytes() const noexcept;
+    CanvasBufferView bufferView() noexcept;
 
     void setDepth(PixelDepth depth);
     void setInk(ColorIndex color);
@@ -119,12 +171,15 @@ private:
     friend class WindowManager;
     ColorIndex readPixel(std::size_t index) const noexcept;
     void writePixel(std::size_t index, ColorIndex color) noexcept;
+    void copyPixelsTo(std::uint32_t y, std::uint32_t x, std::uint32_t width,
+                      ColorIndex* destination) const noexcept;
+    void plotSpan(std::size_t firstPixel, std::size_t pixelCount);
     Rect renderText(Point topLeft, const std::string& value, bool fillBackground,
                     bool useOverMode, const BitmapFont* font, FontStyle style);
     std::uint8_t* pixelData() noexcept;
     const std::uint8_t* pixelData() const noexcept;
     IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth,
-                  CanvasArena* arena);
+                  CanvasArena* arena, const CanvasRasterOps* rasterOps);
     std::uint32_t width_;
     std::uint32_t height_;
     PixelDepth depth_;
@@ -132,7 +187,11 @@ private:
     ColorIndex paper_ = 0;
     OverMode overMode_ = OverMode::Set;
     CanvasArena* arena_ = nullptr;
+    const CanvasRasterOps* rasterOps_ = nullptr;
     std::uint64_t arenaHandle_ = 0;
+    // CanvasArena handles stay stable, but resolving one traverses its block
+    // list. Cache the current allocation pointer on this hot pixel-access path.
+    std::uint8_t* arenaPixels_ = nullptr;
     std::vector<ColorIndex> pixels_;
 };
 
@@ -140,10 +199,14 @@ private:
 // frames after changes, restoring content that was previously covered.
 class WindowManager {
 public:
-    WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight);
+    WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight,
+                  std::shared_ptr<const CanvasRasterOps> rasterOps = {});
 
     WindowId create(SessionId owner, Rect bounds,
                     PixelDepth depth = PixelDepth::Four);
+    void setCanvasMemoryProbe(std::function<std::size_t()> probe) {
+        arena_.setMemoryProbe(std::move(probe));
+    }
     void setCanvasResizeObserver(CanvasResizeObserver observer) {
         arena_.setResizeObserver(std::move(observer));
     }
@@ -159,8 +222,11 @@ public:
     void setBounds(WindowId id, Rect bounds);
     void setPixelDepth(WindowId id, PixelDepth depth);
     void setScreenSize(std::uint32_t width, std::uint32_t height);
+    // Drops all canvas data while retaining per-task viewport assignments.
+    void clearWindows() noexcept;
     void setVisible(WindowId id, bool visible);
     void raise(WindowId id);
+    bool raiseSession(SessionId owner);
     void tile();
 
     IndexedCanvas& canvas(WindowId id);
@@ -197,10 +263,13 @@ private:
     static void validate(TaskViewport viewport);
     Rect screenBounds(const Entry& entry) const;
     Rect clipToTask(const Entry& entry, Rect screenBounds) const;
+    Rect screenBounds(const Entry& entry, const TaskViewport& viewport) const;
+    Rect clipToViewport(const TaskViewport& viewport, Rect screenBounds) const;
 
     std::uint32_t screenWidth_;
     std::uint32_t screenHeight_;
     CanvasArena arena_;
+    std::shared_ptr<const CanvasRasterOps> rasterOps_;
     WindowId nextId_ = 1;
     std::list<Entry> windows_; // bottom-to-top; each entry frees with its owner
     std::map<SessionId, TaskViewport> taskViewports_;

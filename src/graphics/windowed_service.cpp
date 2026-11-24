@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <stdexcept>
 #include <vector>
+
+#include "ql32/runtime/error.hpp"
 
 namespace ql32::graphics {
 namespace {
@@ -53,9 +56,13 @@ Rect unite(Rect first, Rect second) {
 } // namespace
 
 WindowedService::WindowedService(std::uint32_t screenWidth, std::uint32_t screenHeight,
-                                 std::shared_ptr<FramePresenter> presenter)
-    : manager_(screenWidth, screenHeight),
-      presenter_(std::move(presenter)) {}
+                                 std::shared_ptr<FramePresenter> presenter,
+                                 std::shared_ptr<const CanvasRasterOps> rasterOps)
+    : manager_(screenWidth, screenHeight, std::move(rasterOps)),
+      presenter_(std::move(presenter)) {
+    for (std::size_t index = 0; index < palette_.size(); ++index)
+        palette_[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
+}
 
 void WindowedService::discardFrozenWindows() {
     if (frozenWindows_.empty()) return;
@@ -84,12 +91,24 @@ WindowId WindowedService::ensureWindow(SessionId session, ChannelId channel) {
     discardFrozenWindows();
     discardPresentationBuffer();
     const auto defaultBounds = defaultWindowBounds_.find(channel);
+    // Without an explicit default, size the canvas to the task's viewport so a
+    // tiled worker never allocates (then shrinks) a full-screen buffer.
+    const auto viewport = manager_.taskViewport(session);
     const auto bounds = defaultBounds != defaultWindowBounds_.end() ? defaultBounds->second :
-        Rect{0, 0, manager_.screenWidth(), manager_.screenHeight()};
+        Rect{0, 0, std::max(1u, std::min(viewport.canvasWidth, manager_.screenWidth())),
+             std::max(1u, std::min(viewport.canvasHeight, manager_.screenHeight()))};
+    requireCanvasMemory(bounds);
     const auto id = manager_.create(session, bounds,
                                    PixelDepth::Four);
     sessionWindows_.emplace(key, id);
     return id;
+}
+
+void WindowedService::requireCanvasMemory(Rect bounds) const {
+    if (!canvasAdmission_) return;
+    const auto bytes = (static_cast<std::size_t>(bounds.width) * bounds.height + 1) / 2;
+    if (const auto failure = canvasAdmission_(bytes))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfMemory, *failure);
 }
 
 WindowId WindowedService::windowForSession(SessionId session) {
@@ -107,6 +126,125 @@ void WindowedService::setDefaultWindowBounds(ChannelId channel, Rect bounds) {
     if (bounds.width == 0 || bounds.height == 0)
         throw std::invalid_argument("window size must be positive");
     defaultWindowBounds_[channel] = bounds;
+}
+
+bool WindowedService::setDisplaySize(std::uint32_t width, std::uint32_t height) {
+    lastDisplayResizeDiscardedWindows_ = false;
+    if (width == 0 || height == 0 ||
+        width > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
+        height > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()))
+        return false;
+    const auto oldWidth = manager_.screenWidth();
+    const auto oldHeight = manager_.screenHeight();
+    if (oldWidth == width && oldHeight == height) return true;
+
+    auto resizedDefaults = defaultWindowBounds_;
+    for (auto& [channel, bounds] : resizedDefaults) {
+        (void)channel;
+        const auto old = bounds;
+        if (old.x == 0 && old.width == oldWidth) bounds.width = width;
+        if (old.y == 0 && old.height == oldHeight) bounds.height = height;
+        else if (old.y == 0 && old.x == 0 && old.width == oldWidth &&
+                 static_cast<std::uint64_t>(old.height) < oldHeight) {
+            const auto bottomMargin = oldHeight - old.height;
+            bounds.height = height > bottomMargin ? height - bottomMargin : height;
+        }
+        if (old.y != 0 &&
+            static_cast<std::uint64_t>(old.y) + old.height == oldHeight) {
+            bounds.y = static_cast<std::int32_t>(height > old.height ? height - old.height : 0);
+            bounds.height = std::min(bounds.height, height);
+        }
+        if (bounds.height == 0) bounds.height = 1;
+    }
+
+    struct WindowResize { WindowId id; Rect oldBounds; Rect newBounds; };
+    std::vector<WindowResize> windowsToResize;
+    std::map<SessionId, TaskViewport> oldViewports;
+    for (const auto& [key, id] : sessionWindows_) {
+        oldViewports.emplace(key.session, manager_.taskViewport(key.session));
+        const auto oldDefault = defaultWindowBounds_.find(key.channel);
+        const auto nextDefault = resizedDefaults.find(key.channel);
+        if (oldDefault == defaultWindowBounds_.end() || nextDefault == resizedDefaults.end())
+            continue;
+        const auto viewport = manager_.taskViewport(key.session);
+        const auto state = manager_.windowState(id);
+        const auto expectedX = static_cast<std::int64_t>(viewport.originX) +
+                               viewport.offsetX + oldDefault->second.x;
+        const auto expectedY = static_cast<std::int64_t>(viewport.originY) +
+                               viewport.offsetY + oldDefault->second.y;
+        if (state.bounds.x == expectedX && state.bounds.y == expectedY &&
+            state.bounds.width == oldDefault->second.width &&
+            state.bounds.height == oldDefault->second.height)
+            windowsToResize.push_back({id, oldDefault->second, nextDefault->second});
+    }
+
+    manager_.setScreenSize(width, height);
+    try {
+        std::map<SessionId, TaskViewport> viewports;
+        for (const auto& [session, originalViewport] : oldViewports) {
+            auto viewport = originalViewport;
+            if (viewport.originX == 0 && viewport.originY == 0 &&
+                viewport.offsetX == 0 && viewport.offsetY == 0 &&
+                viewport.canvasWidth == oldWidth && viewport.canvasHeight == oldHeight) {
+                viewport.canvasWidth = width;
+                viewport.canvasHeight = height;
+                viewports[session] = viewport;
+            }
+        }
+        for (const auto& [session, viewport] : viewports)
+            manager_.setTaskViewport(session, viewport);
+        for (const auto& window : windowsToResize)
+            manager_.setBounds(window.id, window.newBounds);
+    } catch (...) {
+        for (auto window = windowsToResize.rbegin(); window != windowsToResize.rend(); ++window) {
+            try { manager_.setBounds(window->id, window->oldBounds); } catch (...) {}
+        }
+        for (const auto& [session, viewport] : oldViewports) {
+            try { manager_.setTaskViewport(session, viewport); } catch (...) {}
+        }
+        manager_.setScreenSize(oldWidth, oldHeight);
+
+        // A canvas resize can fail while allocating its replacement buffer.
+        // Retry the screen change with a clean set of canvases so active tasks
+        // survive the mode change and recreate windows on their next draw.
+        for (const auto& [key, id] : sessionWindows_) {
+            (void)key;
+            try { manager_.close(id); } catch (...) {}
+        }
+        sessionWindows_.clear();
+        for (const auto id : frozenWindows_) {
+            try {
+                const auto owner = manager_.windowState(id).owner;
+                manager_.close(id);
+                manager_.releaseTaskViewportIfUnused(owner);
+            } catch (...) {}
+        }
+        frozenWindows_.clear();
+        manager_.clearWindows();
+        textCursors_.clear();
+        graphicsCursors_.clear();
+        manager_.setScreenSize(width, height);
+        defaultWindowBounds_ = std::move(resizedDefaults);
+        lastDisplayResizeDiscardedWindows_ = true;
+        if (consoleClearCallback_) consoleClearCallback_();
+        if (consoleTextPositionCallback_) consoleTextPositionCallback_(0, 0);
+        if (consoleBoundsCallback_) {
+            const auto console = defaultWindowBounds_.find(0);
+            if (console != defaultWindowBounds_.end()) consoleBoundsCallback_(console->second);
+        }
+        discardPresentationBuffer();
+        present();
+        return true;
+    }
+
+    defaultWindowBounds_ = std::move(resizedDefaults);
+    if (consoleBoundsCallback_) {
+        const auto console = defaultWindowBounds_.find(0);
+        if (console != defaultWindowBounds_.end()) consoleBoundsCallback_(console->second);
+    }
+    discardPresentationBuffer();
+    present();
+    return true;
 }
 
 IndexedCanvas& WindowedService::canvas(SessionId session, ChannelId channel) {
@@ -170,11 +308,23 @@ void WindowedService::line(SessionId session, Point from, Point to) {
 
 void WindowedService::line(SessionId session, ChannelId channel, Point from, Point to) {
     canvas(session, channel).line(from, to);
+    graphicsCursors_[SurfaceKey{session, channel}] = to;
     const auto left = std::min<std::int64_t>(from.x, to.x);
     const auto top = std::min<std::int64_t>(from.y, to.y);
     const auto width = std::abs(static_cast<std::int64_t>(from.x) - to.x) + 1;
     const auto height = std::abs(static_cast<std::int64_t>(from.y) - to.y) + 1;
     presentRegion(screenRegion(session, channel, left, top, width, height));
+}
+
+void WindowedService::setGraphicsPosition(SessionId session, ChannelId channel,
+                                          Point position) {
+    (void)canvas(session, channel);
+    graphicsCursors_[SurfaceKey{session, channel}] = position;
+}
+
+Point WindowedService::graphicsPosition(SessionId session, ChannelId channel) const {
+    const auto found = graphicsCursors_.find(SurfaceKey{session, channel});
+    return found == graphicsCursors_.end() ? Point{} : found->second;
 }
 
 void WindowedService::pixel(SessionId session, Point position) {
@@ -185,6 +335,30 @@ void WindowedService::pixel(SessionId session, ChannelId channel, Point position
     auto& target = canvas(session, channel);
     target.plotPixel(position.x, position.y);
     presentRegion(screenRegion(session, channel, position.x, position.y, 1, 1));
+}
+
+ColorIndex WindowedService::inkColor(SessionId session, ChannelId channel) {
+    return canvas(session, channel).ink();
+}
+
+void WindowedService::drawIndexedRow(SessionId session, ChannelId channel,
+                                     Point topLeft, const std::uint8_t* pixels,
+                                     std::size_t count,
+                                     std::optional<ColorIndex> transparentIndex) {
+    if (!pixels && count != 0) throw std::invalid_argument("bitmap row is null");
+    auto& target = canvas(session, channel);
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const auto color = pixels[offset];
+        if (transparentIndex && color == *transparentIndex) continue;
+        const auto x = static_cast<std::int64_t>(topLeft.x) +
+            static_cast<std::int64_t>(offset);
+        if (x < std::numeric_limits<std::int32_t>::min() ||
+            x > std::numeric_limits<std::int32_t>::max()) continue;
+        target.setPixel(static_cast<std::int32_t>(x), topLeft.y, color);
+    }
+    if (count != 0)
+        presentRegion(screenRegion(session, channel, topLeft.x, topLeft.y,
+                                   static_cast<std::int64_t>(count), 1));
 }
 
 void WindowedService::rectangle(SessionId session, Point topLeft,
@@ -265,6 +439,14 @@ void WindowedService::setGraphicsFont(SessionId session, ChannelId channel,
     graphicsFonts_[{session, channel}] = {font, style};
 }
 
+void WindowedService::resetTextFont(SessionId session, ChannelId channel) {
+    textFonts_.erase({session, channel});
+}
+
+void WindowedService::resetGraphicsFont(SessionId session, ChannelId channel) {
+    graphicsFonts_.erase({session, channel});
+}
+
 void WindowedService::clearFontSelections(SessionId session, ChannelId channel) {
     textFonts_.erase({session, channel});
     graphicsFonts_.erase({session, channel});
@@ -331,6 +513,23 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
     bool scrolled = false;
     cursor.x = std::clamp(cursor.x, 0, std::max(0, maxX - cellWidth));
     cursor.y = std::clamp(cursor.y, 0, std::max(0, maxY - cellHeight));
+    struct PendingTextRun {
+        Point position;
+        std::uint64_t scrollRowsBefore;
+        std::string text;
+    };
+    std::vector<PendingTextRun> pendingRuns;
+    pendingRuns.reserve(std::min<std::size_t>(value.size() / columns + 1, rows + 1));
+    std::uint64_t scrollRows = 0;
+    std::string run;
+    run.reserve(std::min<std::size_t>(value.size(), columns));
+    Point runPosition = cursor;
+    std::uint64_t runScrollRows = 0;
+    const auto flushRun = [&] {
+        if (run.empty()) return;
+        pendingRuns.push_back({runPosition, runScrollRows, std::move(run)});
+        run.clear();
+    };
     for (std::size_t offset = 0; offset < value.size();) {
         const auto raw = static_cast<std::uint8_t>(value[offset]);
         if (raw == '\r') {
@@ -338,6 +537,7 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
             continue;
         }
         if (raw == '\n') {
+            flushRun();
             cursor.x = 0;
             cursor.y += cellHeight;
             ++offset;
@@ -351,21 +551,44 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
                 advance = glyph.advance;
             }
             if (cursor.x + advance > maxX) {
+                flushRun();
                 cursor.x = 0;
                 cursor.y += cellHeight;
             }
-            const Rect glyphDirty = selectedFont ?
-                target.printText(cursor, std::string(1, static_cast<char>(character)),
-                                 *selectedFont, selection.style) :
-                target.printText(cursor, std::string(1, static_cast<char>(character)));
-            dirty = unite(dirty, glyphDirty);
+            if (run.empty()) {
+                runPosition = cursor;
+                runScrollRows = scrollRows;
+            }
+            run.push_back(static_cast<char>(character));
             cursor.x += advance;
         }
         if (cursor.y + cellHeight - 1 >= maxY) {
-            target.scrollUp(cellHeight);
+            flushRun();
+            scrollRows += cellHeight;
             cursor.y = std::max(0, cursor.y - cellHeight);
             scrolled = true;
         }
+    }
+    flushRun();
+    if (scrolled)
+        target.scrollUp(static_cast<std::uint32_t>(std::min<std::uint64_t>(
+            scrollRows, target.height())));
+    for (const auto& pending : pendingRuns) {
+        Point position = pending.position;
+        if (scrolled) {
+            // Text written before later scrolls moves up with the existing
+            // canvas. Runs already below the bottom edge were clipped before
+            // those scrolls and must remain invisible.
+            if (position.y < 0 || position.y + cellHeight > maxY) continue;
+            const auto laterScrollRows = scrollRows - pending.scrollRowsBefore;
+            const auto finalY = static_cast<std::int64_t>(position.y) - laterScrollRows;
+            if (finalY + cellHeight <= 0 || finalY >= maxY) continue;
+            position.y = static_cast<std::int32_t>(finalY);
+        }
+        const Rect runDirty = selectedFont ?
+            target.printText(position, pending.text, *selectedFont, selection.style) :
+            target.printText(position, pending.text);
+        dirty = unite(dirty, runDirty);
     }
     if (scrolled) dirty = {0, 0, target.width(), target.height()};
     if (dirty.width != 0 && dirty.height != 0) {
@@ -373,8 +596,65 @@ void WindowedService::writeText(SessionId session, ChannelId channel,
             static_cast<std::int32_t>(static_cast<std::int64_t>(bounds.x) + dirty.x),
             static_cast<std::int32_t>(static_cast<std::int64_t>(bounds.y) + dirty.y),
             dirty.width, dirty.height};
-        presentRegion(intersect(translated, manager_.windowState(id).screenClip));
+        const Rect screenDirty = intersect(
+            translated, manager_.windowState(id).screenClip);
+        const auto batch = textOutputBatches_.find(key);
+        if (batch != textOutputBatches_.end() && batch->second.depth != 0)
+            batch->second.dirty = unite(batch->second.dirty, screenDirty);
+        else
+            presentRegion(screenDirty);
     }
+}
+
+void WindowedService::beginTextOutputBatch(SessionId session, ChannelId channel) {
+    if (channel == 0) {
+        if (consoleOutputBatchBeginCallback_) consoleOutputBatchBeginCallback_();
+        return;
+    }
+    ++textOutputBatches_[{session, channel}].depth;
+}
+
+void WindowedService::endTextOutputBatch(SessionId session, ChannelId channel) {
+    if (channel == 0) {
+        if (consoleOutputBatchEndCallback_) consoleOutputBatchEndCallback_();
+        return;
+    }
+    const SurfaceKey key{session, channel};
+    const auto batch = textOutputBatches_.find(key);
+    if (batch == textOutputBatches_.end() || batch->second.depth == 0) return;
+    if (--batch->second.depth != 0) return;
+    const Rect dirty = batch->second.dirty;
+    textOutputBatches_.erase(batch);
+    presentRegion(dirty);
+}
+
+void WindowedService::flushTextOutputBatches(SessionId session) {
+    for (auto batch = textOutputBatches_.begin(); batch != textOutputBatches_.end();) {
+        if (batch->first.session != session) {
+            ++batch;
+            continue;
+        }
+        const Rect dirty = batch->second.dirty;
+        batch = textOutputBatches_.erase(batch);
+        presentRegion(dirty);
+    }
+    flushPendingPresentation();
+}
+
+void WindowedService::beginPresentationBatch(SessionId session) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    ++presentationBatchDepth_;
+}
+
+void WindowedService::endPresentationBatch(SessionId session) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    if (presentationBatchDepth_ == 0 || --presentationBatchDepth_ != 0) return;
+    const bool fullFrame = presentationBatchNeedsFullFrame_;
+    const Rect dirty = presentationBatchDirty_;
+    presentationBatchNeedsFullFrame_ = false;
+    presentationBatchDirty_ = {};
+    if (fullFrame) present();
+    else if (dirty.width != 0 && dirty.height != 0) presentRegion(dirty);
 }
 
 void WindowedService::clear(SessionId session) {
@@ -399,12 +679,14 @@ void WindowedService::closeWindow(SessionId session, ChannelId channel) {
     const auto found = sessionWindows_.find(key);
     if (found == sessionWindows_.end()) {
         textCursors_.erase(key);
+        graphicsCursors_.erase(key);
         return;
     }
     const auto oldBounds = manager_.windowState(found->second).screenClip;
     manager_.close(found->second);
     sessionWindows_.erase(found);
     textCursors_.erase(key);
+    graphicsCursors_.erase(key);
     if (channel == 0 && consoleBoundsCallback_) {
         const auto fallback = defaultWindowBounds_.find(channel);
         if (fallback != defaultWindowBounds_.end()) {
@@ -426,6 +708,10 @@ void WindowedService::closeWindow(SessionId session, ChannelId channel) {
 }
 
 void WindowedService::closeSession(SessionId session) {
+    for (auto batch = textOutputBatches_.begin(); batch != textOutputBatches_.end();) {
+        if (batch->first.session == session) batch = textOutputBatches_.erase(batch);
+        else ++batch;
+    }
     for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
         if (found->first.session != session) {
             ++found;
@@ -433,6 +719,7 @@ void WindowedService::closeSession(SessionId session) {
         }
         frozenWindows_.push_back(found->second);
         textCursors_.erase(found->first);
+        graphicsCursors_.erase(found->first);
         textFonts_.erase(found->first);
         graphicsFonts_.erase(found->first);
         found = sessionWindows_.erase(found);
@@ -449,6 +736,10 @@ void WindowedService::closeSession(SessionId session) {
 }
 
 void WindowedService::discardSession(SessionId session) {
+    for (auto batch = textOutputBatches_.begin(); batch != textOutputBatches_.end();) {
+        if (batch->first.session == session) batch = textOutputBatches_.erase(batch);
+        else ++batch;
+    }
     Rect dirty{};
     for (const auto& [key, id] : sessionWindows_)
         if (key.session == session)
@@ -460,6 +751,7 @@ void WindowedService::discardSession(SessionId session) {
     for (auto found = sessionWindows_.begin(); found != sessionWindows_.end();) {
         if (found->first.session == session) {
             textCursors_.erase(found->first);
+            graphicsCursors_.erase(found->first);
             textFonts_.erase(found->first);
             graphicsFonts_.erase(found->first);
             found = sessionWindows_.erase(found);
@@ -489,11 +781,31 @@ void WindowedService::discardSession(SessionId session) {
 void WindowedService::setUpdateMode(SessionId session, UpdateMode mode) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
     updateMode_ = mode;
-    if (mode != UpdateMode::Off) present();
+    if (mode != UpdateMode::Off) update(session);
+}
+
+void WindowedService::setFrameSkip(SessionId session, std::uint32_t frames) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    frameSkip_ = frames;
+    frameSkipRemaining_ = 0;
+}
+
+void WindowedService::resetUpdateState(SessionId session) {
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    updateMode_ = UpdateMode::Auto;
+    frameSkip_ = 0;
+    frameSkipRemaining_ = 0;
+    present();
 }
 
 void WindowedService::update(SessionId session) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    if (skipPresentationRequest()) return;
+    if (coalescingEnabled() && presenter_ && presentationBatchDepth_ == 0) {
+        Rect whole{0, 0, manager_.screenWidth(), manager_.screenHeight()};
+        if (takeCoalescedRegion(whole)) presentRegionNow(whole);
+        return;
+    }
     present();
 }
 
@@ -525,7 +837,19 @@ RgbColor WindowedService::paletteColor(SessionId session, ChannelId channel,
                                        std::uint16_t index) {
     const auto& window = canvas(session, channel);
     if (index >= window.paletteSize()) throw std::out_of_range("palette index out of range");
-    return defaultPaletteColor(index);
+    return palette_[index];
+}
+
+void WindowedService::setPaletteColors(
+    SessionId session, std::uint16_t firstIndex,
+    const std::vector<RgbColor>& colors) {
+    if (colors.empty()) throw std::invalid_argument("palette range cannot be empty");
+    if (session == 0) throw std::invalid_argument("graphics session must be valid");
+    const auto paletteSize = windowInfo(session).paletteSize;
+    if (firstIndex >= paletteSize || colors.size() > paletteSize - firstIndex)
+        throw std::out_of_range("palette range exceeds the active palette");
+    std::copy(colors.begin(), colors.end(), palette_.begin() + firstIndex);
+    presentRegion({0, 0, manager_.screenWidth(), manager_.screenHeight()});
 }
 
 void WindowedService::setWindowBounds(SessionId session, Rect bounds) {
@@ -542,6 +866,7 @@ void WindowedService::setWindowBounds(SessionId session, ChannelId channel, Rect
         // frozen canvases here just as ensureWindow() does for drawing commands.
         discardFrozenWindows();
         discardPresentationBuffer();
+        requireCanvasMemory(bounds);
         const auto id = manager_.create(session, bounds, PixelDepth::Four);
         sessionWindows_.emplace(key, id);
         const auto state = manager_.windowState(id);
@@ -634,20 +959,30 @@ void WindowedService::setWindowVisible(SessionId session, bool visible) {
     presentRegion(dirty);
 }
 
+void WindowedService::raiseWindows(SessionId session) {
+    if (manager_.raiseSession(session)) presentIfConfigured();
+}
+
 void WindowedService::raiseWindow(SessionId session) {
     manager_.raise(ensureWindow(session, 1));
     presentIfConfigured();
 }
 
-void WindowedService::tileWindows() {
+bool WindowedService::tileWindows() {
     manager_.tile();
     presentIfConfigured();
+    return true;
 }
 
 void WindowedService::present() {
     if (!presenter_) return;
-    for (std::size_t index = 0; index < frame_.palette.size(); ++index)
-        frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
+    if (presentationBatchDepth_ != 0) {
+        presentationBatchNeedsFullFrame_ = true;
+        presentationBatchDirty_ = {};
+        return;
+    }
+    pendingDirty_ = {};
+    frame_.palette = palette_;
     const auto width = manager_.screenWidth();
     const auto height = manager_.screenHeight();
     if (presenter_->presentRows(
@@ -675,17 +1010,89 @@ void WindowedService::presentRegion(Rect region) {
     region = intersect(region,
         {0, 0, manager_.screenWidth(), manager_.screenHeight()});
     if (region.width == 0 || region.height == 0) return;
-    for (std::size_t index = 0; index < frame_.palette.size(); ++index)
-        frame_.palette[index] = defaultPaletteColor(static_cast<std::uint16_t>(index));
+    if (presentationBatchDepth_ != 0) {
+        if (!presentationBatchNeedsFullFrame_)
+            presentationBatchDirty_ = unite(presentationBatchDirty_, region);
+        return;
+    }
+    if (skipPresentationRequest()) return;
+    if (coalescingEnabled() && !takeCoalescedRegion(region)) return;
+    presentRegionNow(region);
+}
+
+// Merges the request into the pending rectangle. Returns false while the rate
+// limit defers it; otherwise region becomes the merged rectangle to present.
+bool WindowedService::takeCoalescedRegion(Rect& region) {
+    ++coalesceStats_.requests;
+    pendingDirty_ = unite(pendingDirty_, region);
+    if (coalesceClockUs_() < nextPresentAllowedUs_) {
+        ++coalesceStats_.deferred;
+        return false;
+    }
+    region = intersect(pendingDirty_,
+        {0, 0, manager_.screenWidth(), manager_.screenHeight()});
+    pendingDirty_ = {};
+    return true;
+}
+
+void WindowedService::setPresentCoalescing(
+    std::uint32_t minIntervalUs, std::uint32_t costRatio,
+    std::function<std::uint64_t()> clockUs) {
+    flushPendingPresentation();
+    coalesceMinIntervalUs_ = minIntervalUs;
+    coalesceCostRatio_ = costRatio;
+    coalesceClockUs_ = std::move(clockUs);
+    nextPresentAllowedUs_ = 0;
+}
+
+void WindowedService::pollPendingPresentation() {
+    if (!hasPendingPresentation() || !coalescingEnabled()) return;
+    if (presentationBatchDepth_ != 0) return;
+    if (coalesceClockUs_() < nextPresentAllowedUs_) return;
+    flushPendingPresentation();
+}
+
+void WindowedService::flushPendingPresentation() {
+    if (!hasPendingPresentation()) return;
+    auto region = intersect(pendingDirty_,
+        {0, 0, manager_.screenWidth(), manager_.screenHeight()});
+    pendingDirty_ = {};
+    if (region.width == 0 || region.height == 0 || !presenter_) return;
+    presentRegionNow(region);
+}
+
+void WindowedService::presentRegionNow(Rect region) {
+    const auto startUs = coalescingEnabled() ? coalesceClockUs_() : 0;
+    frame_.palette = palette_;
     const auto width = manager_.screenWidth();
     const auto height = manager_.screenHeight();
+    const struct Finish {
+        WindowedService& self; std::uint64_t startUs;
+        ~Finish() {
+            if (!self.coalescingEnabled()) return;
+            const auto endUs = self.coalesceClockUs_();
+            const auto cost = endUs - startUs;
+            ++self.coalesceStats_.presented;
+            self.coalesceStats_.presentUs += cost;
+            self.nextPresentAllowedUs_ = endUs + std::max<std::uint64_t>(
+                self.coalesceMinIntervalUs_, cost * self.coalesceCostRatio_);
+        }
+    } finish{*this, static_cast<std::uint64_t>(startUs)};
     if (presenter_->presentRowsRegion(width, height, frame_.palette, region,
             [this, region](std::uint32_t y, std::vector<ColorIndex>& row) {
                 composeDisplayRegionRow(y,
                     static_cast<std::uint32_t>(region.x), region.width, row);
-            }))
-        return;
+            })) return;
     present();
+}
+
+bool WindowedService::skipPresentationRequest() {
+    if (frameSkipRemaining_ != 0) {
+        --frameSkipRemaining_;
+        return true;
+    }
+    frameSkipRemaining_ = frameSkip_;
+    return false;
 }
 
 void WindowedService::composeDisplayRegionRow(std::uint32_t y, std::uint32_t x,
@@ -722,11 +1129,7 @@ void WindowedService::invalidateSystemRegion(Rect region) {
     region = intersect(region,
         {0, 0, manager_.screenWidth(), manager_.screenHeight()});
     if (region.width == 0 || region.height == 0) return;
-    const auto saved = updateMode_;
-    updateMode_ = UpdateMode::Auto;
-    try { presentRegion(region); }
-    catch (...) { updateMode_ = saved; throw; }
-    updateMode_ = saved;
+    presentRegion(region);
 }
 
 void WindowedService::discardPresentationBuffer() {

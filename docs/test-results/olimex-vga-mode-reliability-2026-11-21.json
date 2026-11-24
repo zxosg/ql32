@@ -1,0 +1,2300 @@
+{
+  "attempts": [
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 4223475,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": true,
+      "mode": 1,
+      "options": 0,
+      "free": 4208587,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 240,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": true,
+      "mode": 1,
+      "options": 0,
+      "free": 4208587,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 240,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 4223291,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 4223291,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": true,
+      "mode": 1,
+      "options": 0,
+      "free": 4208599,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 240,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": true,
+      "mode": 1,
+      "options": 0,
+      "free": 4208603,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 240,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 4223291,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 4223291,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": true,
+      "mode": 1,
+      "options": 0,
+      "free": 4208595,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 240,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": true,
+      "mode": 1,
+      "options": 0,
+      "free": 4208599,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 240,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 4223291,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222783,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        1,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222767,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        2,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222767,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        2,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222247,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        3,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222767,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        3,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222767,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        4,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222767,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        4,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222871,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        5,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222939,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "idle",
+      "requested": [
+        0,
+        2
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 4222879,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3994691,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 3995027,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 3995039,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995131,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995111,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 3995007,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 3995039,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        1,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995307,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        0,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995131,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        1,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995079,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        2,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995123,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        2,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3994595,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        3,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995127,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        3,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995131,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        4,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995123,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        4,
+        1
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995219,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        5,
+        0
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995263,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "loaded",
+      "requested": [
+        0,
+        2
+      ],
+      "accepted": false,
+      "mode": 0,
+      "options": 0,
+      "free": 3995223,
+      "largest": 3932148,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "RUNNABLE",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    },
+    {
+      "phase": "recovery",
+      "requested": [
+        0,
+        0
+      ],
+      "accepted": true,
+      "mode": 0,
+      "options": 0,
+      "free": 4210083,
+      "largest": 4063220,
+      "tasks": [
+        {
+          "id": 1,
+          "status": "WAITING_INPUT",
+          "supervisor": true,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 320,
+          "canvas_height": 200,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 2,
+          "status": "CANCELLED",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 0,
+          "canvas_height": 0,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 3,
+          "status": "CANCELLED",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 0,
+          "canvas_height": 0,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 4,
+          "status": "CANCELLED",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 0,
+          "canvas_height": 0,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        },
+        {
+          "id": 5,
+          "status": "CANCELLED",
+          "supervisor": false,
+          "interactive": true,
+          "priority": 4,
+          "canvas_origin_x": 0,
+          "canvas_origin_y": 0,
+          "canvas_width": 0,
+          "canvas_height": 0,
+          "canvas_offset_x": 0,
+          "canvas_offset_y": 0,
+          "error": ""
+        }
+      ]
+    }
+  ],
+  "final": {
+    "phase": "recovery",
+    "requested": [
+      0,
+      0
+    ],
+    "accepted": true,
+    "mode": 0,
+    "options": 0,
+    "free": 4210083,
+    "largest": 4063220,
+    "tasks": [
+      {
+        "id": 1,
+        "status": "WAITING_INPUT",
+        "supervisor": true,
+        "interactive": true,
+        "priority": 4,
+        "canvas_origin_x": 0,
+        "canvas_origin_y": 0,
+        "canvas_width": 320,
+        "canvas_height": 200,
+        "canvas_offset_x": 0,
+        "canvas_offset_y": 0,
+        "error": ""
+      },
+      {
+        "id": 2,
+        "status": "CANCELLED",
+        "supervisor": false,
+        "interactive": true,
+        "priority": 4,
+        "canvas_origin_x": 0,
+        "canvas_origin_y": 0,
+        "canvas_width": 0,
+        "canvas_height": 0,
+        "canvas_offset_x": 0,
+        "canvas_offset_y": 0,
+        "error": ""
+      },
+      {
+        "id": 3,
+        "status": "CANCELLED",
+        "supervisor": false,
+        "interactive": true,
+        "priority": 4,
+        "canvas_origin_x": 0,
+        "canvas_origin_y": 0,
+        "canvas_width": 0,
+        "canvas_height": 0,
+        "canvas_offset_x": 0,
+        "canvas_offset_y": 0,
+        "error": ""
+      },
+      {
+        "id": 4,
+        "status": "CANCELLED",
+        "supervisor": false,
+        "interactive": true,
+        "priority": 4,
+        "canvas_origin_x": 0,
+        "canvas_origin_y": 0,
+        "canvas_width": 0,
+        "canvas_height": 0,
+        "canvas_offset_x": 0,
+        "canvas_offset_y": 0,
+        "error": ""
+      },
+      {
+        "id": 5,
+        "status": "CANCELLED",
+        "supervisor": false,
+        "interactive": true,
+        "priority": 4,
+        "canvas_origin_x": 0,
+        "canvas_origin_y": 0,
+        "canvas_width": 0,
+        "canvas_height": 0,
+        "canvas_offset_x": 0,
+        "canvas_offset_y": 0,
+        "error": ""
+      }
+    ]
+  }
+}

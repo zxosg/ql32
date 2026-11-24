@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ql32/runtime/bulk_write_gate.hpp"
 #include "ql32/runtime/storage.hpp"
 
 #include <FS.h>
@@ -11,11 +12,20 @@ namespace ql32::platform::esp32 {
 // Paths are relative to the mounted filesystem root.
 class SdStorage final : public runtime::StorageService {
 public:
-    explicit SdStorage(fs::FS& filesystem, std::string drive = "SDC", std::string mountPoint = {})
-        : filesystem_(filesystem), drive_(std::move(drive)), mountPoint_(std::move(mountPoint)) {}
+    // The Arduino fs::FS base class has no capacity API, so the board supplies
+    // a provider returning {total, used} bytes.
+    using SpaceProvider = bool (*)(std::uint64_t& total, std::uint64_t& used);
+
+    // mountPoint is the VFS path (e.g. "/sd") used by bounded directory iteration.
+    explicit SdStorage(fs::FS& filesystem, std::string drive = "SDC",
+                       SpaceProvider spaceProvider = nullptr, std::string mountPoint = {})
+        : filesystem_(filesystem), drive_(std::move(drive)),
+          spaceProvider_(spaceProvider), mountPoint_(std::move(mountPoint)) {}
 
     std::string readText(const std::string& path) override;
     std::unique_ptr<runtime::StorageReadHandle> openRead(
+        const std::string& path) override;
+    std::unique_ptr<runtime::StorageWriteHandle> openWrite(
         const std::string& path) override;
     void writeText(const std::string& path, const std::string& contents) override;
     void writeTextStream(const std::string& path,
@@ -26,12 +36,19 @@ public:
     std::uintmax_t size(const std::string& path) override;
     void rename(const std::string& path, const std::string& newPath) override;
     void remove(const std::string& path) override;
+    void createDirectory(const std::string& path) override;
     void removeDirectory(const std::string& path) override;
     void format(const std::string& path) override;
+    runtime::StorageSpace space(const std::string& path) override;
+
+    // Optional: told when a large write begins/ends (internal flash only).
+    void setBulkWriteGate(runtime::BulkWriteGate* gate) noexcept { bulkWriteGate_ = gate; }
 
 private:
+    runtime::BulkWriteGate* bulkWriteGate_ = nullptr;
     fs::FS& filesystem_;
     std::string drive_;
+    SpaceProvider spaceProvider_;
     std::string mountPoint_;
     void ensureAvailable();
     std::string resolve(const std::string& path, bool allowRoot) const;

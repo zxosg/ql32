@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ql32/runtime/bulk_write_gate.hpp"
 #include "ql32/runtime/channel.hpp"
 #include "ql32/runtime/storage.hpp"
 
@@ -27,6 +28,8 @@ public:
                     std::string_view bytes) override;
     void seek(runtime::SessionId session, runtime::ChannelId channel,
               std::uint64_t offset) override;
+    std::uint64_t position(runtime::SessionId session, runtime::ChannelId channel) override;
+    std::uint64_t length(runtime::SessionId session, runtime::ChannelId channel) override;
     bool atEnd(runtime::SessionId session, runtime::ChannelId channel) override;
     void write(runtime::SessionId session, runtime::ChannelId channel,
                const std::string& text) override;
@@ -34,12 +37,17 @@ public:
     void closeSession(runtime::SessionId session) override;
     std::vector<runtime::ChannelInfo> listOpen(runtime::SessionId session) override;
 
+    // Optional: told when a large write begins/ends (internal flash only).
+    void setBulkWriteGate(runtime::BulkWriteGate* gate) noexcept { bulkWriteGate_ = gate; }
+
 private:
     struct OpenChannel {
         runtime::SessionId session;
         runtime::ChannelMode mode;
         fs::File file;
     };
+
+    runtime::BulkWriteGate* bulkWriteGate_ = nullptr;
 
     fs::FS& filesystem_;
     std::string drive_;

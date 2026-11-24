@@ -1,5 +1,6 @@
 ' Finite attractor benchmark using the density settings from attractor.bas.
 ' Change the two OPTION declarations for each clock/precision configuration.
+' Serial markers include the measured CPU clock for each run.
 CONST KOptMathDouble = 0
 CONST KOptMathSingle = 1
 CONST KEspCpuFreq80 = 80
@@ -10,6 +11,7 @@ OPTION KEspCpuFreq80
 
 benchmarkChannel = OPEN(2)
 PRINT #benchmarkChannel,"ATTRACTOR_START"
+PRINT #benchmarkChannel,"ATTRACTOR_CPUFREQ=";CPUFREQ()
 
 x = 0
 v = 0
@@ -29,9 +31,12 @@ FOR frame = 1 TO 100
   FOR i = 1 TO 50 STEP rowStep
     inkIndex = (c - 1) MOD 7 + 1
     INK inkIndex
+    rowAngle = r * i
     FOR j = 1 TO 50 STEP sampleStep
-      u = SIN(i + v) + SIN(r * i + x)
-      v = COS(i + v) + COS(r * i + x)
+      angleV = i + v
+      angleX = rowAngle + x
+      u = SIN(angleV) + SIN(angleX)
+      v = COS(angleV) + COS(angleX)
       x = u + t
       px = INT(cx + u * sc)
       py = INT(cy + v * sc)

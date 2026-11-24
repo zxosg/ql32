@@ -56,7 +56,12 @@ ql32::platform::esp32::CpuFrequency boardCpuFrequency;
 ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", "/spiffs");
+bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SPIFFS.totalBytes();
+    used = SPIFFS.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace, "/spiffs");
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
 std::unique_ptr<ql32::platform::tenstar_esp32s3::TftTextConsole> tftConsole;
 std::unique_ptr<std::ostream> basicOutput;
@@ -92,18 +97,25 @@ void refreshDebugOverlay() {
     const auto freeBytes = boardMemory.freeBytes();
     const auto heap = boardMemory.fragmentationInfo();
     const std::size_t activeTasks = scheduler ? scheduler->activeTaskCount() : 0;
-    char clockText[9] = "--:--:--";
-    if (const auto timestamp = boardClock.unixTimeSeconds()) {
-        const std::time_t value = static_cast<std::time_t>(*timestamp);
-        std::tm parts{};
-        if (gmtime_r(&value, &parts))
-            std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
-                          parts.tm_hour, parts.tm_min, parts.tm_sec);
+    char clockText[16]{};
+    const auto timestamp = boardClock.unixTimeSeconds();
+    std::tm parts{};
+    const std::time_t value = timestamp ? static_cast<std::time_t>(*timestamp) : 0;
+    if (timestamp && gmtime_r(&value, &parts)) {
+        std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
+                      parts.tm_hour, parts.tm_min, parts.tm_sec);
+    } else {
+        // Unsynchronized wall clock: show uptime instead, marked with "UP".
+        const std::uint32_t seconds = now / 1000;
+        std::snprintf(clockText, sizeof(clockText), "UP %02u:%02u:%02u",
+                      static_cast<unsigned>((seconds / 3600) % 100),
+                      static_cast<unsigned>((seconds / 60) % 60),
+                      static_cast<unsigned>(seconds % 60));
     }
     const auto freeK = freeBytes / 1024;
     const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu TASK:%u %s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
@@ -348,6 +360,8 @@ void receiveSerialCharacter(char character) {
             Serial.print(inputLine.c_str());
         }
         break;
+    case ql32::platform::esp32::SerialKey::Down:
+        break;
     case ql32::platform::esp32::SerialKey::Left:
         if (inputCursor > 0) { --inputCursor; Serial.write('\b'); }
         break;
@@ -423,6 +437,9 @@ void advanceScheduler() {
             }
             Serial.print(inputPrompt.c_str());
             if (edit) Serial.print(inputLine.c_str());
+            // Native USB CDC holds a short TX tail until the next write or
+            // frame; flush so the prompt is not delayed until the next command.
+            Serial.flush();
             replPromptShown = true;
         }
     } else {
@@ -547,6 +564,21 @@ void setup() {
     }
 
     ql32::vm::Services services;
+    {
+        ql32::runtime::SystemInfoProfile profile;
+        profile.values = {"0.1.0", "unknown", "tenstar_ts_esp32s3_st7789",
+                          "st7789-tft 240x135 rgb565", "serial", "ffs",
+                          "tft,psram,network,wifi"};
+        profile.capabilities = {{"display", true}, {"input", true},
+                                {"storage", true}, {"network", true},
+                                {"wifi", true}, {"ps2", false}, {"serial", true},
+                                {"sd", false}, {"ffs", true}, {"psram", true},
+                                {"spi", true}, {"i2c", true}, {"gpio", true},
+                                {"adc", true}, {"timer", true}, {"touch", false},
+                                {"buttons", false}, {"usb-hid", false}};
+        services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+            std::move(profile));
+    }
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(

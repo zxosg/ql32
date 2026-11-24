@@ -1,5 +1,6 @@
 #include "ql32/platform/linux/directory_channels.hpp"
 #include "ql32/platform/linux/directory_storage.hpp"
+#include "ql32/platform/linux/virtual_hardware.hpp"
 #include "ql32/interpreter.hpp"
 
 #include <chrono>
@@ -271,6 +272,151 @@ void testBinaryChannelRandomAccess() {
     std::filesystem::remove_all(root);
 }
 
+int failureCode(const std::shared_ptr<ql32::runtime::ChannelService>& channels,
+                const std::string& source) {
+    ql32::Interpreter interpreter({}, channels);
+    std::ostringstream sink;
+    try {
+        interpreter.execute(source, sink);
+    } catch (const std::exception& error) {
+        if (const auto* typed = dynamic_cast<const ql32::runtime::Error*>(&error))
+            return static_cast<int>(typed->code());
+        if (const auto* service = dynamic_cast<const ql32::runtime::ServiceError*>(&error))
+            return static_cast<int>(service->languageCode());
+        return static_cast<int>(ql32::runtime::errorCodeFor(error));
+    }
+    return 0;
+}
+
+std::string executeFailure(const std::shared_ptr<ql32::runtime::ChannelService>& channels,
+                           const std::string& source) {
+    ql32::Interpreter interpreter({}, channels);
+    std::ostringstream sink;
+    try {
+        interpreter.execute(source, sink);
+    } catch (const std::exception& error) {
+        return error.what();
+    }
+    return {};
+}
+
+void testChannelAtSeek() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-at-seek-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        {
+            std::ofstream seed(root / "lines.txt", std::ios::binary);
+            seed << "alpha\nbeta\ngamma\n";
+        }
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        ql32::Interpreter interpreter({}, channels);
+        std::ostringstream output;
+        interpreter.execute(
+            "ch = OPEN(\"lines.txt\", \"READ\")\n"
+            "PRINT READ$(ch)\n"
+            "#ch AT 0\n"
+            "PRINT READ$(ch)\n"
+            "#ch AT 6\n"
+            "PRINT READ$(ch)\n"
+            "#ch AT 17\n"
+            "PRINT EOF(ch)\n"
+            "PRINT FPOS(ch)\n"
+            "PRINT FLEN(ch)\n"
+            "#ch AT 11 + 0\n"
+            "PRINT EOF(ch)\n"
+            "PRINT READ$(ch)\n"
+            "CLOSE ch\n", output);
+        require(output.str() == "alpha\nalpha\nbeta\n1\n17\n17\n0\ngamma\n",
+                "AT did not reposition a read channel or reset EOF");
+
+        interpreter.execute(
+            "w = OPEN(\"w.bin\", \"WRITE\")\n"
+            "WRITE w, \"abcdef\"\n"
+            "#w AT 0\n"
+            "WRITE w, \"X\"\n"
+            "CLOSE w\n", output);
+        std::ifstream written(root / "w.bin", std::ios::binary);
+        const std::string contents{std::istreambuf_iterator<char>(written), {}};
+        require(contents == "X\ncdef\n", "AT did not reposition a write channel");
+
+        const std::string openAppend = "a = OPEN(\"app.txt\", \"APPEND\")\n";
+        const std::string openRead = "a = OPEN(\"lines.txt\", \"READ\")\n";
+        require(failureCode(channels, openAppend + "#a AT 0\n") == 14,
+                "AT accepted an append channel");
+        require(failureCode(channels, openRead + "#a AT -1\n") == 5,
+                "AT accepted a negative offset");
+        require(failureCode(channels, openRead + "#a AT 1.5\n") == 5,
+                "AT accepted a fractional offset");
+        require(failureCode(channels, openRead + "#a AT \"x\"\n") == 4,
+                "AT accepted a string offset");
+        require(failureCode(channels, "#99 AT 0\n") == 14,
+                "AT accepted an invalid handle");
+        require(!executeFailure(channels, "#1 AT 0\n").empty(),
+                "AT accepted the console channel");
+        require(executeFailure(channels, openRead + "#a AT 17\n").empty(),
+                "AT rejected an offset equal to the file length");
+        require(failureCode(channels, openRead + "#a AT 18\n") == 5,
+                "AT accepted an offset beyond the end of the file");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
+void testUpdateMode() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-update-mode-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        {
+            std::ofstream seed(root / "data.bin", std::ios::binary);
+            seed << "0123456789";
+        }
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        ql32::Interpreter interpreter({}, channels);
+        std::ostringstream output;
+        interpreter.execute(
+            "u = OPEN(\"data.bin\", \"UPDATE\")\n"
+            "PRINT FPOS(u)\n"
+            "PRINT FLEN(u)\n"
+            "#u AT 2\n"
+            "#u OUT 3, \"abc\"\n"
+            "PRINT FPOS(u)\n"
+            "#u AT 0\n"
+            "#u IN 6, head$\n"
+            "PRINT head$\n"
+            "#u AT FLEN(u)\n"
+            "#u OUT 2, \"XY\"\n"
+            "PRINT FLEN(u)\n"
+            "CLOSE u\n", output);
+        require(output.str() == "0\n10\n5\n01abc5\n12\n", "UPDATE mode read/write failed");
+        std::ifstream result(root / "data.bin", std::ios::binary);
+        const std::string contents{std::istreambuf_iterator<char>(result), {}};
+        require(contents == "01abc56789XY", "UPDATE mode did not preserve or extend contents");
+        require(!executeFailure(channels, "OPEN(\"missing.bin\", \"UPDATE\")\n").empty(),
+                "UPDATE created a missing file");
+        require(!std::filesystem::exists(root / "missing.bin"),
+                "UPDATE created a missing file");
+        require(!executeFailure(channels,
+                    "u = OPEN(\"data.bin\", \"UPDATE\")\n#u AT 13\n").empty(),
+                "UPDATE allowed seeking beyond the end");
+        require(!executeFailure(channels, "PRINT FPOS(99)\n").empty() &&
+                !executeFailure(channels, "PRINT FLEN(1)\n").empty() &&
+                !executeFailure(channels, "PRINT FLEN(\"x\")\n").empty(),
+                "FPOS/FLEN accepted an invalid channel");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testInputLineAndSessionResume() {
     auto ui = std::make_shared<ql32::ui::QueuedService>();
     ql32::Interpreter interpreter({}, {}, ui);
@@ -290,6 +436,130 @@ void testInputLineAndSessionResume() {
             "INPUT did not store and return the submitted line");
 }
 
+void testCopyFromHardwareSerialUntilCtrlZ() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-uartcopy-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        auto files = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+        auto hardware = std::make_shared<ql32::platform::linux_host::VirtualHardware>();
+        hardware->setSerialLoopback(true);
+        auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(
+            files, ql32::runtime::ChannelRegistry::SerialWriter{}, hardware);
+        ql32::Interpreter interpreter(storage, channels);
+        std::ostringstream console;
+        interpreter.executeInteractive("u=OPEN(2,1,9600,0,0)\n", console);
+        interpreter.executeInteractive("PRINT #u,\"uart data\";CHR$(26);\"ignored\"\n", console);
+        interpreter.executeInteractive("COPY #u TO \"uart.txt\"\n", console);
+        std::ifstream in(root / "uart.txt", std::ios::binary);
+        const std::string content{std::istreambuf_iterator<char>(in), {}};
+        require(content == "uart data", "COPY from a serial channel did not stop at Ctrl-Z");
+    } catch (...) {
+        std::filesystem::remove_all(root);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
+void testPrintSeparatorsOnRoutedChannel() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-separators-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        auto files = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+        auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(files);
+        ql32::Interpreter interpreter(storage, channels);
+        std::ostringstream console;
+        interpreter.executeInteractive("f=OPEN(\"sep.txt\",\"WRITE\")\n", console);
+        interpreter.executeInteractive(
+            "PRINT #f,\"A\"!\"B\"\nPRINT #f,\"A\",\"B\"\nPRINT #f,\"C\"! : PRINT #f,\"D\"\n",
+            console);
+        interpreter.executeInteractive("CLOSE #f\n", console);
+        std::ifstream in(root / "sep.txt", std::ios::binary);
+        const std::string content{std::istreambuf_iterator<char>(in), {}};
+        require(content == "A B\nA       B\nC D\n",
+                "! and , separators ignored the column on a routed channel");
+    } catch (...) {
+        std::filesystem::remove_all(root);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
+void testChannelMirroring() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-mirror-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    const auto fails = [](ql32::Interpreter& interpreter, const std::string& source) {
+        std::ostringstream sink;
+        try { interpreter.execute(source, sink); } catch (const std::exception&) { return true; }
+        return false;
+    };
+    const auto slurp = [&](const char* name) {
+        std::ifstream in(root / name, std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>(in), {}};
+    };
+    try {
+        auto channels = std::make_shared<ql32::platform::linux_host::DirectoryChannels>(root);
+        auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+        std::ostringstream console;
+        {
+            ql32::Interpreter interpreter(storage, channels);
+            interpreter.executeInteractive("log = OPEN(\"log.txt\", \"WRITE\")\n", console);
+            interpreter.executeInteractive("MIRROR #0 TO #log\n", console);
+            interpreter.executeInteractive("PRINT #0,\"one\"\nWRITE 0, \"two\"\n", console);
+            interpreter.executeInteractive("10 PRINT #0,\"stored\"\n", console);
+            interpreter.executeInteractive("CHANNEL #0\n", console);
+            interpreter.executeInteractive("LIST\n", console);
+            interpreter.executeInteractive("MIRROR LIST\n", console);
+            require(fails(interpreter, "MIRROR #0 TO #0\n"), "self mirror must be rejected");
+            require(fails(interpreter, "MIRROR #log TO #0\n"), "mirror cycle must be rejected");
+            interpreter.executeInteractive("MIRROR DELETE #log\nPRINT #0,\"unmirrored\"\n", console);
+            interpreter.executeInteractive("MIRROR #0 TO #log\nCLOSE #log\nPRINT #0,\"after close\"\n", console);
+            interpreter.executeInteractive("MIRROR LIST\n", console);
+            require(fails(interpreter, "MIRROR #0 TO #77\n"), "closed target must be rejected");
+        }
+        require(slurp("log.txt") == "one\ntwo\n10 PRINT #0,\"stored\"\nMIRROR #0 TO #2\n",
+                "mirror file did not receive PRINT, WRITE and LIST text");
+        require(console.str().find("MIRROR #0 TO #") != std::string::npos,
+                "MIRROR LIST did not list the relation");
+        require(console.str().find("unmirrored") != std::string::npos &&
+                console.str().find("after close") != std::string::npos,
+                "primary output must continue after delete/close");
+        require(console.str().find("No mirrors") != std::string::npos,
+                "closing the target must remove its mirror");
+
+        std::ostringstream limits;
+        ql32::Interpreter interpreter(storage, channels);
+        interpreter.executeInteractive(
+            "a = OPEN(\"a.txt\", \"WRITE\")\nb = OPEN(\"b.txt\", \"WRITE\")\n"
+            "c = OPEN(\"c.txt\", \"WRITE\")\nd = OPEN(\"d.txt\", \"WRITE\")\n"
+            "e = OPEN(\"e.txt\", \"WRITE\")\n"
+            "MIRROR #0 TO #a\nMIRROR #0 TO #b\nMIRROR #0 TO #c\nMIRROR #0 TO #d\n", limits);
+        require(fails(interpreter, "MIRROR #0 TO #e\n"), "fifth mirror must be rejected");
+        require(fails(interpreter, "MIRROR #a TO #e\n"), "mirror chain must be rejected");
+
+        std::ostringstream failing;
+        ql32::Interpreter reader(storage, channels);
+        reader.executeInteractive(
+            "r = OPEN(\"a.txt\", \"READ\")\nMIRROR #0 TO #r\nPRINT #0,\"still shown\"\n"
+            "MIRROR LIST\n", failing);
+        require(failing.str().find("still shown") != std::string::npos &&
+                failing.str().find("DISABLED") != std::string::npos,
+                "failing mirror must auto-disable without affecting the primary");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 void testDefaultAndRoutedOutputChannels() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -301,7 +571,6 @@ void testDefaultAndRoutedOutputChannels() {
         std::ostringstream console;
         {
             ql32::Interpreter interpreter(storage, channels);
-            // Separate REPL submissions retain channels; a whole-program execute closes them.
             interpreter.executeInteractive("file = OPEN(\"routed.txt\", \"WRITE\")\n", console);
             interpreter.executeInteractive("CHANNEL #1 TO #file\nPRINT \"print target\"\n", console);
             interpreter.executeInteractive("WRITE 1, \"write target\"\n", console);
@@ -423,8 +692,13 @@ int main() {
         testBasicChannelCalls();
         testWindowDeviceChannel();
         testBinaryChannelRandomAccess();
+        testChannelAtSeek();
+        testUpdateMode();
         testInputLineAndSessionResume();
         testDefaultAndRoutedOutputChannels();
+        testPrintSeparatorsOnRoutedChannel();
+        testChannelMirroring();
+        testCopyFromHardwareSerialUntilCtrlZ();
         testChannelBindingSnapshotsEndpoint();
         testGetChannelInspection();
         testTouchChannelAndRunCleanup();

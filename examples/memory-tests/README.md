@@ -35,8 +35,9 @@ terminal task record (`after_reap`), and after temporary-file cleanup (`after`).
 `task_record_recovery_bytes` is the net total-heap recovery between the first
 two checkpoints, including any telemetry/allocator effects. Recovery checks
 and cumulative drift use the final sample, with no worker result retained.
-Consistent declines raise a warning. Array
-and combined workers must show at least an 8 KiB active heap decrease; channel,
+Consistent declines raise a warning. The
+combined worker must show at least an 8 KiB active heap decrease, and the array
+worker 4 KiB (numeric array elements are 8-byte doubles); channel,
 graphics, and debugger workers must show at least 2 KiB for their active task
 state. Graphics results are diagnostic for additional canvas heap deltas
 because canvas and session state have separate lifetimes. The canvas arena

@@ -1,0 +1,9 @@
+152105.759100 TASK "SD152105.859732 C:/work152105.959881 er-1.ba152106.059995 s"> TASK "SDC:/worker-1.bas"
+Started task 7
+GFXPROFILE requests=1 full=0 partial=1 fallback=0152106.160337  rows=16 composed_px=5120 written_px=10240 compose_us=3022 convert_us=917 write_us=57 update_us=15290 update_samples=1 update_p50_us=15290 update_p95_us=15290 update_p99_us=15290 swap_requested=1 swap_queued=1 swap_executed=1 swap_skipped=0 swap_us=11143 swap_calls=1 swap_avg_us=11143 swap_min_us=11143 swap_max_us=11143 swap_samples=1 swap_p50_us=11143 swap_p95_us=11143 swap_p99_us=11143
+> TASK152106.260488  "FFS:/152106.360675 mbprogr152106.460814 ess.bas152106.561040 "> TASK "FFS:/mbprogress.bas"
+152106.661214 Started task 8
+GFXPROFILE requests=1 full=0 partial=1 fallback=0 rows=16 composed_px=5120 written_px=10240 compose_us=3031 convert_us=903 write_us=53 update_us=16764 update_samples=1 update_p50_us=16764 update_p95_us=16764 update_p99_us=16764 swap_requested=1 swap_queued=1 swap_executed=1 swap_skipped=0 swap_us=12624 swap_calls=1 swap_avg_us=12624 swap_min_us=12624 swap_max_us=12624 swap_samples=1 swap_p50_us=12624 swap_p95_us=12624 swap_p99_us=12624
+> 152106.961853 MB_BEGIN
+152107.062269 MB_ROW 0
+152186.020725 MB_ROW 1

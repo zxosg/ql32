@@ -1,17 +1,19 @@
 # QL/32 — Platform Portability Requirements
 
 **Document ID:** QL32-PLAT-001  
-**Status (2026-11-11):** CYD task cleanup and memory/concurrency behavior have been characterized across the 25-run worker suite, canvas-resize soaks, two-full-screen-canvas tests, and worker saturation/OOM recovery. No monotonic heap loss was observed in repeated cleanup cycles; some ten-worker OOM passes left the largest free block reduced after task reaping. The separate 25-run suite returned total free heap to within 60 bytes of baseline after reboot; the saturation pass itself was not measured across reboot. The measured operating envelope and remaining uncertainty are recorded below and in [the CYD follow-up report](../test-results/CYD-open-points-2026-11-07.md). CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen allocation, rotation, touch corner taps, Wi-Fi station behavior, and TASKVIEW offset bounce are hardware-verified. The 2026-11-08 follow-up also visually checked the four-color pattern at all four rotations; initial `#0` clipping came from its console overlay, so corrected geometry used graphics channel `#1`. Tenstar display colors and repeated rotations are verified after a rotation-order fix; Wi-Fi was skipped. Olimex and LILYGO physical checks in the current acceptance plan were skipped by user choice. See [the dated acceptance report](../test-results/board-acceptance-performance-2026-11-08.md). Linux remains the first conformance host.
+**Status (2026-11-12):** CYD task cleanup and memory/concurrency behavior have been characterized across the 25-run worker suite, canvas-resize soaks, two-full-screen-canvas tests, and worker saturation/OOM recovery. No monotonic heap loss was observed in repeated cleanup cycles; some ten-worker OOM passes left the largest free block reduced after task reaping. The separate 25-run suite returned total free heap to within 60 bytes of baseline after reboot; the saturation pass itself was not measured across reboot. The measured operating envelope and remaining uncertainty are recorded below and in [the CYD follow-up report](../test-results/CYD-open-points-2026-11-07.md). CYD TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen allocation, rotation, touch corner taps, Wi-Fi station behavior, and TASKVIEW offset bounce are hardware-verified. The 2026-11-08 follow-up also visually checked the four-color pattern at all four rotations; initial `#0` clipping came from its console overlay, so corrected geometry used graphics channel `#1`. Tenstar display colors and repeated rotations are verified after a rotation-order fix; Wi-Fi was skipped. Olimex PSRAM mode switching, double-buffered clearing at supported modes, 640×480 single-buffered operation, and the 240 MHz/DOUBLE attractor benchmark were verified on 2026-11-12. Double buffering at 640×480 is rejected because FabGL corrupts its viewport allocation on a later mode change. LILYGO physical checks remain skipped by user choice. See [the dated acceptance report](../test-results/board-acceptance-performance-2026-11-08.md). Linux remains the first conformance host.
 
 Supported build families are independent firmware targets:
 
 | Profile | Display / input | Status |
 | --- | --- | --- |
 | `lilygo_vga32` | FabGL VGA, PS/2 | Profile exists; physical acceptance skipped by user on 2026-11-08 |
-| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass. Optional `olimex_esp32_sbc_fabgl_psram` WROVER profile also booted with 4 MiB mapped PSRAM and completed the Mandelbrot task on 2026-11-11; current physical follow-up skipped by user |
+| `olimex_esp32_sbc_retro` (default WROVER image, 2026-11-21) | Single-framebuffer packed4 PSRAM-DMA retro video with runtime `MODE 0/1/2` (320x200/320x240/400x300), 16-entry RGB222 palette; MODE 3/4 rejected. FabGL stays a separate build (`olimex_esp32_sbc_fabgl_psram`) for 640x400/640x480; no in-session backend switch. See [320x results](../test-results/olimex-single-framebuffer-320x-2026-11-21.md) | Host-tested; built; hardware per results file |
+| `olimex_esp32_sbc_fabgl` | FabGL VGA, PS/2, 512 KiB SPIFFS (`FFS`) and SD (`SDC`) | Built and flashed on Rev B; both drives mount; REPL, dual-drive YMODEM, remote debugger, VGA capture/font, pager, and Mandelbrot checks pass. Optional `olimex_esp32_sbc_fabgl_psram` WROVER profile booted with 4 MiB mapped PSRAM; on 2026-11-12 it passed repeated mode/clear tests for double-buffered 320×200, 400×300, 640×400 and single-buffered 640×480. Double-buffered 640×480 is rejected after a reproducible FabGL heap-corruption failure on later mode changes. See [attractor benchmark results](../test-results/attractor-performance-2026-11-12.md). 2026-11-21: the no-PSRAM profile refuses MODE 1/2 with a BASIC error; standard PSRAM-DMA 640x400/640x480 verified stable (zero late refills) and stress-tested; see [final mode matrix](../test-results/olimex-final-mode-matrix-stress-2026-11-21.md) |
 | `esp32_2432s028` | ILI9341 TFT console/graphics, USB serial terminal input, SD storage | Optional SD-only deployment; firmware and host tests pass; TFT, serial REPL, BASIC loop, SD text round-trip, compositor movement/clipping, full-screen resizing, all rotations, and Wi-Fi station behavior verified |
 | `esp32_2432s028_spiffs` | CYD with 1 MiB internal SPIFFS (`FFS`) | Preferred CYD profile; built and flashed; storage mounted, `startup.bas` loaded at boot; 25-run cleanup suite, two-full-screen-canvas limit, ten-small-worker saturation, OOM recovery, reboot recovery, and touch corner taps verified; post-saturation largest-block reduction remains a documented limitation |
-| `ql32_tenstar_esp32s3` | TENSTAR TS-ESP32-S3, ST7789 240×135, USB serial, QSPI PSRAM, 512 KiB SPIFFS (`FFS`) | Built and flashed; startup and test programs load from SPIFFS; USB REPL reports 240×135×4-bit; 2 MiB PSRAM detected; worker/Mandelbrot stress run cleaned up; display colors and rotations visually checked after rotation-order fix; Wi-Fi skipped; performance matrix open; sensors deferred |
+| `esp32_2432s028_spiffs_debug` | Same as `esp32_2432s028_spiffs` with `-Og -g3` DWARF symbols | Diagnostic image for decoding captured Xtensa PCs; not a separate product profile |
+| `ql32_tenstar_esp32s3` | TENSTAR TS-ESP32-S3, ST7789 240×135, USB serial, QSPI PSRAM, 512 KiB SPIFFS (`FFS`) | Built and flashed; full test 2026-11-23 (see [follow-ups](../test-results/tenstar-followups-2026-11-23.md)): touch, audio (`MUSIC`/`SOUND`), SD and `MODE` are **N/A** (no hardware / display-mode service); remote debugger, golden programs, heap limits verified; startup and test programs load from SPIFFS; USB REPL reports 240×135×4-bit; 2 MiB PSRAM detected; worker/Mandelbrot stress run cleaned up; display colors and rotations visually checked after rotation-order fix; Wi-Fi skipped; performance matrix open; sensors deferred |
 | `esp32s3_tft` | SPI/RGB TFT, USB HID/buttons/touch | Backlog |
 | `esp32p4_tft` | RGB/MIPI display, USB HID/touch | Evaluation target |
 | `linux` | Host adapter | Development and conformance host |
@@ -113,6 +115,17 @@ the same `MemoryService` used by BASIC `FREE()` after each rotation:
 | 4 bit | 125,532 | 125,532 | 125,532 | 125,532 | 125,532 |
 | 8 bit | 87,132 | 87,132 | 87,132 | 87,132 | 87,132 |
 
+On the CYD the window mode defaults to `ISOLATED` at boot (QL/32-specific; each
+task gets a tile-sized canvas, `WINDOWMODE SHARED` restores full-screen canvases).
+
+On the CYD the debug overlay shows `FREE`, `MAX` (largest block), `BLK` (allocated
+block count) and `MIN` (lowest free heap since boot, QL/32-specific); the line
+fills about 52 of the 53 columns of a 320-pixel screen. The serial monitor command `HEAP STATS`
+prints `HEAPSTATS|free|largest|min|loopstack|musicstack|musiciostack|failedalloc|lastfail`
+(stack values are FreeRTOS high-water marks in bytes remaining; music stacks
+are 0 until audio has started), and failed heap allocations are logged on the
+serial console as `ALLOCFAIL|size|caps|function|free|largest`. Plain `HEAP` is unchanged.
+
 All values are free heap bytes. The 28,800-byte drop from 1-bit to 4-bit and
 38,400-byte drop from 4-bit to 8-bit match the additional storage for 76,800
 pixels. The depth was selected through the platform-neutral C++ adapter API;
@@ -206,3 +219,14 @@ observation. The run predates the latest upstream pull and did not measure
 frame duration or clock readback; rebuild and repeat before considering the
 current tree hardware-verified.
 
+
+## Olimex single-framebuffer retro mode (QL/32-specific, 2026-11-21)
+
+With `QL32_OLIMEX_SINGLE_FRAMEBUFFER` (400x300, 320x240 or 320x200 indexed-4 on PSRAM-DMA, selected per build) graphics
+writes one persistent PSRAM framebuffer (60,000, 38,400 or 32,000 bytes) directly; the refill worker
+scans it continuously into the internal DMA ring. Partial-frame visibility and
+tearing are permitted; drawing never waits for vertical refresh. Palette
+changes apply at the frame boundary. Neighbouring packed-4 pixel updates must
+not be lost; producers serialise only single-byte nibble updates, never the
+refill worker or ISR. Status: built and host-tested; short hardware runs show
+zero late refills. See `docs/test-results/olimex-single-framebuffer-2026-11-21.md` and `...-320x-2026-11-21.md`. Colours are limited to 16 palette entries. `olimex_esp32_sbc_retro` makes MODE runtime-selectable (0/1/2 = 320x200/320x240/400x300; 3/4 rejected); the other single-framebuffer envs keep MODE fixed to the build geometry.

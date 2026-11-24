@@ -79,6 +79,19 @@ void testFfsDriveQualification() {
     require(rejected, "FFS adapter accepted an unavailable SDC drive");
 }
 
+void testFfsMissingFileIsNotADirectory() {
+    fs::FS filesystem;
+    filesystem.setMissingAsDirectory(true);
+    ql32::platform::esp32::SdStorage storage(filesystem, "FFS");
+    bool notFound = false;
+    try {
+        (void)storage.readText("FFS:/missing.bas");
+    } catch (const ql32::runtime::ServiceError& error) {
+        notFound = error.code() == ql32::runtime::ServiceErrorCode::NotFound;
+    }
+    require(notFound, "FFS missing file was reported as a directory");
+}
+
 } // namespace
 
 int main() {
@@ -87,6 +100,7 @@ int main() {
         testRejectsEscapingPaths();
         testUnmountedStorageReportsUnavailable();
         testFfsDriveQualification();
+        testFfsMissingFileIsNotADirectory();
     } catch (const std::exception& error) {
         std::cerr << "ESP32 storage adapter test failed: " << error.what() << '\n';
         return 1;

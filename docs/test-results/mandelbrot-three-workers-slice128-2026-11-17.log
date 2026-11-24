@@ -1,0 +1,19 @@
+151829.139012 TASKS #151829.239589 0> TASKS #0
+SLICE 128 instructions
+1 SUPERVISOR P=4 RUNNABLE
+2 WORKER P=4 WAITING_INPUT
+GFXPROFILE requests=1 full=0 partial=1 fallback=0 rows=16 composed_px=5120 written_px=10240 compose_us=3565 convert_us=910 write_us=54 update_us=13170 update_samples=1 update_p50_us=13170 update_p95_us=13170 update_p99_us=13170 swap_requested=1 swap_queued=1 swap_executed=1 swap_skipped=0 swap_us=8506 swap_calls=1 swap_avg_us=8506 swap_min_us=8506 swap_max_us=8506 swap_samples=1 swap_p50_us=8506 swap_151829.339836 p95_us=8506 swap_p99_us=8506
+> 151829.440269 TASK "SD151829.540462 C:/work151829.640658 er-1.ba151829.740813 s"> TASK "SDC:/worker-1.bas"
+Started task 3
+GFXPROFILE reques151829.841231 ts=1 full=0 partial=1 fallback=0 rows=16 composed_px=5120 written_px=10240 compose_us=3346 convert_us=911 write_us=56 update_us=16317 update_samples=1 update_p50_us=16317 update_p95_us=16317 update_p99_us=16317 swap_requested=1 swap_queued=1 swap_executed=1 swap_skipped=0 swap_us=11852 swap_calls=1 swap_avg_us=11852 swap_min_us=11852 swap_max_us=11852 swap_samples=1 swap_p50_us=11852 swap_p95_us=11852 swap_p99_us=11852
+> TASK151829.941399  "SDC:/151830.041592 worker-151830.141794 2.bas"> TASK "SDC:/worker-2.bas"
+151830.241986 Started task 4
+GFXPROFILE requests=1 full=0 partial=1 fallback=0 rows=16 composed_px=5120 written_px=10240 compose_us=3346 convert_us=914 write_us=58 update_us=15339 update_samples=1 update_p50_us=15339 update_p95_us=15339 update_p99_us=15339 swap_requested=1 swap_queued=1 swap_executed=1 swap_skipped=0 swap_us=10870 swap_calls=1 swap_avg_us=10870 swap_min_us=10870 swap_max_us=10870 swap_samples=1 swap_p50_us=10870 swap_p95_us=10870 swap_p99_us=10870
+> 151830.342411 TASK "S151830.442576 DC:/wor151830.542753 ker-3.b151830.642916 as"> TASK "SDC:/worker-3.bas"
+151830.743102 Started task 5
+GFXPROFILE requests=1 full=0 partial=1 fallback=0 rows=16 composed_px=5120 written_px=10240 compose_us=3340 convert_us=927 write_us=55 update_us=15954 update_samples=1 update_p50_us=15954 update_p95_us=15954 update_p99_us=15954 swap_requested=1 swap_queued=1 swap_executed=1 swap_skipped=0 swap_us=11479 swap_calls=1 swap_avg_us=11479 swap_min_us=11479 swap_max_us=11479 swap_samples=1 swap_p50_us=11479 swap_p95_us=11479 swap_p99_us=11479
+> 151830.943659 TAS151831.043851 K "FFS:151831.144033 /mbprog151831.244166 ress.ba151831.344348 s"> TASK "FFS:/mbprogress.bas"
+151831.945590 Started task 6
+GFXPROFILE requests=29 full=0 partial=29 fallback=0 rows=2296 composed_px=232312 written_px=240888 compose_us=106940 convert_us=2872 write_us=52190 update_us=456849 update_samples=29 update_p50_us=12262 update_p95_us=27764 update_p99_us=31674 swap_requested=29 swap_queued=29 swap_executed=29 swap_skipped=0 swap_us=287410 swap_calls=29 swap_avg_us=9910 swap_min_us=1154 swap_max_us=14271 swap_samples=29 swap_p50_us=11292 swap_p95_us=12828 swap_p99_us=13286
+> 151832.747326 MB_BEGIN
+151832.847845 MB_ROW 0

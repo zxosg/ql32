@@ -54,7 +54,7 @@ runtime::ChannelId VirtualHardware::open(
             invalid("hardware OPEN contains duplicate pins");
         const auto owner = pinOwners_.find(pin);
         if (owner != pinOwners_.end())
-            throw ServiceError(ServiceErrorCode::Unavailable, "hardware pin is already reserved");
+            throw ServiceError(ServiceErrorCode::ResourceBusy, "hardware pin is already reserved");
         reserved.push_back(pin);
     };
     switch (device) {
@@ -373,6 +373,7 @@ void VirtualHardware::writeText(runtime::SessionId session, runtime::ChannelId i
         throw ServiceError(ServiceErrorCode::Unavailable, "device does not support text output");
     opened.tx.append(text.data(), text.size());
     if (serialLoopback_) {
+        for (char character : text) opened.rx.push_back(static_cast<std::uint8_t>(character));
         std::string line;
         for (char character : text) {
             if (character == '\r' || character == '\n') {

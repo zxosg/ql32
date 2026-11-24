@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QRect, QSize, Qt, QTimer, QSignalBlocker, Signal
-from PySide6.QtGui import QColor, QPainter, QTextFormat
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap, QTextFormat
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel,
     QInputDialog,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from .serial_worker import SerialWorker
+from .qimg import convert_image, suggest_device_path, validate_device_path
 
 
 class LineNumberArea(QWidget):
@@ -43,6 +45,7 @@ class SourceEditor(QPlainTextEdit):
     def __init__(self):
         super().__init__()
         self.breakpoints: set[int] = set()
+        self.execution_line: int | None = None
         self.line_area = LineNumberArea(self)
         self.blockCountChanged.connect(self._update_margin)
         self.updateRequest.connect(self._update_area)
@@ -114,12 +117,31 @@ class SourceEditor(QPlainTextEdit):
         self.breakpoint_changed.emit(line, enabled)
 
     def highlight_current_line(self):
-        selection = QTextEdit.ExtraSelection()
-        selection.format.setBackground(QColor("#313a46"))
-        selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
-        selection.cursor = self.textCursor()
-        selection.cursor.clearSelection()
-        self.setExtraSelections([selection])
+        selections = []
+        if self.textCursor().blockNumber() + 1 != self.execution_line:
+            selection = QTextEdit.ExtraSelection()
+            selection.format.setBackground(QColor("#dcecff"))
+            selection.format.setForeground(QColor("#20242b"))
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            selections.append(selection)
+        if self.execution_line is not None:
+            block = self.document().findBlockByNumber(self.execution_line - 1)
+            if block.isValid():
+                selection = QTextEdit.ExtraSelection()
+                selection.format.setBackground(QColor("#ffe082"))
+                selection.format.setForeground(QColor("#20242b"))
+                selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+                selection.cursor = self.textCursor()
+                selection.cursor.setPosition(block.position())
+                selection.cursor.clearSelection()
+                selections.append(selection)
+        self.setExtraSelections(selections)
+
+    def set_execution_line(self, line):
+        self.execution_line = int(line) if line and int(line) > 0 else None
+        self.highlight_current_line()
 
     def goto_source_line(self, line):
         if line < 1:
@@ -146,6 +168,7 @@ class DebuggerWindow(QMainWindow):
         self.worker.repl_output.connect(self._append_repl_output)
         self.worker.request_finished.connect(self._on_response)
         self.worker.transfer_progress.connect(self._on_transfer_progress)
+        self.worker.transfer_status.connect(self._on_transfer_status)
         self.worker.transfer_finished.connect(self._on_transfer_finished)
         self.pending: dict[int, tuple] = {}
         self.transfer_jobs: dict[str, tuple] = {}
@@ -157,6 +180,7 @@ class DebuggerWindow(QMainWindow):
         self.screen_capture = False
         self._is_connected = False
         self._inspect_inflight = False
+        self._connected_port: str | None = None
 
         root = QWidget()
         outer = QVBoxLayout(root)
@@ -164,6 +188,7 @@ class DebuggerWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_debug_tab(), "Debugger")
         self.tabs.addTab(self._build_files_tab(), "Files")
+        self.tabs.addTab(self._build_qimg_tab(), "Image converter")
         self.tabs.addTab(self._build_screen_tab(), "Screen")
         self.tabs.addTab(self._build_repl_tab(), "REPL")
         outer.addWidget(self.tabs)
@@ -172,7 +197,7 @@ class DebuggerWindow(QMainWindow):
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._poll_debug_state)
-        self.poll_timer.start(600)
+        self.poll_timer.start(1200)
 
     def _connection_bar(self):
         row = QHBoxLayout()
@@ -199,9 +224,13 @@ class DebuggerWindow(QMainWindow):
         self.task_box = QComboBox()
         self.task_refresh = QPushButton("Refresh tasks")
         self.task_refresh.clicked.connect(lambda: self._request("tasks.list", callback="tasks"))
-        self.attach_button = QPushButton("Attach")
+        self.attach_button = QPushButton("Attach to task")
+        self.attach_button.setToolTip(
+            "Attach to an existing task. Select its source file in Files first.")
         self.attach_button.clicked.connect(self._attach_selected)
-        self.start_button = QPushButton("Start selected file")
+        self.start_button = QPushButton("Start file paused")
+        self.start_button.setToolTip(
+            "Start the selected BASIC file with the debugger attached and paused at its first statement.")
         self.start_button.clicked.connect(self._start_selected)
         bar.addWidget(QLabel("Task"))
         bar.addWidget(self.task_box, 1)
@@ -358,6 +387,75 @@ class DebuggerWindow(QMainWindow):
         self._screen_path: Path | None = None
         return page
 
+    def _build_qimg_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        controls = QHBoxLayout()
+        self.qimg_load_button = QPushButton("Load image")
+        self.qimg_load_button.clicked.connect(self._qimg_load)
+        controls.addWidget(self.qimg_load_button)
+        self.qimg_width = self._spinbox(1, 2048, 320, "QIMG output width")
+        self.qimg_height = self._spinbox(1, 2048, 240, "QIMG output height")
+        self.qimg_width.valueChanged.connect(
+            lambda value: self._qimg_resize_changed("width", value))
+        self.qimg_height.valueChanged.connect(
+            lambda value: self._qimg_resize_changed("height", value))
+        controls.addWidget(QLabel("Width"))
+        controls.addWidget(self.qimg_width)
+        controls.addWidget(QLabel("Height"))
+        controls.addWidget(self.qimg_height)
+        self.qimg_keep_aspect = QCheckBox("Keep aspect ratio")
+        self.qimg_keep_aspect.setChecked(True)
+        controls.addWidget(self.qimg_keep_aspect)
+        layout.addLayout(controls)
+
+        self.qimg_preview = QLabel("Load an image to preview its 16-color conversion")
+        self.qimg_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qimg_preview.setMinimumSize(500, 320)
+        self.qimg_preview.setStyleSheet("background:#20242b;color:#d0d5dc")
+        self.qimg_preview.setScaledContents(False)
+        layout.addWidget(self.qimg_preview, 1)
+
+        export_row = QHBoxLayout()
+        self.qimg_status = QLabel("No image loaded")
+        export_row.addWidget(self.qimg_status, 1)
+        self.qimg_dither = QCheckBox("Dither")
+        self.qimg_dither.setChecked(True)
+        self.qimg_dither.toggled.connect(self._qimg_rebuild)
+        export_row.addWidget(self.qimg_dither)
+        self.qimg_export_button = QPushButton("Export QIMG")
+        self.qimg_export_button.clicked.connect(self._qimg_export)
+        self.qimg_upload_button = QPushButton("Upload to device")
+        self.qimg_upload_button.clicked.connect(self._qimg_upload)
+        export_row.addWidget(self.qimg_export_button)
+        export_row.addWidget(self.qimg_upload_button)
+        layout.addLayout(export_row)
+
+        destination_row = QHBoxLayout()
+        destination_row.addWidget(QLabel("Device path"))
+        self.qimg_device_path = QLineEdit()
+        self.qimg_device_path.setPlaceholderText("FFS:/image.qimg")
+        destination_row.addWidget(self.qimg_device_path, 1)
+        layout.addLayout(destination_row)
+
+        transfer_row = QHBoxLayout()
+        self.qimg_transfer_status = QLabel("Ready")
+        self.qimg_transfer_progress = QProgressBar()
+        self.qimg_transfer_progress.setRange(0, 1000)
+        self.qimg_transfer_progress.setValue(0)
+        transfer_row.addWidget(self.qimg_transfer_status)
+        transfer_row.addWidget(self.qimg_transfer_progress, 1)
+        layout.addLayout(transfer_row)
+
+        self._qimg_source = None
+        self._qimg_source_path: Path | None = None
+        self._qimg_data: bytes | None = None
+        self._qimg_preview_image = None
+        self._qimg_resize_guard = False
+        self.qimg_export_button.setEnabled(False)
+        self.qimg_upload_button.setEnabled(False)
+        return page
+
     def _build_repl_tab(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -381,15 +479,25 @@ class DebuggerWindow(QMainWindow):
         return page
 
     def _refresh_ports(self):
-        current = self.port_box.currentText()
+        current = self.port_box.currentData()
         self.port_box.clear()
         try:
             from serial.tools import list_ports
             for port in list_ports.comports():
+                # list_ports reports enumerated ports, but stale or permission-
+                # blocked device nodes can still appear on Unix. Do not open a
+                # port to probe it: opening an ESP32 USB-UART may reset the board.
+                if os.name != "nt" and (
+                    not os.path.exists(port.device) or
+                    not os.access(port.device, os.R_OK | os.W_OK)
+                ):
+                    continue
                 self.port_box.addItem(f"{port.device} — {port.description}", port.device)
+            if self.port_box.count() == 0:
+                self.port_box.addItem("No available serial ports")
         except ImportError:
             self.port_box.addItem("Install pyserial to list ports")
-        index = self.port_box.findText(current)
+        index = self.port_box.findData(current)
         if index >= 0:
             self.port_box.setCurrentIndex(index)
 
@@ -406,6 +514,7 @@ class DebuggerWindow(QMainWindow):
 
     def _on_connected(self, port, info):
         self._is_connected = True
+        self._connected_port = port
         self.board_label.setText(info.get("board", ""))
         if not info.get("supported"):
             self.status_label.setText("Unsupported board")
@@ -424,6 +533,7 @@ class DebuggerWindow(QMainWindow):
 
     def _on_disconnected(self):
         self._is_connected = False
+        self._connected_port = None
         self.status_label.setText("Disconnected")
         self.board_label.clear()
         self.current_task = None
@@ -453,6 +563,7 @@ class DebuggerWindow(QMainWindow):
             self._populate_files(payload)
         elif callback == "start":
             self.current_task = int(payload["task_id"])
+            self._log(f"Started task {self.current_task}; debugger attached and paused at the start.")
             self._request("tasks.list", callback="tasks")
         elif callback == "viewport":
             self._log(f"Task {payload['task_id']} canvas set to "
@@ -460,11 +571,10 @@ class DebuggerWindow(QMainWindow):
                       f"{payload['canvas_width']}×{payload['canvas_height']} "
                       f"offset ({payload.get('canvas_offset_x', 0)}, "
                       f"{payload.get('canvas_offset_y', 0)})")
-            self._log(f"Started and attached task {self.current_task}")
             self._inspect()
         elif callback == "attach":
             self.current_task = int(payload["task_id"])
-            self._log(f"Attached to task {self.current_task}")
+            self._log(f"Source loaded; attached to task {self.current_task}.")
             self._inspect()
         elif callback == "inspect":
             self._inspect_inflight = False
@@ -586,6 +696,132 @@ class DebuggerWindow(QMainWindow):
         self.transfer_jobs[key] = ("upload", device_path)
         self.worker.upload(key, local, device_path)
 
+    def _qimg_load(self):
+        local, _ = QFileDialog.getOpenFileName(
+            self, "Load image", "",
+            "Images (*.png *.bmp *.jpg *.jpeg *.gif *.tga *.pcx *.webp);;All files (*)")
+        if not local:
+            return
+        try:
+            from PIL import Image
+            with Image.open(local) as opened:
+                self._qimg_source = opened.copy()
+            self._qimg_source_path = Path(local)
+            self._qimg_resize_guard = True
+            scale = min(1.0, 2048 / self._qimg_source.width,
+                        2048 / self._qimg_source.height)
+            width = max(1, round(self._qimg_source.width * scale))
+            height = max(1, round(self._qimg_source.height * scale))
+            self.qimg_width.setValue(width)
+            self.qimg_height.setValue(height)
+            self._qimg_resize_guard = False
+            self.qimg_device_path.setText(suggest_device_path(
+                str(self._qimg_source_path),
+                self.remote_dir or self.root_box.currentText() or "FFS:/"))
+            self._qimg_rebuild()
+        except Exception as error:
+            self._qimg_resize_guard = False
+            self._qimg_source = None
+            self._qimg_data = None
+            self._qimg_preview_image = None
+            self.qimg_preview.setText(f"Could not load image: {error}")
+            self.qimg_preview.setPixmap(QPixmap())
+            self.qimg_export_button.setEnabled(False)
+            self.qimg_upload_button.setEnabled(False)
+            self._show_error(f"Could not load image: {error}")
+
+    def _qimg_resize_changed(self, changed, value):
+        if self._qimg_resize_guard or self._qimg_source is None:
+            return
+        if self.qimg_keep_aspect.isChecked():
+            self._qimg_resize_guard = True
+            ratio = self._qimg_source.width / self._qimg_source.height
+            if changed == "width":
+                self.qimg_height.setValue(max(1, min(2048, round(value / ratio))))
+            else:
+                self.qimg_width.setValue(max(1, min(2048, round(value * ratio))))
+            self._qimg_resize_guard = False
+        self._qimg_rebuild()
+
+    def _qimg_rebuild(self, *_):
+        if self._qimg_source is None:
+            return
+        try:
+            data, preview = convert_image(
+                self._qimg_source, self.qimg_width.value(), self.qimg_height.value(),
+                dither=self.qimg_dither.isChecked())
+            self._qimg_data = data
+            self._qimg_preview_image = preview
+            self._show_qimg_preview()
+            self.qimg_status.setText(
+                f"{self.qimg_width.value()}×{self.qimg_height.value()} · "
+                f"{len(data)} bytes · 16-color indexed QIMG v2")
+            self.qimg_export_button.setEnabled(True)
+            self.qimg_upload_button.setEnabled(True)
+        except Exception as error:
+            self._qimg_data = None
+            self.qimg_export_button.setEnabled(False)
+            self.qimg_upload_button.setEnabled(False)
+            self.qimg_status.setText(f"Conversion error: {error}")
+
+    def _show_qimg_preview(self):
+        if self._qimg_preview_image is None:
+            return
+        image = self._qimg_preview_image
+        raw = image.tobytes("raw", "RGB")
+        qimage = QImage(raw, image.width, image.height, image.width * 3,
+                        QImage.Format.Format_RGB888).copy()
+        pixmap = QPixmap.fromImage(qimage)
+        self.qimg_preview.setPixmap(pixmap.scaled(
+            self.qimg_preview.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation))
+
+    def _qimg_export(self):
+        if not self._qimg_data:
+            return
+        default = (self._qimg_source_path.stem if self._qimg_source_path else "image") + ".qimg"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export QIMG v2", default, "QL/32 indexed image (*.qimg)")
+        if path:
+            if Path(path).suffix.lower() != ".qimg":
+                path += ".qimg"
+            try:
+                Path(path).write_bytes(self._qimg_data)
+                self._log(f"Exported QIMG v2: {path}")
+            except OSError as error:
+                self._show_error(f"Could not write QIMG file: {error}")
+
+    def _qimg_upload(self):
+        if not self._qimg_data:
+            self._show_error("Load and convert an image first.")
+            return
+        if not self._is_connected:
+            self._show_error("Connect to QL/32 before uploading an image.")
+            return
+        device_path = self.qimg_device_path.text().strip()
+        if not device_path:
+            self._show_error("Enter a device path for the QIMG file.")
+            return
+        try:
+            validate_device_path(device_path)
+        except ValueError as error:
+            self._show_error(str(error))
+            return
+        temp = tempfile.NamedTemporaryFile(prefix="ql32-image-", suffix=".qimg",
+                                           delete=False)
+        try:
+            temp.write(self._qimg_data)
+            temp.close()
+        except OSError as error:
+            temp.close()
+            Path(temp.name).unlink(missing_ok=True)
+            self._show_error(f"Could not prepare QIMG upload: {error}")
+            return
+        key = f"qimg-upload-{id(temp)}"
+        self.transfer_jobs[key] = ("qimg-upload", device_path, temp.name)
+        self.worker.upload(key, temp.name, device_path)
+        self._log(f"Uploading QIMG v2 to {device_path}")
+
     def _download_file(self):
         item = self.file_tree.currentItem()
         entry = item.data(0, Qt.ItemDataRole.UserRole) if item else None
@@ -644,13 +880,14 @@ class DebuggerWindow(QMainWindow):
             self._request("debug.inspect", self.current_task, callback="inspect")
 
     def _poll_debug_state(self):
-        if self._is_connected:
-            self._request("tasks.list", callback="tasks")
+        if self._is_connected and not self.transfer_jobs:
+            tasks_pending = any(callback == "tasks" for callback in self.pending.values())
+            if not tasks_pending:
+                self._request("tasks.list", callback="tasks")
             self._inspect()
 
     def _show_snapshot(self, snapshot):
         location = snapshot["location"]
-        line = location.get("basic_line") or location.get("source_line")
         state = "PAUSED" if snapshot.get("paused") else "RUNNING"
         self.where_label.setText(
             f"{state} — BASIC {location.get('basic_line') or '—'}, "
@@ -659,6 +896,9 @@ class DebuggerWindow(QMainWindow):
         )
         if snapshot.get("paused") and location.get("source_line"):
             self.editor.goto_source_line(location["source_line"])
+            self.editor.set_execution_line(location["source_line"])
+        else:
+            self.editor.set_execution_line(None)
         variables = {"locals": snapshot["frames"][-1]["locals"] if snapshot["frames"] else {},
                      "local_arrays": snapshot["frames"][-1]["arrays"] if snapshot["frames"] else [],
                      "globals": snapshot["globals"], "arrays": snapshot["arrays"]}
@@ -715,10 +955,31 @@ class DebuggerWindow(QMainWindow):
     def _on_transfer_progress(self, key, done, total):
         self.transfer_progress.setValue(0 if not total else int(done * 1000 / total))
         self.status_label.setText(f"Transfer {done}/{total} bytes")
+        job = self.transfer_jobs.get(key)
+        if job and job[0] == "qimg-upload":
+            self.qimg_transfer_progress.setValue(
+                0 if not total else int(done * 1000 / total))
+            self.qimg_transfer_status.setText(f"Uploading {done}/{total} bytes")
+
+    def _on_transfer_status(self, key, status):
+        self.status_label.setText(status)
+        job = self.transfer_jobs.get(key)
+        if job and job[0] == "qimg-upload":
+            self.qimg_transfer_status.setText(status)
 
     def _on_transfer_finished(self, key, kind, path, error):
         job = self.transfer_jobs.pop(key, None)
+        if job and job[0] == "qimg-upload":
+            try:
+                Path(job[2]).unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                self._log(f"Could not remove temporary image: {cleanup_error}")
+            self.qimg_transfer_progress.setValue(0)
+            self.qimg_transfer_status.setText(
+                "Upload failed" if error else f"Uploaded to {job[1]}")
         self.transfer_progress.setValue(0)
+        if self._is_connected and self._connected_port:
+            self.status_label.setText(f"Connected: {self._connected_port}")
         if error:
             self._log(f"{kind}: {error}")
             if "cancel" not in error.lower():
@@ -749,7 +1010,9 @@ class DebuggerWindow(QMainWindow):
             self._list_files()
 
     def _log(self, message):
-        self.log_view.appendPlainText(str(message))
+        text = str(message).strip()
+        if text and text != ">":
+            self.log_view.appendPlainText(text)
 
     def _append_repl_output(self, message):
         text = str(message)
@@ -759,6 +1022,11 @@ class DebuggerWindow(QMainWindow):
         if text.strip() == ">":
             return
         self.repl_view.appendPlainText(text)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._qimg_preview_image is not None:
+            self._show_qimg_preview()
 
     def _send_repl_command(self):
         command = self.repl_input.text().strip()

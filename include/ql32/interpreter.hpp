@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -15,13 +16,18 @@
 #include "ql32/runtime/channel.hpp"
 #include "ql32/runtime/buffer.hpp"
 #include "ql32/runtime/storage.hpp"
+#include "ql32/runtime/file_ops.hpp"
 #include "ql32/runtime/network.hpp"
 #include "ql32/runtime/memory.hpp"
 #include "ql32/runtime/system_control.hpp"
+#include "ql32/runtime/system_info.hpp"
 #include "ql32/runtime/cpu_frequency.hpp"
+#include "ql32/runtime/display_mode.hpp"
+#include "ql32/runtime/music.hpp"
 #include "ql32/runtime/task_control.hpp"
 #include "ql32/runtime/error.hpp"
 #include "ql32/graphics/service.hpp"
+#include "ql32/graphics/bitmap.hpp"
 #include "ql32/ui/service.hpp"
 
 namespace ql32 {
@@ -50,7 +56,10 @@ public:
                          std::shared_ptr<runtime::TaskControlService> taskControl = {},
                          runtime::TaskId taskId = 0,
                          std::shared_ptr<runtime::SystemControlService> systemControl = {},
-                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency = {});
+                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency = {},
+                         std::shared_ptr<runtime::DisplayModeService> displayModes = {},
+                         std::shared_ptr<runtime::SystemInfoService> systemInfo = {},
+                         std::shared_ptr<runtime::MusicService> music = {});
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -80,6 +89,11 @@ public:
     std::size_t openChannelCount() const;
     void setErrorContext(runtime::ErrorCode code, std::string detail = {});
     void abortExecution() noexcept;
+    // Keeps channels opened by programs in a long-lived interactive session
+    // until explicitly closed or until the session itself ends.
+    void setPersistentSessionResources(bool persistent) noexcept {
+        persistentSessionResources_ = persistent;
+    }
     // Release retained display memory while keeping this interpreter session
     // available for the next interactive command.
     void releaseGraphicsResources() noexcept;
@@ -101,8 +115,12 @@ public:
     std::string takePendingRunSource() noexcept;
     std::string takePendingInteractiveTail() noexcept;
     std::optional<InteractiveLineEdit> takePendingLineEdit() noexcept;
+    std::optional<InteractiveLineEdit> navigateProgramEdit(int currentLine,
+                                                            int direction);
     bool hasPendingInteractivePager() const noexcept;
     ExecutionStatus resumeInteractivePager(std::ostream& output);
+    bool hasPendingFileJob() const noexcept { return pendingFileJob_ != nullptr; }
+    ExecutionStatus resumeFileJob(std::ostream& output);
     runtime::ErrorCode errorCode() const noexcept { return errorCode_; }
     const std::string& errorDetail() const {
         if (hasTrappedDetail_) errorDetail_.assign(trappedDetail_);
@@ -120,6 +138,27 @@ private:
                                      std::size_t instructionBudget);
     void writePagerPage(std::ostream& output, std::size_t lineCount);
     void clearPager() noexcept;
+    void clearFileJob() noexcept;
+    ExecutionStatus startFileJob(runtime::fileops::Plan plan, std::ostream& output,
+                                 const char* commandName);
+    ExecutionStatus runFileJob(std::ostream& output);
+    void writeTextToChannel(std::ostream& output, runtime::ChannelId channel,
+                            std::string_view text);
+    // Single text-output choke point for a resolved endpoint; fans out to mirrors.
+    void emitText(std::ostream& output, runtime::ChannelId endpoint,
+                  const std::string& text, bool mirror = true);
+    void writeEndpoint(std::ostream& output, runtime::ChannelId endpoint,
+                       const std::string& text);
+    void mirrorText(std::ostream& output, runtime::ChannelId source,
+                    const std::string& text);
+    // Live graphics-capable mirror destinations of a source; closed ones are disabled.
+    std::vector<runtime::ChannelId> graphicsMirrorTargets(runtime::ChannelId source);
+    void failMirror(runtime::ChannelId source, runtime::ChannelId destination,
+                    const std::string& reason);
+    void addMirror(runtime::ChannelId source, runtime::ChannelId destination);
+    void deleteMirrors(runtime::ChannelId destination);
+    void removeMirrorsFor(runtime::ChannelId channel);
+    std::string mirrorListing() const;
     runtime::ChannelId resolveChannel(runtime::ChannelId channel) const;
     void setDefaultOutputChannel(runtime::ChannelId channel);
     void bindChannel(runtime::ChannelId source, runtime::ChannelId destination);
@@ -139,16 +178,30 @@ private:
     std::size_t pendingPagerPageRows_ = 1;
     runtime::ChannelId pendingPagerChannel_ = 0;
     std::optional<ui::RequestId> pendingPagerRequest_;
+    std::unique_ptr<runtime::fileops::Job> pendingFileJob_;
+    std::optional<ui::RequestId> pendingFileConfirm_;
+    std::ostream* fileJobOutput_ = nullptr;
     // Logical channels point directly at the endpoint handle they currently
     // represent. No channel-to-channel route chains are retained.
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;
+    struct Mirror {
+        runtime::ChannelId destination = 0;
+        bool disabled = false;
+        std::uint64_t dropped = 0;
+        std::string failure;
+    };
+    // Session-local text mirrors keyed by resolved source endpoint.
+    std::map<runtime::ChannelId, std::vector<Mirror>> mirrors_;
+    bool emittingMirror_ = false;
     std::vector<runtime::ChannelId> executionChannels_;
     bool interactiveCommandExecution_ = false;
+    bool persistentSessionResources_ = false;
     std::map<int, std::string> program_;
     std::optional<int> lastEditedLine_;
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;
     graphics::FontRegistry fontRegistry_;
+    graphics::BitmapRegistry bitmapRegistry_;
     std::shared_ptr<runtime::ChannelService> channels_;
     runtime::BufferManager buffers_;
     std::shared_ptr<ui::Service> ui_;
@@ -156,6 +209,9 @@ private:
     std::shared_ptr<runtime::NetworkService> network_;
     std::shared_ptr<runtime::MemoryService> memory_;
     std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency_;
+    std::shared_ptr<runtime::DisplayModeService> displayModes_;
+    std::shared_ptr<runtime::SystemInfoService> systemInfo_;
+    std::shared_ptr<runtime::MusicService> music_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::shared_ptr<runtime::SystemControlService> systemControl_;
     runtime::SessionId session_id_ = 0;

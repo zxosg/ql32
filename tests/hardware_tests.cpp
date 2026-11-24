@@ -74,14 +74,13 @@ void externalInputsAndLifetimeTest() {
     Interpreter interpreter({}, channels);
     // This test deliberately spans persistent REPL submissions.
     std::ostringstream output;
-    interpreter.executeInteractive("g=OPEN(5,7,0)\na=OPEN(6,8,12)\nPRINT IN(g);IN(a)\n", output);
-    require(output.str() == "01234\n", "GPIO/ADC input values were not returned");
-    bool duplicateRejected = false;
-    try { interpreter.executeInteractive("other=OPEN(5,7,0)\n", output); }
-    catch (const std::exception&) { duplicateRejected = true; }
-    require(duplicateRejected, "duplicate pin reservation was accepted");
-    interpreter.executeInteractive("CLOSE g\nCLOSE a\n", output);
-    interpreter.executeInteractive("other=OPEN(5,7,0)\nCLOSE other\n", output);
+    interpreter.execute(
+        "g=OPEN(5,7,0)\na=OPEN(6,8,12)\nPRINT IN(g);IN(a)\n"
+        "other=OPEN(5,7,0)\nPRINT other\n"
+        "PRINT IN(g)\nCLOSE g\nCLOSE a\n"
+        "other=OPEN(5,7,0)\nPRINT other>=0\nCLOSE other\n", output);
+    require(output.str() == "01234\n-22\n0\n1\n",
+            "pin conflict must return -22 and reopening after CLOSE must succeed");
 }
 
 void invalidSyntaxTest() {
@@ -124,27 +123,28 @@ void serialTouchAndTimerTest() {
         runtime::ChannelRegistry::SerialWriter{}, hardware);
     Interpreter interpreter({}, channels);
     std::ostringstream output;
-    interpreter.executeInteractive("uart=OPEN(2,1,9600,0,0)\n", output);
-    interpreter.executeInteractive(
+    // Channels are closed when a program run ends, so one program owns them all.
+    auto readStatus = interpreter.executeResumable(
+        "uart=OPEN(2,1,9600,0,0)\n"
         "touch=OPEN(11,9)\nPRINT IN(touch)\n"
         "WRITE uart,\"PING\"\n"
         "buffer=ALLOC(2)\nPOKE buffer,65,66\n"
         "status=IOWRITE(uart,buffer)\nPRINT status\n"
-        "timer=OPEN(12,1,0)\n", output);
-    auto readStatus = interpreter.executeInteractiveResumable("reply$=READ$(uart)\nPRINT reply$\n", output);
+        "timer=OPEN(12,1,0)\n"
+        "reply$=READ$(uart)\nPRINT reply$\n"
+        "ticks=IN(timer)\nPRINT ticks>0\n"
+        "CLOSE touch\nCLOSE uart\nCLOSE timer\nDEALLOC buffer\n", output);
     require(readStatus == ExecutionStatus::WaitingChannel,
             "serial READ$ did not suspend the BASIC session when no line was ready");
+    const auto uartData = hardware->takeSerialOutput(blocker + 1);
     hardware->queueSerialLine(blocker + 1, "REPLY");
     require(interpreter.channelReadReady(), "serial line did not wake its waiting session");
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
     readStatus = interpreter.resume(output);
     require(readStatus == ExecutionStatus::Completed, "serial READ$ did not resume to completion");
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    interpreter.executeInteractive("ticks=IN(timer)\nPRINT ticks>0\n", output);
     require(output.str() == "1\n0\nREPLY\n1\n",
             "touch, UART line/buffer, or timer channel behavior failed");
-    const auto uartData = hardware->takeSerialOutput(blocker + 1);
     require(uartData == "PING\nAB", "UART text and binary output were not preserved");
-    interpreter.executeInteractive("CLOSE touch\nCLOSE uart\nCLOSE timer\nDEALLOC buffer\n", output);
     hardware->close(900, blocker);
 }
 

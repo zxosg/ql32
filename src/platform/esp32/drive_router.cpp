@@ -6,9 +6,9 @@
 namespace ql32::platform::esp32 {
 namespace {
 
-std::string driveName(const std::string& path) {
+std::string driveName(const std::string& path, const char* fallback) {
     const auto colon = path.find(':');
-    if (colon == std::string::npos) return "SDC";
+    if (colon == std::string::npos) return fallback;
     std::string drive = path.substr(0, colon);
     std::transform(drive.begin(), drive.end(), drive.begin(), [](unsigned char c) {
         return static_cast<char>(std::toupper(c));
@@ -16,8 +16,8 @@ std::string driveName(const std::string& path) {
     return drive;
 }
 
-bool isFfs(const std::string& path) {
-    const auto drive = driveName(path);
+bool isFfs(const std::string& path, bool defaultToFfs) {
+    const auto drive = driveName(path, defaultToFfs ? "FFS" : "SDC");
     if (drive == "FFS") return true;
     if (drive == "SDC") return false;
     throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -27,7 +27,7 @@ bool isFfs(const std::string& path) {
 } // namespace
 
 runtime::StorageService& DriveRouterStorage::forPath(const std::string& path) const {
-    return isFfs(path) ? ffs_ : sdc_;
+    return isFfs(path, defaultToFfs_) ? ffs_ : sdc_;
 }
 
 std::string DriveRouterStorage::readText(const std::string& path) {
@@ -37,6 +37,11 @@ std::string DriveRouterStorage::readText(const std::string& path) {
 std::unique_ptr<runtime::StorageReadHandle> DriveRouterStorage::openRead(
         const std::string& path) {
     return forPath(path).openRead(path);
+}
+
+std::unique_ptr<runtime::StorageWriteHandle> DriveRouterStorage::openWrite(
+        const std::string& path) {
+    return forPath(path).openWrite(path);
 }
 
 void DriveRouterStorage::writeText(const std::string& path, const std::string& contents) {
@@ -77,8 +82,16 @@ void DriveRouterStorage::remove(const std::string& path) {
     forPath(path).remove(path);
 }
 
+void DriveRouterStorage::createDirectory(const std::string& path) {
+    forPath(path).createDirectory(path);
+}
+
 void DriveRouterStorage::removeDirectory(const std::string& path) {
     forPath(path).removeDirectory(path);
+}
+
+runtime::StorageSpace DriveRouterStorage::space(const std::string& path) {
+    return forPath(path).space(path);
 }
 
 void DriveRouterStorage::format(const std::string& path) {
@@ -86,7 +99,7 @@ void DriveRouterStorage::format(const std::string& path) {
 }
 
 runtime::ChannelService& DriveRouterChannels::forPath(const std::string& path) const {
-    return isFfs(path) ? ffs_ : sdc_;
+    return isFfs(path, defaultToFfs_) ? ffs_ : sdc_;
 }
 
 runtime::ChannelId DriveRouterChannels::remember(runtime::SessionId session,
@@ -137,6 +150,18 @@ void DriveRouterChannels::seek(runtime::SessionId session, runtime::ChannelId ch
         std::uint64_t offset) {
     const auto routed = lookup(session, channel);
     routed.service->seek(session, routed.channel, offset);
+}
+
+std::uint64_t DriveRouterChannels::position(runtime::SessionId session,
+        runtime::ChannelId channel) {
+    const auto routed = lookup(session, channel);
+    return routed.service->position(session, routed.channel);
+}
+
+std::uint64_t DriveRouterChannels::length(runtime::SessionId session,
+        runtime::ChannelId channel) {
+    const auto routed = lookup(session, channel);
+    return routed.service->length(session, routed.channel);
 }
 
 bool DriveRouterChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {

@@ -1,0 +1,10 @@
+> 
+> TASK "FFS:/attractor.bas"> TASK "FFS:/attractor.bas"
+Started task 2
+> DMADIAG> DMADIAG
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=18249, rows=8759520, EOF-events=145992, refills=8759520, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=415, clone-bytes=1288512, pending-reuses=30, refill-batches=145992, refill-max-us=2303, refill-row-max-us=148, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+KILL 2KILL 2
+> 
+> TASKS> TASKS
+> 

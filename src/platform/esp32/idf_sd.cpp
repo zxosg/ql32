@@ -12,6 +12,7 @@ extern "C" {
 #include <driver/spi_master.h>
 #include <esp_err.h>
 #include <esp_vfs_fat.h>
+#include <ff.h>
 #include <sdmmc_cmd.h>
 }
 
@@ -26,6 +27,10 @@ namespace {
 
 using runtime::ServiceError;
 using runtime::ServiceErrorCode;
+
+bool canRead(runtime::ChannelMode mode) {
+    return mode == runtime::ChannelMode::Read || mode == runtime::ChannelMode::Update;
+}
 
 std::string errorText(const char* operation) {
     return std::string(operation) + ": " + std::strerror(errno);
@@ -76,6 +81,34 @@ std::string normalizePath(const std::string& path, bool allowRoot,
                            std::string(subject) + " file path must not be empty");
     return result.empty() ? "/" : result;
 }
+
+class IdfSdWriteHandle final : public runtime::StorageWriteHandle {
+public:
+    explicit IdfSdWriteHandle(int descriptor) : descriptor_(descriptor) {}
+    ~IdfSdWriteHandle() override {
+        if (descriptor_ >= 0) ::close(descriptor_);
+    }
+    void write(const std::uint8_t* data, std::size_t size) override {
+        std::size_t offset = 0;
+        while (offset < size) {
+            const auto written = ::write(descriptor_, data + offset, size - offset);
+            if (written <= 0)
+                throw ServiceError(ServiceErrorCode::IoError, errorText("storage write"));
+            offset += static_cast<std::size_t>(written);
+        }
+    }
+    void close() override {
+        if (::fsync(descriptor_) != 0)
+            throw ServiceError(ServiceErrorCode::IoError, errorText("storage sync"));
+        const int closing = descriptor_;
+        descriptor_ = -1;
+        if (::close(closing) != 0)
+            throw ServiceError(ServiceErrorCode::IoError, errorText("storage close"));
+    }
+
+private:
+    int descriptor_ = -1;
+};
 
 class IdfSdReadHandle final : public runtime::StorageReadHandle {
 public:
@@ -229,6 +262,16 @@ std::unique_ptr<runtime::StorageReadHandle> IdfSdStorage::openRead(
         static_cast<std::uint64_t>(status.st_size));
 }
 
+std::unique_ptr<runtime::StorageWriteHandle> IdfSdStorage::openWrite(
+        const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    const int descriptor = ::open(fullPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (descriptor < 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage write open"));
+    return std::make_unique<IdfSdWriteHandle>(descriptor);
+}
+
 void IdfSdStorage::writeText(const std::string& path, const std::string& contents) {
     ensureAvailable();
     const std::string fullPath = resolve(path, false);
@@ -317,6 +360,23 @@ std::vector<runtime::FileEntry> IdfSdStorage::list(const std::string& path) {
     return entries;
 }
 
+runtime::StorageSpace IdfSdStorage::space(const std::string&) {
+    ensureAvailable();
+    runtime::StorageSpace result;
+    FATFS* fatfs = nullptr;
+    DWORD freeClusters = 0;
+    // The single SDSPI mount is FatFs volume 0.
+    if (f_getfree("0:", &freeClusters, &fatfs) != FR_OK || !fatfs) return result;
+    const std::uint64_t clusterBytes =
+        static_cast<std::uint64_t>(fatfs->csize) * FF_MIN_SS;
+    result.total = static_cast<std::uint64_t>(fatfs->n_fatent - 2) * clusterBytes;
+    result.free = std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(freeClusters) * clusterBytes, result.total);
+    result.used = result.total - result.free;
+    result.known = true;
+    return result;
+}
+
 bool IdfSdStorage::exists(const std::string& path) {
     ensureAvailable();
     const std::string fullPath = resolve(path, false);
@@ -382,6 +442,13 @@ void IdfSdStorage::remove(const std::string& path) {
         throw ServiceError(ServiceErrorCode::IoError, errorText("storage remove"));
 }
 
+void IdfSdStorage::createDirectory(const std::string& path) {
+    ensureAvailable();
+    const std::string fullPath = resolve(path, false);
+    if (::mkdir(fullPath.c_str(), 0775) != 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("storage create directory"));
+}
+
 void IdfSdStorage::removeDirectory(const std::string& path) {
     ensureAvailable();
     const std::string fullPath = resolve(path, false);
@@ -434,9 +501,11 @@ runtime::ChannelId IdfSdChannels::open(runtime::SessionId session, const std::st
     int flags = O_RDONLY;
     if (mode == runtime::ChannelMode::Write) flags = O_WRONLY | O_CREAT | O_TRUNC;
     if (mode == runtime::ChannelMode::Append) flags = O_WRONLY | O_CREAT | O_APPEND;
+    if (mode == runtime::ChannelMode::Update) flags = O_RDWR;
     const int descriptor = ::open(fullPath.c_str(), flags, 0666);
     if (descriptor < 0) {
-        if (errno == ENOENT && mode == runtime::ChannelMode::Read)
+        if (errno == ENOENT && (mode == runtime::ChannelMode::Read ||
+                                mode == runtime::ChannelMode::Update))
             throw ServiceError(ServiceErrorCode::NotFound, "channel: cannot open file: " + path);
         throw ServiceError(ServiceErrorCode::IoError, errorText("channel open"));
     }
@@ -460,7 +529,7 @@ std::optional<std::string> IdfSdChannels::readLine(runtime::SessionId session,
                                                     runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     std::string line;
     char character = 0;
@@ -477,7 +546,7 @@ std::string IdfSdChannels::readBytes(runtime::SessionId session, runtime::Channe
                                      std::size_t count) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     std::string bytes(count, '\0');
     std::size_t offset = 0;
@@ -521,10 +590,30 @@ void IdfSdChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
         throw ServiceError(ServiceErrorCode::IoError, errorText("channel seek"));
 }
 
+std::uint64_t IdfSdChannels::position(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Append)
+        throw ServiceError(ServiceErrorCode::InvalidHandle,
+                           "append channels do not report a position");
+    const auto current = ::lseek(opened.descriptor, 0, SEEK_CUR);
+    if (current < 0) throw ServiceError(ServiceErrorCode::IoError, errorText("channel position"));
+    return static_cast<std::uint64_t>(current);
+}
+
+std::uint64_t IdfSdChannels::length(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    struct stat status {};
+    if (::fstat(opened.descriptor, &status) != 0)
+        throw ServiceError(ServiceErrorCode::IoError, errorText("channel length"));
+    return static_cast<std::uint64_t>(status.st_size);
+}
+
 bool IdfSdChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     const auto current = ::lseek(opened.descriptor, 0, SEEK_CUR);
     const auto end = ::lseek(opened.descriptor, 0, SEEK_END);

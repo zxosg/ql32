@@ -1,5 +1,6 @@
 #include "ql32/ui/graphic_presenter.hpp"
 
+#include <array>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -224,15 +225,22 @@ void testCancellationAndLayers() {
     const auto first = service->beginAlert(1, "Alert", "A message");
     const auto second = service->beginAlert(2, "Next", "Another message");
     ui.beginNext();
-    require(capture->count > before, "system UI was suppressed by GUPDATE 0");
+    require(capture->count == before,
+            "system UI forced a presentation while GUPDATE was off");
+    graphics->update(1);
+    require(capture->count > before,
+            "explicit GUPDATE did not present the pending system UI");
     const auto bounds = ui.bounds();
     const auto center = static_cast<std::size_t>(bounds.y + bounds.height / 2) * 320 +
                         static_cast<std::size_t>(bounds.x + bounds.width / 2);
     require(capture->latest.pixels[center] != 8, "console covered the UI layer");
     service->cancelSession(1);
     ui.refresh();
-    require(!ui.active() && capture->latest.pixels[center] == 8,
-            "cancelled UI failed to restore console");
+    require(!ui.active() && capture->latest.pixels[center] != 8,
+            "cancelled UI unexpectedly changed the screen while GUPDATE was off");
+    graphics->update(1);
+    require(capture->latest.pixels[center] == 8,
+            "explicit GUPDATE did not restore the console after UI cancellation");
     require(ui.beginNext() && ui.active(), "second session request was lost");
     ui.handleKey(key(ql32::input::Key::Enter));
     require(service->poll(second)->kind == ql32::ui::ResultKind::Acknowledged &&
@@ -330,6 +338,16 @@ void testInfoToastColorsAndBlinkOptions() {
     require(toast && toast->ink == 2 && toast->paper == 6 &&
             toast->displayMode == 0,
             "info service did not retain toast colors and display mode");
+
+    service->showInfo(1, "framed", 3000, -1, 1, 2, 0, 0, 6);
+    ui.refresh();
+    const auto framed = service->currentInfo();
+    require(framed && framed->frame == 6, "info service did not retain frame color");
+    std::array<int, 16> counts{};
+    for (const auto color : capture->latest.pixels)
+        if (color < counts.size()) ++counts[color];
+    require(counts[6] > 0 && counts[2] > 0 && counts[0] > 0,
+            "info toast frame, ink and paper were not drawn in separate colors");
 }
 } // namespace
 

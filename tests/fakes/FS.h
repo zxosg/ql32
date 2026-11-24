@@ -23,6 +23,7 @@ public:
     explicit operator bool() const { return valid_; }
     bool isDirectory() const { return directory_; }
     std::size_t size() const;
+    std::size_t position() const { return cursor_; }
     int available() const;
     int read();
     std::size_t read(std::uint8_t* buffer, std::size_t length);
@@ -33,6 +34,7 @@ public:
     const char* name() const { return name_.c_str(); }
     const char* path() const { return path_.c_str(); }
     File openNextFile();
+    void rewindDirectory() { childCursor_ = 0; }
 
 private:
     FS* filesystem_ = nullptr;
@@ -66,8 +68,13 @@ public:
             file.seek(static_cast<std::uint32_t>(files_[key].size()));
             return file;
         }
-        return found == files_.end() ? File{} : File(this, key);
+        if (found == files_.end())
+            return missingAsDirectory_ ? File(this, key, true) : File{};
+        return File(this, key);
     }
+
+    // SPIFFS has no directories; Arduino returns a childless directory handle for a missing name.
+    void setMissingAsDirectory(bool enabled) { missingAsDirectory_ = enabled; }
 
     bool isDirectory(const std::string& path) const {
         return directories_.contains(path);
@@ -84,6 +91,11 @@ public:
         return true;
     }
     bool remove(const char* path) { return files_.erase(path) != 0; }
+    bool mkdir(const char* path) {
+        const std::string key(path);
+        if (exists(path) || !directories_.contains(parent(path))) return false;
+        return directories_.insert(key).second;
+    }
     bool rmdir(const char* path) {
         const std::string key(path);
         if (!directories_.contains(key) || key == "/" || !children(key).empty()) return false;
@@ -119,6 +131,7 @@ private:
     std::map<std::string, std::string> files_;
     std::set<std::string> directories_;
     bool mounted_ = true;
+    bool missingAsDirectory_ = false;
 };
 
 inline File::File(FS* filesystem, std::string path, bool directory)

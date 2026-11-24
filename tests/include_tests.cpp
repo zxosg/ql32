@@ -91,6 +91,22 @@ void testDialogFlagsAreAvailableFromQl32Include() {
             "ql32.inc dialog option constants were missing or had incorrect values");
 }
 
+void testSystemInfoConstantsAreAvailableFromQl32Include() {
+    const auto sourceRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+    auto storage = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(
+        sourceRoot / "data");
+    ql32::Interpreter interpreter(storage);
+    std::ostringstream output;
+    interpreter.executeResumable(
+        "INCLUDE \"ql32.inc\"\n"
+        "PRINT KSysVersion;\",\";KSysBuild;\",\";KSysPlatform;\",\";"
+        "KSysDisplay;\",\";KSysInput;\",\";KSysStorage;\",\";KSysFeatures\n"
+        "PRINT KCapabilityUnknown;\",\";KCapabilityNo;\",\";KCapabilityYes\n",
+        output);
+    require(output.str() == "0,1,2,3,4,5,6\n-1,0,1\n",
+            "system information constants were missing or had incorrect values");
+}
+
 void testIncludeSafetyAndPlacement() {
     TempTree files;
     files.write("cycle.bas", "INCLUDE \"cycle.bas\"\n");
@@ -135,6 +151,7 @@ int main() {
         testNestedIncludesAndLibraryFunctions();
         testIncludeInNumberedProgram();
         testDialogFlagsAreAvailableFromQl32Include();
+        testSystemInfoConstantsAreAvailableFromQl32Include();
         testIncludeSafetyAndPlacement();
     } catch (const std::exception& error) {
         std::cerr << "include test failed: " << error.what() << '\n';

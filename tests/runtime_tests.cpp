@@ -35,6 +35,7 @@ public:
         ++calls;
         return succeeds;
     }
+    std::uint16_t currentFrequencyMHz() const override { return lastFrequency; }
 
     std::uint16_t lastFrequency = 0;
     int calls = 0;
@@ -45,7 +46,7 @@ class RecordingMemoryService final : public ql32::runtime::MemoryService {
 public:
     std::uint64_t freeBytes() const override { return 123456; }
     std::optional<ql32::runtime::HeapFragmentationInfo> fragmentationInfo() const override {
-        return ql32::runtime::HeapFragmentationInfo{65432, 17, 0};
+        return ql32::runtime::HeapFragmentationInfo{65432, 17, 445};
     }
 };
 
@@ -363,6 +364,54 @@ void testStopContinueReturnsToPromptAndResumesNextStatement() {
             "CONTINUE resumed stale bytecode after the stored program changed");
 }
 
+void testListDefinitionsAndVariables() {
+    ql32::Interpreter interpreter;
+    std::ostringstream setup;
+    interpreter.executeInteractive(
+        "10 DEFINE PROCEDURE Greet(who$, n)\n"
+        "20 PRINT who$\n"
+        "30 END DEFINE\n"
+        "40 DEF FN Twice(x)\n"
+        "50 RETURN x * 2\n"
+        "60 END DEF\n"
+        "70 DEFINE PROCEDURE Quiet\n"
+        "80 END DEFINE\n", setup);
+    const auto run = [&](const std::string& command) {
+        std::ostringstream out;
+        interpreter.executeInteractive(command + "\n", out);
+        return out.str();
+    };
+    require(run("LIST PROC").find("Greet(who$, n)\nQuiet\n") != std::string::npos &&
+                run("LIST PROC").find("Twice") == std::string::npos &&
+                run("list procedures").find("20 PRINT") == std::string::npos,
+            "LIST PROC did not list procedure signatures only");
+    require(run("LIST FN") == "Twice(x)\n", "LIST FN did not list function signatures");
+    require(run("LIST #1, function twice") == "40 DEFine FuNction Twice(x)\n"
+                "50 RETurn x * 2\n60 END DEFine\n",
+            "LIST FN name did not list the definition lines");
+    require(run("LIST PROC greet #1").find("20 PRINT who$") != std::string::npos,
+            "LIST PROC name with trailing channel failed");
+    require(run("LIST 20").find("20 PRINT who$") != std::string::npos,
+            "numeric LIST regressed");
+    bool unknown = false;
+    try { run("LIST PROC missing"); } catch (const std::runtime_error&) { unknown = true; }
+    require(unknown, "LIST PROC with an unknown name did not fail");
+    bool wrongKind = false;
+    try { run("LIST FN Greet"); } catch (const std::runtime_error&) { wrongKind = true; }
+    require(wrongKind, "LIST FN accepted a procedure name");
+
+    ql32::Interpreter empty;
+    std::ostringstream none;
+    empty.executeInteractive("10 PRINT 1\nLIST PROC\nLIST FN\nLIST LOCALS\nLIST GLOBALS\n", none);
+    require(none.str() == "", "empty definition/variable lists printed output");
+
+    ql32::Interpreter vars;
+    std::ostringstream varOutput;
+    vars.executeInteractive("b$=\"x\"\na=1\nLIST GLOBALS\nGLOBALS\n", varOutput);
+    require(varOutput.str() == "A = 1\nB$ = \"x\"\nA = 1\nB$ = \"x\"\n",
+            "GLOBALS were not listed sorted");
+}
+
 void testHelpCommandCatalog() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -523,6 +572,13 @@ void testSerialKeyDecoder() {
     require(character && character->key == ql32::platform::esp32::SerialKey::Character &&
                 character->character == 'x',
             "printable serial input was not preserved after cursor sequences");
+    require(!decoder.feed('\x1b') && !decoder.feed('[') && !decoder.feed('1') &&
+                !decoder.feed(';') && !decoder.feed('5'),
+            "Ctrl+Left sequence prefix was exposed as text");
+    const auto controlLeft = decoder.feed('D');
+    require(controlLeft && controlLeft->key == ql32::platform::esp32::SerialKey::Left &&
+                controlLeft->control,
+            "ANSI Ctrl+Left was not decoded with its modifier");
 }
 
 void testStoredProgramDiagnosticsAndArrayTypes() {
@@ -595,6 +651,45 @@ void testKeywordAbbreviationCoverage() {
                 ("supported keyword abbreviation did not canonicalize: " + spelling +
                  "\n" + canonical).c_str());
     }
+}
+
+void testCompactBlockTerminatorsFromCommandLine() {
+    ql32::Interpreter interpreter;
+    std::istringstream input(
+        "10 IF 1 THEN\n"
+        "20 PRINT \"if\"\n"
+        "30 ENDIF\n"
+        "40 FOR i=1 TO 1\n"
+        "50 PRINT \"for\"\n"
+        "60 ENDFOR i\n"
+        "70 REPEAT loop\n"
+        "80 PRINT \"rep\"\n"
+        "90 EXIT loop\n"
+        "100 ENDREP loop\n"
+        "110 SELECT ON 1\n"
+        "120 = 1\n"
+        "130 PRINT \"sel\"\n"
+        "140 ENDSEL\n"
+        "150 DEF PROC work()\n"
+        "160 PRINT \"def\"\n"
+        "170 ENDDEF\n"
+        "180 work\n"
+        "LIST\n"
+        "RUN\n");
+    std::ostringstream output;
+    std::ostringstream diagnostics;
+    interpreter.runRepl(input, output, diagnostics);
+    const std::string result = output.str();
+    require(diagnostics.str().empty(),
+            ("compact block terminators produced a REPL error: " +
+             diagnostics.str()).c_str());
+    for (const std::string& line : {
+             "30 END IF", "60 END FOR i", "100 END REPeat loop",
+             "140 END SELect", "170 END DEFine"})
+        require(result.find(line) != std::string::npos,
+                ("compact block terminator did not expand to " + line).c_str());
+    require(result.find("if\nfor\nrep\nsel\ndef\n") != std::string::npos,
+            "program with compact block terminators did not execute correctly");
 }
 
 void testForwardCallsAndKnownSemanticErrors() {
@@ -1016,8 +1111,9 @@ void testFreeReturnsAllMetricsWithoutSelector() {
         "PRINT FREE()\n"
         "PRINT FREE(0)\n"
         "PRINT FREE(1)\n"
-        "PRINT FREE(2)\n", output);
-    require(output.str() == "123456,65432,17\n123456\n65432\n17\n",
+        "PRINT FREE(2)\n"
+        "PRINT FREE(3)\n", output);
+    require(output.str() == "123456,65432,17,445\n123456\n65432\n17\n445\n",
             "FREE() did not return all heap metrics or selector forms changed");
 }
 
@@ -1026,8 +1122,27 @@ void testFreeLeavesUnavailableMetricsAsEmptyCsvFields() {
     ql32::Interpreter interpreter({}, {}, {}, {}, {}, memory);
     std::ostringstream output;
     interpreter.execute("PRINT FREE()\n", output);
-    require(output.str() == "123456,,\n",
+    require(output.str() == "123456,,,\n",
             "FREE() did not preserve CSV positions for unavailable metrics");
+}
+
+void testDimRejectsArrayLargerThanLargestFreeBlock() {
+    auto memory = std::make_shared<RecordingMemoryService>();
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, memory);
+    std::ostringstream output;
+    interpreter.execute("DIM small(100)\nPRINT \"ok\"\n", output);
+    require(output.str() == "ok\n", "DIM within the largest free block failed");
+    // Numeric elements are 8 B, so 5001 elements (about 40 KB) fit in 65,432 B.
+    interpreter.execute("DIM packed(5000)\nPACKED(5000)=7\nPRINT packed(5000)\n", output);
+    require(output.str() == "ok\n7\n", "numeric array did not use compact elements");
+    bool rejected = false;
+    try {
+        interpreter.execute("DIM big(9000)\n", output);
+    } catch (const std::exception& error) {
+        rejected = std::string(error.what()).find("array exceeds available memory") !=
+            std::string::npos;
+    }
+    require(rejected, "DIM larger than the largest free block was not rejected");
 }
 
 void testEmergencyReserveCanBeReleasedAndRestored() {
@@ -1104,12 +1219,13 @@ void testCpuFrequencyOption() {
             "CONST KOptMathSingle = 1\n"
             "OPTION KOptMathSingle\n") +
             "OPTION KEspCpuFreq" + std::to_string(mhz) + "\n"
-            "PRINT 16777216 + 1 - 16777216\n";
+            "PRINT 16777216 + 1 - 16777216\n"
+            "PRINT CPUFREQ()\n";
         interpreter.execute(source, output);
         require(service->calls == 1 && service->lastFrequency == mhz,
                 "CPU frequency option did not call the platform service");
-        require(output.str() == "0\n",
-                "CPU frequency option did not coexist with math precision OPTION");
+        require(output.str() == "0\n" + std::to_string(mhz) + "\n",
+                "CPU frequency option did not coexist with math precision or readback");
     }
 
     ql32::Interpreter host;
@@ -1117,8 +1233,9 @@ void testCpuFrequencyOption() {
     host.execute(
         "CONST KEspCpuFreq160 = 160\n"
         "OPTION KEspCpuFreq160\n"
-        "PRINT 42\n", ignoredOutput);
-    require(ignoredOutput.str() == "42\n",
+        "PRINT 42\n"
+        "PRINT CPUFREQ()\n", ignoredOutput);
+    require(ignoredOutput.str() == "42\n0\n",
             "CPU frequency option was not harmless without a platform adapter");
 
     for (const std::string& source : {
@@ -1144,8 +1261,9 @@ void testQ32ErrorFunctions() {
         "PRINT ERR\n"
         "PRINT ERR$(0)\n"
         "PRINT ERR$(22)\n"
+        "PRINT ERR$(23)\n"
         "PRINT ERRX$\n", output);
-    require(output.str() == "0\nNo error\nUnknown QL/32 error code 22\n\n",
+    require(output.str() == "0\nNo error\nResource is already in use\nUnknown QL/32 error code 23\n\n",
             "ERR, ERR$, or ERRX$ returned an incorrect value");
 }
 
@@ -1313,10 +1431,37 @@ void testDialogMenuBasicCallsSuspendAndResume() {
             "REPL dialog getter did not return the submitted value");
 }
 
+void testPrintLinesAreChargedToSliceBudget() {
+    ql32::Interpreter plain;
+    std::ostringstream plainOutput;
+    int plainSlices = 1;
+    auto status = plain.executeSlice(
+        "FOR i = 1 TO 20\n a = a + 1\nEND FOR i\n", plainOutput, 128);
+    while (status == ql32::ExecutionStatus::Yielded) {
+        ++plainSlices;
+        status = plain.resumeSlice(plainOutput, 128);
+    }
+    ql32::Interpreter printing;
+    std::ostringstream printOutput;
+    int printSlices = 1;
+    status = printing.executeSlice(
+        "FOR i = 1 TO 20\n PRINT \"x\"\nEND FOR i\n", printOutput, 128);
+    while (status == ql32::ExecutionStatus::Yielded) {
+        ++printSlices;
+        status = printing.resumeSlice(printOutput, 128);
+    }
+    require(status == ql32::ExecutionStatus::Completed &&
+                printOutput.str().size() == 40,
+            "budgeted PRINT loop did not complete correctly");
+    require(printSlices >= plainSlices * 3,
+            "PRINT lines were not charged to the slice budget");
+}
+
 } // namespace
 
 int main() {
     try {
+        testPrintLinesAreChargedToSliceBudget();
         testInterpreterSessions();
         testDiagnosticsUseBasicLineNumbers();
         testEmbeddedDataReadRestoreAndEof();
@@ -1325,6 +1470,7 @@ int main() {
         testAtomicProgramLineAndBlocks();
         testDeleteProgramLinesAtomically();
         testStopContinueReturnsToPromptAndResumesNextStatement();
+        testListDefinitionsAndVariables();
         testHelpCommandCatalog();
         testPersistentRepl();
         testEditStoredLineFromRepl();
@@ -1332,6 +1478,7 @@ int main() {
         testSerialKeyDecoder();
         testStoredProgramDiagnosticsAndArrayTypes();
         testKeywordAbbreviationCoverage();
+        testCompactBlockTerminatorsFromCommandLine();
         testForwardCallsAndKnownSemanticErrors();
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
@@ -1344,6 +1491,7 @@ int main() {
         testPauseDurationRoundsUpAndResumes();
         testFreeReturnsAllMetricsWithoutSelector();
         testFreeLeavesUnavailableMetricsAsEmptyCsvFields();
+        testDimRejectsArrayLargerThanLargestFreeBlock();
         testEmergencyReserveCanBeReleasedAndRestored();
         testProgramNumericPrecisionOption();
         testCpuFrequencyOption();

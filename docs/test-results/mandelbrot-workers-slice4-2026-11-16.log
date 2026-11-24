@@ -1,0 +1,35 @@
+0.100 >
+2.103 >
+2.204 @QL32DBG/1	123	OK	[{"id":1,"status":"WAITING_INPUT","supervisor":true,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":2,"status":"DEBUG_PAUSED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":3,"status":"DEBUG_PAUSED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":4,"status":"DEBUG_PAUSED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""},{"id":5,"status":"DEBUG_PAUSED","supervisor":false,"interactive":true,"priority":4,"canvas_origin_x":0,"canvas_origin_y":0,"canvas_width":320,"canvas_height":240,"canvas_offset_x":0,"canvas_offset_y":0,"error":""}]
+2.204 GFXPROFILE requests=3 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+5.113 > KILL 2> KILL 2
+5.213 Killed task 2
+5.313 GFXPROFILE requests=3 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+7.117 > KILL 3> KILL 3
+7.217 Killed task 3
+7.317 GFXPROFILE requests=3 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+9.220 > KILL 4> KILL 4
+9.321 Killed task 4
+9.321 GFXPROFILE requests=3 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+11.124 > KILL 5> KILL 5
+11.224 Killed task 5
+11.325 GFXPROFILE requests=3 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+13.230 > MODE 1,0> MODE 1,0
+13.230 Display mode set to 320x240 (320x240); window contents preserved where possible.
+13.331 GFXPROFILE requests=1 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+18.543 > TASK "FFS:/mbprogress.bas"> TASK "FFS:/mbprogress.bas"
+18.644 Started task 6
+18.644 GFXPROFILE requests=1 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+18.744 > MB_BEGIN
+18.845 MB_ROW 0
+19.646 TASK "SDC:/worker-1.bas"> TASK "SDC:/worker-1.bas"
+19.647 Started task 7
+19.747 GFXPROFILE requests=1 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+20.853 > TASK "SDC:/worker-2.bas"> TASK "SDC:/worker-2.bas"
+20.953 Started task 8
+20.953 GFXPROFILE requests=1 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+22.257 > TASK "SDC:/worker-3.bas"> TASK "SDC:/worker-3.bas"
+22.557 Started task 9
+22.557 GFXPROFILE requests=12 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+43.251 > GFXPROFILE requests=644 full=0 partial=0 fallback=0 rows=0 composed_px=0 written_px=0 compose_us=0 convert_us=0 write_us=0 update_us=0 update_samples=0 update_p50_us=0 update_p95_us=0 update_p99_us=0 swap_requested=0 swap_queued=0 swap_executed=0 swap_skipped=0 swap_us=0 swap_calls=0 swap_avg_us=0 swap_min_us=0 swap_max_us=0 swap_samples=0 swap_p50_us=0 swap_p95_us=0 swap_p99_us=0
+67.205 > MB_ROW 1

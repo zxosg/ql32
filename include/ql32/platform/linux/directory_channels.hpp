@@ -24,6 +24,8 @@ public:
                     std::string_view bytes) override;
     void seek(runtime::SessionId session, runtime::ChannelId channel,
               std::uint64_t offset) override;
+    std::uint64_t position(runtime::SessionId session, runtime::ChannelId channel) override;
+    std::uint64_t length(runtime::SessionId session, runtime::ChannelId channel) override;
     bool atEnd(runtime::SessionId session, runtime::ChannelId channel) override;
     void write(runtime::SessionId session, runtime::ChannelId channel,
                const std::string& text) override;
@@ -35,6 +37,7 @@ private:
     struct OpenChannel {
         runtime::SessionId session;
         runtime::ChannelMode mode;
+        std::filesystem::path path;
         std::fstream file;
     };
 
@@ -46,6 +49,7 @@ private:
     std::filesystem::path resolve(const std::string& path,
                                   runtime::ChannelMode mode) const;
     OpenChannel& owned(runtime::SessionId session, runtime::ChannelId channel);
+    static void beginWrite(OpenChannel& opened);
 };
 
 } // namespace ql32::platform::linux_host

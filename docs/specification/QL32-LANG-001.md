@@ -117,8 +117,10 @@ supported ESP32 firmware. CPU frequency is a device-wide setting, not a
 per-task property. The request is applied when the module starts and remains
 active until another module requests a different frequency or the board
 restarts; among running tasks, the most recently started module containing
-this option wins. Linux and macOS accept these declarations and ignore them.
-This option is QL/32-specific and platform-dependent.
+this option wins. `CPUFREQ()` reports the current measured clock in MHz, or
+zero when the platform cannot report it. Linux and macOS accept the frequency
+declarations and ignore them, and `CPUFREQ()` returns zero there. These
+features are QL/32-specific and platform-dependent.
 
 The first slice accepts this grammar (later sections extend it):
 
@@ -288,7 +290,9 @@ window colors before the first expression, for example
 `PRINT INK 3, PAPER 6, "hello"`. Commas after the first expression retain their
 normal tab-stop meaning. Graphical text defaults to 5×7 glyphs in 6×8 cells.
 `LOADFONT(path$)` returns a session-owned font handle; built-in handles are
-`KFontSmall`, `KFontNormal`, `KFontLarge`, and `KFontTitle`. `FONT handle,style`
+`KFontSmall`, `KFontNormal`, `KFontLarge`, and `KFontTitle`. Handle
+`KFontDefault` (0) with style 0 clears the selection and restores the platform
+default for that channel. `FONT handle,style`
 selects normal text output, while `GFONT handle,style` independently selects
 graphical `TEXT`; both accept an optional `#channel` selector. Styles are
 combinable flags: normal `0`, bold `1`, underline `2`. `UNLOADFONT handle`
@@ -299,6 +303,24 @@ Normal output fills paper cells; graphical text draws only glyph pixels.
 QFNT v2 preserves each BDF glyph’s bitmap bounds, signed offsets, and advance;
 it is limited to 8,192 bytes. Printable ASCII is supported and other characters
 map to `?`; Czech glyphs are not included initially.
+
+`LOADIMAGE(path$)` opens a session-owned indexed bitmap and returns its handle.
+`BLIT [#channel,] handle,x,y[,transparentIndex]` draws it into a graphics
+window, and `UNLOADIMAGE handle` closes the reader and releases the resource.
+Loaded images are limited to 2,048 pixels per side and 1 MiB of pixel data.
+The QL/32-specific QIMG v2 file is uncompressed indexed-4 with an embedded
+palette. Its fixed 64-byte header contains `QIMG`, version `2`, format `4`,
+little-endian width, height, row stride, and 32-bit payload size in the first
+16 bytes, followed by 16 RGB palette entries (48 bytes, RGB component order).
+The payload stores rows from top to bottom, two pixels per byte, with the left
+pixel in the high nibble. For odd widths the unused low nibble is ignored.
+Pixel indexes refer to the embedded palette. During `BLIT`, each source color
+maps to the nearest color in the active display palette; this does not change
+the shared display palette. The optional transparent index refers to the
+source image palette and skips matching pixels. Blits validate the complete
+image before drawing, batch the presentation, obey `GUPDATE`, and restore the
+caller's current ink. Image readers and handles belong to the interpreter
+session and are released when it is destroyed. QIMG v1 is not supported.
 
 Numbers print using locale-independent shortest round-trip decimal notation;
 zero, including negative zero, prints as `0`. Strings print as their contents.
@@ -480,7 +502,7 @@ parentheses in expressions: `value = Square(4)`.
 
 ## 7. Arrays
 
-`DIM array%(upper)` and multidimensional variants are implemented. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. The host allocation limit is one million elements per array; board-specific limits remain to be measured. Dimensioned arrays can be passed to procedure/function parameters by reference.
+`DIM array%(upper)` and multidimensional variants are implemented. QL/32 indexing starts at zero: `DIM a%(3)` creates indexes 0 through 3 inclusive. [SuperBASIC's numeric `DIM`](https://superbasic-manual.readthedocs.io/en/latest/D/dim.html) uses the same zero-based inclusive bounds; the indexing rule may earn class S after conformance tests. QL/32's dynamic UTF-8 string arrays do not reproduce the historical fixed-length string-array model and are class Q. Elements start with the type default. Every dimension is bounds-checked; allocation failure is a runtime error. On ESP32 boards `DIM` also fails with a runtime error when the array would exceed the largest free heap block (QL/32-specific; host-tested, not yet verified on the CYD). The host allocation limit is one million elements per array; board-specific limits remain to be measured. Dimensioned arrays can be passed to procedure/function parameters by reference.
 
 String values, including scalar string variables and quoted string literals,
 support SuperBASIC-style, one-based inclusive slices: `text$(4 TO 8)`,
@@ -561,17 +583,24 @@ and the OPL samples noted in [docs/reference](../reference/README.md).
 
 `FREE()` returns a comma-delimited string containing the current free-memory
 estimate in bytes, the largest contiguous free block in bytes, and the number
-of free blocks reported by the allocator, in that order. A platform without
+of free blocks, and the number of allocated blocks reported by the allocator,
+in that order. A platform without
 fragmentation metrics leaves the unavailable fields empty while preserving the
 comma positions. `FREE(0)` returns the free-memory estimate as a number;
 `FREE(1)` returns the largest contiguous free block as a number, and `FREE(2)`
-returns the number of free blocks as a number. ESP32 reports all three values
-for byte-addressable heap. Linux supports only selector 0; selector 1 and 2
+returns the number of free blocks as a number; `FREE(3)` returns the number of
+allocated blocks. ESP32 reports all four values
+for byte-addressable heap. Linux supports only selector 0; selectors 1 to 3
 report that allocator fragmentation metrics are unavailable. Selectors must
-be integer values from 0 through 2. `ql32.inc` defines
-`KFreeTotal`, `KFreeContiguous`, and `KFreeFragments` for the selector values.
+be integer values from 0 through 3. `ql32.inc` defines
+`KFreeTotal`, `KFreeContiguous`, `KFreeFragments`, and `KFreeAllocated` for the selector values.
 Values are platform memory snapshots, not exact counts of memory owned by the
-current BASIC session. The target shell's separate `MEM` command is not
+current BASIC session. QL/32-specific: when a platform sets admission limits,
+starting a task, the first drawing or `WINDOW` of a task whose canvas does not fit,
+`MUSIC PLAY`/`BEEP`, or a `MODE` change to a larger display fails
+with an out-of-memory error such as `not enough memory for a new task: need
+14336 bytes free (6144 contiguous), have 9000 free, 4000 largest`, leaving
+running tasks unaffected and the session usable. The target shell's separate `MEM` command is not
 implemented.
 
 ## 8. Immediate mode, commands, and errors
@@ -594,7 +623,28 @@ function calls are bound when `RUN` compiles the complete program. Unnumbered
 statements execute immediately. A `.bas` file passed to the Linux CLI is a
 complete source unit executed in file order; it does not edit a persistent
 interactive program. The REPL command processor provides `LOAD`, `SAVE`, `DIR`,
-`DELETE`, `RENAME`, `FORMAT`, and `CD`. `DELETE lineNumber1,...` atomically
+`DELETE`, `RENAME`, `FORMAT`, and `CD`. `LIST line` selects one exact line;
+`LIST start TO end` selects an inclusive range, `LIST start TO` continues to
+the final stored line, and `LIST TO end` begins at the first stored line.
+The legacy `LIST start-end` range syntax remains accepted. The channel may
+also be written first as `LIST #ch, selector`. QL/32-specific extensions:
+`LIST PROC` / `LIST PROCEDURES` and `LIST FN` / `LIST FUNCTIONS` print one
+signature line (name and parameters, no program lines) per definition in
+program order, and print nothing, without error, when none are defined;
+`LIST PROC name` / `LIST FN name` (case-insensitive, optional `#ch,`) print the
+stored lines from `DEFine` to `END DEFine`, and an unknown name, or a name of
+the other kind, is an error. Definitions are found by scanning stored lines
+whose first statement is the `DEFine` header. `LIST GLOBALS` and
+`LIST LOCALS` print `name = value` lines sorted by name, then array bounds. With
+a DEBUG task attached they read its debug snapshot (LOCALS = innermost call
+frame); otherwise GLOBALS shows the interactive session variables and LOCALS is
+empty. Empty output is not an error. The `GLOBALS` and `LOCALS` debug commands
+are aliases with the same sorted output (no DEBUG task required). `RUN` does not
+expose the finished program's variables to the session. `RENUMBER` defaults
+to start 10 and step 10; `RENUMBER start, step` supplies both values. It
+rewrites numeric `GOTO`, `GO TO`, and `RESTORE` targets when they refer to a
+stored line, and commits only if the renumbered program validates. It rejects
+line-number overflow without changing the program. `DELETE lineNumber1,...` atomically
 removes the listed numbered program lines and validates the result once, so a
 matching block start and end can be removed in one command. `DELETE path$`
 continues to remove a file; a quoted string or string variable is treated as a
@@ -625,10 +675,20 @@ escape its root. A drive prefix can be used by any operation that accepts a
 storage path, including `LOAD`, `SAVE`, `DIR`, `INCLUDE`, `TASK`, and file
 channels, as well as the file commands below.
 
-`DIR [path]` lists the immediate entries of a directory in sorted name order;
-directory names end in `/`. With no path it lists the session's current
-directory. `CD path$` changes that directory for the current interpreter
-session. `CD` accepts a quoted path, a string variable, or a bare path such as
+`DIR [#channel] [path|pattern]` lists the immediate entries of a directory
+in the storage adapter's name order; directory names end in `/`. The last path
+component may contain `*` (any run) and `?` (any one character), matched
+case-insensitively. With no path it lists the session's current directory.
+`CAT [#channel] [path|pattern]` (QL32-specific) prints a detailed listing:
+directories first, then files, each group in case-insensitive name order, with
+raw byte sizes right-aligned (`<DIR>` for directories), a
+`N file(s), M dir(s), S bytes` line, and `Total:`, `Used:`, `Free:` byte counts
+for the drive holding the listed path. The space lines are omitted when the
+storage adapter cannot report capacity (`StorageService::space()` returns
+`known=false`). `DIR DETAILS` was replaced by `CAT` and now reports an error.
+Both commands honor the output channel and the pager. `CD path$` changes that
+directory for the current interpreter session. `CD` accepts a quoted path, a
+string variable, or a bare path such as
 `CD ..`; relative paths start at the current directory. `.` and `..` components
 walk the directory tree, and a drive-qualified path selects its root or a
 directory on that drive.
@@ -636,7 +696,24 @@ directory on that drive.
 `DELETE lineNumber1,...` deletes the listed program lines atomically. The
 candidate program is validated once after all removals, and a failed edit
 leaves the stored program unchanged. `DELETE path$` removes a file and
-`RENAME path$,newpath$` moves a file. Their paths are resolved relative to the
+`RENAME path$,newpath$` (or `RENAME path$ TO newpath$`) moves a file.
+QL/32-specific file commands (no SMSQ/E compatibility is claimed): `COPY source TO
+destination [FORCE]`, `MOVE source TO destination [FORCE]`, `DELETE path [FORCE]` and
+`MKDIR directory` and `RMDIR directory [FORCE]`. Sources may use `*`/`?` wildcards in the leaf name only; a
+source or destination may be `#channel` for `COPY` (file channels as sources; bytes are
+copied unchanged). A destination ending in `/` or naming an existing directory receives
+files under their own names; several sources require a directory destination. `COPY`
+and `MOVE` refuse to overwrite and `RMDIR` refuses non-empty directories unless `FORCE`
+is given; a `DELETE` wildcard matching more than one file asks `Y/N` unless `FORCE`, and
+programs or sessions without a UI fail instead of prompting. Zero wildcard matches is an
+error. Drive roots and the current directory are never removed. Copies stream in
+2048-byte slices through a temporary file, so the scheduler is never blocked; `MOVE`
+across drives is copy, size verification, then source removal. The first failure stops
+the command and reports how many items completed. Directories cannot be copied. `MKDIR` fails if the path exists or its parent is
+missing. On `FFS:` (SPIFFS, which has no directory entries) `MKDIR` succeeds without
+creating anything: a directory exists once a file with that prefix exists, so a repeated
+`MKDIR` there is not an error and an empty directory cannot be listed or removed.
+Previously. Their paths are resolved relative to the
 current directory unless drive-qualified. Rename fails if the destination
 already exists; file deletion applies to files, not directories. `FORMAT path$`
 recursively deletes all files and subdirectories
@@ -664,14 +741,35 @@ Wait mode focuses the child while it runs, then resumes the caller. Child
 failure details are available through `ERR`, `ERR$`, and `ERRX$`. Without wait
 mode, source completion leaves the task at its own interactive prompt with its
 variables, program, graphics window, and channels retained. `TASKS` lists task
-IDs, kind, priority, state, and errors, along with the global instruction
-slice; suspended tasks also show their saved resume priority.
+IDs, source name, priority, state, and errors, along with the global instruction
+slice; suspended tasks also show their saved resume priority. The source name
+(QL/32-specific) is `SUPERVISOR` for the supervisor, otherwise the file passed
+to `TASK` with its directory and extension removed. Names longer than 10
+characters show the first 7 and last 3 characters joined by `..` (for example
+`ffs:/name_long_very_12.bas` is listed as `name_lo.._12`), so a numeric suffix
+stays visible; the column is therefore up to 12 characters wide. Tasks started
+without a file show `(inline)`. `TASKRESULT` reports it as `File:`.
 `PAUSE delay` suspends only the calling task for `delay` milliseconds while
 the scheduler continues running other tasks. The delay must be numeric and in
 `0..4294967295`; fractional values round up to the next millisecond. `PAUSE 0`
 yields until the next scheduler turn. A timed wait appears as `WAITING_TIME`.
 The millisecond unit follows Annex32's `PAUSE` reference; task-local scheduling
 and the accepted range are QL/32-specific ([Annex32 PAUSE](https://www.cicciocb.com/annex32help/V1.518/start.htm)).
+`BEEP duration, pitch [, waveform]` plays a tone and suspends only the calling
+task for `duration` milliseconds (`WAITING_TIME`, like `PAUSE`). `duration` is an
+integer `1..600000`, `pitch` an integer Hz value `20..10000`. `waveform` is
+optional (default `"SQUARE"`): a case-insensitive string `"SQUARE"`, `"SINE"`,
+`"TRIANGLE"`, `"SAW"`/`"SAWTOOTH"`/`"/|"` (rising) or `"SAWDOWN"`/`"|\\"`
+(falling), or a number `0..4` in that order. Negative, fractional, or
+out-of-range values raise a runtime error. `VOLUME level` sets the global output
+level for `BEEP` and `MUSIC` (integer `0..255`, default `128`; not per session,
+and not persistent across reboot). A tone from the session that owns the audio
+output mixes with its `MUSIC`; another session gets `ResourceBusy`. Without an
+audio service (Linux host, boards lacking the `Audio` capability) both commands
+raise "audio service unavailable". These commands are QL/32-specific: the
+SMSQ/E `BEEP duration, pitch [, pitch2, grad_x, grad_y, wrap, fuzzy, random]`
+form uses QL sound-chip units and a different signature, and QL/32 does not
+claim compatibility with it.
 `TASKRESULT id` prints all available properties. In expressions,
 `TASKRESULT(id, selector)` returns one property selected by `KTaskResultStatus`,
 `KTaskResultChannels`, `KTaskResultErrorCode`, `KTaskResultErrorDetail`,
@@ -722,6 +820,47 @@ and `ERRX$` returns contextual detail for the current task error. Error code 0
 means no error; positive codes are stable QL/32 codes, with no SMSQ/E numeric
 compatibility claim.
 
+`MUSIC PLAY "path"` selects the decoder from file content: VTX, or Atari ST / Amstrad
+YM (QL/32-specific player; LHA-wrapped `-lh5-`/`-lh0-` level-0 or raw). YM2!, YM3!,
+YM3b, YM5! and YM6! are supported, including YM5/YM6 effects: SID voice, digi-drum
+(8-bit unsigned/signed or 4-bit), sync-buzzer, and sinus-SID (approximation: 16-step
+sine amplitude shape, QL/32-specific). Effect decoding follows the behavior of
+arnaud-carre/StSound (MIT, behavioral reference only, independent code): YM5 slot 0 is
+always a SID voice and slot 1 a digi-drum (no type bits); YM6 uses the type bits; a SID
+gate or sync-buzzer is clocked by the MFP timer (2457600 Hz / (prescaler x count)), a SID
+square lasts two timer ticks, and the sync-buzzer restarts the envelope on each tick with
+the shape taken from the voice volume nibble. YM2 follows the Mad Max conventions:
+any register 13 write means shape 10 with register 12 forced to 0, and register 10 bit 7
+selects a digi-drum on voice C at (MFP/4)/register 12. The Mad Max drum samples are NOT
+built in (licensing unclear), so those drums are muted unless a bank is supplied with
+`YmSong::setDrumBank`. Not supported: YMT1/YMT2 trackers and MIX.
+The whole song is decoded into RAM (up to 1.5 MiB unpacked, so large songs need PSRAM).
+
+PT3 (QL/32-specific player of ProTracker 3 / Vortex Tracker II modules, version
+0-9, any of the four tone tables). One AY chip at 1.7734 MHz, 50 Hz player tick,
+modules up to 64 KiB held in RAM. The song loops to its loop position until
+stopped. Not supported: TurboSound (second module / `02TS` footer; the extra data
+is ignored). Note and volume tables are factual numeric data; the player logic is
+an independent implementation. The file type is detected from content.
+
+SQT (QL/32-specific player of SQ-Tracker modules, up to 64 KiB, one AY chip at
+1.7734 MHz, 50 Hz tick, loops to the module loop position). SQT has no signature:
+it is recognised by the fixed pointer-table geometry (98-byte samples, 34-byte
+ornaments), checked after VTX, YM and PT3. Player logic is an independent
+implementation; the note table is shared numeric data.
+
+VTX: files up to 256 KiB and register streams up to 512 KiB are accepted (about
+10 minutes at 50 Hz); a stream length that is not a multiple of 14 is truncated to
+whole frames. Stereo mode bits are parsed but the DAC output is mono, so all
+three voices are mixed equally.
+
+`MUSIC WAV "path"` (QL/32-specific, not SMSQ/E) streams an uncompressed PCM WAV
+file from storage without loading it into RAM (2 KiB read buffer). Supported:
+8-bit unsigned or 16-bit signed, mono or stereo (averaged to mono), 4000-48000 Hz
+(linearly resampled to the 22050 Hz output). Other formats raise a runtime error.
+WAV plays in the music slot of the platform-neutral mixer, so BEEP and MUSIC TEST
+mix over it; the audio output remains owned by one session at a time.
+
 | Code | `ERR$` message |
 | ---: | --- |
 | 0 | No error |
@@ -754,9 +893,10 @@ are statement commands. See
 [QL32-API-001](QL32-API-001.md). `EDIT [lineNumber]` loads a stored numbered
 line into the REPL editor. With no number, it opens the last line selected with
 `EDIT`, or the first program line when no line has been edited yet. On serial
-REPLs, Left/Right move the cursor, Home/End move to the line boundaries, and
-Backspace/Delete remove characters. Up on an empty prompt recalls the last
-submitted BASIC line. Enter replaces the line; clearing the
+REPLs, Left/Right move the cursor, Ctrl+Left/Right move by words, Home/End move
+to the line boundaries, and Backspace/Delete remove characters. While a stored
+line is being edited, Up/Down loads the previous/next existing numbered line.
+At an ordinary empty prompt, Up recalls the last submitted BASIC line. Enter replaces the line; clearing the
 buffer then pressing Enter submits the line number alone, deleting that line.
 The host stream REPL displays the selected line and accepts a replacement
 numbered line; an empty response deletes it. Invalid numbers and line numbers
@@ -791,6 +931,46 @@ Geometric numeric arguments to `WINDOW`, `PLOT`, `LINE`, `RECT`, `CIRCLE`, and
 32-bit pixel-coordinate range; window and shape dimensions must remain positive
 after conversion. Palette indices, fill flags, font handles, and other control
 values remain integer-only. This is pixel rounding, not subpixel rendering.
+`PALETTE start,rgb[,rgb...]` changes a contiguous range in the display-wide
+palette. Each `rgb` is a packed 24-bit `RRGGBB` integer (red in bits 16–23,
+green in bits 8–15, blue in bits 0–7). The range must fit within
+`GPALETTESIZE()`. The retained indexed pixels are unchanged, so every window
+using an edited index changes color. The command follows the range-redefinition
+model of SuperBASIC `PALETTE_QL`, but this spelling and packed value contract
+are QL/32-specific. Palette changes follow the current `GUPDATE` and frame-skip
+settings; with updates off, a later bare `GUPDATE` presents the new mapping.
+`RGB(red,green,blue)` packs three integer components in the range 0..255 into
+that 24-bit value. `PALROT start,count,steps` circularly rotates the selected
+range toward higher palette indices for positive steps; negative steps rotate
+the other way. `PALSHIFT start,count,direction,rgb` shifts the range one entry
+in direction `1` or `-1` and writes the supplied packed RGB value into the
+vacated entry. `PALFADE start,count,targetRgb,amount` moves each selected RGB
+component linearly toward the target by a fraction from 0 to 1, rounded to the
+nearest integer. These commands operate on the shared display palette and do
+not use a timer; programs control animation timing and step size. They follow
+the current `GUPDATE` and frame-skip settings and are QL/32-specific.
+`SYSINFO$(selector)` returns stable strings from the selected runtime profile.
+Selectors `KSysVersion`, `KSysBuild`, `KSysPlatform`, `KSysDisplay`,
+`KSysInput`, `KSysStorage`, and `KSysFeatures` are defined in `ql32.inc`.
+`CAPABILITY(query$)` returns `KCapabilityYes` (1), `KCapabilityNo` (0), or
+`KCapabilityUnknown` (-1). Capability names are case-insensitive and repeated
+whitespace is collapsed. These calls describe support compiled into the
+selected profile; they do not report changing state such as whether storage is
+mounted or Wi-Fi is associated. Current profiles include the host, Olimex VGA,
+CYD, and Tenstar ESP32-S3 targets.
+
+`TILE` is a supervisor-only display command that re-arranges all visible
+retained windows to fit the screen. It is provided by graphics services that
+support multi-window composition; the command reports unsupported service
+errors on other adapters.
+`LINE x,y` sets the current graphics cursor without drawing;
+`LINE TO x,y` draws from that cursor and advances it; `LINE x,y TO x2,y2`
+draws from the supplied start point and advances it to the endpoint. The
+existing `LINE x1,y1,x2,y2` form remains available and also advances the
+cursor. `GX()` and `GY()` return the cursor coordinates. Cursor state belongs
+to each session and graphics channel. These forms implement the basic
+cursor-relative subset of SuperBASIC `LINE`; omitted polyline-list forms are
+not claimed compatible.
 graphics commands use the current graphics output default; channel-qualified
 graphics commands use a `#channel` selector. The clear command accepts
 `CLS`, `CLS #channel`, `CLS ink,paper`, or `CLS #channel,ink,paper`; the color
@@ -808,6 +988,24 @@ Graphics fail if that endpoint lacks graphics capability. Changing the default
 to `#0` selects `#0` for unqualified output; explicit selectors still use the
 selected handle's active binding. The current runtime still resolves per-session
 routes per operation; direct binding is the approved target architecture.
+`MIRROR #source TO #destination` (QL/32-specific; no SMSQ/E reference)
+adds a session-local text mirror: every text write to the source's resolved
+endpoint (PRINT, WRITE, LIST, DIR, CAT, HELP, diagnostics and prompts) is also
+written to the destination, which may be `#0`, `#1`, a window, serial, file or
+null channel. From the moment the mirror is set up, graphics drawing and state
+commands to a screen or window source (PLOT, LINE, RECT, CIRCLE, TEXT, BLIT, CLS,
+AT, INK, PAPER, OVER, FONT, GFONT) are also executed as-is on each window or
+screen destination, which keeps its own size, position and palette; nothing is
+scaled or copied, out-of-window pixels are clipped, and a destination error
+disables the mirror. WINDOW, CLOSEWINDOW and palette commands are never
+forwarded. INPUT echo is not mirrored; reads are never mirrored. Self-mirroring, chains and cycles are
+rejected, a source has at most 4 mirrors, and tasks do not inherit mirrors.
+Mirror writes never block or fail the program: a failing destination is
+disabled, and a full serial buffer drops bytes (platform serial writer is
+non-blocking) and counts them. A paged listing is mirrored once in full.
+`MIRROR DELETE #destination` removes all mirrors into it, `MIRROR LIST` shows
+relations, drop counts and failures, and closing a channel removes its
+relations.
 Channel handles belong to one interpreter session. A task launched by the
 embedded `TASK` command has its own `#0`, `#1`, and opened handle numbers; a
 number in one session does not select a handle in another. The sessions still
@@ -865,14 +1063,30 @@ INPUT #1, "Serial line?", #3, response$
 ```
 
 `GUPDATE 0` suppresses automatic presentation while drawing commands still
-modify their retained canvases. Bare `GUPDATE` forces the current composed
-screen to display without changing the selected mode. `GUPDATE 1` restores
-automatic presentation. `ql32.inc` defines `KGupdateOff = 0`, and both
+modify their retained canvases. This also defers system-layer redraws, so they
+cannot expose pending canvas changes through a full-frame fallback. Bare
+`GUPDATE` forces the current composed screen to display without changing the
+selected mode. `GUPDATE 1` restores automatic presentation. `ql32.inc` defines
+`KGupdateOff = 0`, and both
 `KGupdateOn` and `KGupdateAuto` as `1`; they name the automatic mode, which is
 immediate on current presenters. Other numeric modes are reserved. Update
 suppression controls the shared physical display, so it affects drawing from
 all sessions until a later `GUPDATE 1`. Use it around a drawing batch, then
 call bare `GUPDATE` once to present the batch.
+
+`GUPDATE SKIP,n` configures presentation skipping without changing the
+automatic/off mode. After a frame is presented, the next `n` automatic or
+explicit presentation requests are skipped; `n=0` presents every request.
+Drawing still updates retained canvases during skipped requests, and the next
+presented frame includes those changes. The skip count is shared by all
+sessions because they share one display. Bare `GUPDATE` requests are subject
+to the active skip count.
+
+When a BASIC program returns control to its console, or reaches an interactive
+UI request such as a dialog, menu, pager prompt, or keyboard `INPUT`, QL/32
+restores automatic updates, clears the frame-skip count, and presents the
+current composed screen. This graphics state remains active after the UI
+request completes until BASIC changes it again.
 
 Prompt expressions must evaluate to strings. Keyboard input
 suspends only its BASIC session and resumes when the UI presenter submits a
@@ -880,6 +1094,25 @@ line. File-channel `INPUT` reads one line synchronously and raises an error at
 EOF. Configured serial hardware channels support asynchronous line reads as
 specified in [QL32-HW-001](QL32-HW-001.md); the legacy zero-argument serial
 output endpoint and null channels do not support input.
+
+Random access uses `#channel AT offset` (QL/32-specific; no SMSQ/E
+compatibility is claimed). `offset` is a zero-based absolute byte position,
+a nonnegative integer from 0 through the file length. `FPOS(channel)` returns
+the current byte position and `FLEN(channel)` returns the file length. Relative
+and from-end positioning use arithmetic: `#c AT FPOS(c) + 10`,
+`#c AT FLEN(c) - 4`. Seeking exactly to the length leaves the channel at EOF;
+`AT` clears EOF state. An offset beyond the length raises error 5 (no
+clamping); a non-integer or negative offset raises error 5 and a non-numeric
+operand raises error 4. A closed or invalid handle raises error 14. Append
+channels and non-file channels cannot seek or report position (append channels
+raise error 14, other endpoints error 13). `FPOS`/`FLEN` on a closed handle
+raise error 14.
+
+`OPEN(path, "UPDATE")` opens an existing file for reading and writing without
+truncation (error 10 if missing; it never creates a file). It starts at
+position 0 and shares one position for reads and writes. A write may overwrite
+existing bytes or extend the file at its end; because `AT` cannot move past the
+length, the file never has a gap. `READ`, `WRITE`, and `APPEND` are unchanged.
 
 Exact binary transfers use channel-context forms:
 
@@ -892,8 +1125,8 @@ Exact binary transfers use channel-context forms:
 that many bytes from the start of the string buffer. Counts are limited to
 8192 bytes per operation. Linux directory and ESP32 SD file adapters support
 these operations. Strings preserve NUL and arbitrary byte sequences for binary
-I/O, but text operations such as slicing and printing assume UTF-8. The BASIC
-syntax for seeking within a channel is not specified here.
+I/O, but text operations such as slicing and printing assume UTF-8. Seeking
+within a channel is specified above (`#channel AT offset`).
 
 The compiler pipeline is UTF-8 source → tokens → syntax tree → semantic checks → bytecode → verifier → VM. A VM state contains variables, stacks, source location, default output channel, and error state for one session. No mutable BASIC program state belongs in process-wide globals. Errors have stable code, category, message, and source span. A failed session does not reset the host or another session. Instruction slices and cancellation checkpoints prepare for multitasking.
 
@@ -1012,3 +1245,159 @@ compiled by `RUN`. Multiple-range evaluation is tested once in source order.
 Nested inline loops are outside the explicit M1 grammar, and board allocation
 limits are a later hardware qualification item. Broader SMSQ/E compatibility
 claims remain limited to behavior with both source references and tests.
+
+## 11. Built-in reference index (2026-11-22 audit)
+
+This section lists every built-in command, function, shell command, and
+debugger command that the 2026-11-22 implementation accepts. It is derived from
+the keyword and built-in tables in `src/language/interpreter.cpp`, not from
+other documents. Detailed semantics stay in the sections named in the last
+column. Everything here is QL/32-specific unless a row cites a reference; no
+SMSQ/E compatibility is claimed without a cited source and a conformance test.
+Arities come from the compiler's built-in signature table.
+
+### 11.1 MUSIC, BEEP, VOLUME (audio)
+
+Audio is implemented on the Olimex ESP32-SBC audio adapter (GPIO25 DAC,
+`MusicService` in `src/platform/olimex_vga`) and, experimentally, on the CYD
+(same service on the GPIO26 DAC2 speaker output). Targets without PSRAM
+(the CYD) do not decode VTX files into RAM: the first `MUSIC PLAY` transcodes
+the file into a QL/32-specific plane cache (`.q32v-<hash>`, version 2, LZ-compressed in
+256-frame windows, typically 12-38% of the raw 14 or 16 bytes per frame) on `SDC:/`, or on `FFS:/` when no SD card is present or it is
+write-protected, and later plays reuse it. Playback then needs about 8 KiB of
+heap for any song length. YM2!/YM3!/YM3b/YM5!/YM6! files (raw or LHA wrapped,
+up to 256 KiB packed) take the same path with a `Q32Y` cache (14 or 16 register
+bytes per frame compressed the same way, any YM5/YM6 register layout); measured on the CYD a playing YM
+costs about 15 KiB of heap, all released by `MUSIC STOP` apart from the music
+service's retained task stacks. Digi-drum samples stay in RAM (at most 12288
+samples in total; further drums are silent) and title/author/comment are not kept.
+The first play of a song needs seconds to a few minutes to write the cache. Linux, Tenstar, and LILYGO
+raise "music service unavailable" / "audio service unavailable". One session at
+a time owns the output; another session's request raises `ResourceBusy`.
+
+| Statement | Effect |
+| --- | --- |
+| `MUSIC PLAY path$` | Plays a tracker/chip file; the decoder is chosen from file content: VTX, YM2!/YM3!/YM3b/YM5!/YM6! (raw or LHA `-lh5-`/`-lh0-`), PT3, SQT (see section 8). Loops where the format has a loop point. |
+| `MUSIC WAV path$` | Streams an uncompressed PCM WAV (8-bit unsigned or 16-bit signed, mono/stereo, 4000-48000 Hz, resampled to 22050 Hz) from storage with a 2 KiB buffer. Other formats raise a runtime error. QL/32-specific, not SMSQ/E. |
+| `MUSIC TEST` | Starts a 1 kHz sine test tone until `MUSIC STOP`. |
+| `MUSIC STOP` | Stops all audio from the owning session and releases ownership. |
+| `MUSIC PAUSE` / `MUSIC RESUME` | Pauses/resumes the owner's music. |
+| `MUSIC STATUS` | Prints `MUSIC PLAYING`, `MUSIC PAUSED`, or `MUSIC STOPPED`. |
+| `BEEP duration, pitch [, waveform]` | See section 8 (`1..600000` ms, `20..10000` Hz; waveforms 0..4 or names). |
+| `VOLUME level` | Global output level `0..255`, default `128`, not persistent. |
+
+`MUSIC` takes exactly one subcommand; `PLAY` and `WAV` require a string path,
+the others take no argument. Example:
+
+```basic
+MUSIC WAV "FFS:/jingle.wav"
+PAUSE 2000
+MUSIC STATUS
+MUSIC STOP
+```
+
+`MUSIC` is also in the shell command list. Not supported: YMT1/YMT2/MIX and PT3
+TurboSound; no other formats are recognised.
+
+### 11.2 Statements and keywords
+
+`PRINT`, `AT` (also `#ch AT offset`), `DATA`, `READ`, `RESTORE`, `STOP`, `DIM`,
+`SELect ON`, `ON`, `REMark`, `GO TO`/`GOTO`, `REMAINDER`, `IF`/`THEN`/`ELSE`/
+`END IF`, `FOR`/`TO`/`STEP`/`NEXT`, `REPeat`/`EXIT`, `DEFine PROCedure`/
+`FuNction`, `LOCal`, `RETurn`, `CONST`, `OPTION`, and the operators `DIV`,
+`MOD`, `AND`, `OR`, `XOR`, `NOT`. Sections 2-7.
+
+`DIM name(d1[,d2...])` accepts non-negative integer upper bounds up to
+2147483647 per dimension but the **total element count is capped at 1,000,000
+per array on every target** (`array allocation limit exceeded`). On ESP32 the
+request must also fit the largest free heap block (`array exceeds available
+memory`); the preflight uses 8 bytes per numeric element (numeric arrays are
+stored as raw doubles since 2026-11-22) and `sizeof(std::string)` per string
+element. Dimensioned arrays are session-owned and passed by reference.
+
+### 11.3 Channel, file and memory commands
+
+| Syntax | Notes |
+| --- | --- |
+| `OPEN(path$, mode$)` | Function; modes `READ`, `WRITE`, `APPEND`, `UPDATE`. Section 8. |
+| `CLOSE h`, `WRITE #c, ...`, `INPUT [#c,] ...`, `READ$(c)`, `EOF(c)` | Section 8. |
+| `#c AT offset` | **SEEK equivalent**; there is no `SEEK` keyword. Zero-based absolute byte offset `0..FLEN`. QL/32-specific. |
+| `FPOS(c)`, `FLEN(c)` | Current position and length. |
+| `#c IN n, buf$`, `#c OUT n, buf$` | Exact binary transfers, at most 8192 bytes. |
+| `CHANNEL #c [TO #d]`, `GETCHANNEL(selector)` | Default-channel routing and lookup. |
+| `IN(port)`, `OUT port, value`, `IOREAD(pin)`, `IOWRITE(pin, value)` | Hardware channels, section 8.1. |
+| `ALLOC(n)`, `DEALLOC h`, `PEEK`/`PEEK_W`/`PEEK_L(h, offset)`, `POKE`/`POKE_W`/`POKE_L h, offset, value`, `XFER` | Session-owned binary buffers, section 8.1. |
+
+### 11.4 Functions
+
+String: `LEN`, `LEFT$`, `RIGHT$`, `MID$`, `REPT$`, `CODE`, `ASC`, `CHR$`,
+`UPPER$`, `LOWER$`, `STR$`, `VAL`, `HEX$`, `BIN$`, `EVAL`, `EVAL$`, `LOC`.
+Numeric: `SIN`, `COS`, `INT`, `RND`, `RGB`, `CPUFREQ`, `FREE`, and the 32-bit
+bit functions `BAND`, `BOR`, `BXOR`, `BNOT`, `ROL`, `ROR`, `SRA`, `SRL`, `SLA`,
+`SLL`. `RANDOMIZE seed` seeds `RND`. Errors: `ERR`, `ERR$(code)`, `ERRX$`.
+Tasks: `TASK`, `TASKRESULT`, `GETTASK`. System: `SYSINFO$(selector)`,
+`CAPABILITY(selector)`, `MODE(selector)`.
+
+### 11.5 Graphics, windows, fonts, images, palette
+
+| Syntax | Notes |
+| --- | --- |
+| `INK c`, `PAPER c`, `OVER m`, `FLASH ...`, `RGB(r,g,b)` | Colour state; `RGB` returns a packed colour. |
+| `PLOT x,y`, `LINE x1,y1,x2,y2`, `RECT x,y,w,h`, `CIRCLE x,y,r`, `TEXT x,y,text$` | Drawing into the selected window. |
+| `CLS`, `ROTATE deg`, `TILE`, `GUPDATE`, `BLIT ...` | Section 9 / API M3. `GUPDATE` batches present. |
+| `WINDOW x,y,w,h`, `CLOSEWINDOW` | Section 9 / API M3-M4. |
+| `PALETTE i,rgb`, `PALROT`, `PALSHIFT`, `PALFADE`, `GPALETTE$(i)`, `GPALETTESIZE()` | Indexed palette; 16 entries on retro/PSRAM-DMA profiles. |
+| `FONT`, `GFONT`, `LOADFONT(path$)`, `GETFONT(...)`, `UNLOADFONT` | Fonts. |
+| `LOADIMAGE(path$)`, `UNLOADIMAGE h`, `BLIT` | QIMG v2 indexed images. |
+| `GWIDTH()`, `GHEIGHT()`, `GDEPTH()`, `GORIGINX()`, `GORIGINY()`, `GROTATION()`, `GX()`, `GY()` | Canvas queries; `GDEPTH` returns bits per pixel. |
+| `MODE modeId[,options]`, `MODE(KModeCurrent)`, `MODE(KModeOptions)` | Runtime display mode; see 11.7. |
+
+### 11.6 UI, dialogs, menus, network
+
+`ALERT title$, text$`, `CONFIRM(title$, text$)`, `IPRINT`, `BUSY` (section 9);
+declarative dialogs `DINIT([title$, options])`, `DTEXT d,label$`,
+`DEDIT d,label$,initial$`, `DINT d,label$,initial,min,max`,
+`DFLOAT d,label$,initial,min,max`, `DCHOICE d,label$,initial,"A|B|C"`,
+`DCHECK d,label$,state`, `DBUTTONS d,accept$,cancel$`, `DIALOG(d)`,
+`DGET$(d,field)`, `DGET(d,field)`; menus `MINIT(title$)`, `MCARD m,id,label$,
+shortcut$`, `MENABLE m,id,enabled`, `MENU(m)`. Syntax and presenter behaviour:
+[QL32-UI-001](QL32-UI-001.md). Network: `GETNET ssid$,password$`, `DISNET`,
+`NETSTAT$()`, `NETADDR$()`, `NETSIGNAL()` ([QL32-NET-001](QL32-NET-001.md)).
+
+### 11.7 Display modes
+
+`MODE` is runtime-selectable and supervisor-only (workers keep running).
+`MODE 0/1/2` = 320x200 / 320x240 / 400x300 on `olimex_esp32_sbc_retro`
+(single framebuffer, 16-entry RGB222 palette, boots in mode 2); modes 3/4
+(640x400/640x480) are rejected there with "mode N is unavailable" and need the
+`olimex_esp32_sbc_fabgl_psram` image. Fixed-mode builds report their single
+mode. Shell form: `MODE [LIST|name|modeId[,options]]`. See
+[QL32-PLAT-001](QL32-PLAT-001.md) and [QL32-API-001](QL32-API-001.md).
+
+### 11.8 Shell and debugger commands (not compiled BASIC statements)
+
+Shell: `HELP`, `RUN`, `LIST [a [TO [b]]]`, `LIST [#ch,] PROC|FN [name]`, `LIST GLOBALS|LOCALS`, `EDIT [n]`, `RENUMBER [start,step]`,
+`DIR`, `CAT`, `PAGER`, `NEW`, `LOAD`, `SAVE`, `DELETE`, `RENAME`, `FORMAT`, `CD`,
+`REBOOT`, `TASKS`, `TASKCHANNELS`, `KILL`, `TASKVIEW`, `WINDOWMODE
+[ISOLATED|SHARED]`, `MODE`, `TASKRESULT`, `LOGON`, `LOGOFF`, `SUSPEND`,
+`RESUME`, `SLICE`, `PRIORITY`, `MUSIC`. Monitor-only: `RECV`, `SEND`, `SCREEN`
+(YMODEM/BMP capture, see README).
+
+Debugger: `DEBUG id`, `BREAK line`, `CLEARBREAK line`, `BREAKPOINTS`, `STEP`,
+`NEXT`, `CONTINUE`, `DEBUG CONTINUE`, `WHERE`, `LOCALS`, `GLOBALS`, `STACK`,
+`STATS`, `WATCH expr`, `UNWATCH expr`, `WATCHES`, `EVAL expr`, `DIAGNOSTICS
+ON|RESET`, `TRACE ON`, `DEBUGBAR`. Breakpoint lines are BASIC line
+numbers (`1..32767`) in numbered programs and physical source lines in
+unnumbered programs. `EVAL` and watches accept side-effect-free expressions only.
+Details: README "Debugger".
+
+### 11.9 Compiled program representation
+
+Programs compile to a compacted bytecode (2026-11-22): one `Instruction` record
+is 40 bytes on x86-64 (was 256), with interned text pointers, packed flag bits,
+narrow 16-bit line/column fields and one shared operand word; rarely used
+metadata is kept out of line. A program that exceeds a narrow field (for
+example more than 65535 source lines/columns or 65535 call arguments) fails to
+compile with "program exceeds a bytecode field limit". Behaviour is unchanged;
+see [QL32-VM-001](QL32-VM-001.md) and the
+[bytecode memory report](../test-results/bytecode-memory-2026-11-22.md).

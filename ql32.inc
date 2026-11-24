@@ -2,7 +2,20 @@
 CONST KChannelCount = 0
 CONST KChannelHandle = 1
 CONST KChannelType = 2
+' SYSINFO$ selector values
+CONST KSysVersion = 0
+CONST KSysBuild = 1
+CONST KSysPlatform = 2
+CONST KSysDisplay = 3
+CONST KSysInput = 4
+CONST KSysStorage = 5
+CONST KSysFeatures = 6
+' CAPABILITY(query$) result values
+CONST KCapabilityUnknown = -1
+CONST KCapabilityNo = 0
+CONST KCapabilityYes = 1
 ' Built-in bitmap font handles
+CONST KFontDefault = 0
 CONST KFontSmall = 1
 CONST KFontNormal = 2
 CONST KFontLarge = 3
@@ -86,6 +99,7 @@ CONST KFlowXonXoff = 2
 CONST KFreeTotal = 0
 CONST KFreeContiguous = 1
 CONST KFreeFragments = 2
+CONST KFreeAllocated = 3
 ' TASK and GETTASK selectors, plus TASKRESULT selectors
 CONST KTaskWait = 1
 CONST KTaskResultStatus = 1
@@ -174,3 +188,14 @@ CONST KErrTaskLimit = 18
 CONST KErrUnsupportedOperation = 19
 CONST KErrInvalidSelector = 20
 CONST KErrTaskStillRunning = 21
+' MODE statement and MODE(selector) query values
+CONST KModeCurrent = 0
+CONST KModeOptions = 1
+CONST KVgaMode320x200 = 0
+CONST KVgaMode320x240 = 1
+CONST KVgaMode400x300 = 2
+CONST KVgaMode640x400 = 3
+CONST KVgaMode640x480 = 4
+CONST KVgaDisplayOptionsDefault = 0
+CONST KVgaDisplayOptionDoubleBuffered = 1
+CONST KOpenResourceBusy = -22

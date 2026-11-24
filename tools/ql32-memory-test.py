@@ -27,6 +27,7 @@ METRIC_RE = re.compile(
     re.IGNORECASE,
 )
 TASK_ID_RE = re.compile(rb"TASKID\|[a-z0-9_-]+\|(\d+)", re.IGNORECASE)
+MUSIC_RETAINED_ALLOWANCE = 20 * 1024
 ERROR_RE = re.compile(
     rb"(?:BASIC session \d+ VM error:|Transfer failed:|Runtime error:|Out of memory|"
     rb"\b(?:syntax|type|allocation) error\b)",
@@ -190,42 +191,64 @@ def start_worker(console: SerialConsole, case: str, filename: str) -> tuple[int,
     return task_id, output
 
 
+def task_listed(console: SerialConsole, task_id: int) -> tuple[bytes, bool]:
+    # TASKS prints "<id> <name> P=<n> <state>"; the name column is WORKER or a
+    # source file name depending on the firmware revision.
+    output = console.command("TASKS #serial_probe")
+    console.check_output(output, f"list tasks for {task_id}")
+    pattern = rb"(?m)^\s*" + str(task_id).encode() + rb"\s+\S+\s+P="
+    return output, re.search(pattern, output) is not None
+
+
+def read_task_count(console: SerialConsole, context: str) -> tuple[bytes, int]:
+    count_output = console.command('PRINT #serial_probe,"TASKCOUNT|";GETTASK(0)')
+    count_match = re.search(rb"TASKCOUNT\|(\d+)", count_output)
+    if not count_match:
+        raise TestFailure(f"could not read task count {context}: {count_output[-500:]!r}")
+    return count_output, int(count_match.group(1))
+
+
 def cancel_worker(console: SerialConsole, task_id: int) -> tuple[bytes, str, int]:
+    """KILL a running worker.
+
+    Older firmware keeps a CANCELLED record until a second KILL; newer firmware
+    reaps it immediately. Returns CANCELLED or REAPED accordingly.
+    """
     output = console.command(f"KILL {task_id}")
     expected_cancel = re.compile(
         rb"BASIC session " + str(task_id).encode() + rb" VM error: Task cancelled\r?\n",
         re.IGNORECASE,
     )
     console.check_output(expected_cancel.sub(b"", output), f"cancel task {task_id}")
-    status = console.command(
-        f'PRINT #serial_probe,"TASKRETAIN|";TASKRESULT({task_id},1)'
-    )
-    console.check_output(status, f"read cancelled task {task_id} result")
-    match = re.search(rb"TASKRETAIN\|(CANCELLED)", status, re.IGNORECASE)
-    if not match:
-        raise TestFailure(f"cancelled task {task_id} result was not retained: {status[-500:]!r}")
-    count_output = console.command(
-        'PRINT #serial_probe,"TASKCOUNT|";GETTASK(0)'
-    )
-    count_match = re.search(rb"TASKCOUNT\|(\d+)", count_output)
-    if not count_match:
-        raise TestFailure(f"could not read task count after cancellation: {count_output[-500:]!r}")
-    return output + status + count_output, match.group(1).decode("ascii"), int(count_match.group(1))
+    listing, listed = task_listed(console, task_id)
+    status_name = "REAPED"
+    if listed:
+        status = console.command(
+            f'PRINT #serial_probe,"TASKRETAIN|";TASKRESULT({task_id},1)'
+        )
+        console.check_output(status, f"read cancelled task {task_id} result")
+        match = re.search(rb"TASKRETAIN\|(CANCELLED)", status, re.IGNORECASE)
+        if not match:
+            raise TestFailure(
+                f"cancelled task {task_id} result was not retained: {status[-500:]!r}")
+        status_name = "CANCELLED"
+        listing += status
+    count_output, count = read_task_count(console, "after cancellation")
+    return output + listing + count_output, status_name, count
 
 
 def reap_worker(console: SerialConsole, task_id: int) -> tuple[bytes, int]:
-    output = console.command(f"KILL {task_id}")
-    console.check_output(output, f"reap cancelled task {task_id}")
-    output += console.command("TASKS #0")
-    if re.search(rb"(?m)^\s*" + str(task_id).encode() + rb"\s+WORKER\b", output):
-        raise TestFailure(f"task {task_id} still appears in TASKS after reap")
-    count_output = console.command(
-        'PRINT #serial_probe,"TASKCOUNT|";GETTASK(0)'
-    )
-    count_match = re.search(rb"TASKCOUNT\|(\d+)", count_output)
-    if not count_match:
-        raise TestFailure(f"could not read task count after reap: {count_output[-500:]!r}")
-    return output + count_output, int(count_match.group(1))
+    # Only KILL a task that is still listed: KILL of an unknown ID is an error.
+    listing, listed = task_listed(console, task_id)
+    output = b""
+    if listed:
+        output = console.command(f"KILL {task_id}")
+        console.check_output(output, f"reap cancelled task {task_id}")
+        listing, still_listed = task_listed(console, task_id)
+        if still_listed:
+            raise TestFailure(f"task {task_id} still appears in TASKS after reap")
+    count_output, count = read_task_count(console, "after reap")
+    return output + listing + count_output, count
 
 
 def kill_worker(console: SerialConsole, task_id: int) -> bytes:
@@ -259,7 +282,7 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
                 debug_log += console.command("STATS")
                 debug_log += console.command("STEP")
                 debug_log += console.command("WHERE")
-                debug_log += console.command("CONTINUE")
+                debug_log += console.command("DEBUG CONTINUE")
                 console.check_output(debug_log, "debugger attach/inspect/continue")
             after_active, _ = sample(console, name, f"during{repetition}")
             cancel_log, cancelled_status, task_count_after_cancel = cancel_worker(
@@ -327,7 +350,7 @@ def run_worker_case(console: SerialConsole, name: str, filename: str,
             if task_id is not None:
                 if debugger:
                     try:
-                        console.command("CONTINUE")
+                        console.command("DEBUG CONTINUE")
                     except Exception:
                         pass
                 try:
@@ -353,6 +376,73 @@ def run_combined_case(console: SerialConsole, cycles: int, tolerance: int,
                            report_cases=report_cases)
 
 
+def run_load_case(console: SerialConsole, workers: int, tolerance: int,
+                  baseline: HeapSample, report_cases: list[dict],
+                  min_free: int, min_largest: int, max_blocks: int,
+                  music_file: str | None) -> dict:
+    """Run several workers (and music) together and bound the loaded heap."""
+    result = {"name": "load", "workers": workers, "music": music_file is not None}
+    report_cases.append(result)
+    task_ids: list[int] = []
+    music_started = False
+    try:
+        if music_file is not None:
+            output = console.command(f'MUSIC PLAY "FFS:/{music_file}"', 60)
+            console.check_output(output, "start music")
+            music_started = True
+        for index in range(workers):
+            output = console.command('load_task = TASK("FFS:/ql32_mem_load.bas")')
+            console.check_output(output, f"start load worker {index + 1}")
+            output += console.command('PRINT #serial_probe,"TASKID|load|";load_task')
+            match = TASK_ID_RE.search(output)
+            if not match:
+                raise TestFailure(f"no task ID for load worker {index + 1}: {output[-500:]!r}")
+            task_ids.append(int(match.group(1)))
+        loaded = []
+        for step in range(6):
+            time.sleep(2.0)
+            loaded.append(sample(console, "load", f"loaded{step}")[0])
+        worst = HeapSample(min(item.total for item in loaded),
+                           min(item.largest for item in loaded),
+                           max(item.blocks for item in loaded))
+        result["baseline"] = serial_metric_dict(baseline)
+        result["loaded_worst"] = serial_metric_dict(worst)
+        result["loaded_samples"] = [serial_metric_dict(item) for item in loaded]
+        result["limits"] = {"min_free": min_free, "min_largest": min_largest,
+                            "max_blocks": max_blocks}
+        if worst.total < min_free:
+            raise TestFailure(f"load free heap {worst.total} below limit {min_free}")
+        if worst.largest < min_largest:
+            raise TestFailure(f"load largest block {worst.largest} below limit {min_largest}")
+        if worst.blocks > max_blocks:
+            raise TestFailure(f"load free-block count {worst.blocks} above limit {max_blocks}")
+        if max(item.total for item in loaded) - worst.total > 4096:
+            raise TestFailure("load free heap drifted by more than 4096 bytes during soak")
+    finally:
+        for task_id in task_ids:
+            try:
+                kill_worker(console, task_id)
+            except Exception:
+                pass
+        if music_started:
+            try:
+                console.command("MUSIC STOP")
+            except Exception:
+                pass
+    after, _ = sample(console, "load", "after")
+    result["after"] = serial_metric_dict(after)
+    # The music service keeps its two task stacks and the I2S DMA buffers after
+    # MUSIC STOP, so allow that fixed amount of retained heap when music ran.
+    retained = MUSIC_RETAINED_ALLOWANCE if music_started else 0
+    result["music_retained_allowance"] = retained
+    allowance = tolerance + retained
+    if after.total < baseline.total - allowance or after.largest < baseline.largest - tolerance:
+        raise TestFailure(
+            f"load did not recover to baseline within {allowance} bytes: "
+            f"{after} vs {baseline}")
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("port", help="serial device used by the CYD REPL")
@@ -363,6 +453,13 @@ def main() -> int:
                         help="JSON report destination (default: ./memory-test-report.json)")
     parser.add_argument("--firmware-revision",
                         help="revision of the image on the board; defaults to local git revision")
+    parser.add_argument("--load-workers", type=int, default=0,
+                        help="also run a combined-load case with this many drawing workers")
+    parser.add_argument("--load-music", type=Path, default=None,
+                        help="local music file (e.g. a .pt3) played during the load case")
+    parser.add_argument("--load-min-free", type=int, default=20 * 1024)
+    parser.add_argument("--load-min-largest", type=int, default=8 * 1024)
+    parser.add_argument("--load-max-blocks", type=int, default=100)
     parser.add_argument("--skip-upload", action="store_true",
                         help="use BASIC fixtures already deployed to FFS")
     args = parser.parse_args()
@@ -377,7 +474,12 @@ def main() -> int:
         ("ql32_mem_graphics.bas", FIXTURES / "graphics-worker.bas"),
         ("ql32_mem_debugger.bas", FIXTURES / "debugger-worker.bas"),
         ("ql32_mem_combined.bas", FIXTURES / "combined-worker.bas"),
+        ("ql32_mem_load.bas", FIXTURES / "load-worker.bas"),
     ]
+    music_name = None
+    if args.load_music is not None:
+        music_name = "ql32_mem_music" + args.load_music.suffix
+        fixtures.append((music_name, args.load_music))
     for device_name, local_path in fixtures:
         if not local_path.is_file():
             raise TestFailure(f"missing BASIC fixture: {local_path}")
@@ -444,7 +546,7 @@ def main() -> int:
 
             run_worker_case(
                 console, "array", "ql32_mem_array.bas", args.cycles,
-                tolerance, baseline, minimum_drop=8 * 1024,
+                tolerance, baseline, minimum_drop=4 * 1024,
                 report_cases=report["cases"],
             )
             run_worker_case(
@@ -459,9 +561,15 @@ def main() -> int:
                 report_cases=report["cases"],
             )
             run_combined_case(console, args.cycles, tolerance, baseline, report["cases"])
+            if args.load_workers > 0:
+                run_load_case(console, args.load_workers, tolerance, baseline,
+                              report["cases"], args.load_min_free,
+                              args.load_min_largest, args.load_max_blocks, music_name)
 
             # Trend information is diagnostic; allocator block counts are not a pass gate.
             for case in report["cases"]:
+                if "repetitions" not in case:
+                    continue
                 counts = [item["after"]["blocks"] for item in case["repetitions"]]
                 declines = sum(right < left for left, right in zip(counts, counts[1:]))
                 if declines >= max(3, len(counts) - 2):

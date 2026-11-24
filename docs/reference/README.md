@@ -1,5 +1,10 @@
 # Language reference sources
 
+The implementation-facing language manual is
+[QL/32 BASIC Language Reference](QL32-Language-Reference.md). It summarizes
+implemented syntax, built-ins, target support, and hardware drivers. This page
+records external source material and compatibility references.
+
 These are the sources linked in the “QL32 Project Idea” chat and used to compile [QL32-LANG-001](../specification/QL32-LANG-001.md). The manuals are linked rather than redistributed. *Programming Psion Computers* explicitly reserves reproduction rights.
 
 ## SuperBASIC / SMSQ/E

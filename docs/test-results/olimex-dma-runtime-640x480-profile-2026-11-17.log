@@ -1,0 +1,32 @@
+QL/32 BASIC
+Version 0.1.0
+Free memory total: 3628783
+Largest free block: 3407860
+Free fragments: 15
+BASIC REPL ready (USB serial and PS/2 keyboard)
+> PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1441, rows=691680, EOF-events=11528, refills=691680, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=16, clone-bytes=577280, pending-reuses=4, refill-batches=11528, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1502, rows=720960, EOF-events=12016, refills=720960, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=18, clone-bytes=582424, pending-reuses=4, refill-batches=12016, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1562, rows=749760, EOF-events=12496, refills=749760, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=20, clone-bytes=582472, pending-reuses=4, refill-batches=12496, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1622, rows=778560, EOF-events=12976, refills=778560, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=22, clone-bytes=582520, pending-reuses=4, refill-batches=12976, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1682, rows=807360, EOF-events=13456, refills=807360, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=24, clone-bytes=582568, pending-reuses=4, refill-batches=13456, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1742, rows=836160, EOF-events=13936, refills=836160, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=26, clone-bytes=582616, pending-reuses=4, refill-batches=13936, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1802, rows=864960, EOF-events=14416, refills=864960, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=28, clone-bytes=582664, pending-reuses=4, refill-batches=14416, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1862, rows=893760, EOF-events=14896, refills=893760, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=30, clone-bytes=582712, pending-reuses=4, refill-batches=14896, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1922, rows=922560, EOF-events=15376, refills=922560, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=32, clone-bytes=582760, pending-reuses=4, refill-batches=15376, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1982, rows=951360, EOF-events=15856, refills=951360, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=34, clone-bytes=582808, pending-reuses=4, refill-batches=15856, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=2042, rows=980160, EOF-events=16336, refills=980160, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=36, clone-bytes=582856, pending-reuses=4, refill-batches=16336, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=2102, rows=1008960, EOF-events=16816, refills=1008960, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=38, clone-bytes=582904, pending-reuses=4, refill-batches=16816, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=2162, rows=1037760, EOF-events=17296, refills=1037760, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=40, clone-bytes=582952, pending-reuses=4, refill-batches=17296, refill-max-us=2261, refill-row-max-us=87, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0

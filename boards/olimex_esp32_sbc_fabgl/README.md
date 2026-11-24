@@ -25,6 +25,69 @@ pio run -e olimex_esp32_sbc_fabgl_psram -t upload
 pio device monitor -b 115200
 ```
 
+## Selecting VGA modes
+
+Use `olimex_esp32_sbc_fabgl_psram` for the qualified FabGL path. Its BASIC
+presets are 0=320x200, 1=320x240, 2=400x300, 3=640x400 and 4=640x480.
+These are requested geometries, **not a guarantee that the framebuffer fits**.
+FabGL's scanout buffers require internal DMA RAM even when several megabytes
+of PSRAM are free. On the tested board with normal startup services, modes
+0 and 1 with option 0 fit; modes 2-4 do not. A different heap or build can
+change allocation capacity.
+With music plus four stress workers active, even mode 1 was explicitly refused
+while mode 0 and the workers remained operational. See the
+[MODE reliability report](../../docs/test-results/olimex-vga-mode-reliability-2026-11-21.md).
+
+```basic
+MODE 1,0
+PRINT MODE(0),MODE(1)
+MODE 0,0
+```
+
+The second argument is 0 for single buffering or 1 for double buffering.
+Omitting it preserves the current option. Double buffering needs two internal
+framebuffers; runtime switching may refuse it even when a dedicated
+double-buffer test profile can allocate its initial buffers before services
+start. MODE 4 with option 1 is explicitly unavailable. Allocation preflight
+now checks complete row-pool capacity before letting FabGL reconfigure larger
+buffers; failures report internal-memory constraints and restore the previous
+mode. Repeated requests and shrinking from mode 1 to mode 0 are supported.
+
+The experimental fixed DMA profiles are different builds:
+`..._psram_dma_display_640x400_present_profile` accepts only `MODE 3,0`, and
+`..._psram_dma_display_640x480_present_profile` accepts only `MODE 4,0`.
+Rejections of modes 0-2 there are intentional. Those profiles are not the
+qualified default and do not provide live switching to FabGL modes.
+
+Music playback alone does not identify the firmware: both paths support
+audio. `PRINT MODE(0),MODE(1)` reports the active mode and buffering option,
+not the PlatformIO environment. The current build identifier may be
+`unknown`, and the display string in `SYSINFO$(3)` is static; do not use it
+as proof of the active geometry or exact firmware. Keep the environment used
+to flash the board in the hardware test record.
+
+For the target-local PSRAM-to-DMA color-bar scanout experiment, build the
+separate test image:
+
+```sh
+pio run -e olimex_esp32_sbc_fabgl_psram_dma_test
+pio run -e olimex_esp32_sbc_fabgl_psram_dma_test -t upload
+pio device monitor -b 115200
+```
+
+This build option replaces normal QL/32/FabGL startup with a static 320x200
+test frame. The source frame is 8-bit indexed in PSRAM (64,000 bytes). DMA
+descriptors, horizontal/vertical blank lines, and a ring of three 320-byte lines
+are allocated with `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL`; for the configured
+timing the scanout class accounts for 18,800 bytes of internal DMA payload,
+plus allocator metadata and the small controller object. It checks the
+returned pointer capabilities before starting `GPIOStream`. This is an early
+vertical slice: each source row is the same eight vertical color bars, so the
+three ring slots can remain unchanged while active-row descriptors reuse
+them. Dynamic palette updates and QL/32 rendering are not connected in this
+test profile. The normal `olimex` and `olimex-psram` profiles continue to use
+FabGL. Physical VGA stability and timing checks are pending an Olimex board.
+
 This profile selects PlatformIO's `esp-wrover-kit` target, enables PSRAM
 initialization and the ESP32 cache workaround, and reports PSRAM and internal
 free memory at boot. It also uses a 16 KiB Arduino loop stack to accommodate
@@ -54,6 +117,42 @@ The VGA screen reserves its bottom three 8-pixel text rows for console channel
 character-cell size used by graphics channel `#1`; console text uses QL ink 4
 (green). The default `#1` graphics window occupies the area above those rows;
 output continues to mirror to USB serial.
+
+## AY/VTX music playback
+
+The Olimex profile exposes software AY-3-8912 playback through the board's
+schematic-confirmed GPIO25 audio output. The renderer uses I2S0's built-in DAC
+and DMA, leaving the VGA scanout on I2S1. Copy
+`examples/music/Bosconia1.vtx` to the SD card root to use the included test
+song. `MUSIC PLAY` reads and decodes a VTX AY/YM register-stream file before
+returning, then streams audio independently of BASIC scheduler ticks:
+
+```basic
+MUSIC PLAY "SDC:/Bosconia1.vtx"
+MUSIC STATUS
+MUSIC PAUSE
+MUSIC RESUME
+MUSIC STOP
+```
+
+`BEEP ms, hz [, waveform]` and `VOLUME 0..255` (default 128) use the same
+GPIO25 output; see QL32-LANG-001. `MUSIC TEST` plays a 1 kHz sine until
+`MUSIC STOP`. Sound was verified by ear on 2026-11-20 (see
+`docs/test-results/olimex-sound-2026-11-20.md`).
+
+The same command uses an `FFS:/` path in the SPIFFS profile. `MUSIC`
+commands are QL/32-specific. This profile accepts VTX files up to 64 KiB with
+register streams up to 96 KiB; SQT, STC, AY containers, other sound chips, and
+other boards are not included yet. The
+GPIO25 connection is confirmed by the schematic, but analog level, amplifier
+requirements, audio quality, and VGA coexistence still need physical playback
+verification. See `examples/music/vtx-player.bas` for a short control example.
+
+VTX register data is decompressed into memory before playback. The included
+`Bosconia1.vtx` expands to 93,184 bytes, so use the
+`olimex_esp32_sbc_fabgl_psram` profile on WROVER-E boards for this test; the
+standard profile may not have a large enough free heap block. The LH5 history
+dictionary is heap allocated to keep it off the BASIC task stack.
 
 ## Hardware checks (2026-11-05)
 

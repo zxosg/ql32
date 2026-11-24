@@ -285,6 +285,14 @@ const BitmapFont& FontRegistry::selectGraphics(FontChannel channel, FontHandle h
     return select(channel, handle, style, graphicsSelections_);
 }
 
+void FontRegistry::resetText(FontChannel channel) noexcept {
+    textSelections_.erase(channel);
+}
+
+void FontRegistry::resetGraphics(FontChannel channel) noexcept {
+    graphicsSelections_.erase(channel);
+}
+
 const BitmapFont& FontRegistry::select(FontChannel channel, FontHandle handle,
                                       std::uint8_t style,
                                       std::map<FontChannel, FontSelection>& selections) {

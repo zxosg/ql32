@@ -26,7 +26,7 @@ targets.
 
 The host CLI includes expressions, structured blocks, procedures, functions,
 locals, arrays, `SELect ON`, numbered-line commands (`LIST`, `RUN`, `NEW`,
-`LOAD`, `SAVE`, `DIR`, `CD`, `DELETE` for lines or files, `RENAME`, and `FORMAT`), and a persistent
+`LOAD`, `SAVE`, `DIR`, `CD`, `DELETE` for lines or files, `RENAME`, `COPY`, `MOVE`, `MKDIR`, `RMDIR`, and `FORMAT`), and a persistent
 terminal REPL. `CD` maintains a per-session current directory; file commands
 accept relative paths, including `.` and `..`. `FORMAT` recursively clears a
 selected directory, including a drive root. The M2 host slice
@@ -161,7 +161,16 @@ tools/build-target.sh mac
 tools/build-target.sh cyd
 tools/build-target.sh vga32
 tools/build-target.sh olimex
+tools/build-target.sh olimex-psram    # olimex_esp32_sbc_fabgl_psram
+tools/build-target.sh olimex-retro    # olimex_esp32_sbc_retro (default WROVER image)
 ```
+
+`cyd` builds the SD-only `esp32_2432s028` profile; the preferred CYD profile
+is `pio run -e esp32_2432s028_spiffs`. The Tenstar uses
+`pio run -e ql32_tenstar_esp32s3`. Other helper tools (`ql32-memory-test.py`,
+`run-vm-benchmarks.py`, `bytecode_footprint`, `upload-olimex-fs.sh`) are listed
+in [PROJECT-HANDOFF.md](PROJECT-HANDOFF.md). Every BASIC command is indexed in
+[the language reference](docs/specification/QL32-LANG-001.md#11-built-in-reference-index-2026-11-22-audit).
 
 The host executables are `build/linux/ql32` and `build/macos/ql32`. Run the
 matching host test suite with `ctest --test-dir build/linux --output-on-failure`
@@ -175,6 +184,17 @@ pio run -e lilygo_vga32 -t upload
 pio run -e olimex_esp32_sbc_fabgl -t upload
 pio run -e esp32_2432s028_spiffs -t upload
 ```
+
+Olimex ESP32-SBC-FabGL with a WROVER/PSRAM module has two separate images
+(the FabGL and PSRAM-scanout backends cannot share one build; flash one):
+
+```bash
+pio run -e olimex_esp32_sbc_retro -t upload       # default: MODE 0/1/2 = 320x200, 320x240, 400x300 (single framebuffer, boots 400x300)
+pio run -e olimex_esp32_sbc_fabgl_psram -t upload # FabGL: MODE 640x400/640x480 and FabGL fallback
+```
+
+The retro image offers 16 simultaneous palette colours (RGB222) per mode and
+rejects MODE 3/4 (640x400/640x480); use the FabGL image for those.
 
 ### Serial file transfer
 
@@ -191,8 +211,8 @@ python3 tools/ql32-ymodem.py capture /dev/cu.usbserial-XXXX 115200 screen.bmp
 
 `send` uploads the local file; `receive` downloads the device file. Without
 `--device-path`, start `RECV` or `SEND` from an already-open monitor first.
-Transfers use CRC-16 and 1 KiB YMODEM data packets. A failed receive removes
-its partial file and restores any previous destination from `.BAK`.
+Transfers use CRC-16 and 1 KiB YMODEM data packets. A receive writes a temporary file and replaces the destination only after the
+transfer completes; a failed receive leaves any existing file intact.
 On CYD, `capture` sends an indexed BMP snapshot of the retained graphics compositor and
 text console without writing it to board storage. `SCREEN` is also available as
 a monitor command. Capture pauses BASIC scheduling while the image transfers.
@@ -219,6 +239,14 @@ editor gutter to toggle a breakpoint, then use Continue, Step, Next, and Pause.
 The panels show source position, locals, globals, arrays, watches, stack, and
 opt-in execution counters. EVAL and watches accept only side-effect-free
 expressions. Screen captures are on demand and can be saved as BMP files.
+The Image converter tab loads common raster files, previews a 16-color QIMG v2
+conversion, resizes with optional aspect preservation, exports `.qimg`, and
+uploads the result to a chosen device path over YMODEM. Install the listed
+Pillow dependency with the other debugger requirements. Source transparency is
+composited onto black; BASIC `BLIT` can still treat a selected palette index as
+transparent. For ESP32 `FFS:` destinations, suggested names fit SPIFFS's
+31-byte path-component limit; longer manually entered components are rejected
+before the transfer starts.
 
 The Debugger tab also exposes each task's screen-space canvas origin and clip
 size. Select a task, edit X/Y/W/H, and choose **Set selected canvas** to move or

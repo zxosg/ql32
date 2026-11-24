@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -100,12 +101,31 @@ public:
               const std::string& value) override {
         writtenText += value;
     }
-    void writeText(ql32::graphics::SessionId,
+    void writeText(ql32::graphics::SessionId session,
                    const std::string& value) override {
+        lastTextSession = session;
         writtenText += value;
     }
     void clear(ql32::graphics::SessionId) override {}
-    void closeSession(ql32::graphics::SessionId) override {}
+    void closeSession(ql32::graphics::SessionId) override { ++closeSessionCount; }
+    void setWindowBounds(ql32::graphics::SessionId,
+                         ql32::graphics::ChannelId channel,
+                         ql32::graphics::Rect bounds) override {
+        windowBounds[channel] = bounds;
+    }
+    void raiseWindows(ql32::graphics::SessionId session) override {
+        raisedSessions.push_back(session);
+    }
+    void setUpdateMode(ql32::graphics::SessionId,
+                       ql32::graphics::UpdateMode mode) override {
+        updateMode = mode;
+        updateModeHistory.push_back(mode);
+    }
+    void setFrameSkip(ql32::graphics::SessionId, std::uint32_t frames) override {
+        frameSkip = frames;
+        frameSkipHistory.push_back(frames);
+    }
+    void update(ql32::graphics::SessionId) override { ++updateCount; }
     ql32::graphics::WindowInfo windowInfo(ql32::graphics::SessionId) override {
         return info;
     }
@@ -115,7 +135,84 @@ public:
     }
 
     std::string writtenText;
+    ql32::graphics::SessionId lastTextSession = 0;
     ql32::graphics::WindowInfo info{120, 32, 4, 16, 0, 0, 0};
+    ql32::graphics::UpdateMode updateMode = ql32::graphics::UpdateMode::Auto;
+    std::uint32_t frameSkip = 0;
+    std::size_t updateCount = 0;
+    std::size_t closeSessionCount = 0;
+    std::unordered_map<ql32::graphics::ChannelId, ql32::graphics::Rect> windowBounds;
+    std::vector<ql32::graphics::UpdateMode> updateModeHistory;
+    std::vector<std::uint32_t> frameSkipHistory;
+    std::vector<ql32::graphics::SessionId> raisedSessions;
+};
+
+class TestDisplayModes final : public ql32::runtime::DisplayModeService {
+public:
+    std::vector<ql32::runtime::DisplayMode> availableModes() const override {
+        return {{"320x200", 320, 200, 70, 0, 0},
+                {"640x480", 640, 480, 60, 1, 0}};
+    }
+    std::string currentMode() const override { return current; }
+    ql32::runtime::DisplayMode setMode(std::string_view name) override {
+        std::string key(name);
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::toupper(ch));
+        });
+        for (const auto& mode : availableModes()) {
+            std::string candidate = mode.name;
+            std::transform(candidate.begin(), candidate.end(), candidate.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+            if (candidate == key) {
+                return setMode(mode.id, currentOptions);
+            }
+        }
+        throw std::invalid_argument("unknown test display mode");
+    }
+    ql32::runtime::DisplayMode currentDisplayMode() const override {
+        for (auto mode : availableModes()) {
+            if (mode.name == current) {
+                mode.options = currentOptions;
+                return mode;
+            }
+        }
+        throw std::invalid_argument("unknown test display mode");
+    }
+    ql32::runtime::DisplayMode setMode(std::uint32_t id,
+                                       std::uint32_t options) override {
+        if (options > 1) throw std::invalid_argument("unsupported options");
+        for (auto mode : availableModes()) {
+            if (mode.id == id) {
+                current = mode.name;
+                currentOptions = options;
+                mode.options = options;
+                return mode;
+            }
+        }
+        throw std::invalid_argument("unknown test display mode");
+    }
+    std::string current = "320x200";
+    std::uint32_t currentOptions = 0;
+};
+
+class FakeMemory final : public ql32::runtime::MemoryService {
+public:
+    std::uint64_t freeBytes() const override { return free; }
+    std::optional<ql32::runtime::HeapFragmentationInfo> fragmentationInfo() const override {
+        return ql32::runtime::HeapFragmentationInfo{largest, 1, 1};
+    }
+    std::uint64_t free = 100000;
+    std::uint64_t largest = 50000;
+};
+
+class ModeFramePresenter final : public ql32::graphics::FramePresenter {
+public:
+    void present(const ql32::graphics::Frame& frame) override {
+        lastFrame = frame;
+        ++presentCount;
+    }
+    ql32::graphics::Frame lastFrame;
+    std::size_t presentCount = 0;
 };
 
 class CountingSystemControl final : public ql32::runtime::SystemControlService {
@@ -315,6 +412,56 @@ void testEditPrefillIsDeliveredToInteractiveInputHost() {
             "edited line did not replace the stored program source");
 }
 
+void testRenumberListRangesAndEditNavigation() {
+    ql32::vm::SessionScheduler scheduler({}, 8);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    for (const char* line : {"10 GOTO 40\n", "20 DATA 7\n",
+                             "30 RESTORE 20\n", "40 PRINT 40\n"}) {
+        require(scheduler.submit(repl, line), "REPL rejected a numbered fixture line");
+        require(scheduler.tick(), "scheduler did not store a numbered fixture line");
+    }
+    require(scheduler.submit(repl, "RENUMBER 100, 10\n") && scheduler.tick(),
+            "REPL rejected custom RENUMBER");
+    require(scheduler.submit(repl, "LIST\n") && scheduler.tick(),
+            "REPL rejected LIST after RENUMBER");
+    require(output.str() ==
+                "100 GOTO 130\n110 DATA 7\n120 RESTORE 110\n130 PRINT 40\n",
+            "RENUMBER failed to update line references or changed a numeric literal");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST 110\n") && scheduler.tick() &&
+                output.str() == "110 DATA 7\n",
+            "LIST line did not select exactly one numbered line");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST 110 TO\n") && scheduler.tick() &&
+                output.str() == "110 DATA 7\n120 RESTORE 110\n130 PRINT 40\n",
+            "LIST start TO did not list through the end of the program");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST TO 120\n") && scheduler.tick() &&
+                output.str() == "100 GOTO 130\n110 DATA 7\n120 RESTORE 110\n",
+            "LIST TO end did not list from the beginning through the end line");
+    require(scheduler.submit(repl, "EDIT 120\n") && scheduler.tick(),
+            "REPL rejected EDIT for line navigation");
+    const auto edit = scheduler.takePendingLineEdit(repl);
+    require(edit && edit->lineNumber == 120,
+            "EDIT did not provide the selected line to the input host");
+    const auto previous = scheduler.navigateProgramEdit(repl, 120, -1);
+    const auto next = scheduler.navigateProgramEdit(repl, 120, 1);
+    require(previous && previous->lineNumber == 110 &&
+                previous->text == "110 DATA 7" && next &&
+                next->lineNumber == 130 && next->text == "130 PRINT 40" &&
+                !scheduler.navigateProgramEdit(repl, 100, -1) &&
+                !scheduler.navigateProgramEdit(repl, 130, 1),
+            "EDIT Up/Down did not navigate adjacent stored lines");
+    require(scheduler.submit(repl, "RENUMBER\n") && scheduler.tick(),
+            "REPL rejected default RENUMBER");
+    output.str(""); output.clear();
+    require(scheduler.submit(repl, "LIST\n") && scheduler.tick() &&
+                output.str() ==
+                    "10 GOTO 40\n20 DATA 7\n30 RESTORE 20\n40 PRINT 40\n",
+            "default RENUMBER did not use the 10,10 sequence or retain references");
+}
+
 void testInteractiveStartupProgramSharesReplSession() {
     ql32::vm::SessionScheduler scheduler({}, 1);
     std::ostringstream output;
@@ -328,6 +475,52 @@ void testInteractiveStartupProgramSharesReplSession() {
     for (int tick = 0; tick < 20 && scheduler.tick(); ++tick) {}
     require(output.str() == "startup complete\n42\n",
             "startup and REPL did not share one interpreter session");
+}
+
+void testInteractiveStartupKeepsOpenedGraphicsWindows() {
+    auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(nullptr);
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.channels = channels;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 128);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output,
+        "rightChannel=OPEN(4)\n"
+        "WINDOW #1,0,0,160,176\n"
+        "PAPER #1,1\nINK #1,6\nCLS #1\n"
+        "WINDOW #rightChannel,160,0,160,176\n"
+        "PAPER #rightChannel,2\nINK #rightChannel,6\nCLS #rightChannel\n"
+        "WINDOW #0,0,176,320,24\nPAPER #0,0\nINK #0,4\nCLS #0\n"
+        "CHANNEL #1\nPRINT #0,GETCHANNEL(0)\n");
+    for (int tick = 0; tick < 20 && scheduler.tick(); ++tick) {}
+
+    const auto startupTask = scheduler.task(repl);
+    require(startupTask &&
+                startupTask->status == ql32::vm::TaskStatus::WaitingInput,
+            "interactive startup did not return to the supervisor prompt");
+    const auto rightWindow = graphics->windowBounds.at(2);
+    const auto consoleWindow = graphics->windowBounds.at(0);
+    if (!(output.str() == "3\n" && graphics->closeSessionCount == 0 &&
+          rightWindow.x == 160 && rightWindow.width == 160 &&
+          rightWindow.height == 176 && consoleWindow.y == 176 &&
+          consoleWindow.width == 320 && consoleWindow.height == 24)) {
+        throw std::runtime_error("startup retained-state check: output=" + output.str() +
+            " closeSession=" + std::to_string(graphics->closeSessionCount) +
+            " right=" + std::to_string(rightWindow.x) + "," +
+            std::to_string(rightWindow.y) + "," + std::to_string(rightWindow.width) +
+            "," + std::to_string(rightWindow.height) + " console=" +
+            std::to_string(consoleWindow.x) + "," + std::to_string(consoleWindow.y) +
+            "," + std::to_string(consoleWindow.width) + "," +
+            std::to_string(consoleWindow.height) + " error=" + startupTask->error);
+    }
+
+    require(scheduler.submit(repl, "CLS #2\nPRINT #0,GETCHANNEL(0)\n") &&
+                scheduler.tick(),
+            "supervisor could not use startup window channel #2 after returning to REPL");
+    require(scheduler.task(repl)->status == ql32::vm::TaskStatus::WaitingInput &&
+                output.str() == "3\n3\n" && graphics->closeSessionCount == 0,
+            "startup window channel did not survive a subsequent REPL command");
 }
 
 void testInteractiveSessionRecoversFromCommandErrors() {
@@ -643,6 +836,37 @@ void testSupervisorCanSetSliceAndWorkerPriority() {
             "supervisor did not receive scheduler command confirmations");
 }
 
+void testRunCompletionRestoresAutomaticGraphicsUpdatesForConsole() {
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+
+    const auto submitAndFinish = [&](const std::string& command) {
+        require(scheduler.submit(supervisor, command),
+                "supervisor did not accept graphics reset test command");
+        for (int tick = 0; tick < 100 && scheduler.task(supervisor)->status !=
+                ql32::vm::TaskStatus::WaitingInput; ++tick)
+            require(scheduler.tick(), "scheduler stopped before command completed");
+        require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
+                "supervisor did not return to its console prompt");
+    };
+
+    submitAndFinish("10 GUPDATE 0\n");
+    submitAndFinish("20 GUPDATE SKIP,3\n");
+    const auto updatesBeforeRun = graphics->updateCount;
+    submitAndFinish("RUN\n");
+    require(graphics->updateMode == ql32::graphics::UpdateMode::Auto &&
+                graphics->frameSkip == 0 && graphics->updateCount > updatesBeforeRun &&
+                graphics->updateModeHistory.size() >= 2 &&
+                graphics->updateModeHistory[0] == ql32::graphics::UpdateMode::Off &&
+                graphics->frameSkipHistory.size() >= 2 &&
+                graphics->frameSkipHistory[0] == 3,
+            "program completion did not restore and present normal console updates");
+}
+
 void testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts() {
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(
         32, 8, nullptr);
@@ -696,6 +920,32 @@ void testCancellingWorkerDiscardsItsGraphicsAllocations() {
             "cancelling a worker retained its canvas allocation");
     require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
             "cancelling a worker changed the supervisor session");
+}
+
+void testWorkerCanvasIsLazyAndTileSizedInIsolatedMode() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(32, 8, nullptr);
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream supervisorOutput;
+    scheduler.launchInteractive(supervisorOutput);
+    require(scheduler.setWindowMode(ql32::runtime::WindowMode::Isolated),
+            "could not enable isolated viewports");
+    std::ostringstream textOutput;
+    scheduler.launchWorker("REPeat forever\n  PAUSE 1\nEND REPeat forever\n", textOutput);
+    for (int tick = 0; tick < 30; ++tick) (void)scheduler.tick();
+    require(graphics->windowManager().size() == 0,
+            "a text-only worker allocated a canvas");
+    std::ostringstream drawOutput;
+    scheduler.launchWorker("PAPER 4\nCLS\nREPeat forever\n  PAUSE 1\nEND REPeat forever\n",
+                           drawOutput);
+    for (int tick = 0; tick < 60 && graphics->windowManager().size() == 0; ++tick)
+        (void)scheduler.tick();
+    require(graphics->windowManager().size() == 1, "drawing worker did not allocate a canvas");
+    const auto state = graphics->windowManager().compositionOrder().front();
+    const auto bytes = (static_cast<std::size_t>(state.bounds.width) * state.bounds.height + 1) / 2;
+    require(bytes < (32u * 8u + 1) / 2,
+            "isolated worker canvas was not smaller than the full screen");
 }
 
 void testSupervisorTaskViewportUsesTaskToSessionMapping() {
@@ -971,6 +1221,17 @@ void testSupervisorCanToggleDebugBar() {
             "DEBUGBAR OFF did not disable the overlay");
 }
 
+void testTaskDisplayName() {
+    using ql32::runtime::taskDisplayName;
+    require(taskDisplayName("ffs:/name_long_very_12.bas") == "name_lo.._12", "long name");
+    require(taskDisplayName("worker-1.bas") == "worker-1", "short name");
+    require(taskDisplayName("0123456789.bas") == "0123456789", "exactly 10 characters");
+    require(taskDisplayName("sd:/a/b/01234567890") == "0123456..890", "no extension");
+    require(taskDisplayName("a.b.bas") == "a.b", "only last extension");
+    require(taskDisplayName(".bas") == ".bas", "leading dot is not an extension");
+    require(taskDisplayName("").empty(), "empty name");
+}
+
 void testTasksUsesDefaultAndExplicitPrintChannels() {
     auto channels = std::make_shared<CapturingChannelService>();
     auto graphics = std::make_shared<CapturingGraphicsService>();
@@ -980,6 +1241,9 @@ void testTasksUsesDefaultAndExplicitPrintChannels() {
     ql32::vm::SessionScheduler scheduler(std::move(services), 32);
     std::ostringstream consoleOutput;
     const auto supervisor = scheduler.launchInteractive(consoleOutput);
+    std::ostringstream workerOutput;
+    scheduler.launchWorker("PAUSE 1000\n", workerOutput, "ffs:/name_long_very_12.bas");
+    scheduler.launchWorker("PAUSE 1000\n", workerOutput);
 
     require(scheduler.submit(supervisor, "sink=OPEN(3)\n"),
             "supervisor could not open a channel for TASKS output");
@@ -990,6 +1254,11 @@ void testTasksUsesDefaultAndExplicitPrintChannels() {
     require(scheduler.tick(), "scheduler did not execute unqualified TASKS");
     require(graphics->writtenText.find("SLICE 32 instructions") != std::string::npos,
             "TASKS did not default to print channel #1");
+    require(graphics->writtenText.find("SUPERVISOR P=") != std::string::npos &&
+                graphics->writtenText.find("name_lo.._12 P=") != std::string::npos &&
+                graphics->writtenText.find("(inline) P=") != std::string::npos &&
+                graphics->writtenText.find("WORKER") == std::string::npos,
+            "TASKS did not list supervisor, shortened file name and inline task");
 
     require(scheduler.submit(supervisor, "TASKS #2\n"),
             "supervisor did not accept TASKS channel redirection");
@@ -1047,6 +1316,25 @@ void testKillRemovesCompletedAndFailedTaskRecords() {
                 "Killed task " + std::to_string(completed) + "\n" +
                 "Killed task " + std::to_string(failed) + "\n",
             "KILL did not confirm removal of terminal task records");
+}
+
+void testKillReleasesRunningWorkerRecord() {
+    ql32::vm::SessionScheduler scheduler({}, 32);
+    std::ostringstream supervisorOutput;
+    std::ostringstream workerOutput;
+    const auto supervisor = scheduler.launchInteractive(supervisorOutput);
+    const auto worker = scheduler.launchWorker("REPeat forever\nEND REPeat forever\n",
+                                               workerOutput);
+    for (int tick = 0; tick < 4; ++tick) (void)scheduler.tick();
+    require(scheduler.task(worker)->status != ql32::vm::TaskStatus::Cancelled,
+            "worker did not start running");
+
+    require(scheduler.kill(worker), "KILL of a running worker failed");
+    require(!scheduler.task(worker),
+            "KILL left the cancelled worker record in the scheduler");
+    require(!scheduler.kill(worker), "KILL of a released worker succeeded");
+    require(scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput,
+            "KILL changed the supervisor session");
 }
 
 void testTaskSupportsCommandAndFunctionSyntax() {
@@ -1121,6 +1409,38 @@ void testTaskWaitResumesCallerAndExposesChildStatus() {
             "wait form did not finish child and return caller to its prompt");
     require(graphics->writtenText == "COMPLETED\n",
             "TASKRESULT did not expose the completed standard task status");
+    require(!graphics->raisedSessions.empty() &&
+                graphics->raisedSessions.back() == graphics->lastTextSession,
+            "completed child did not raise its caller's windows");
+}
+
+void testAltTabCyclesLiveTasksIncludingNonInteractiveTasks() {
+    auto graphics = std::make_shared<CapturingGraphicsService>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 32);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+    const auto first = scheduler.launch("x=1\n", output);
+    const auto second = scheduler.launch("x=2\n", output);
+
+    require(scheduler.focusedTask() == supervisor &&
+                scheduler.focusedTaskNumber() == 1 &&
+                scheduler.activeTaskCount() == 3,
+            "initial active task position was incorrect");
+    const auto raisedBeforeTab = graphics->raisedSessions.size();
+    require(scheduler.focusNextTask() && scheduler.focusedTask() == first &&
+                scheduler.focusedTaskNumber() == 2,
+            "Alt+Tab did not activate a running non-interactive task");
+    require(!graphics->raisedSessions.empty() &&
+                graphics->raisedSessions.size() > raisedBeforeTab,
+            "Alt+Tab did not raise the selected task's windows");
+    require(scheduler.focusNextTask() && scheduler.focusedTask() == second &&
+                scheduler.focusedTaskNumber() == 3,
+            "Alt+Tab did not advance to the next task");
+    require(scheduler.focusNextTask() && scheduler.focusedTask() == supervisor &&
+                scheduler.focusedTaskNumber() == 1,
+            "Alt+Tab did not wrap to the first live task");
 }
 
 void testWaitTaskResumesAfterDialogAndMenu() {
@@ -1313,16 +1633,193 @@ void testRebootInteractiveCommandCallsSystemService() {
             "REBOOT did not notify and invoke the system-control service");
 }
 
+void testSupervisorCanListAndChangeDisplayMode() {
+    auto presenter = std::make_shared<ModeFramePresenter>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
+    auto displayModes = std::make_shared<TestDisplayModes>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    services.displayModes = displayModes;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto supervisor = scheduler.launchInteractive(output);
+
+    require(scheduler.submit(supervisor, "MODE LIST\n"),
+            "supervisor did not accept MODE LIST");
+    require(scheduler.tick(), "scheduler did not dispatch MODE LIST");
+    require(presenter->presentCount > 0 && presenter->lastFrame.width == 320 &&
+                output.str().empty(),
+            "MODE LIST did not use the default graphics output channel");
+
+    require(scheduler.submit(supervisor, "MODE 640x480\n"),
+            "supervisor did not accept MODE selection");
+    require(scheduler.tick(), "scheduler did not dispatch MODE selection");
+    require(displayModes->current == "640x480" &&
+                graphics->displaySize() == std::pair<std::uint32_t, std::uint32_t>{640, 480} &&
+                output.str().find("Display mode set to 640x480 (640x480)") != std::string::npos,
+            "MODE selection did not update hardware and graphics geometry");
+
+    require(scheduler.submit(supervisor, "MODE 0,0\n"),
+            "supervisor did not accept a numeric MODE selection");
+    require(scheduler.tick(), "scheduler did not dispatch numeric MODE selection");
+    require(displayModes->current == "320x200" &&
+                graphics->displaySize() == std::pair<std::uint32_t, std::uint32_t>{320, 200} &&
+                output.str().find("Display mode set to 320x200 (320x200)") !=
+                    std::string::npos,
+            "numeric MODE ID/options did not update the display mode");
+
+    require(scheduler.submit(supervisor, "MODE 0,1\n"),
+            "supervisor did not accept double-buffered MODE");
+    require(scheduler.tick(), "scheduler did not dispatch double-buffered MODE");
+    require(displayModes->current == "320x200" &&
+                displayModes->currentOptions == 1 &&
+                output.str().find("Display mode set to 320x200 (320x200)") !=
+                    std::string::npos,
+            "MODE did not retain the requested display option");
+}
+
+void testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.workerTotalBytes = 14000;
+    policy.workerContiguousBytes = 6000;
+    policy.displayModeGuard = true;
+    memory->setAdmissionPolicy(policy);
+    auto presenter = std::make_shared<ModeFramePresenter>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
+    auto displayModes = std::make_shared<TestDisplayModes>();
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.graphics = graphics;
+    services.displayModes = displayModes;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+
+    const auto ok = scheduler.launchWorker("PRINT 1\n", output);
+    require(scheduler.cancel(ok) && scheduler.reap(ok), "admitted worker not reaped");
+
+    memory->free = 13000;
+    std::string message;
+    try { scheduler.launchWorker("PRINT 1\n", output); }
+    catch (const ql32::runtime::Error& e) {
+        require(e.code() == ql32::runtime::ErrorCode::OutOfMemory, "wrong error code");
+        message = e.what();
+    }
+    require(message.find("need 14000 bytes free (6000 contiguous), have 13000 free, "
+                         "50000 largest") != std::string::npos,
+            ("low free memory did not refuse a worker clearly: " + message).c_str());
+    require(scheduler.tasks().empty(), "refused worker left a task behind");
+
+    memory->free = 100000;
+    memory->largest = 5000;
+    bool refused = false;
+    try { scheduler.launch("PRINT 1\n", output); }
+    catch (const ql32::runtime::Error&) { refused = true; }
+    require(refused, "fragmented heap did not refuse a launch");
+
+    memory->largest = 50000;
+    memory->free = 1000;
+    const auto supervisor = scheduler.launchInteractive(output);
+    require(scheduler.submit(supervisor, "MODE 640x480\n") && scheduler.tick(),
+            "MODE not dispatched");
+    const auto info = scheduler.task(supervisor);
+    require(displayModes->current == "320x200" &&
+                (output.str() + info->error + info->errorDetail)
+                        .find("not enough memory for display mode 640x480") !=
+                    std::string::npos,
+            ("MODE growth was not refused when memory is low: " + output.str() +
+             info->error).c_str());
+
+    memory->free = 400000;
+    require(scheduler.submit(supervisor, "MODE 640x480\n") && scheduler.tick() &&
+                displayModes->current == "640x480",
+            "MODE growth was refused despite enough memory");
+    memory->free = 100;
+    require(scheduler.submit(supervisor, "MODE 320x200\n") && scheduler.tick() &&
+                displayModes->current == "320x200",
+            "shrinking MODE was refused");
+}
+
+void testAdmissionDisabledByDefault() {
+    auto memory = std::make_shared<FakeMemory>();
+    memory->free = 1;
+    memory->largest = 1;
+    ql32::vm::Services services;
+    services.memory = memory;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    const auto id = scheduler.launchWorker("PRINT 1\n", output);
+    require(scheduler.cancel(id), "default policy refused a worker");
+}
+
+void testCanvasAdmissionNeedsContiguousBlockPlusHeadroom() {
+    FakeMemory memory;
+    memory.free = 60000;
+    memory.largest = 17000;
+    require(!memory.canvasFailure(38400), "canvas guard fired while disabled");
+    ql32::runtime::AdmissionPolicy policy;
+    policy.canvasGuard = true;
+    policy.canvasHeadroomBytes = 8192;
+    memory.setAdmissionPolicy(policy);
+    const auto refusal = memory.canvasFailure(38400);
+    require(refusal && refusal->find("38400") != std::string::npos &&
+                refusal->find("17000 largest") != std::string::npos,
+            "canvas admission did not refuse a block larger than the largest free block");
+    memory.largest = 50000;
+    require(!memory.canvasFailure(38400), "canvas admission refused a canvas that fits");
+    memory.free = 40000;
+    require(memory.canvasFailure(38400).has_value(),
+            "canvas admission ignored required headroom");
+}
+
+void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
+    auto presenter = std::make_shared<ModeFramePresenter>();
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
+    auto displayModes = std::make_shared<TestDisplayModes>();
+    ql32::vm::Services services;
+    services.graphics = graphics;
+    services.displayModes = displayModes;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    std::ostringstream workerOutput;
+    const auto supervisor = scheduler.launchInteractive(output,
+        "MODE 1,1\nPRINT #0,MODE(0);\",\";MODE(1)\n");
+    require(scheduler.setWindowMode(ql32::runtime::WindowMode::Isolated),
+            "could not enable isolated task viewports for the mode-change test");
+    const auto worker = scheduler.launchWorker(
+        "REPeat forever\n  PAUSE 1\nEND REPeat forever\n", workerOutput);
+    for (int tick = 0; tick < 200 && output.str().find("1,1") == std::string::npos; ++tick)
+        (void)scheduler.tick();
+
+    require(scheduler.task(supervisor) &&
+                scheduler.task(supervisor)->status == ql32::vm::TaskStatus::WaitingInput &&
+                scheduler.task(worker) &&
+                scheduler.task(worker)->status != ql32::vm::TaskStatus::Completed &&
+                displayModes->current == "640x480" &&
+                displayModes->currentOptions == 1 &&
+                graphics->displaySize() ==
+                    std::pair<std::uint32_t, std::uint32_t>{640, 480} &&
+                scheduler.task(worker)->viewport.canvasWidth == 320 &&
+                scheduler.task(worker)->viewport.canvasHeight == 480 &&
+                output.str().find("1,1") != std::string::npos,
+            "compiled MODE did not switch/query display mode with an active worker");
+}
+
 } // namespace
 
 int main() {
+    testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow();
+    testAdmissionDisabledByDefault();
+    testCanvasAdmissionNeedsContiguousBlockPlusHeadroom();
     testRoundRobinSlicesKeepSessionsIndependent();
     testUiWaitDoesNotBlockOtherSessions();
     testOptionalPagerSuspendsOnlyReplAndContinuesTail();
     testInteractiveSessionUsesSlicesAndKeepsReplState();
     testStopContinueReturnsToPromptWithoutSuspendingSession();
     testEditPrefillIsDeliveredToInteractiveInputHost();
+    testRenumberListRangesAndEditNavigation();
     testInteractiveStartupProgramSharesReplSession();
+    testInteractiveStartupKeepsOpenedGraphicsWindows();
     testInteractiveSessionRecoversFromCommandErrors();
     testSchedulerOffersNonAllocatingTaskStatusAndErrorViews();
     testInteractiveUiWaitResumesThroughScheduler();
@@ -1334,24 +1831,31 @@ int main() {
     testPriorityWeightsChangeFrequency();
     testSchedulerReleasesTaskBookkeepingAfterWorkerBursts();
     testSupervisorCanSetSliceAndWorkerPriority();
+    testRunCompletionRestoresAutomaticGraphicsUpdatesForConsole();
     testIdleWorkerRetainsItsWindowWhenAnotherWorkerStarts();
     testCancellingWorkerDiscardsItsGraphicsAllocations();
     testSupervisorTaskViewportUsesTaskToSessionMapping();
+    testWorkerCanvasIsLazyAndTileSizedInIsolatedMode();
     testBasicTaskViewCommandIsSupervisorOnly();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();
+    testTaskDisplayName();
     testTasksUsesDefaultAndExplicitPrintChannels();
     testKillConfirmationUsesConsoleChannel();
     testKillRemovesCompletedAndFailedTaskRecords();
+    testKillReleasesRunningWorkerRecord();
     testTaskSupportsCommandAndFunctionSyntax();
     testCompletedTaskCanBeReapedExplicitly();
     testTaskWaitResumesCallerAndExposesChildStatus();
+    testAltTabCyclesLiveTasksIncludingNonInteractiveTasks();
     testWaitTaskResumesAfterDialogAndMenu();
     testTaskWaitReturnsChildErrorContext();
     testTaskAndVmPausePreserveRunnableSessions();
     testPauseWaitIsCooperativeAndUsesMilliseconds();
     testBreakPreservesInteractiveSessionAndStopAllReturnsSupervisor();
     testRebootInteractiveCommandCallsSystemService();
+    testSupervisorCanListAndChangeDisplayMode();
+    testBasicProgramChangesModeWhileWorkersRunAndQueriesMode();
     return 0;
 }

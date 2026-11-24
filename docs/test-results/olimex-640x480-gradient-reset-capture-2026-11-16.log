@@ -1,0 +1,2 @@
+PSRAM VGA DMA heap before allocation: free=251184, largest=110580 bytes
+PSRAM VGA scanout started: 640x480, scan-count=1, pixel clock=25175000 Hz, nominal refresh=59.94 Hz; format=indexed4, stride=320

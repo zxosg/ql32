@@ -11,6 +11,10 @@ namespace {
 using runtime::ServiceError;
 using runtime::ServiceErrorCode;
 
+bool canRead(runtime::ChannelMode mode) {
+    return mode == runtime::ChannelMode::Read || mode == runtime::ChannelMode::Update;
+}
+
 } // namespace
 
 SdChannels::~SdChannels() {
@@ -82,15 +86,32 @@ runtime::ChannelId SdChannels::open(runtime::SessionId session,
     case runtime::ChannelMode::Read: flags = FILE_READ; break;
     case runtime::ChannelMode::Write: flags = FILE_WRITE; break;
     case runtime::ChannelMode::Append: flags = FILE_APPEND; break;
+    case runtime::ChannelMode::Update: flags = "r+"; break;
     }
+    // Creating or truncating a file writes flash metadata.
+    runtime::BulkWriteScope hold(mode == runtime::ChannelMode::Write ||
+                                 mode == runtime::ChannelMode::Append
+                                     ? bulkWriteGate_ : nullptr);
     fs::File file = filesystem_.open(resolved.c_str(), flags);
     if (!file)
-        throw ServiceError(mode == runtime::ChannelMode::Read
+        throw ServiceError(mode == runtime::ChannelMode::Read ||
+                           mode == runtime::ChannelMode::Update
                                ? ServiceErrorCode::NotFound
                                : ServiceErrorCode::IoError,
                            "channel: cannot open file: " + path);
     if (file.isDirectory()) {
+        // SPIFFS has no directories: a childless "directory" is a missing file.
+        bool phantom = false;
+        if (drive_ == "FFS") {
+            file.rewindDirectory();
+            fs::File entry = file.openNextFile();
+            phantom = !entry;
+            if (entry) entry.close();
+        }
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "channel: cannot open file: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "channel path names a directory: " + path);
     }
@@ -115,7 +136,7 @@ std::optional<std::string> SdChannels::readLine(runtime::SessionId session,
                                                runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for reading");
 
@@ -135,7 +156,7 @@ std::string SdChannels::readBytes(runtime::SessionId session,
                                   runtime::ChannelId channel, std::size_t count) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for reading");
     std::string bytes(count, '\0');
     const std::size_t received = opened.file.read(
@@ -151,11 +172,28 @@ void SdChannels::writeBytes(runtime::SessionId session, runtime::ChannelId chann
     OpenChannel& opened = owned(session, channel);
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle, "channel is not open for writing");
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const auto written = opened.file.write(
         reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
     opened.file.flush();
     if (written != bytes.size())
         throw ServiceError(ServiceErrorCode::IoError, "channel write failed");
+}
+
+std::uint64_t SdChannels::position(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    if (opened.mode == runtime::ChannelMode::Append)
+        throw ServiceError(ServiceErrorCode::InvalidHandle,
+                           "append channels do not report a position");
+    return opened.file.position();
+}
+
+std::uint64_t SdChannels::length(runtime::SessionId session, runtime::ChannelId channel) {
+    std::lock_guard lock(mutex_);
+    OpenChannel& opened = owned(session, channel);
+    opened.file.flush();
+    return opened.file.size();
 }
 
 void SdChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
@@ -173,7 +211,7 @@ void SdChannels::seek(runtime::SessionId session, runtime::ChannelId channel,
 bool SdChannels::atEnd(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
-    if (opened.mode != runtime::ChannelMode::Read)
+    if (!canRead(opened.mode))
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for reading");
     return opened.file.available() == 0;
@@ -186,6 +224,7 @@ void SdChannels::write(runtime::SessionId session, runtime::ChannelId channel,
     if (opened.mode == runtime::ChannelMode::Read)
         throw ServiceError(ServiceErrorCode::InvalidHandle,
                            "channel is not open for writing");
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const auto written = opened.file.write(
         reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
     opened.file.flush();
@@ -196,6 +235,7 @@ void SdChannels::write(runtime::SessionId session, runtime::ChannelId channel,
 void SdChannels::close(runtime::SessionId session, runtime::ChannelId channel) {
     std::lock_guard lock(mutex_);
     OpenChannel& opened = owned(session, channel);
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     opened.file.close();
     channels_.erase(channel);
 }
@@ -204,6 +244,7 @@ void SdChannels::closeSession(runtime::SessionId session) {
     std::lock_guard lock(mutex_);
     for (auto channel = channels_.begin(); channel != channels_.end();) {
         if (channel->second.session == session) {
+            runtime::BulkWriteScope hold(bulkWriteGate_);
             channel->second.file.close();
             channel = channels_.erase(channel);
         } else {

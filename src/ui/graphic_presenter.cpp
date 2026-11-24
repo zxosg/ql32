@@ -523,7 +523,10 @@ void GraphicPresenter::composeRow(std::uint32_t y, std::uint32_t x,
                 row[i] = (infoToast_ && infoToast_->displayMode == 1 && phase) || swap ?
                     infoToast_->paper : infoToast_->ink;
             } else {
-                row[i] = swap ? infoToast_->paper : infoToast_->ink;
+                const auto frame = infoToast_ && infoToast_->frame >= 0 ?
+                    static_cast<graphics::ColorIndex>(infoToast_->frame) :
+                    infoToast_->ink;
+                row[i] = swap ? infoToast_->paper : frame;
             }
         }
     }
@@ -737,6 +740,11 @@ void GraphicPresenter::handleSerialByte(char byte, std::uint32_t nowMs) {
         else if (byte == 'D') event.key = input::Key::Left;
         else return;
         handleKey(event);
+        return;
+    }
+    if (byte == 0x1a && inputActive() && !request_->dialogOptions.keyInput) {
+        service_->submitInput(request_->id, inputEdit_ + '\x1a');
+        finish();
         return;
     }
     if (byte == 27) { serialEscapeState_ = 1; serialEscapeAt_ = nowMs; return; }

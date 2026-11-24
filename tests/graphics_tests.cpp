@@ -1,5 +1,6 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/graphics/windowed_service.hpp"
+#include "ql32/ui/service.hpp"
 
 #include <algorithm>
 #include <array>
@@ -127,6 +128,12 @@ public:
                    const std::string& value) override {
         events.push_back({"PRINT_TEXT", session, {}, {}, 0, 0, value, channel});
     }
+    void beginTextOutputBatch(SessionId session, ChannelId channel) override {
+        events.push_back({"PRINT_BATCH_BEGIN", session, {}, {}, 0, 0, {}, channel});
+    }
+    void endTextOutputBatch(SessionId session, ChannelId channel) override {
+        events.push_back({"PRINT_BATCH_END", session, {}, {}, 0, 0, {}, channel});
+    }
     bool setTextPosition(SessionId session, ChannelId channel,
                          std::uint32_t row, std::uint32_t column) override {
         events.push_back({"AT", session,
@@ -153,6 +160,10 @@ public:
         const char* name = mode == UpdateMode::Off ? "GUPDATE_OFF" :
                            mode == UpdateMode::On ? "GUPDATE_ON" : "GUPDATE_AUTO";
         events.push_back({name, session});
+    }
+    void setFrameSkip(SessionId session, std::uint32_t frames) override {
+        events.push_back({"GUPDATE_SKIP", session, {}, {},
+                          static_cast<int>(frames)});
     }
     void update(SessionId session) override { events.push_back({"GUPDATE", session}); }
     WindowInfo windowInfo(SessionId) override { return info; }
@@ -196,6 +207,54 @@ public:
     void rename(const std::string&, const std::string&) override {}
     void remove(const std::string&) override {}
 };
+
+class BitmapTestStorage final : public ql32::runtime::StorageService {
+public:
+    explicit BitmapTestStorage(std::string image) : image_(std::move(image)) {}
+    std::string readText(const std::string&) override { return {}; }
+    std::unique_ptr<ql32::runtime::StorageReadHandle> openRead(
+            const std::string& path) override {
+        if (path != "sprite.qimg") throw std::runtime_error("file not found");
+        return std::make_unique<ql32::runtime::MemoryStorageReadHandle>(image_);
+    }
+    void writeText(const std::string&, const std::string&) override {}
+    std::vector<ql32::runtime::FileEntry> list(const std::string&) override { return {}; }
+    bool exists(const std::string& path) override { return path == "sprite.qimg"; }
+    std::uintmax_t size(const std::string&) override { return image_.size(); }
+    void rename(const std::string&, const std::string&) override {}
+    void remove(const std::string&) override {}
+private:
+    std::string image_;
+};
+
+std::string makeTestQimg(std::uint16_t width, std::uint16_t height,
+                         const std::vector<std::uint8_t>& packedRows) {
+    const auto stride = static_cast<std::uint16_t>((width + 1u) / 2u);
+    std::string bytes(64, '\0');
+    bytes[0] = 'Q'; bytes[1] = 'I'; bytes[2] = 'M'; bytes[3] = 'G';
+    bytes[4] = 2; bytes[5] = 4;
+    bytes[6] = static_cast<char>(width & 0xff);
+    bytes[7] = static_cast<char>(width >> 8);
+    bytes[8] = static_cast<char>(height & 0xff);
+    bytes[9] = static_cast<char>(height >> 8);
+    bytes[10] = static_cast<char>(stride & 0xff);
+    bytes[11] = static_cast<char>(stride >> 8);
+    const auto payloadSize = static_cast<std::uint32_t>(packedRows.size());
+    for (std::size_t i = 0; i < 4; ++i)
+        bytes[12 + i] = static_cast<char>(payloadSize >> (8 * i));
+    constexpr std::array<std::array<std::uint8_t, 3>, 16> palette{{
+        {{0, 0, 0}}, {{0, 0, 255}}, {{255, 0, 0}}, {{255, 0, 255}},
+        {{0, 255, 0}}, {{0, 255, 255}}, {{255, 255, 0}}, {{255, 255, 255}},
+        {{85, 85, 85}}, {{85, 85, 255}}, {{255, 85, 85}}, {{255, 85, 255}},
+        {{85, 255, 85}}, {{85, 255, 255}}, {{255, 255, 85}}, {{192, 192, 192}}
+    }};
+    for (std::size_t index = 0; index < palette.size(); ++index) {
+        for (std::size_t component = 0; component < palette[index].size(); ++component)
+            bytes[16 + index * 3 + component] = static_cast<char>(palette[index][component]);
+    }
+    for (const auto byte : packedRows) bytes.push_back(static_cast<char>(byte));
+    return bytes;
+}
 
 std::string makeTestQfnt() {
     constexpr std::size_t headerSize = 26;
@@ -356,6 +415,299 @@ void testGraphicsUpdateCommandDispatch() {
             "GUPDATE modes or explicit flush were dispatched in the wrong order");
 }
 
+void testGupdateOffSuppressesVmDrawingUntilExplicitUpdate() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(32, 24, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "GUPDATE 0\nPLOT 2,2\nPRINT \"pending\"\n", output);
+    require(presenter->presentCount == 0,
+            "VM GUPDATE 0 presented later drawing commands automatically");
+    interpreter.execute("GUPDATE\n", output);
+    require(presenter->presentCount == 1,
+            "bare GUPDATE did not present the retained frame after GUPDATE 0");
+    interpreter.execute("GUPDATE 1\nPLOT 4,4\n", output);
+    require(presenter->presentCount == 3,
+            "GUPDATE 1 did not restore automatic presentation");
+}
+
+void testProgrammableGlobalPalette() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(16, 8, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT #0,RGB(18,52,86)\n"
+        "GUPDATE 0\nPALETTE 1,RGB(18,52,86),RGB(171,205,239)\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\n", output);
+    require(output.str() == "1193046\n#123456\n#ABCDEF\n",
+            "RGB packing or PALETTE readback was incorrect");
+    require(presenter->presentCount == 0,
+            "PALETTE bypassed GUPDATE 0 presentation suppression");
+    interpreter.execute("GUPDATE\n", output);
+    require(presenter->presentCount == 1 &&
+                presenter->lastFrame.palette[1].red == 0x12 &&
+                presenter->lastFrame.palette[1].green == 0x34 &&
+                presenter->lastFrame.palette[1].blue == 0x56 &&
+                presenter->lastFrame.palette[2].red == 0xAB &&
+                presenter->lastFrame.palette[2].green == 0xCD &&
+                presenter->lastFrame.palette[2].blue == 0xEF,
+            "palette range was not reflected in the composed frame");
+
+    require(graphics->paletteColor(2, 1).red == 0x12 &&
+                graphics->paletteColor(2, 2).blue == 0xEF,
+            "palette changes were not shared across graphics sessions");
+
+    bool outOfRangeRejected = false;
+    try {
+        interpreter.execute("PALETTE 15,16777215,0\n", output);
+    } catch (const std::runtime_error& error) {
+        outOfRangeRejected = std::string(error.what()).find("palette range") !=
+                             std::string::npos;
+    }
+    require(outOfRangeRejected, "PALETTE accepted a range past the active palette");
+
+    bool invalidColorRejected = false;
+    try {
+        interpreter.execute("PALETTE 1,16777216\n", output);
+    } catch (const std::runtime_error& error) {
+        invalidColorRejected = std::string(error.what()).find("RGB color") !=
+                               std::string::npos;
+    }
+    require(invalidColorRejected, "PALETTE accepted an RGB value above 24 bits");
+
+    bool invalidComponentRejected = false;
+    try {
+        interpreter.execute("PRINT RGB(256,0,0)\n", output);
+    } catch (const std::runtime_error& error) {
+        invalidComponentRejected = std::string(error.what()).find("RGB components") !=
+                                   std::string::npos;
+    }
+    require(invalidComponentRejected, "RGB accepted a component above 255");
+}
+
+void testProgramControlledPaletteTransforms() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(16, 8, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "GUPDATE 0\n"
+        "PALETTE 1,RGB(16,32,48),RGB(64,80,96),RGB(112,128,144)\n"
+        "PALROT 1,3,1\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\nPRINT #0,GPALETTE$(3)\n"
+        "PALSHIFT 1,3,1,RGB(170,187,204)\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\nPRINT #0,GPALETTE$(3)\n"
+        "PALSHIFT 1,3,-1,RGB(1,2,3)\n"
+        "PALFADE 1,2,16777215,0.5\n"
+        "PRINT #0,GPALETTE$(1)\nPRINT #0,GPALETTE$(2)\nPRINT #0,GPALETTE$(3)\n", output);
+    require(output.str() ==
+                "#708090\n#102030\n#405060\n"
+                "#AABBCC\n#708090\n#102030\n"
+                "#B8C0C8\n#889098\n#010203\n",
+            "palette rotate, shift, or fade produced unexpected colors");
+    require(presenter->presentCount == 0,
+            "palette transforms bypassed GUPDATE 0 suppression");
+    interpreter.execute("GUPDATE\n", output);
+    require(presenter->presentCount == 1 &&
+                presenter->lastFrame.palette[1].red == 0xB8 &&
+                presenter->lastFrame.palette[2].blue == 0x98,
+            "palette transform result was not presented by GUPDATE");
+
+    const auto rejects = [&](const std::string& command, const std::string& expected) {
+        try {
+            interpreter.execute(command, output);
+        } catch (const std::runtime_error& error) {
+            return std::string(error.what()).find(expected) != std::string::npos;
+        }
+        return false;
+    };
+    require(rejects("PALROT 15,2,1\n", "palette range"),
+            "PALROT accepted a range beyond the palette");
+    require(rejects("PALSHIFT 1,2,0,0\n", "direction must be -1 or 1"),
+            "PALSHIFT accepted a zero direction");
+    require(rejects("PALFADE 1,2,0,1.1\n", "fade amount"),
+            "PALFADE accepted an amount above one");
+}
+
+void testIndexedBitmapLoadBlitAndRelease() {
+    auto storage = std::make_shared<BitmapTestStorage>(
+        makeTestQimg(3, 2, {0x12, 0x30, 0x40, 0x60}));
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(24, 16, presenter);
+    ql32::Interpreter interpreter(storage, {}, {}, graphics);
+    std::ostringstream output;
+
+    interpreter.execute(
+        "image = LOADIMAGE(\"sprite.qimg\")\n"
+        "INK 9\n"
+        "BLIT image,4,5,0\n", output);
+
+    const auto windows = graphics->windowManager().compositionOrder();
+    require(windows.size() == 1, "bitmap draw created unexpected graphics windows");
+    const auto& canvas = graphics->windowManager().canvas(windows.front().id);
+    require(canvas.pixel(4, 5) == 1 && canvas.pixel(5, 5) == 2 &&
+                canvas.pixel(6, 5) == 3,
+            "QIMG high-nibble-first pixels were not blitted in row order");
+    require(canvas.pixel(4, 6) == 4 && canvas.pixel(5, 6) == 0 &&
+                canvas.pixel(6, 6) == 6,
+            "odd-width QIMG row or transparent color was rendered incorrectly");
+    require(presenter->presentCount == 1,
+            "BLIT did not coalesce row updates into one presentation");
+    interpreter.execute("PLOT 0,0\n", output);
+    require(canvas.pixel(0, 0) == 9,
+            "BLIT failed to restore the caller's graphics ink");
+
+    interpreter.execute("UNLOADIMAGE image\n", output);
+    bool unloadedRejected = false;
+    try {
+        interpreter.execute("BLIT image,0,0\n", output);
+    } catch (const std::exception& error) {
+        unloadedRejected = std::string(error.what()).find("unknown bitmap handle") !=
+                           std::string::npos;
+    }
+    require(unloadedRejected, "BLIT accepted a released image handle");
+
+    auto malformedStorage = std::make_shared<BitmapTestStorage>(
+        makeTestQimg(3, 2, {0x12, 0x30, 0x40}));
+    ql32::Interpreter malformed(malformedStorage);
+    bool malformedRejected = false;
+    try {
+        malformed.execute("image = LOADIMAGE(\"sprite.qimg\")\n", output);
+    } catch (const std::runtime_error& error) {
+        malformedRejected = std::string(error.what()).find("QIMG stride or payload") !=
+                            std::string::npos;
+    }
+    require(malformedRejected, "LOADIMAGE accepted a truncated QIMG payload");
+
+    auto remappedQimg = makeTestQimg(3, 2, {0x12, 0x30, 0x40, 0x60});
+    remappedQimg[16 + 3] = static_cast<char>(255);
+    remappedQimg[16 + 4] = 0;
+    remappedQimg[16 + 5] = 0;
+    auto remappedStorage = std::make_shared<BitmapTestStorage>(remappedQimg);
+    auto remappedGraphics = std::make_shared<WindowedService>(
+        24, 16, std::make_shared<CapturingPresenter>());
+    ql32::Interpreter remapped(remappedStorage, {}, {}, remappedGraphics);
+    remapped.execute("image = LOADIMAGE(\"sprite.qimg\")\nBLIT image,0,0\n", output);
+    const auto remappedWindows = remappedGraphics->windowManager().compositionOrder();
+    const auto& remappedCanvas = remappedGraphics->windowManager().canvas(
+        remappedWindows.front().id);
+    require(remappedCanvas.pixel(0, 0) == 2,
+            "QIMG embedded palette color was not mapped to the closest display color");
+
+    auto legacyQimg = makeTestQimg(3, 2, {0x12, 0x30, 0x40, 0x60});
+    legacyQimg[4] = 1;
+    auto legacyStorage = std::make_shared<BitmapTestStorage>(legacyQimg);
+    ql32::Interpreter legacy(legacyStorage);
+    bool legacyRejected = false;
+    try {
+        legacy.execute("image = LOADIMAGE(\"sprite.qimg\")\n", output);
+    } catch (const std::runtime_error& error) {
+        legacyRejected = std::string(error.what()).find("invalid QIMG header") !=
+                         std::string::npos;
+    }
+    require(legacyRejected, "QIMG v1 was accepted after the format moved to v2");
+}
+
+void testSuperBasicLineCursorForms() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(24, 16, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "INK 2\n"
+        "LINE 2,3\n"
+        "LINE TO 5,6\n"
+        "LINE 8,9 TO 11,12\n"
+        "LINE 1,1,3,1\n"
+        "PRINT #0,GX()\nPRINT #0,GY()\n", output);
+
+    const auto windows = graphics->windowManager().compositionOrder();
+    require(windows.size() == 1, "LINE forms created unexpected graphics windows");
+    const auto session = windows.front().owner;
+    auto& defaultCanvas = graphics->windowManager().canvas(windows.front().id);
+    require(defaultCanvas.pixel(2, 3) == 2 && defaultCanvas.pixel(5, 6) == 2 &&
+                defaultCanvas.pixel(8, 9) == 2 && defaultCanvas.pixel(11, 12) == 2 &&
+                defaultCanvas.pixel(1, 1) == 2 && defaultCanvas.pixel(3, 1) == 2,
+            "cursor-based LINE forms or the original coordinate form drew incorrectly");
+    const auto cursor = graphics->graphicsPosition(session, 1);
+    require(cursor.x == 3 && cursor.y == 1,
+            "LINE did not retain the endpoint as the graphics cursor");
+    require(output.str() == "3\n1\n",
+            "GX or GY did not report the current graphics cursor");
+    graphics->setGraphicsPosition(session, 2, {4, 4});
+    const auto channelCursor = graphics->graphicsPosition(session, 2);
+    require(channelCursor.x == 4 && channelCursor.y == 4,
+            "graphics cursors were not stored independently by channel");
+}
+
+void testGraphicsUpdateSkipCommandDispatch() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute("GUPDATE SKIP,1\nGUPDATE SKIP,0\n", output);
+    require(graphics->events.size() == 2 &&
+                graphics->events[0].name == "GUPDATE_SKIP" &&
+                graphics->events[0].a == 1 &&
+                graphics->events[1].name == "GUPDATE_SKIP" &&
+                graphics->events[1].a == 0,
+            "GUPDATE SKIP did not dispatch its frame counts");
+
+    bool rejected = false;
+    try {
+        interpreter.execute("GUPDATE SKIP,1.5\n", output);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("nonnegative 32-bit integer") !=
+                   std::string::npos;
+    }
+    require(rejected, "GUPDATE SKIP accepted a fractional frame count");
+}
+
+void testUiInteractionResetsGraphicsUpdateStateAndKeepsIt() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    auto ui = std::make_shared<ql32::ui::QueuedService>();
+    ql32::Interpreter interpreter({}, {}, ui, graphics);
+    std::ostringstream output;
+
+    const auto verifyReset = [&](const std::string& source) {
+        graphics->events.clear();
+        const auto status = interpreter.executeResumable(
+            "GUPDATE 0\nGUPDATE SKIP,2\n" + source, output);
+        require(status == ql32::ExecutionStatus::Suspended,
+                "UI request did not suspend its BASIC session");
+        require(graphics->events.size() >= 5 &&
+                    graphics->events[graphics->events.size() - 3].name == "GUPDATE_SKIP" &&
+                    graphics->events[graphics->events.size() - 3].a == 0 &&
+                    graphics->events[graphics->events.size() - 2].name == "GUPDATE_AUTO" &&
+                    graphics->events.back().name == "GUPDATE",
+                "UI interaction did not reset and present the normal update state");
+        const auto request = ui->takeNextRequest();
+        require(request.has_value(), "UI interaction did not enqueue its request");
+        const bool resolved = request->kind == ql32::ui::RequestKind::Input ?
+            ui->submitInput(request->id, "ok") :
+            ui->resolve(request->id, ql32::ui::ResultKind::Cancelled);
+        if (!resolved)
+            throw std::runtime_error("UI request kind " +
+                std::to_string(static_cast<unsigned>(request->kind)) +
+                " could not be resolved in the test");
+        const auto beforeResume = graphics->events.size();
+        (void)interpreter.resume(output);
+        require(graphics->events.size() == beforeResume,
+                "graphics update state was reverted after the UI interaction");
+    };
+
+    verifyReset("ALERT \"Notice\",\"Message\"\n");
+    verifyReset("INPUT value$\n");
+    verifyReset("dialogHandle = DINIT(\"Dialog\")\n"
+                "DTEXT dialogHandle,\"Fields\"\n"
+                "DEDIT dialogHandle,\"Name\",\"Initial\"\n"
+                "accepted = DIALOG(dialogHandle)\n");
+    verifyReset("menuHandle = MINIT(\"Menu\")\n"
+                "MCARD menuHandle,1,\"One\",\"1\"\n"
+                "selected = MENU(menuHandle)\n");
+}
+
 void testWindowedGraphicsUpdateBatching() {
     auto presenter = std::make_shared<CapturingPresenter>();
     WindowedService graphics(10, 10, presenter);
@@ -383,6 +735,148 @@ void testWindowedGraphicsUpdateBatching() {
     graphics.setUpdateMode(1, UpdateMode::Auto);
     require(presenter->presentCount == 3 && presenter->lastFrame.pixels[5 * 10 + 8] == 2,
             "GUPDATE AUTO did not restore default automatic presentation");
+}
+
+void testWindowedGraphicsCoalescesPresentationsByTimeAndCost() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter);
+    std::uint64_t now = 1000;
+    graphics.setPresentCoalescing(500, 0, [&now] { return now; });
+    graphics.circle(1, {1, 1}, 0);
+    require(presenter->presentCount == 1, "first request must present at once");
+    now += 100;
+    graphics.circle(1, {3, 3}, 0);
+    graphics.circle(1, {5, 5}, 0);
+    require(presenter->presentCount == 1 && graphics.hasPendingPresentation(),
+            "requests inside the interval must be merged, not presented");
+    graphics.pollPendingPresentation();
+    require(presenter->presentCount == 1, "poll must respect the interval");
+    now += 500;
+    graphics.pollPendingPresentation();
+    require(presenter->presentCount == 2 && !graphics.hasPendingPresentation() &&
+                presenter->lastFrame.pixels[5 * 10 + 5] == 7,
+            "poll after the interval must publish the latest merged state");
+    require(graphics.coalesceStats().requests == 3 &&
+                graphics.coalesceStats().deferred == 2 &&
+                graphics.coalesceStats().presented == 2,
+            "coalescing counters");
+    now += 600;
+    graphics.circle(1, {7, 7}, 0);
+    graphics.circle(1, {8, 8}, 0);
+    graphics.flushPendingPresentation();
+    require(presenter->presentCount == 4,
+            "flush must publish pending output immediately");
+    require(!graphics.hasPendingPresentation(), "flush must clear pending output");
+    now += 10000;
+    graphics.setUpdateMode(1, UpdateMode::Off);
+    graphics.circle(1, {4, 4}, 0);
+    const auto before = presenter->presentCount;
+    graphics.update(1);
+    graphics.update(1);
+    require(presenter->presentCount <= before + 1 &&
+                graphics.coalesceStats().deferred >= 3,
+            "explicit GUPDATE must obey the rate limit");
+    graphics.flushPendingPresentation();
+    graphics.setPresentCoalescing(0, 0, {});
+    graphics.setUpdateMode(1, UpdateMode::Auto);
+    graphics.circle(1, {2, 2}, 0);
+    require(!graphics.hasPendingPresentation(), "disabled coalescing must not defer");
+}
+
+void testWindowedGraphicsSkipsAutomaticPresentations() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter);
+    graphics.setFrameSkip(1, 1);
+    graphics.circle(1, {1, 1}, 0);
+    graphics.circle(1, {3, 3}, 0);
+    require(presenter->presentCount == 1,
+            "GUPDATE SKIP 1 did not skip one automatic presentation");
+    graphics.circle(1, {5, 5}, 0);
+    require(presenter->presentCount == 2 &&
+                presenter->lastFrame.pixels[3 * 10 + 3] == 7,
+            "GUPDATE SKIP did not present the latest retained canvas state");
+
+    graphics.update(1);
+    require(presenter->presentCount == 2,
+            "bare GUPDATE did not honor the active frame-skip cadence");
+    graphics.update(1);
+    require(presenter->presentCount == 3,
+            "bare GUPDATE did not resume presentation after the skipped request");
+    graphics.setFrameSkip(1, 0);
+    graphics.setUpdateMode(1, UpdateMode::Auto);
+    graphics.circle(1, {7, 7}, 0);
+    require(presenter->presentCount == 5,
+            "GUPDATE SKIP 0 did not restore presentation on every request");
+}
+
+void testWindowedGraphicsResetUpdateStatePresentsAndDisablesSkip() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter);
+    graphics.setUpdateMode(1, UpdateMode::Off);
+    graphics.setFrameSkip(1, 2);
+    graphics.circle(1, {3, 3}, 0);
+    require(presenter->presentCount == 0,
+            "test setup unexpectedly presented while updates were off");
+
+    graphics.resetUpdateState(1);
+    require(presenter->presentCount == 1,
+            "resetting graphics update state did not present the current frame");
+    graphics.circle(1, {4, 4}, 0);
+    require(presenter->presentCount == 2,
+            "reset graphics update state did not restore automatic presentation");
+    graphics.update(1);
+    require(presenter->presentCount == 3,
+            "reset graphics update state did not disable frame skipping");
+}
+
+void testPresentationBatchCoalescesResetAndPageUpdate() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter);
+    graphics.setUpdateMode(1, UpdateMode::Off);
+    graphics.circle(1, {3, 3}, 0);
+    require(presenter->presentCount == 0,
+            "presentation batch test setup unexpectedly presented");
+
+    graphics.beginPresentationBatch(1);
+    graphics.resetUpdateState(1);
+    graphics.circle(1, {4, 4}, 0);
+    require(presenter->presentCount == 0,
+            "presentation batch published an intermediate frame");
+    graphics.endPresentationBatch(1);
+    require(presenter->presentCount == 1 &&
+                presenter->lastFrame.pixels[3 * 10 + 3] == 7 &&
+                presenter->lastFrame.pixels[4 * 10 + 4] == 7,
+            "presentation batch did not publish the composed screen once");
+
+    graphics.circle(1, {5, 5}, 0);
+    require(presenter->presentCount == 2,
+            "presentation batch did not restore automatic updates");
+}
+
+void testPresentationBatchPreservesConcurrentDrawingAcrossResize() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(10, 10, presenter);
+    graphics.setWindowBounds(1, {0, 0, 4, 4});
+    graphics.setWindowBounds(2, {5, 0, 4, 4});
+    graphics.setInk(1, 2);
+    graphics.setInk(2, 4);
+    const auto baseline = presenter->presentCount;
+
+    graphics.beginPresentationBatch(1);
+    graphics.pixel(1, 1, {1, 1});
+    graphics.beginPresentationBatch(2);
+    graphics.pixel(2, 1, {1, 1});
+    graphics.endPresentationBatch(2);
+    require(graphics.setDisplaySize(12, 12), "batched resize failed");
+    require(presenter->presentCount == baseline,
+            "resize or another session presented while batched");
+    graphics.endPresentationBatch(1);
+    require(presenter->presentCount == baseline + 1 &&
+                presenter->lastFrame.width == 12 &&
+                presenter->lastFrame.height == 12 &&
+                presenter->lastFrame.pixels[1 * 12 + 1] == 2 &&
+                presenter->lastFrame.pixels[1 * 12 + 6] == 4,
+            "batched resize lost a session's retained drawing");
 }
 
 void testDrawingArgumentValidation() {
@@ -610,6 +1104,26 @@ void testTextAndGraphicsFontStateAndStyles() {
             "normal PRINT did not rasterize the underline style");
 }
 
+void testDefaultFontHandleResetsSelections() {
+    FontRegistry fonts;
+    fonts.selectText(1, 4, 0);
+    fonts.selectGraphics(1, 4, 0);
+    fonts.resetText(1);
+    fonts.resetGraphics(1);
+    require(fonts.textSelection(1).handle == 0 &&
+                fonts.graphicsSelection(1).handle == 0,
+            "font handle zero did not clear the registry selection");
+
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(32, 32, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute(
+        "FONT #1,4,0\nGFONT #1,4,0\n"
+        "FONT #1,0,0\nGFONT #1,0,0\n"
+        "PRINT #1,\"default\"\nTEXT #1,0,16,\"default\"\n", output);
+}
+
 void testLoadFontIsBoundedAndChannelScoped() {
     auto storage = std::make_shared<BitmapFontStorage>(makeTestQfnt());
     auto presenter = std::make_shared<CapturingPresenter>();
@@ -784,13 +1298,16 @@ void testPrintChannelRouting() {
 
     graphics->events.clear();
     interpreter.execute("PRINT #1,INK 3,PAPER 6,\"styled\"\n", console);
-    require(graphics->events.size() >= 3 &&
-            graphics->events[0].name == "INK" && graphics->events[0].a == 3 &&
-            graphics->events[1].name == "PAPER" && graphics->events[1].a == 6 &&
-            std::any_of(graphics->events.begin(), graphics->events.end(),
-                [](const Event& event) {
-                    return event.name == "TEXT" && event.text == "styled";
-                }),
+    const auto appliedInk = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) { return event.name == "INK" && event.a == 3; });
+    const auto appliedPaper = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) { return event.name == "PAPER" && event.a == 6; });
+    const auto styledText = std::find_if(graphics->events.begin(), graphics->events.end(),
+        [](const Event& event) { return event.name == "TEXT" && event.text == "styled"; });
+    require(appliedInk != graphics->events.end() &&
+            appliedPaper != graphics->events.end() &&
+            styledText != graphics->events.end() && appliedInk < appliedPaper &&
+            appliedPaper < styledText,
             "PRINT leading INK/PAPER options were not applied before its text");
 
     auto presenter = std::make_shared<CapturingPresenter>();
@@ -807,6 +1324,38 @@ void testPrintChannelRouting() {
     };
     require(windowConsole.str().empty() && hasInk(0, 8) && hasInk(8, 16),
             "window PRINT did not draw consecutive lines to the retained canvas");
+}
+
+void testPrintStatementsBracketGraphicsOutputBatch() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    interpreter.execute("PRINT \"x\";1\nPRINT \"tail\";\n", output);
+
+    const auto count = [&](const char* name) {
+        return std::count_if(graphics->events.begin(), graphics->events.end(),
+            [&](const Event& event) { return event.name == name; });
+    };
+    require(count("PRINT_BATCH_BEGIN") == 2 && count("PRINT_BATCH_END") == 2,
+            "PRINT did not close its graphics batch for both newline and trailing separator");
+    require(count("TEXT") >= 4,
+            "PRINT test did not exercise multiple text fragments");
+
+    auto consoleGraphics = std::make_shared<RecordingGraphics>();
+    ql32::Interpreter consoleInterpreter({}, {}, {}, consoleGraphics);
+    std::ostringstream consoleOutput;
+    consoleInterpreter.execute(
+        "CHANNEL #0\nPRINT \"x\";1\nPRINT \"tail\";\n", consoleOutput);
+    const auto consoleBatchCount = [&](const char* name) {
+        return std::count_if(consoleGraphics->events.begin(), consoleGraphics->events.end(),
+            [&](const Event& event) {
+                return event.name == name && event.channel == 0;
+            });
+    };
+    require(consoleOutput.str() == "x1\ntail" &&
+            consoleBatchCount("PRINT_BATCH_BEGIN") == 2 &&
+            consoleBatchCount("PRINT_BATCH_END") == 2,
+            "console PRINT fragments were not bracketed by channel-0 batches");
 }
 
 void testChannelDefaultRoutingAndGraphicsSelectors() {
@@ -1140,6 +1689,66 @@ void testCanvasStorageReleasesAndReusesAllocations() {
     manager.setPixelDepth(last, PixelDepth::Eight);
     require(manager.canvas(last).pixel(2, 2) == 9,
             "canvas depth change lost pixels in the arena");
+
+    manager.setBounds(last, {8, 0, 6, 4});
+    manager.canvas(last).setPixel(5, 3, 211);
+    require(manager.canvas(last).pixel(5, 3) == 211,
+            "canvas resize did not refresh its cached arena storage pointer");
+}
+
+void testPackedCanvasScrollCopiesAlignedStorageAndHandlesOddRows() {
+    using namespace ql32::graphics;
+
+    IndexedCanvas packed(4, 4, PixelDepth::Four);
+    packed.setPaper(15);
+    for (std::uint32_t y = 0; y < packed.height(); ++y)
+        for (std::uint32_t x = 0; x < packed.width(); ++x)
+            packed.setPixel(static_cast<std::int32_t>(x),
+                            static_cast<std::int32_t>(y),
+                            static_cast<ColorIndex>(y + 1));
+    packed.scrollUp(1);
+    for (std::uint32_t y = 0; y < 3; ++y)
+        for (std::uint32_t x = 0; x < packed.width(); ++x)
+            require(packed.pixel(x, y) == y + 2,
+                    "aligned packed scroll did not preserve source rows");
+    for (std::uint32_t x = 0; x < packed.width(); ++x)
+        require(packed.pixel(x, 3) == 15,
+                "aligned packed scroll did not clear the exposed row with paper");
+
+    IndexedCanvas oddWidth(3, 3, PixelDepth::Four);
+    oddWidth.setPaper(14);
+    for (std::uint32_t y = 0; y < oddWidth.height(); ++y)
+        for (std::uint32_t x = 0; x < oddWidth.width(); ++x)
+            oddWidth.setPixel(static_cast<std::int32_t>(x),
+                              static_cast<std::int32_t>(y),
+                              static_cast<ColorIndex>(y * 3 + x));
+    oddWidth.scrollUp(1);
+    for (std::uint32_t y = 0; y < 2; ++y)
+        for (std::uint32_t x = 0; x < oddWidth.width(); ++x)
+            require(oddWidth.pixel(x, y) == (y + 1) * 3 + x,
+                    "odd-width packed scroll changed nibble order");
+    for (std::uint32_t x = 0; x < oddWidth.width(); ++x)
+        require(oddWidth.pixel(x, 2) == 14,
+                "odd-width packed scroll did not clear its exposed row");
+
+    IndexedCanvas byteCanvas(3, 3, PixelDepth::Eight);
+    byteCanvas.setPaper(255);
+    for (std::uint32_t y = 0; y < byteCanvas.height(); ++y)
+        for (std::uint32_t x = 0; x < byteCanvas.width(); ++x)
+            byteCanvas.setPixel(static_cast<std::int32_t>(x),
+                                static_cast<std::int32_t>(y),
+                                static_cast<ColorIndex>(20 + y));
+    byteCanvas.scrollUp(1);
+    require(byteCanvas.pixel(0, 0) == 21 && byteCanvas.pixel(2, 1) == 22 &&
+                byteCanvas.pixel(1, 2) == 255,
+            "byte-canvas scroll did not move and clear complete rows");
+
+    IndexedCanvas bitCanvas(8, 2, PixelDepth::One);
+    bitCanvas.setPaper(0);
+    for (std::int32_t x = 0; x < 8; ++x) bitCanvas.setPixel(x, 1, 1);
+    bitCanvas.scrollUp(1);
+    require(bitCanvas.pixel(7, 0) == 1 && bitCanvas.pixel(0, 1) == 0,
+            "byte-aligned one-bit scroll did not move and clear rows");
 }
 
 void testTaskViewportTranslatesAndClipsOwnedWindows() {
@@ -1193,6 +1802,70 @@ void testTaskViewportTranslatesAndClipsOwnedWindows() {
             "expanding/moving the task viewport did not reveal retained pixels or preserve other tasks");
 }
 
+void testRowCompositionMatchesFullFrameForPackedCanvasWidths() {
+    using namespace ql32::graphics;
+    constexpr std::uint32_t width = 11;
+    constexpr std::uint32_t height = 7;
+    WindowManager manager(width, height);
+    const auto background = manager.create(1, {0, 0, width, height});
+    auto& backgroundCanvas = manager.canvas(background);
+    for (std::uint32_t y = 0; y < height; ++y)
+        for (std::uint32_t x = 0; x < width; ++x)
+            backgroundCanvas.setPixel(static_cast<std::int32_t>(x),
+                static_cast<std::int32_t>(y),
+                static_cast<ColorIndex>((x + 3 * y) & 0x0Fu));
+
+    const auto foreground = manager.create(2, {3, 1, 7, 5});
+    auto& foregroundCanvas = manager.canvas(foreground);
+    foregroundCanvas.setDepth(PixelDepth::Eight);
+    for (std::uint32_t y = 0; y < foregroundCanvas.height(); ++y)
+        for (std::uint32_t x = 0; x < foregroundCanvas.width(); ++x)
+            foregroundCanvas.setPixel(static_cast<std::int32_t>(x),
+                static_cast<std::int32_t>(y),
+                static_cast<ColorIndex>(32 + x + y * 7));
+
+    const auto top = manager.create(3, {5, 2, 3, 3});
+    auto& topCanvas = manager.canvas(top);
+    topCanvas.setDepth(PixelDepth::One);
+    for (std::uint32_t y = 0; y < topCanvas.height(); ++y)
+        for (std::uint32_t x = 0; x < topCanvas.width(); ++x)
+            topCanvas.setPixel(static_cast<std::int32_t>(x),
+                static_cast<std::int32_t>(y), static_cast<ColorIndex>((x + y) & 1u));
+
+    std::vector<ColorIndex> reference(static_cast<std::size_t>(width) * height, 0);
+    for (const auto& state : manager.compositionOrder()) {
+        const auto& source = manager.canvas(state.id);
+        const auto sourceX = static_cast<std::uint32_t>(
+            static_cast<std::int64_t>(state.screenClip.x) - state.bounds.x);
+        const auto sourceY = static_cast<std::uint32_t>(
+            static_cast<std::int64_t>(state.screenClip.y) - state.bounds.y);
+        for (std::uint32_t y = 0; y < state.screenClip.height; ++y) {
+            const auto destinationOffset =
+                static_cast<std::size_t>(state.screenClip.y + static_cast<std::int32_t>(y)) *
+                    width + static_cast<std::uint32_t>(state.screenClip.x);
+            for (std::uint32_t x = 0; x < state.screenClip.width; ++x)
+                reference[destinationOffset + x] = source.pixel(sourceX + x, sourceY + y);
+        }
+    }
+    require(manager.compose() == reference,
+            "optimized full-frame composition differs from pixel-by-pixel reference");
+    std::vector<ColorIndex> row;
+    for (std::uint32_t y = 0; y < height; ++y) {
+        manager.composeRowInto(y, row);
+        require(std::equal(row.begin(), row.end(),
+                    reference.begin() + static_cast<std::size_t>(y) * width),
+                "optimized full-row composition differs from full-frame output");
+        for (const auto region : {std::pair<std::uint32_t, std::uint32_t>{1, 9},
+                                  {4, 3}, {7, 4}}) {
+            manager.composeRegionRowInto(y, region.first, region.second, row);
+            const auto expected = reference.begin() +
+                static_cast<std::size_t>(y) * width + region.first;
+            require(std::equal(row.begin(), row.end(), expected),
+                    "optimized partial-row composition differs from full-frame output");
+        }
+    }
+}
+
 void testTouchHitTestingUsesTopmostVisibleClippedWindow() {
     WindowManager manager(100, 80);
     const auto background = manager.create(11, {0, 0, 60, 60});
@@ -1218,6 +1891,19 @@ void testTouchWindowResolvesToItsBASICChannel() {
     const auto channel = graphics.channelForWindow(19, state[0].id);
     require(channel && *channel == 27,
             "touch target window did not resolve to its BASIC channel handle");
+}
+
+void testDefaultCanvasIsSizedToTaskViewport() {
+    using namespace ql32::graphics;
+    WindowedService graphics(8, 6, std::make_shared<CapturingPresenter>());
+    graphics.setTaskViewport(55, {0, 0, 4, 3});
+    const auto window = graphics.windowForSession(55);
+    const auto& canvas = graphics.windowManager().canvas(window);
+    require(canvas.width() == 4 && canvas.height() == 3,
+            "default canvas should match the task viewport, not the full screen");
+    const auto full = graphics.windowForSession(56);
+    require(graphics.windowManager().canvas(full).width() == 8,
+            "a task without a viewport should keep a full-screen canvas");
 }
 
 void testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin() {
@@ -1308,6 +1994,88 @@ void testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink() {
             "resizing one window changed another window's pixels");
 }
 
+void testArenaCanvasResizeReusesAllocationAtEveryDepth() {
+    using namespace ql32::graphics;
+    for (const auto depth : {PixelDepth::One, PixelDepth::Four, PixelDepth::Eight}) {
+        WindowManager manager(64, 64);
+        const auto id = manager.create(1, {0, 0, 32, 16}, depth);
+        const ColorIndex top = depth == PixelDepth::One ? 1 : 7;
+        auto& canvas = manager.canvas(id);
+        canvas.setPixel(0, 0, top);
+        canvas.setPixel(9, 3, top);
+        canvas.setPixel(31, 15, top);
+
+        std::size_t bothLive = 0;
+        manager.setCanvasResizeObserver(
+            [&](CanvasResizePhase phase, std::size_t, std::size_t) {
+                if (phase == CanvasResizePhase::BothBuffersLive) ++bothLive;
+            });
+        manager.setBounds(id, {0, 0, 10, 4});
+        require(bothLive == 0, "shrinking a canvas held both buffers live");
+        require(canvas.width() == 10 && canvas.height() == 4 &&
+                    canvas.pixel(0, 0) == top && canvas.pixel(9, 3) == top,
+                "in-place shrink lost cropped pixels");
+
+        // Growing back reuses spare capacity when it was kept, and must
+        // paper-fill the new area either way.
+        manager.setBounds(id, {0, 0, 20, 8});
+        require(canvas.pixel(0, 0) == top && canvas.pixel(9, 3) == top &&
+                    canvas.pixel(19, 7) == canvas.paper(),
+                "regrow lost pixels or did not paper-fill the new area");
+        manager.setCanvasResizeObserver({});
+    }
+}
+
+void testCanvasGrowthWithoutRoomFreesOldBufferFirst() {
+    using namespace ql32::graphics;
+    WindowManager manager(64, 64);
+    const auto id = manager.create(1, {0, 0, 8, 8}, PixelDepth::Four);
+    auto& canvas = manager.canvas(id);
+    canvas.setPixel(1, 1, 5);
+
+    std::size_t bothLive = 0;
+    manager.setCanvasResizeObserver(
+        [&](CanvasResizePhase phase, std::size_t, std::size_t) {
+            if (phase == CanvasResizePhase::BothBuffersLive) ++bothLive;
+        });
+    manager.setCanvasMemoryProbe([] { return std::size_t{16}; });
+    manager.setBounds(id, {0, 0, 32, 32});
+    require(bothLive == 0, "low-memory growth held old and new buffers together");
+    require(canvas.width() == 32 && canvas.height() == 32 &&
+                canvas.pixel(1, 1) == canvas.paper(),
+            "low-memory growth did not produce a cleared canvas of the new size");
+    canvas.setPixel(31, 31, 9);
+    require(canvas.pixel(31, 31) == 9, "low-memory growth left unusable pixel storage");
+
+    manager.setCanvasMemoryProbe([] { return std::size_t{1} << 20; });
+    manager.setBounds(id, {0, 0, 40, 40});
+    require(bothLive == 1 && canvas.pixel(31, 31) == 9,
+            "growth with enough memory did not preserve pixels");
+}
+
+void testWindowedServiceRefusesCanvasBeforeAllocating() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(100, 100, presenter);
+    std::size_t asked = 0;
+    graphics.setCanvasAdmission([&](std::size_t bytes) -> std::optional<std::string> {
+        asked = bytes;
+        return "not enough memory for a canvas";
+    });
+    bool refused = false;
+    try {
+        graphics.setInk(1, 3);
+        graphics.circle(1, {4, 5}, 0);
+    } catch (const ql32::runtime::ServiceError& error) {
+        refused = error.code() == ql32::runtime::ServiceErrorCode::OutOfMemory;
+    }
+    require(refused && asked == 5000, "canvas admission did not refuse a full-screen canvas");
+    require(graphics.windowManager().size() == 0,
+            "refused canvas still allocated a window");
+    graphics.setCanvasAdmission({});
+    graphics.circle(1, {4, 5}, 0);
+    require(graphics.windowManager().size() == 1, "canvas not created after admission cleared");
+}
+
 void testFailedCanvasResizePreservesAllWindows() {
     using namespace ql32::graphics;
     WindowManager manager(16, 8);
@@ -1378,6 +2146,30 @@ void testTextCellsFillCharacterGapsWithPaper() {
         require(canvas.pixel(x, 7) == 6,
                 "text cell's bottom row was not filled with paper");
     require(sawInk, "text glyph did not use the active ink color");
+}
+
+void testMirrorForwardsGraphicsAsIsToDestination() {
+    auto graphics = std::make_shared<RecordingGraphics>();
+    auto channels = std::make_shared<ql32::runtime::ChannelRegistry>(nullptr);
+    ql32::Interpreter interpreter({}, channels, {}, graphics);
+    std::ostringstream output;
+    interpreter.executeInteractive("w=OPEN(4)\n", output);
+    interpreter.executeInteractive("INK #w,5\n", output);
+    interpreter.executeInteractive("MIRROR #1 TO #w\n", output);
+    interpreter.executeInteractive("INK 3\n", output);
+    interpreter.executeInteractive("LINE 1,2,30,40\n", output);
+    interpreter.executeInteractive("RECT 0,0,5,5,1\nWINDOW 1,1,50,50\n", output);
+    interpreter.executeInteractive("MIRROR DELETE #w\nLINE 7,7,8,8\n", output);
+    const auto count = [&](const char* name, ql32::graphics::ChannelId channel) {
+        return std::count_if(graphics->events.begin(), graphics->events.end(),
+            [&](const Event& event) { return event.name == name && event.channel == channel; });
+    };
+    require(count("INK", 2) == 2 && count("INK", 1) == 1,
+            "state commands must be forwarded only after MIRROR is set up");
+    require(count("LINE", 1) == 2 && count("LINE", 2) == 1,
+            "LINE forms were not routed to the destination as-is");
+    require(count("RECT", 2) == 1 && count("WINDOW", 2) == 0,
+            "RECT must be forwarded and WINDOW must not");
 }
 
 void testCloseWindowCommandDispatch() {
@@ -1490,6 +2282,318 @@ void testScreenPrintPositionsArePerChannelAndSeparateFromText() {
     require(!hasInk(24, 0), "TEXT changed the independent PRINT position");
 }
 
+void testTextOutputBatchPresentsOnceForMultiplePrintFragments() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(80, 64, presenter);
+    graphics->beginTextOutputBatch(42, 1);
+    graphics->writeText(42, 1, "value ");
+    graphics->writeText(42, 1, "123");
+    graphics->writeText(42, 1, "\n");
+    require(presenter->presentCount == 0,
+            "PRINT fragments presented before the statement completed");
+    graphics->endTextOutputBatch(42, 1);
+    require(presenter->presentCount == 1,
+            "one PRINT statement did not produce exactly one presentation");
+
+    graphics->beginTextOutputBatch(42, 1);
+    graphics->beginTextOutputBatch(42, 1);
+    graphics->writeText(42, 1, "nested");
+    graphics->endTextOutputBatch(42, 1);
+    require(presenter->presentCount == 1,
+            "nested PRINT batch presented before its outer batch ended");
+    graphics->endTextOutputBatch(42, 1);
+    require(presenter->presentCount == 2,
+            "nested PRINT batch did not present once when fully closed");
+
+    int consoleBeginCount = 0;
+    int consoleEndCount = 0;
+    graphics->setConsoleOutputBatchCallbacks(
+        [&] { ++consoleBeginCount; }, [&] { ++consoleEndCount; });
+    graphics->beginTextOutputBatch(42, 0);
+    graphics->endTextOutputBatch(42, 0);
+    require(consoleBeginCount == 1 && consoleEndCount == 1 &&
+            presenter->presentCount == 2,
+            "channel-0 output batch did not reach the console or presented graphics");
+}
+
+void testBatchedGraphicsTextMatchesLegacyScrolling() {
+    auto batchPresenter = std::make_shared<CapturingPresenter>();
+    auto batched = std::make_shared<WindowedService>(32, 24, batchPresenter);
+    batched->setDefaultWindowBounds(1, {0, 0, 32, 24});
+
+    const std::string text = "ABCD EF\nline 2\n0123456789\nlast";
+    batched->writeText(17, 1, text);
+
+    ql32::graphics::IndexedCanvas reference(32, 24);
+    reference.setInk(7);
+    reference.setPaper(0);
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    for (const auto character : text) {
+        if (character == '\r') continue;
+        if (character == '\n') {
+            x = 0;
+            y += 8;
+        } else {
+            if (x + 6 > 30) {
+                x = 0;
+                y += 8;
+            }
+            reference.printText({x, y}, std::string(1, character));
+            x += 6;
+        }
+        if (y + 7 >= 24) {
+            reference.scrollUp(8);
+            y = std::max(0, y - 8);
+        }
+    }
+
+    for (std::uint32_t yPixel = 0; yPixel < 24; ++yPixel)
+        for (std::uint32_t xPixel = 0; xPixel < 32; ++xPixel)
+            require(batchPresenter->lastFrame.pixels[yPixel * 32 + xPixel] ==
+                        reference.pixel(xPixel, yPixel),
+                    "batched graphics text changed wrapping or scroll results");
+}
+
+void testFailedPrintFlushesItsPartialOutputBatch() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(80, 64, presenter);
+    ql32::Interpreter interpreter({}, {}, {}, graphics);
+    std::ostringstream output;
+    bool failed = false;
+    try {
+        interpreter.execute("PRINT \"partial\";1/0\n", output);
+    } catch (const std::runtime_error&) {
+        failed = true;
+    }
+    require(failed, "division by zero in PRINT expression was not reported");
+    require(presenter->presentCount == 1,
+            "failed PRINT left its partial output hidden in an open batch");
+}
+
+void testDisplayGeometryChangeResizesDefaultWindowsAndPresents() {
+    auto presenter = std::make_shared<CapturingPresenter>();
+    auto graphics = std::make_shared<WindowedService>(320, 200, presenter);
+    graphics->setDefaultWindowBounds(0, {0, 176, 320, 24});
+    graphics->setDefaultWindowBounds(1, {0, 0, 320, 176});
+    Rect consoleBounds{};
+    graphics->setConsoleBoundsCallback([&](Rect bounds) { consoleBounds = bounds; });
+    graphics->writeText(1, 0, "console");
+    graphics->writeText(1, 1, "graphics");
+
+    require(graphics->setDisplaySize(640, 480),
+            "windowed graphics refused supported display geometry change");
+    require(graphics->displaySize() == std::pair<std::uint32_t, std::uint32_t>{640, 480},
+            "windowed graphics did not expose its updated display dimensions");
+    const auto console = graphics->windowInfo(1, 0);
+    const auto screen = graphics->windowInfo(1, 1);
+    require(console.width == 640 && console.height == 24,
+            "bottom console window did not stretch with display width");
+    require(screen.width == 640 && screen.height == 456,
+            "main graphics window did not grow to the new display geometry");
+    require(consoleBounds.x == 0 && consoleBounds.y == 456 &&
+                consoleBounds.width == 640 && consoleBounds.height == 24,
+            "console overlay did not receive its updated screen bounds");
+    require(presenter->lastFrame.width == 640 && presenter->lastFrame.height == 480,
+            "display geometry change did not present a full resized frame");
+}
+
+void testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure() {
+    using namespace ql32::graphics;
+    auto graphics = std::make_shared<WindowedService>(16, 8, nullptr);
+    graphics->setDefaultWindowBounds(1, {0, 0, 16, 8});
+    graphics->pixel(77, {2, 3});
+    require(graphics->windowManager().size() == 1,
+            "initial display window was not created");
+
+    // Allow the resize bookkeeping allocations, then fail allocating the
+    // replacement canvas so the service must use its clear-and-rebuild path.
+    failAllocationAfter.store(4, std::memory_order_relaxed);
+    require(graphics->setDisplaySize(32, 16),
+            "display change did not recover from a canvas resize allocation failure");
+    failAllocationAfter.store(-1, std::memory_order_relaxed);
+    require(graphics->lastDisplayResizeDiscardedWindows() &&
+                graphics->windowManager().size() == 0 &&
+                graphics->displaySize() == std::pair<std::uint32_t, std::uint32_t>{32, 16},
+            "fallback did not discard old canvases and apply the new geometry");
+
+    graphics->pixel(77, {1, 1});
+    const auto window = graphics->windowInfo(77);
+    require(window.width == 32 && window.height == 16 &&
+                graphics->windowManager().size() == 1 &&
+                graphics->windowManager().canvas(
+                    graphics->windowManager().compositionOrder().front().id).pixel(1, 1) == 7,
+            "active session did not recreate its window at the new display size");
+}
+
+void testDisplayShrinkClipsDeferredConsoleDamage() {
+    class GeometryCheckingPresenter final : public ql32::graphics::FramePresenter {
+    public:
+        void present(const ql32::graphics::Frame&) override {}
+        bool presentRowsRegion(std::uint32_t width, std::uint32_t height,
+                               const std::array<RgbColor, 256>&, Rect region,
+                               const RowProvider&) override {
+            require(region.x >= 0 && region.y >= 0 &&
+                        static_cast<std::uint64_t>(region.x) + region.width <= width &&
+                        static_cast<std::uint64_t>(region.y) + region.height <= height,
+                    "deferred damage exceeds the resized display");
+            return true;
+        }
+    };
+    auto presenter = std::make_shared<GeometryCheckingPresenter>();
+    WindowedService graphics(10, 12, presenter);
+    graphics.setDefaultWindowBounds(0, {0, 10, 10, 2});
+    std::uint64_t now = 0;
+    graphics.setPresentCoalescing(500, 0, [&now] { return now; });
+    graphics.invalidateSystemRegion({0, 10, 10, 2});
+    now = 100;
+    graphics.invalidateSystemRegion({0, 10, 10, 2});
+    require(graphics.hasPendingPresentation(), "console damage was not deferred");
+    graphics.setConsoleBoundsCallback([&](Rect bounds) {
+        graphics.invalidateSystemRegion(bounds);
+    });
+    now = 1000;
+    require(graphics.setDisplaySize(10, 10), "display shrink failed");
+    require(graphics.displaySize() == std::pair<std::uint32_t, std::uint32_t>{10, 10} &&
+                !graphics.hasPendingPresentation(),
+            "display shrink left stale geometry or deferred damage");
+}
+
+void testSystemInfoFunctionsUseInjectedPortableProfile() {
+    ql32::runtime::SystemInfoProfile profile;
+    profile.values = {"0.1.0", "test-build", "test-board",
+                      "vga 320x200", "ps2", "ffs,sd", "vga,ps2"};
+    profile.capabilities = {{"display", true}, {"PS2", true},
+                            {"spi bus", false}};
+    auto systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+        std::move(profile));
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {},
+                                  systemInfo);
+    std::ostringstream output;
+    interpreter.executeResumable(
+        "PRINT SYSINFO$(0);\"|\";SYSINFO$(1);\"|\";SYSINFO$(2);\"|\";"
+        "SYSINFO$(3);\"|\";SYSINFO$(4);\"|\";SYSINFO$(5);\"|\";SYSINFO$(6)\n"
+        "PRINT CAPABILITY(\"ps2\");\"|\";CAPABILITY(\"  SPI   BUS \");\"|\";"
+        "CAPABILITY(\"missing\")\n", output);
+    require(output.str() ==
+                "0.1.0|test-build|test-board|vga 320x200|ps2|ffs,sd|vga,ps2\n1|0|-1\n",
+            "SYSINFO$/CAPABILITY did not expose the injected portable profile");
+}
+
+void testSystemInfoRejectsInvalidSelector() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        interpreter.executeResumable("PRINT SYSINFO$(7)\n", output);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("system information selector") !=
+                   std::string::npos;
+    }
+    require(rejected, "SYSINFO$ accepted an out-of-range selector");
+}
+
+class SupervisorTaskControl final : public ql32::runtime::TaskControlService {
+public:
+    explicit SupervisorTaskControl(bool isSupervisor = true)
+        : isSupervisor_(isSupervisor) {}
+    ql32::runtime::TaskId startTask(std::string, std::ostream&,
+                                    ql32::runtime::TaskId, std::uint32_t,
+                                    std::string) override {
+        return 0;
+    }
+    bool killTask(ql32::runtime::TaskId) override { return false; }
+    bool logon(ql32::runtime::TaskId) override { return false; }
+    ql32::runtime::TaskId logoff() override { return 0; }
+    ql32::runtime::TaskId focusedTask() const override { return 9; }
+    bool suspendTask(ql32::runtime::TaskId) override { return false; }
+    bool resumeTask(ql32::runtime::TaskId) override { return false; }
+    std::size_t instructionBudget() const override { return 128; }
+    bool setInstructionBudget(std::size_t) override { return false; }
+    bool setTaskPriority(ql32::runtime::TaskId, std::uint32_t) override {
+        return false;
+    }
+    std::vector<ql32::runtime::ManagedTaskInfo> listTasks() const override {
+        ql32::runtime::ManagedTaskInfo supervisor;
+        supervisor.id = 9;
+        supervisor.supervisor = isSupervisor_;
+        return {supervisor};
+    }
+    std::vector<ql32::runtime::ChannelInfo> listChannels(
+        ql32::runtime::TaskId) const override { return {}; }
+private:
+    bool isSupervisor_;
+};
+
+void testSupervisorTileCommandUsesGraphicsWindowManager() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(32, 24, nullptr);
+    auto tasks = std::make_shared<SupervisorTaskControl>();
+    ql32::Interpreter interpreter({}, {}, {}, graphics, {}, {}, tasks, 9);
+    graphics->pixel(interpreter.graphicsSessionId(), {2, 3});
+    std::ostringstream output;
+    interpreter.executeResumable("TILE\n", output);
+    const auto window = graphics->windowInfo(interpreter.graphicsSessionId());
+    require(window.originX == 0 && window.originY == 0 &&
+                window.width == 32 && window.height == 24,
+            "supervisor TILE did not arrange the retained graphics window");
+}
+
+void testTileCommandIsSupervisorOnly() {
+    auto graphics = std::make_shared<ql32::graphics::WindowedService>(32, 24, nullptr);
+    auto tasks = std::make_shared<SupervisorTaskControl>(false);
+    ql32::Interpreter interpreter({}, {}, {}, graphics, {}, {}, tasks, 9);
+    std::ostringstream output;
+    bool rejected = false;
+    try {
+        interpreter.executeResumable("TILE\n", output);
+    } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("TILE is supervisor-only") !=
+                   std::string::npos;
+    }
+    require(rejected, "TILE was available to a non-supervisor session");
+}
+
+void testMenuEnableCommandChangesNextPresentation() {
+    auto ui = std::make_shared<ql32::ui::QueuedService>();
+    ql32::Interpreter interpreter({}, {}, ui);
+    std::ostringstream output;
+    const auto status = interpreter.executeResumable(
+        "menu% = MINIT(\"Actions\")\n"
+        "MCARD menu%, 41, \"Save\", \"S\"\n"
+        "MENABLE menu%, 41, 0\n"
+        "selected% = MENU(menu%)\n", output);
+    require(status == ql32::ExecutionStatus::Suspended,
+            "MENU did not suspend after applying its enabled-state update");
+    const auto request = ui->takeNextRequest();
+    require(request && request->kind == ql32::ui::RequestKind::Menu &&
+                request->items.size() == 1 && request->items[0].commandId == 41 &&
+                !request->items[0].enabled,
+            "MENABLE did not disable the selected command in the next menu request");
+    require(!ui->selectMenu(request->id, 41),
+            "disabled menu item was still accepted as a selection");
+}
+
+void testMenuEnableRejectsInvalidValuesAndUnknownItems() {
+    const std::array<std::pair<const char*, const char*>, 2> cases{{
+        {"MENABLE menu%, 41, 2\n", "menu enabled flag must be 0 or 1"},
+        {"MENABLE menu%, 42, 1\n", "unknown menu command ID"}
+    }};
+    for (const auto& test : cases) {
+        ql32::Interpreter interpreter({}, {}, std::make_shared<ql32::ui::QueuedService>());
+        std::ostringstream output;
+        bool rejected = false;
+        try {
+            interpreter.executeResumable(
+                "menu% = MINIT(\"Actions\")\n"
+                "MCARD menu%, 41, \"Save\", \"S\"\n" +
+                    std::string(test.first), output);
+        } catch (const std::runtime_error& error) {
+            rejected = std::string(error.what()).find(test.second) != std::string::npos;
+        }
+        require(rejected, "MENABLE accepted invalid state or a missing command ID");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1497,15 +2601,29 @@ int main() {
     testFractionalDrawingGeometryFloorsToPixels();
     testFontSelectionChangesNativeTextCellSize();
     testTextAndGraphicsFontStateAndStyles();
+    testDefaultFontHandleResetsSelections();
     testLoadFontIsBoundedAndChannelScoped();
     testGraphicsUpdateCommandDispatch();
+    testGupdateOffSuppressesVmDrawingUntilExplicitUpdate();
+    testProgrammableGlobalPalette();
+    testProgramControlledPaletteTransforms();
+    testIndexedBitmapLoadBlitAndRelease();
+    testSuperBasicLineCursorForms();
+    testGraphicsUpdateSkipCommandDispatch();
+    testUiInteractionResetsGraphicsUpdateStateAndKeepsIt();
     testWindowedGraphicsUpdateBatching();
+    testWindowedGraphicsSkipsAutomaticPresentations();
+    testWindowedGraphicsCoalescesPresentationsByTimeAndCost();
+    testWindowedGraphicsResetUpdateStatePresentsAndDisablesSkip();
+    testPresentationBatchCoalescesResetAndPageUpdate();
+    testPresentationBatchPreservesConcurrentDrawingAcrossResize();
     testDrawingArgumentValidation();
     testClsChannelAndColorSyntax();
     testClsColorArgumentsClearWithNewPaper();
     testPixelAndFilledShapesRenderOnRetainedCanvas();
     testDisplayCommands();
     testPrintChannelRouting();
+    testPrintStatementsBracketGraphicsOutputBatch();
     testChannelDefaultRoutingAndGraphicsSelectors();
     testListChannelRouting();
     testWindowPositionCommand();
@@ -1518,17 +2636,36 @@ int main() {
     testRepeatedWindowSessionBurstsReleaseAndRecreate();
     testDebugOverlayComposesAboveGraphics();
     testCanvasStorageReleasesAndReusesAllocations();
+    testPackedCanvasScrollCopiesAlignedStorageAndHandlesOddRows();
+    testRowCompositionMatchesFullFrameForPackedCanvasWidths();
     testTaskViewportTranslatesAndClipsOwnedWindows();
     testTouchHitTestingUsesTopmostVisibleClippedWindow();
     testTouchWindowResolvesToItsBASICChannel();
+    testDefaultCanvasIsSizedToTaskViewport();
     testWindowedServiceTaskViewportRedrawAndAbsoluteOrigin();
     testCanvasResizePreservesPixelsAcrossOddWidthGrowAndShrink();
+    testArenaCanvasResizeReusesAllocationAtEveryDepth();
+    testCanvasGrowthWithoutRoomFreesOldBufferFirst();
+    testWindowedServiceRefusesCanvasBeforeAllocating();
     testFailedCanvasResizePreservesAllWindows();
     testEveryPrintableAsciiCharacterHasAGlyph();
     testTextCellsFillCharacterGapsWithPaper();
     testCloseWindowCommandDispatch();
+    testMirrorForwardsGraphicsAsIsToDestination();
     testAtPositionsDefaultAndOpenedScreenChannels();
     testAtWorksOnNumberedBasicLineWithVariableCoordinates();
     testAtRejectsZeroRowOrColumn();
     testScreenPrintPositionsArePerChannelAndSeparateFromText();
+    testTextOutputBatchPresentsOnceForMultiplePrintFragments();
+    testBatchedGraphicsTextMatchesLegacyScrolling();
+    testFailedPrintFlushesItsPartialOutputBatch();
+    testDisplayGeometryChangeResizesDefaultWindowsAndPresents();
+    testDisplayGeometryChangeRebuildsCanvasesAfterResizeFailure();
+    testDisplayShrinkClipsDeferredConsoleDamage();
+    testSystemInfoFunctionsUseInjectedPortableProfile();
+    testSystemInfoRejectsInvalidSelector();
+    testSupervisorTileCommandUsesGraphicsWindowManager();
+    testTileCommandIsSupervisorOnly();
+    testMenuEnableCommandChangesNextPresentation();
+    testMenuEnableRejectsInvalidValuesAndUnknownItems();
 }

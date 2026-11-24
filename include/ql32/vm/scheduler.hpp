@@ -2,6 +2,8 @@
 
 #include "ql32/interpreter.hpp"
 #include "ql32/runtime/error.hpp"
+#include "ql32/runtime/display_mode.hpp"
+#include "ql32/runtime/music.hpp"
 #include "ql32/vm/smooth_weighted_round_robin.hpp"
 
 #include <cstddef>
@@ -43,6 +45,7 @@ struct TaskInfo {
     bool paused = false;
     std::size_t openChannels = 0;
     graphics::TaskViewport viewport{};
+    std::string name;
 };
 
 struct Services {
@@ -54,6 +57,9 @@ struct Services {
     std::shared_ptr<runtime::MemoryService> memory;
     std::shared_ptr<runtime::SystemControlService> systemControl;
     std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency;
+    std::shared_ptr<runtime::DisplayModeService> displayModes;
+    std::shared_ptr<runtime::SystemInfoService> systemInfo;
+    std::shared_ptr<runtime::MusicService> music;
 };
 
 // Cooperative, single-threaded weighted scheduler. Each task owns one
@@ -71,18 +77,26 @@ public:
     SessionScheduler(const SessionScheduler&) = delete;
     SessionScheduler& operator=(const SessionScheduler&) = delete;
 
-    TaskId launch(std::string source, std::ostream& output);
-    TaskId launchWorker(std::string source, std::ostream& output);
-    TaskId launchAndWait(std::string source, std::ostream& output, TaskId parent);
+    // An optional name is the source path; tasks list its short display form.
+    TaskId launch(std::string source, std::ostream& output, std::string name = {});
+    TaskId launchWorker(std::string source, std::ostream& output,
+                        std::string name = {});
+    TaskId launchAndWait(std::string source, std::ostream& output, TaskId parent,
+                         std::string name = {});
     // Creates a persistent interactive session. An optional initial program
     // runs as source before the session begins accepting REPL input.
     TaskId launchInteractive(std::ostream& output, std::string initialProgram = {});
     bool submit(TaskId id, std::string source);
     std::optional<InteractiveLineEdit> takePendingLineEdit(TaskId id) noexcept;
+    std::optional<InteractiveLineEdit> navigateProgramEdit(TaskId id,
+                                                            int currentLine,
+                                                            int direction);
     bool logon(TaskId id);
     TaskId logoff();
     TaskId focusedTask() const noexcept;
     runtime::SessionId keyInputSession() const noexcept;
+    bool focusNextTask();
+    std::size_t focusedTaskNumber() const noexcept;
     bool suspendTask(TaskId id) noexcept;
     bool resumeTask(TaskId id) noexcept;
     std::optional<bool> toggleTaskPaused(TaskId id) noexcept;
@@ -113,6 +127,7 @@ public:
     bool setTaskViewport(TaskId id, graphics::TaskViewport viewport);
     runtime::WindowMode windowMode() const noexcept { return windowMode_; }
     bool setWindowMode(runtime::WindowMode mode);
+    bool displayGeometryChanged();
     std::string takeError(TaskId id);
     bool tick();
     bool cancel(TaskId id);

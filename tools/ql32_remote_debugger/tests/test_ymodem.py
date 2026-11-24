@@ -134,6 +134,17 @@ class YModemTests(unittest.TestCase):
             self.assertEqual(device.commands, ['RECV "FFS:/program.bas"'])
             self.assertEqual(device.data_packets, 2)
 
+    def test_upload_reports_waiting_for_device_destination_setup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "program.bas"
+            source.write_bytes(b"PRINT 42\n")
+            device = SimulatedDevice()
+            statuses = []
+            ymodem.send_file(device, source, "FFS:/program.bas",
+                             wait_for_prompt=False, status=statuses.append)
+            self.assertIn("Waiting for QL/32 to prepare the destination", statuses)
+            self.assertIn("Sending file data", statuses)
+
     def test_upload_reports_receiver_error_after_cancel(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "program.bas"
@@ -185,6 +196,7 @@ class YModemTests(unittest.TestCase):
             with self.assertRaises(ymodem.TransferCancelled):
                 ymodem.send_file(device, source, "FFS:/program.bas",
                                  wait_for_prompt=False, cancelled=lambda: True)
+            self.assertEqual(device.commands, ['RECV "FFS:/program.bas"'])
             self.assertTrue(device.cancelled_by_host)
 
 

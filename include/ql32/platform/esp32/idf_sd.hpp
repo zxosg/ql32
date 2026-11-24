@@ -51,6 +51,8 @@ public:
     std::string readText(const std::string& path) override;
     std::unique_ptr<runtime::StorageReadHandle> openRead(
         const std::string& path) override;
+    std::unique_ptr<runtime::StorageWriteHandle> openWrite(
+        const std::string& path) override;
     void writeText(const std::string& path, const std::string& contents) override;
     void writeTextStream(const std::string& path,
                          const runtime::TextStreamSource& source) override;
@@ -60,8 +62,10 @@ public:
     std::uintmax_t size(const std::string& path) override;
     void rename(const std::string& path, const std::string& newPath) override;
     void remove(const std::string& path) override;
+    void createDirectory(const std::string& path) override;
     void removeDirectory(const std::string& path) override;
     void format(const std::string& path) override;
+    runtime::StorageSpace space(const std::string& path) override;
 
 private:
     const IdfSdCard& card_;
@@ -85,6 +89,8 @@ public:
                     std::string_view bytes) override;
     void seek(runtime::SessionId session, runtime::ChannelId channel,
               std::uint64_t offset) override;
+    std::uint64_t position(runtime::SessionId session, runtime::ChannelId channel) override;
+    std::uint64_t length(runtime::SessionId session, runtime::ChannelId channel) override;
     bool atEnd(runtime::SessionId session, runtime::ChannelId channel) override;
     void write(runtime::SessionId session, runtime::ChannelId channel,
                const std::string& text) override;

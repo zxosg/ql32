@@ -201,6 +201,54 @@ void CanvasArena::replace(std::uint64_t handle, std::vector<std::uint8_t>&& byte
     std::vector<std::uint8_t>().swap(bytes);
 }
 
+std::size_t CanvasArena::capacity(std::uint64_t handle) const noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    return found == blocks_.end() ? 0 : found->bytes.capacity();
+}
+
+bool CanvasArena::resizeInPlace(std::uint64_t handle, std::size_t bytes) noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    if (found == blocks_.end() || bytes == 0 || bytes > found->bytes.capacity())
+        return false;
+    found->bytes.resize(bytes, 0);
+    return true;
+}
+
+void CanvasArena::trim(std::uint64_t handle) noexcept {
+    const auto found = std::find_if(blocks_.begin(), blocks_.end(),
+        [handle](const Block& block) { return block.handle == handle; });
+    if (found == blocks_.end()) return;
+    auto& bytes = found->bytes;
+    const auto spare = bytes.capacity() - bytes.size();
+    if (spare < 64 || spare < bytes.capacity() / 4) return;
+    // shrink_to_fit briefly holds the smaller copy beside the old block.
+    if (memoryProbe_ && memoryProbe_() < bytes.size()) return;
+    try {
+        bytes.shrink_to_fit();
+    } catch (...) {
+        // Keeping the larger block is always valid.
+    }
+}
+
+void CanvasArena::reallocateDiscard(std::uint64_t handle, std::size_t bytes) {
+    auto& target = find(handle);
+    if (bytes == 0) throw std::runtime_error("canvas dimensions must be positive");
+    const auto previous = target.bytes.size();
+    std::vector<std::uint8_t>().swap(target.bytes);
+    try {
+        target.bytes.assign(bytes, 0);
+    } catch (...) {
+        try { target.bytes.assign(previous, 0); } catch (...) {}
+        throw;
+    }
+}
+
+bool CanvasArena::lowMemoryFor(std::size_t bytes) const {
+    return memoryProbe_ && memoryProbe_() < bytes;
+}
+
 void CanvasArena::reportResize(CanvasResizePhase phase, std::size_t oldBytes,
                                std::size_t newBytes) const noexcept {
     if (!resizeObserver_) return;
@@ -229,15 +277,20 @@ std::size_t CanvasArena::size(std::uint64_t handle) const noexcept {
     return found == blocks_.end() ? 0 : found->bytes.size();
 }
 
-IndexedCanvas::IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth)
-    : IndexedCanvas(width, height, depth, nullptr) {}
+IndexedCanvas::IndexedCanvas(std::uint32_t width, std::uint32_t height,
+                             PixelDepth depth, const CanvasRasterOps* rasterOps)
+    : IndexedCanvas(width, height, depth, nullptr, rasterOps) {}
 
 IndexedCanvas::IndexedCanvas(std::uint32_t width, std::uint32_t height, PixelDepth depth,
-                             CanvasArena* arena)
+                             CanvasArena* arena, const CanvasRasterOps* rasterOps)
     : width_(width), height_(height), depth_(depth),
-      ink_(std::min<ColorIndex>(7, colorMask(depth))), arena_(arena) {
+      ink_(std::min<ColorIndex>(7, colorMask(depth))), arena_(arena),
+      rasterOps_(rasterOps) {
     const auto bytes = checkedCanvasBytes(width, height, depth);
-    if (arena_) arenaHandle_ = arena_->allocate(bytes);
+    if (arena_) {
+        arenaHandle_ = arena_->allocate(bytes);
+        arenaPixels_ = arena_->data(arenaHandle_);
+    }
     else pixels_.assign(bytes, 0);
 }
 
@@ -249,9 +302,12 @@ IndexedCanvas::IndexedCanvas(IndexedCanvas&& other) noexcept
     : width_(other.width_), height_(other.height_), depth_(other.depth_),
       ink_(other.ink_), paper_(other.paper_), overMode_(other.overMode_),
       arena_(other.arena_),
-      arenaHandle_(other.arenaHandle_), pixels_(std::move(other.pixels_)) {
+      rasterOps_(other.rasterOps_),
+      arenaHandle_(other.arenaHandle_), arenaPixels_(other.arenaPixels_),
+      pixels_(std::move(other.pixels_)) {
     other.arena_ = nullptr;
     other.arenaHandle_ = 0;
+    other.arenaPixels_ = nullptr;
 }
 
 IndexedCanvas& IndexedCanvas::operator=(IndexedCanvas&& other) noexcept {
@@ -264,23 +320,33 @@ IndexedCanvas& IndexedCanvas::operator=(IndexedCanvas&& other) noexcept {
     paper_ = other.paper_;
     overMode_ = other.overMode_;
     arena_ = other.arena_;
+    rasterOps_ = other.rasterOps_;
     arenaHandle_ = other.arenaHandle_;
+    arenaPixels_ = other.arenaPixels_;
     pixels_ = std::move(other.pixels_);
     other.arena_ = nullptr;
     other.arenaHandle_ = 0;
+    other.arenaPixels_ = nullptr;
     return *this;
 }
 
 std::uint8_t* IndexedCanvas::pixelData() noexcept {
-    return arena_ ? arena_->data(arenaHandle_) : pixels_.data();
+    return arena_ ? arenaPixels_ : pixels_.data();
 }
 
 const std::uint8_t* IndexedCanvas::pixelData() const noexcept {
-    return arena_ ? arena_->data(arenaHandle_) : pixels_.data();
+    return arena_ ? arenaPixels_ : pixels_.data();
 }
 
 std::size_t IndexedCanvas::storageBytes() const noexcept {
     return arena_ ? arena_->size(arenaHandle_) : pixels_.size();
+}
+
+CanvasBufferView IndexedCanvas::bufferView() noexcept {
+    const auto stride = depth_ == PixelDepth::Eight ? width_ :
+        depth_ == PixelDepth::Four ? ((width_ & 1u) ? 0u : width_ / 2u) :
+        ((width_ & 7u) ? 0u : width_ / 8u);
+    return {pixelData(), width_, height_, stride, depth_, ink_, paper_, overMode_};
 }
 
 std::uint16_t IndexedCanvas::paletteSize() const noexcept {
@@ -327,6 +393,60 @@ void IndexedCanvas::writePixel(std::size_t index, ColorIndex color) noexcept {
     }
 }
 
+void IndexedCanvas::copyPixelsTo(std::uint32_t y, std::uint32_t x,
+                                 std::uint32_t width,
+                                 ColorIndex* destination) const noexcept {
+    const auto sourceIndex = static_cast<std::size_t>(y) * width_ + x;
+    const auto* source = pixelData();
+    switch (depth_) {
+    case PixelDepth::Eight:
+        std::memcpy(destination, source + sourceIndex, width);
+        return;
+    case PixelDepth::Four: {
+        auto index = sourceIndex;
+        auto remaining = width;
+        if ((index & 1u) != 0 && remaining != 0) {
+            destination[0] = static_cast<ColorIndex>(source[index >> 1u] & 0x0Fu);
+            ++destination;
+            ++index;
+            --remaining;
+        }
+        while (remaining >= 2) {
+            const auto packed = source[index >> 1u];
+            destination[0] = static_cast<ColorIndex>(packed >> 4u);
+            destination[1] = static_cast<ColorIndex>(packed & 0x0Fu);
+            destination += 2;
+            index += 2;
+            remaining -= 2;
+        }
+        if (remaining != 0)
+            destination[0] = static_cast<ColorIndex>(source[index >> 1u] >> 4u);
+        return;
+    }
+    case PixelDepth::One: {
+        auto index = sourceIndex;
+        auto remaining = width;
+        while (remaining != 0 && (index & 7u) != 0) {
+            *destination++ = readPixel(index++);
+            --remaining;
+        }
+        while (remaining >= 8) {
+            const auto bits = source[index >> 3u];
+            for (unsigned bit = 0; bit < 8; ++bit)
+                destination[bit] = static_cast<ColorIndex>((bits >> (7u - bit)) & 1u);
+            destination += 8;
+            index += 8;
+            remaining -= 8;
+        }
+        while (remaining != 0) {
+            *destination++ = readPixel(index++);
+            --remaining;
+        }
+        return;
+    }
+    }
+}
+
 void IndexedCanvas::setDepth(PixelDepth depth) {
     if (depth == depth_) return;
     (void)colorCount(depth);
@@ -352,6 +472,7 @@ void IndexedCanvas::setDepth(PixelDepth depth) {
     }
     if (arena_) {
         arena_->replace(arenaHandle_, std::move(converted));
+        arenaPixels_ = arena_->data(arenaHandle_);
     } else {
         pixels_.swap(converted);
     }
@@ -371,6 +492,7 @@ void IndexedCanvas::setPaper(ColorIndex color) {
 }
 
 void IndexedCanvas::clear() {
+    if (rasterOps_ && rasterOps_->clear(bufferView())) return;
     if (depth_ == PixelDepth::Eight) {
         std::fill(pixelData(), pixelData() + storageBytes(), paper_);
     } else if (depth_ == PixelDepth::Four) {
@@ -381,13 +503,80 @@ void IndexedCanvas::clear() {
     }
 }
 
+void IndexedCanvas::plotSpan(std::size_t firstPixel, std::size_t pixelCount) {
+    if (pixelCount == 0) return;
+    if (overMode_ == OverMode::Invert) {
+        for (std::size_t offset = 0; offset < pixelCount; ++offset) {
+            const auto index = firstPixel + offset;
+            writePixel(index, static_cast<ColorIndex>(
+                (readPixel(index) ^ ink_) & colorMask(depth_)));
+        }
+        return;
+    }
+
+    const auto color = overMode_ == OverMode::Clear ? paper_ : ink_;
+    auto* pixels = pixelData();
+    if (depth_ == PixelDepth::Eight) {
+        std::memset(pixels + firstPixel, color, pixelCount);
+        return;
+    }
+    if (depth_ == PixelDepth::Four) {
+        auto index = firstPixel;
+        auto remaining = pixelCount;
+        if ((index & 1u) != 0) {
+            writePixel(index++, color);
+            --remaining;
+        }
+        const auto byteCount = remaining / 2;
+        if (byteCount != 0) {
+            const auto packed = static_cast<std::uint8_t>((color << 4u) | color);
+            std::memset(pixels + index / 2, packed, byteCount);
+            index += byteCount * 2;
+            remaining -= byteCount * 2;
+        }
+        if (remaining != 0) writePixel(index, color);
+        return;
+    }
+
+    for (std::size_t offset = 0; offset < pixelCount; ++offset)
+        writePixel(firstPixel + offset, color);
+}
+
 void IndexedCanvas::scrollUp(std::uint32_t pixelRows) {
     if (pixelRows == 0) return;
+    if (rasterOps_ && rasterOps_->scrollUp(bufferView(), pixelRows)) return;
     if (pixelRows >= height_) {
         clear();
         return;
     }
     const auto remaining = height_ - pixelRows;
+    const auto totalPixels = static_cast<std::size_t>(width_) * height_;
+    const auto skippedPixels = static_cast<std::size_t>(width_) * pixelRows;
+    if (depth_ == PixelDepth::Eight) {
+        auto* pixels = pixelData();
+        std::memmove(pixels, pixels + skippedPixels, totalPixels - skippedPixels);
+        std::memset(pixels + totalPixels - skippedPixels, paper_, skippedPixels);
+        return;
+    }
+    if (depth_ == PixelDepth::Four &&
+        (totalPixels & 1u) == 0 && (skippedPixels & 1u) == 0) {
+        auto* pixels = pixelData();
+        const auto remainingBytes = (totalPixels - skippedPixels) / 2;
+        const auto skippedBytes = skippedPixels / 2;
+        std::memmove(pixels, pixels + skippedBytes, remainingBytes);
+        const auto packedPaper = static_cast<std::uint8_t>((paper_ << 4u) | paper_);
+        std::memset(pixels + remainingBytes, packedPaper, skippedBytes);
+        return;
+    }
+    if (depth_ == PixelDepth::One &&
+        (totalPixels & 7u) == 0 && (skippedPixels & 7u) == 0) {
+        auto* pixels = pixelData();
+        const auto remainingBytes = (totalPixels - skippedPixels) / 8;
+        const auto skippedBytes = skippedPixels / 8;
+        std::memmove(pixels, pixels + skippedBytes, remainingBytes);
+        std::memset(pixels + remainingBytes, paper_ ? 0xFF : 0x00, skippedBytes);
+        return;
+    }
     for (std::uint32_t y = 0; y < remaining; ++y)
         for (std::uint32_t x = 0; x < width_; ++x) {
             const auto source = static_cast<std::size_t>(y + pixelRows) * width_ + x;
@@ -403,12 +592,14 @@ void IndexedCanvas::setPixel(std::int32_t x, std::int32_t y, ColorIndex color) {
     if (color >= paletteSize()) throw std::out_of_range("pixel index exceeds window palette");
     if (x < 0 || y < 0 || static_cast<std::uint32_t>(x) >= width_ ||
         static_cast<std::uint32_t>(y) >= height_) return;
+    if (rasterOps_ && rasterOps_->setPixel(bufferView(), x, y, color)) return;
     writePixel(static_cast<std::size_t>(y) * width_ + static_cast<std::uint32_t>(x), color);
 }
 
 void IndexedCanvas::plotPixel(std::int32_t x, std::int32_t y) {
     if (x < 0 || y < 0 || static_cast<std::uint32_t>(x) >= width_ ||
         static_cast<std::uint32_t>(y) >= height_) return;
+    if (rasterOps_ && rasterOps_->plotPixel(bufferView(), x, y)) return;
     const auto index = static_cast<std::size_t>(y) * width_ +
                        static_cast<std::uint32_t>(x);
     switch (overMode_) {
@@ -431,6 +622,7 @@ ColorIndex IndexedCanvas::pixel(std::uint32_t x, std::uint32_t y) const {
 }
 
 void IndexedCanvas::line(Point from, Point to) {
+    if (rasterOps_ && rasterOps_->line(bufferView(), from, to)) return;
     long double x0 = from.x;
     long double y0 = from.y;
     const long double clipDx = static_cast<long double>(to.x) - x0;
@@ -481,13 +673,17 @@ void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t he
         bottom > std::numeric_limits<std::int32_t>::max())
         throw std::out_of_range("rectangle exceeds supported coordinates");
     if (filled) {
+        if (rasterOps_ && rasterOps_->fillRectangle(bufferView(), topLeft,
+                                                     width, height)) return;
         const auto left = std::max<std::int64_t>(0, topLeft.x);
         const auto clippedRight = std::min<std::int64_t>(width_ - 1, right);
         const auto top = std::max<std::int64_t>(0, topLeft.y);
         const auto clippedBottom = std::min<std::int64_t>(height_ - 1, bottom);
-        for (auto y = top; y <= clippedBottom; ++y)
-            for (auto x = left; x <= clippedRight; ++x)
-                plotPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y));
+        for (auto y = top; y <= clippedBottom; ++y) {
+            const auto firstPixel = static_cast<std::size_t>(y) * width_ +
+                                    static_cast<std::size_t>(left);
+            plotSpan(firstPixel, static_cast<std::size_t>(clippedRight - left + 1));
+        }
         return;
     }
     line(topLeft, {static_cast<std::int32_t>(right), topLeft.y});
@@ -500,6 +696,7 @@ void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t he
 
 void IndexedCanvas::circle(Point center, std::int32_t radius, bool filled) {
     if (radius < 0) throw std::invalid_argument("circle radius must be nonnegative");
+    if (rasterOps_ && rasterOps_->circle(bufferView(), center, radius, filled)) return;
     if (filled) {
         const auto top = std::max<std::int64_t>(0,
             static_cast<std::int64_t>(center.y) - radius);
@@ -518,8 +715,11 @@ void IndexedCanvas::circle(Point center, std::int32_t radius, bool filled) {
                 static_cast<std::int64_t>(center.x) - span);
             const auto right = std::min<std::int64_t>(width_ - 1,
                 static_cast<std::int64_t>(center.x) + span);
-            for (auto x = left; x <= right; ++x)
-                plotPixel(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y));
+            if (left <= right) {
+                const auto firstPixel = static_cast<std::size_t>(y) * width_ +
+                                        static_cast<std::size_t>(left);
+                plotSpan(firstPixel, static_cast<std::size_t>(right - left + 1));
+            }
         }
         return;
     }
@@ -618,6 +818,46 @@ Rect IndexedCanvas::renderText(Point topLeft, const std::string& value,
         const auto advance = font ? bitmapGlyph.advance : 6;
         const auto underlineY = font ? std::min<std::int64_t>(cellHeight - 1,
             font->metrics().ascent + 1) : 6;
+        // The default PRINT font uses 6x8 cells and most QL/32 windows use
+        // packed 4-bit pixels. Write three complete packed bytes per glyph
+        // row instead of testing and read/modify/writing all 48 cell pixels.
+        if (!font && fillBackground && !useOverMode && depth_ == PixelDepth::Four &&
+            (width_ & 1u) == 0 && x >= 0 && (x & 1) == 0 && y >= 0 &&
+            x + 6 <= width_ && y + 8 <= height_) {
+            auto* pixels = pixelData();
+            const auto packedRow = static_cast<std::size_t>(y) * width_ +
+                                   static_cast<std::size_t>(x);
+            for (std::int64_t row = 0; row < 8; ++row) {
+                const auto rowIndex = packedRow + static_cast<std::size_t>(row) * width_;
+                for (std::int64_t pair = 0; pair < 3; ++pair) {
+                    const auto firstColumn = pair * 2;
+                    const auto colorAt = [&](std::int64_t column) {
+                        return column < 5 && row < 7 &&
+                            (pattern[static_cast<std::size_t>(column)] &
+                             (1u << static_cast<unsigned>(row))) != 0 ? ink_ : paper_;
+                    };
+                    pixels[(rowIndex + static_cast<std::size_t>(firstColumn)) / 2] =
+                        static_cast<std::uint8_t>((colorAt(firstColumn) << 4u) |
+                                                  colorAt(firstColumn + 1));
+                }
+            }
+            const auto left = static_cast<std::int64_t>(x);
+            const auto top = static_cast<std::int64_t>(y);
+            if (!hasDirty) {
+                dirtyLeft = left;
+                dirtyTop = top;
+                dirtyRight = left + 6;
+                dirtyBottom = top + 8;
+                hasDirty = true;
+            } else {
+                dirtyLeft = std::min(dirtyLeft, left);
+                dirtyTop = std::min(dirtyTop, top);
+                dirtyRight = std::max(dirtyRight, left + 6);
+                dirtyBottom = std::max(dirtyBottom, top + 8);
+            }
+            x += advance;
+            continue;
+        }
         const auto left = std::min<std::int64_t>(fillBackground ? 0 : glyphLeft,
                                                  glyphLeft);
         const auto top = std::min<std::int64_t>(fillBackground ? 0 : glyphTop,
@@ -685,16 +925,25 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
 
     const auto newBytes = checkedCanvasBytes(width, height, depth_);
     const auto oldBytes = storageBytes();
-    if (!arena_ && newBytes <= pixels_.capacity()) {
+    const bool inPlace = arena_ ? newBytes <= arena_->capacity(arenaHandle_)
+                                : newBytes <= pixels_.capacity();
+    if (inPlace) {
         const auto oldWidth = width_;
         const auto oldHeight = height_;
         const auto copyWidth = std::min(oldWidth, width);
         const auto copyHeight = std::min(oldHeight, height);
-        if (newBytes > pixels_.size()) pixels_.resize(newBytes, 0);
+        if (arena_) {
+            if (newBytes > oldBytes) {
+                arena_->resizeInPlace(arenaHandle_, newBytes);
+                arenaPixels_ = arena_->data(arenaHandle_);
+            }
+        } else if (newBytes > pixels_.size()) {
+            pixels_.resize(newBytes, 0);
+        }
 
         // Move overlapping rows in the safe direction when the row stride
-        // changes. This lets orientation swaps reuse the existing canvas
-        // allocation instead of requiring a second full-size buffer.
+        // changes. This reuses the existing allocation instead of requiring a
+        // second full-size buffer.
         if (width > oldWidth) {
             for (std::uint32_t row = copyHeight; row > 0; --row)
                 for (std::uint32_t column = copyWidth; column > 0; --column) {
@@ -717,7 +966,28 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
             for (std::uint32_t column = 0; column < width; ++column)
                 if (row >= copyHeight || column >= copyWidth)
                     writePixel(static_cast<std::size_t>(row) * width + column, paper_);
-        if (newBytes < pixels_.size()) pixels_.resize(newBytes);
+        if (arena_) {
+            if (newBytes < oldBytes) {
+                arena_->resizeInPlace(arenaHandle_, newBytes);
+                arena_->trim(arenaHandle_);
+                arenaPixels_ = arena_->data(arenaHandle_);
+            }
+        } else if (newBytes < pixels_.size()) {
+            pixels_.resize(newBytes);
+        }
+        return;
+    }
+
+    // Growth when the largest free block cannot hold a second copy: free the
+    // old pixels first and start from a cleared (paper) canvas. QL/32-specific.
+    if (arena_ && arena_->lowMemoryFor(newBytes)) {
+        arena_->reportResize(CanvasResizePhase::BeforeAllocation, oldBytes, newBytes);
+        arena_->reallocateDiscard(arenaHandle_, newBytes);
+        arenaPixels_ = arena_->data(arenaHandle_);
+        width_ = width;
+        height_ = height;
+        clear();
+        arena_->reportResize(CanvasResizePhase::AfterSwap, oldBytes, newBytes);
         return;
     }
 
@@ -739,6 +1009,7 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
         arena_->reportResize(CanvasResizePhase::BothBuffersLive,
                              oldBytes, newBytes);
         arena_->replace(arenaHandle_, std::move(resized.pixels_));
+        arenaPixels_ = arena_->data(arenaHandle_);
         arena_->reportResize(CanvasResizePhase::AfterSwap,
                              oldBytes, newBytes);
     } else {
@@ -748,9 +1019,10 @@ void IndexedCanvas::resize(std::uint32_t width, std::uint32_t height) {
     height_ = height;
 }
 
-WindowManager::WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight)
+WindowManager::WindowManager(std::uint32_t screenWidth, std::uint32_t screenHeight,
+                             std::shared_ptr<const CanvasRasterOps> rasterOps)
     : screenWidth_(screenWidth), screenHeight_(screenHeight),
-      arena_() {
+      arena_(), rasterOps_(std::move(rasterOps)) {
     if (screenWidth_ == 0 || screenHeight_ == 0)
         throw std::invalid_argument("window manager screen dimensions must be positive");
     if (screenWidth_ > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
@@ -785,7 +1057,8 @@ WindowId WindowManager::create(SessionId owner, Rect bounds, PixelDepth depth) {
     if (nextId_ == 0) throw std::overflow_error("window identifiers exhausted");
     const WindowId id = nextId_++;
     windows_.push_back({id, owner, bounds, true,
-                        IndexedCanvas(bounds.width, bounds.height, depth, &arena_)});
+                        IndexedCanvas(bounds.width, bounds.height, depth,
+                                      &arena_, rasterOps_.get())});
     return id;
 }
 
@@ -902,8 +1175,23 @@ void WindowManager::setPixelDepth(WindowId id, PixelDepth depth) {
 
 void WindowManager::setScreenSize(std::uint32_t width, std::uint32_t height) {
     (void)checkedPixelCount(width, height);
+    const auto oldWidth = screenWidth_;
+    const auto oldHeight = screenHeight_;
     screenWidth_ = width;
     screenHeight_ = height;
+    for (auto& [owner, viewport] : taskViewports_) {
+        (void)owner;
+        if (viewport.originX == 0 && viewport.originY == 0 &&
+            viewport.offsetX == 0 && viewport.offsetY == 0 &&
+            viewport.canvasWidth == oldWidth && viewport.canvasHeight == oldHeight) {
+            viewport.canvasWidth = width;
+            viewport.canvasHeight = height;
+        }
+    }
+}
+
+void WindowManager::clearWindows() noexcept {
+    windows_.clear();
 }
 
 void WindowManager::setVisible(WindowId id, bool visible) {
@@ -917,6 +1205,20 @@ void WindowManager::raise(WindowId id) {
     windows_.splice(windows_.end(), windows_, found);
 }
 
+bool WindowManager::raiseSession(SessionId owner) {
+    auto current = windows_.begin();
+    const auto originalWindowCount = windows_.size();
+    bool raised = false;
+    for (std::size_t index = 0; index < originalWindowCount; ++index) {
+        const auto window = current++;
+        if (window->owner == owner) {
+            windows_.splice(windows_.end(), windows_, window);
+            raised = true;
+        }
+    }
+    return raised;
+}
+
 void WindowManager::validate(TaskViewport viewport) {
     if (viewport.canvasWidth == 0 || viewport.canvasHeight == 0)
         throw std::invalid_argument("task canvas dimensions must be positive");
@@ -928,7 +1230,11 @@ void WindowManager::validate(TaskViewport viewport) {
 }
 
 Rect WindowManager::screenBounds(const Entry& entry) const {
-    const auto viewport = taskViewport(entry.owner);
+    return screenBounds(entry, taskViewport(entry.owner));
+}
+
+Rect WindowManager::screenBounds(const Entry& entry,
+                                 const TaskViewport& viewport) const {
     const auto x = static_cast<std::int64_t>(viewport.originX) +
                    viewport.offsetX + entry.bounds.x;
     const auto y = static_cast<std::int64_t>(viewport.originY) +
@@ -943,7 +1249,10 @@ Rect WindowManager::screenBounds(const Entry& entry) const {
 }
 
 Rect WindowManager::clipToTask(const Entry& entry, Rect bounds) const {
-    const auto viewport = taskViewport(entry.owner);
+    return clipToViewport(taskViewport(entry.owner), bounds);
+}
+
+Rect WindowManager::clipToViewport(const TaskViewport& viewport, Rect bounds) const {
     const auto left = std::max<std::int64_t>({0, bounds.x, viewport.originX});
     const auto top = std::max<std::int64_t>({0, bounds.y, viewport.originY});
     const auto right = std::min<std::int64_t>({
@@ -975,19 +1284,21 @@ void WindowManager::composeInto(std::vector<ColorIndex>& frame,
     const auto framePixels = checkedPixelCount(screenWidth_, screenHeight_);
     frame.resize(framePixels);
     std::fill(frame.begin(), frame.end(), desktopPaper);
-    for (const auto& state : compositionOrder()) {
-        const auto& source = find(state.id).canvas;
+    for (const auto& entry : windows_) {
+        if (!entry.visible) continue;
+        const auto bounds = screenBounds(entry);
+        const Rect visible = clipToTask(entry, bounds);
+        if (visible.width == 0 || visible.height == 0) continue;
         const auto sourceX = static_cast<std::uint32_t>(
-            static_cast<std::int64_t>(state.screenClip.x) - state.bounds.x);
+            static_cast<std::int64_t>(visible.x) - bounds.x);
         const auto sourceY = static_cast<std::uint32_t>(
-            static_cast<std::int64_t>(state.screenClip.y) - state.bounds.y);
-        for (std::uint32_t row = 0; row < state.screenClip.height; ++row) {
-            const auto destinationOffset = static_cast<std::size_t>(state.screenClip.y + row) * screenWidth_ +
-                                           static_cast<std::uint32_t>(state.screenClip.x);
-            for (std::uint32_t column = 0; column < state.screenClip.width; ++column) {
-                frame[destinationOffset + column] =
-                    source.pixel(sourceX + column, sourceY + row);
-            }
+            static_cast<std::int64_t>(visible.y) - bounds.y);
+        for (std::uint32_t row = 0; row < visible.height; ++row) {
+            const auto destinationOffset =
+                static_cast<std::size_t>(visible.y + static_cast<std::int32_t>(row)) *
+                    screenWidth_ + static_cast<std::uint32_t>(visible.x);
+            entry.canvas.copyPixelsTo(sourceY + row, sourceX, visible.width,
+                                      frame.data() + destinationOffset);
         }
     }
 }
@@ -1011,8 +1322,9 @@ void WindowManager::composeRegionRowInto(std::uint32_t y, std::uint32_t x,
     const auto right = x + width;
     for (const auto& entry : windows_) {
         if (!entry.visible) continue;
-        const auto bounds = screenBounds(entry);
-        const Rect visible = clipToTask(entry, bounds);
+        const auto viewport = taskViewport(entry.owner);
+        const auto bounds = screenBounds(entry, viewport);
+        const Rect visible = clipToViewport(viewport, bounds);
         if (visible.width == 0 || visible.height == 0 ||
             y < static_cast<std::uint32_t>(visible.y) ||
             y >= static_cast<std::uint32_t>(visible.y) + visible.height)
@@ -1025,11 +1337,8 @@ void WindowManager::composeRegionRowInto(std::uint32_t y, std::uint32_t x,
             static_cast<std::int64_t>(left) - bounds.x);
         const auto sourceY = static_cast<std::uint32_t>(
             static_cast<std::int64_t>(y) - bounds.y);
-        for (std::uint32_t destinationX = left;
-             destinationX < clippedRight; ++destinationX) {
-            row[destinationX - x] = entry.canvas.pixel(
-                sourceX + destinationX - left, sourceY);
-        }
+        entry.canvas.copyPixelsTo(sourceY, sourceX,
+            clippedRight - left, row.data() + (left - x));
     }
 }
 

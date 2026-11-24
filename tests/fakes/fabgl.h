@@ -2,9 +2,39 @@
 
 #include <cstdint>
 #include <deque>
+#include <vector>
 #include <string>
 
+#define VGA_320x200_70Hz "320x200"
+#define QVGA_320x240_60Hz "320x240"
+#define VGA_400x300_60Hz "400x300"
+#define VGA_640x400_70Hz "640x400"
+#define VGA_640x480_60Hz "640x480"
+#define FABGLIB_VIEWPORT_MEMORY_POOL_COUNT 128
+#define FABGLIB_MINFREELARGESTBLOCK 40000
+
+struct lldesc_t { std::uint32_t words[3]; };
+
 namespace fabgl {
+
+enum class VGAScanStart { FrontPorch, Sync, BackPorch, VisibleArea };
+struct VGATimings {
+    int VVisibleArea = 0, VFrontPorch = 10, VSyncPulse = 2, VBackPorch = 33;
+    int HVisibleArea = 0, HFrontPorch = 16, HSyncPulse = 96, HBackPorch = 48;
+    int scanCount = 2;
+    VGAScanStart HStartingBlock = VGAScanStart::FrontPorch;
+};
+class VGABaseController {
+public:
+    static bool convertModelineToTimings(const char* modeline, VGATimings* timings) {
+        const std::string mode(modeline);
+        const auto separator = mode.find('x');
+        if (separator == std::string::npos) return false;
+        timings->HVisibleArea = std::stoi(mode.substr(0, separator));
+        timings->VVisibleArea = std::stoi(mode.substr(separator + 1));
+        return true;
+    }
+};
 
 enum VirtualKey {
     VK_NONE, VK_RETURN, VK_KP_ENTER, VK_ESCAPE, VK_BACKSPACE, VK_TAB,
@@ -36,6 +66,96 @@ struct RGB888 {
         : R(red), G(green), B(blue) {}
 };
 
+struct RGB222 {
+    std::uint8_t R = 0;
+    std::uint8_t G = 0;
+    std::uint8_t B = 0;
+    explicit RGB222(const RGB888& color)
+        : R(static_cast<std::uint8_t>((color.R >> 6) & 0x03)),
+          G(static_cast<std::uint8_t>((color.G >> 6) & 0x03)),
+          B(static_cast<std::uint8_t>((color.B >> 6) & 0x03)) {}
+};
+
+enum class PixelFormat { RGBA8888 };
+
+struct RGBA8888 {
+    std::uint8_t R = 0;
+    std::uint8_t G = 0;
+    std::uint8_t B = 0;
+    std::uint8_t A = 0;
+    RGBA8888() = default;
+    RGBA8888(std::uint8_t red, std::uint8_t green,
+             std::uint8_t blue, std::uint8_t alpha)
+        : R(red), G(green), B(blue), A(alpha) {}
+};
+
+class Bitmap {
+public:
+    Bitmap(int, int, void*, PixelFormat) {}
+};
+
+class VGAController {
+public:
+    VGAController(int width = 320, int height = 200)
+        : width_(width), height_(height), buffers_{
+            std::vector<std::vector<std::uint8_t>>(height,
+                std::vector<std::uint8_t>(width)),
+            std::vector<std::vector<std::uint8_t>>(height,
+                std::vector<std::uint8_t>(width))} {}
+    bool isDoubleBufferedEnabled() const { return doubleBuffered_; }
+    bool isDoubleBuffered() const { return doubleBuffered_; }
+    void setDoubleBuffered(bool enabled) { doubleBuffered_ = enabled; }
+    int getWidth() const { return width_; }
+    int getHeight() const { return height_; }
+    void end() { ++endCount; }
+    void setResolution(const char* modeline, int, int, bool doubleBuffered) {
+        VGATimings timings;
+        VGABaseController::convertModelineToTimings(modeline, &timings);
+        width_ = timings.HVisibleArea;
+        height_ = timings.VVisibleArea;
+        if (!allocationResults.empty()) {
+            width_ = allocationResults.front().first;
+            height_ = allocationResults.front().second;
+            allocationResults.pop_front();
+        }
+        doubleBuffered_ = doubleBuffered;
+        ++resolutionCount;
+    }
+    int endCount = 0;
+    int resolutionCount = 0;
+    std::deque<std::pair<int, int>> allocationResults;
+    std::uint8_t createRawPixel(const RGB222& color) const {
+        return static_cast<std::uint8_t>((color.R << 4) | (color.G << 2) | color.B);
+    }
+    std::uint8_t* getScanline(int y) {
+        ++scanlineCallCount;
+        if (scanlineCallCount == failOnScanlineCall) return nullptr;
+        if (y < 0 || y >= height_) return nullptr;
+        return buffers_[drawBuffer_][static_cast<std::size_t>(y)].data();
+    }
+    void swapBuffers() {
+        std::swap(drawBuffer_, visibleBuffer_);
+        ++swapCount;
+    }
+    const std::vector<std::vector<std::uint8_t>>& drawBuffer() const {
+        return buffers_[drawBuffer_];
+    }
+    const std::vector<std::vector<std::uint8_t>>& visibleBuffer() const {
+        return buffers_[visibleBuffer_];
+    }
+    int swapCount = 0;
+    int scanlineCallCount = 0;
+    int failOnScanlineCall = -1;
+
+private:
+    int width_;
+    int height_;
+    bool doubleBuffered_ = true;
+    int drawBuffer_ = 0;
+    int visibleBuffer_ = 1;
+    std::vector<std::vector<std::uint8_t>> buffers_[2];
+};
+
 class Keyboard {
 public:
     void push(VirtualKey key, bool down, std::uint8_t ascii,
@@ -53,16 +173,6 @@ private:
     std::deque<VirtualKeyItem> queue;
 };
 
-struct RGBA8888 {
-    std::uint8_t R=0, G=0, B=0, A=255;
-    RGBA8888() = default;
-    RGBA8888(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a) : R(r), G(g), B(b), A(a) {}
-};
-enum class PixelFormat { RGBA8888 };
-struct Bitmap {
-    int width, height;
-    Bitmap(int w, int h, const RGBA8888*, PixelFormat) : width(w), height(h) {}
-};
 class Canvas {
 public:
     int width = 320;
@@ -87,14 +197,20 @@ public:
     int pixelCount = 0;
     int updateCount = 0;
     int completionCount = 0;
+    int swapCount = 0;
+    VGAController* display = nullptr;
 
-    int getWidth() const { return width; }
-    int getHeight() const { return height; }
+    int getWidth() const { return display ? display->getWidth() : width; }
+    int getHeight() const { return display ? display->getHeight() : height; }
     void beginUpdate() { ++updateCount; }
     void endUpdate() { ++updateCount; }
     void waitCompletion(bool) { ++completionCount; }
+    void swapBuffers() {
+        ++swapCount;
+        if (display) display->swapBuffers();
+    }
+    void drawBitmap(int, int, const Bitmap*) {}
     void setPixel(int, int, RGB888 const&) { ++pixelCount; }
-    void drawBitmap(int, int, const Bitmap* bitmap) { pixelCount += bitmap->width * bitmap->height; }
     void setPenColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) {
         penRed = red; penGreen = green; penBlue = blue;
     }

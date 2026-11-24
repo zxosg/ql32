@@ -55,6 +55,21 @@ class SerialWorkerTests(unittest.TestCase):
         self.assertEqual(worker._serial.writes, [])
         worker._serial = None
 
+    def test_transfer_cancel_requested_before_dispatch_is_not_lost(self):
+        worker = SerialWorker()
+        port = SimulatedSerial()
+        worker._serial = port
+        worker._supported = True
+        finished = []
+        worker.transfer_finished.connect(lambda *result: finished.append(result))
+        worker.cancel_transfer()
+
+        worker._transfer(("upload", "job", "/unused/file.bas", "SDC:/file.bas"))
+
+        self.assertEqual(port.writes, [])
+        self.assertEqual(finished, [("job", "upload", "", "transfer cancelled")])
+        worker._serial = None
+
 
 if __name__ == "__main__":
     unittest.main()

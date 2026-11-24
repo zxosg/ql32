@@ -58,6 +58,22 @@ void testRecallAndSubmission() {
             "Enter should request submission without discarding the line");
 }
 
+void testControlWordNavigation() {
+    ql32::ui::LineEditor editor;
+    editor.setText("10 PRINT  alpha + beta");
+    editor.handleKey(key(ql32::input::Key::Home));
+    auto controlLeft = key(ql32::input::Key::Right);
+    controlLeft.control = true;
+    editor.handleKey(controlLeft);
+    require(editor.cursor() == 3, "Ctrl+Right did not advance to the next word");
+    editor.handleKey(controlLeft);
+    require(editor.cursor() == 10, "Ctrl+Right did not skip whitespace and a word");
+    auto controlRight = key(ql32::input::Key::Left);
+    controlRight.control = true;
+    editor.handleKey(controlRight);
+    require(editor.cursor() == 3, "Ctrl+Left did not return to the previous word");
+}
+
 void testLimitsAndRawProtocolText() {
     ql32::ui::LineEditor editor;
     require(editor.handleKey(key(ql32::input::Key::Character, 'x', false)) ==
@@ -83,6 +99,7 @@ int main() {
     try {
         testInsertionAndEditing();
         testRecallAndSubmission();
+        testControlWordNavigation();
         testLimitsAndRawProtocolText();
         std::cout << "Line editor tests passed\n";
     } catch (const std::exception& error) {

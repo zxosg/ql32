@@ -20,8 +20,9 @@ ChannelMode parseMode(std::string mode) {
     if (mode == "READ") return ChannelMode::Read;
     if (mode == "WRITE") return ChannelMode::Write;
     if (mode == "APPEND") return ChannelMode::Append;
+    if (mode == "UPDATE") return ChannelMode::Update;
     throw ServiceError(ServiceErrorCode::InvalidPath,
-                       "OPEN mode must be READ, WRITE, or APPEND");
+                       "OPEN mode must be READ, WRITE, APPEND, or UPDATE");
 }
 
 } // namespace
@@ -282,6 +283,18 @@ void ChannelRegistry::seek(SessionId session, ChannelId channel,
     files_->seek(session, opened.backend, offset);
 }
 
+std::uint64_t ChannelRegistry::position(SessionId session, ChannelId channel) {
+    const Endpoint opened = endpoint(session, channel);
+    if (opened.type != ChannelType::File) unsupported("position queries");
+    return files_->position(session, opened.backend);
+}
+
+std::uint64_t ChannelRegistry::length(SessionId session, ChannelId channel) {
+    const Endpoint opened = endpoint(session, channel);
+    if (opened.type != ChannelType::File) unsupported("length queries");
+    return files_->length(session, opened.backend);
+}
+
 bool ChannelRegistry::atEnd(SessionId session, ChannelId channel) {
     const Endpoint opened = endpoint(session, channel);
     if (opened.directory) return opened.directory->atEnd();
@@ -308,6 +321,17 @@ void ChannelRegistry::write(SessionId session, ChannelId channel,
     default:
         unsupported("text output");
     }
+}
+
+std::size_t ChannelRegistry::writeNonBlocking(SessionId session, ChannelId channel,
+                                              const std::string& text) {
+    const Endpoint opened = endpoint(session, channel);
+    if (opened.type == ChannelType::Serial && serialTryWriter_) {
+        const std::size_t accepted = std::min(serialTryWriter_(text), text.size());
+        return text.size() - accepted;
+    }
+    write(session, channel, text);
+    return 0;
 }
 
 void ChannelRegistry::close(SessionId session, ChannelId channel) {

@@ -1,4 +1,5 @@
 #include "ql32/platform/esp32/application_input.hpp"
+#include "ql32/platform/esp32/diagnostics.hpp"
 #include <Arduino.h>
 #include <Adafruit_ILI9341.h>
 #include <SD.h>
@@ -12,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <ctime>
 #include <cstring>
 #include <memory>
@@ -29,11 +31,13 @@
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
 #include "ql32/platform/esp32/cpu_frequency.hpp"
+#include "ql32/platform/esp32/drive_router.hpp"
 #include "ql32/ui/graphic_presenter.hpp"
 #include "ql32/platform/esp32/memory.hpp"
 #include "ql32/platform/esp32/network.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/sd_storage.hpp"
+#include "ql32/platform/olimex_vga/music.hpp"
 #include "ql32/platform/esp32/system_control.hpp"
 #include "ql32/platform/esp32/monitor_transfer.hpp"
 #include "ql32/platform/esp32/remote_debug_protocol.hpp"
@@ -72,11 +76,35 @@ ql32::platform::esp32::MemoryService boardMemory;
 ql32::platform::esp32::WifiNetworkService boardNetwork;
 ql32::platform::esp32::SystemControl boardSystemControl;
 #if defined(QL32_CYD_USE_SPIFFS)
-ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", "/spiffs");
+bool spiffsSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SPIFFS.totalBytes();
+    used = SPIFFS.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SPIFFS, "FFS", spiffsSpace, "/spiffs");
 ql32::platform::esp32::SdChannels sdChannels(SPIFFS, "FFS");
+// Optional removable card, addressed as SDC:/. Unqualified paths stay on FFS:.
+bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdcStorage(SD, "SDC", sdCardSpace, "/sd");
+ql32::platform::esp32::SdChannels sdcChannels(SD, "SDC");
+ql32::platform::esp32::DriveRouterStorage driveStorage(sdStorage, sdcStorage, true);
+ql32::platform::esp32::DriveRouterChannels driveChannels(sdChannels, sdcChannels, true);
+ql32::runtime::StorageService& monitorStorage = driveStorage;
+ql32::runtime::ChannelService& monitorChannels = driveChannels;
 #else
-ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", "/sd");
+bool sdCardSpace(std::uint64_t& total, std::uint64_t& used) {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+    return total != 0;
+}
+ql32::platform::esp32::SdStorage sdStorage(SD, "SDC", sdCardSpace, "/sd");
 ql32::platform::esp32::SdChannels sdChannels(SD, "SDC");
+ql32::runtime::StorageService& monitorStorage = sdStorage;
+ql32::runtime::ChannelService& monitorChannels = sdChannels;
 #endif
 std::unique_ptr<ql32::platform::esp32_cyd::TftTextConsole> tftConsole;
 std::unique_ptr<std::ostream> basicOutput;
@@ -188,21 +216,30 @@ void refreshDebugOverlay() {
     const auto freeBytes = boardMemory.freeBytes();
     const auto heap = boardMemory.fragmentationInfo();
     const std::size_t activeTasks = scheduler ? scheduler->activeTaskCount() : 0;
-    char clockText[9] = "--:--:--";
-    if (const auto timestamp = boardClock.unixTimeSeconds()) {
-        const std::time_t value = static_cast<std::time_t>(*timestamp);
-        std::tm parts{};
-        if (gmtime_r(&value, &parts))
-            std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
-                          parts.tm_hour, parts.tm_min, parts.tm_sec);
+    char clockText[16]{};
+    const auto timestamp = boardClock.unixTimeSeconds();
+    std::tm parts{};
+    const std::time_t value = timestamp ? static_cast<std::time_t>(*timestamp) : 0;
+    if (timestamp && gmtime_r(&value, &parts)) {
+        std::snprintf(clockText, sizeof(clockText), "%02d:%02d:%02d",
+                      parts.tm_hour, parts.tm_min, parts.tm_sec);
+    } else {
+        // Unsynchronized wall clock: show uptime instead, marked with "UP".
+        const std::uint32_t seconds = now / 1000;
+        std::snprintf(clockText, sizeof(clockText), "UP %02u:%02u:%02u",
+                      static_cast<unsigned>((seconds / 3600) % 100),
+                      static_cast<unsigned>((seconds / 60) % 60),
+                      static_cast<unsigned>(seconds % 60));
     }
     const auto freeK = freeBytes / 1024;
     const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
+    const auto minK = boardMemory.minimumFreeBytes().value_or(0) / 1024;
     char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK ALLOC:%llu TASK:%u %s",
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu MIN:%lluK TASK:%u %s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
+        static_cast<unsigned long long>(minK),
         static_cast<unsigned>(activeTasks), clockText);
     graphics->setDebugOverlayText(line);
 }
@@ -355,10 +392,10 @@ void submitInputLine() {
     Serial.println();
     if (inputLine == "@SCREEN" &&
         ql32::platform::esp32::handleMonitorTransferCommand(
-            "SCREEN", sdStorage, sdChannels, Serial,
+            "SCREEN", monitorStorage, monitorChannels, Serial,
             [] { return screenCaptureSource(); })) {
     } else if (remoteDebugger && remoteDebugger->handles(inputLine)) {
-        remoteDebugger->handle(inputLine, *scheduler, sdStorage, *basicOutput,
+        remoteDebugger->handle(inputLine, *scheduler, monitorStorage, *basicOutput,
             [](std::string_view bytes) {
                 Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
                 Serial.flush();
@@ -366,7 +403,7 @@ void submitInputLine() {
     } else if (uiPresenter && uiPresenter->active()) {
         (void)uiPresenter->consumeLine(inputLine);
     } else if (ql32::platform::esp32::handleMonitorTransferCommand(
-                   inputLine, sdStorage, sdChannels, Serial,
+                   inputLine, monitorStorage, monitorChannels, Serial,
                    [] { return screenCaptureSource(); })) {
     } else if (scheduler && !inputLine.empty() &&
                !scheduler->submit(scheduler->focusedTask(), inputLine + "\n")) {
@@ -443,6 +480,8 @@ void receiveSerialCharacter(char character) {
             inputCursor = inputLine.size();
             Serial.print(inputLine.c_str());
         }
+        break;
+    case ql32::platform::esp32::SerialKey::Down:
         break;
     case ql32::platform::esp32::SerialKey::Left:
         if (inputCursor > 0) { --inputCursor; Serial.write('\b'); }
@@ -562,6 +601,14 @@ void setup() {
         [] { if (tftConsole) tftConsole->reconfigure(); });
     graphics = std::make_shared<ql32::graphics::WindowedService>(
         display.width(), display.height(), framePresenter);
+    graphics->setCanvasAdmission([](std::size_t bytes) {
+        return boardMemory.canvasFailure(bytes);
+    });
+    graphics->setCanvasMemoryProbe([]() -> std::size_t {
+        const auto info = boardMemory.fragmentationInfo();
+        return info ? static_cast<std::size_t>(info->largestFreeBlockBytes)
+                    : std::numeric_limits<std::size_t>::max();
+    });
     graphics->setCanvasResizeObserver(
         [](ql32::graphics::CanvasResizePhase phase, std::size_t oldBytes,
            std::size_t newBytes) {
@@ -616,6 +663,8 @@ void setup() {
     const bool storageReady = SPIFFS.begin(true);
     if (storageReady && !SPIFFS.exists("/supervisor"))
         (void)SPIFFS.mkdir("/supervisor");
+    Serial.println(SD.begin(ql32::boards::esp32_2432s028::sdChipSelect, sdBus, 4000000,
+                            "/sd", 5) ? "SDC card mounted" : "SDC card not present");
 #else
     sdBus.begin(ql32::boards::esp32_2432s028::sdSck,
                 ql32::boards::esp32_2432s028::sdMiso,
@@ -643,8 +692,9 @@ void setup() {
                 startupProgram = sdStorage.readText("startup.bas");
                 Serial.println("Running Storage:/startup.bas");
             } catch (const ql32::runtime::ServiceError& error) {
-                Serial.printf("Storage startup read error: %s\n", error.what());
-                return;
+                Serial.printf("Storage startup read error: %s; starting without it\n",
+                              error.what());
+                startupProgram.clear();
             }
         } else {
             Serial.println("Storage:/startup.bas not found; starting with a clear display");
@@ -654,26 +704,74 @@ void setup() {
             startupProgram = sdStorage.readText("startup.bas");
             Serial.println("Running SD:/startup.bas");
         } catch (const ql32::runtime::ServiceError& error) {
-            if (error.code() != ql32::runtime::ServiceErrorCode::NotFound) {
-                Serial.printf("Storage startup read error: %s\n", error.what());
-                return;
-            }
-            Serial.println("SD:/startup.bas not found; starting with a clear display");
+            startupProgram.clear();
+            if (error.code() != ql32::runtime::ServiceErrorCode::NotFound)
+                Serial.printf("Storage startup read error: %s; starting without it\n",
+                              error.what());
+            else
+                Serial.println("SD:/startup.bas not found; starting with a clear display");
         }
 #endif
     }
 
     ql32::vm::Services services;
+    {
+        ql32::runtime::SystemInfoProfile profile;
+        profile.values = {"0.1.0", "unknown", "esp32_2432s028_yellow_tft",
+                          "ili9341-tft 320x240 rgb565", "serial,touch", "sd",
+                          "tft,touch,network,wifi"};
+#if defined(QL32_CYD_USE_SPIFFS)
+        profile.values[5] = "ffs";
+        profile.values[6] += ",ffs";
+#endif
+        profile.capabilities = {{"display", true}, {"input", true},
+                                {"storage", true}, {"network", true},
+                                {"wifi", true}, {"ps2", false}, {"serial", true},
+                                {"touch", true}, {"sd",
+#if defined(QL32_CYD_USE_SPIFFS)
+                                false
+#else
+                                true
+#endif
+                                }, {"ffs",
+#if defined(QL32_CYD_USE_SPIFFS)
+                                true
+#else
+                                false
+#endif
+                                }, {"psram", false}, {"spi", true}, {"i2c", true},
+                                {"gpio", true}, {"adc", true}, {"timer", true},
+                                {"buttons", false}, {"usb-hid", false}};
+        services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+            std::move(profile));
+    }
+#if defined(QL32_CYD_USE_SPIFFS)
+    services.storage = std::shared_ptr<ql32::runtime::StorageService>(
+        &driveStorage, [](ql32::runtime::StorageService*) {});
+    auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
+        &driveChannels, [](ql32::runtime::ChannelService*) {});
+#else
     services.storage = std::shared_ptr<ql32::runtime::StorageService>(
         &sdStorage, [](ql32::runtime::StorageService*) {});
     auto fileChannels = std::shared_ptr<ql32::runtime::ChannelService>(
         &sdChannels, [](ql32::runtime::ChannelService*) {});
+#endif
     channelRegistry = std::make_shared<ql32::runtime::ChannelRegistry>(
         std::move(fileChannels), [](std::string_view bytes) {
             Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
         }, std::shared_ptr<ql32::runtime::HardwareChannelService>(
             &hardwareAdapter, [](ql32::runtime::HardwareChannelService*) {}), true);
+    channelRegistry->setSerialTryWriter([](std::string_view bytes) -> std::size_t {
+        const std::size_t room = static_cast<std::size_t>(Serial.availableForWrite());
+        const std::size_t count = std::min(room, bytes.size());
+        if (count != 0)
+            Serial.write(reinterpret_cast<const std::uint8_t*>(bytes.data()), count);
+        return count;
+    });
     services.channels = channelRegistry;
+    // The CYD speaker amplifier is fed by DAC2 on GPIO26.
+    services.music = std::make_shared<ql32::platform::olimex_vga::MusicService>(
+        services.storage, 26, std::vector<std::string>{"SDC:/", "FFS:/"});
     services.ui = uiService;
     services.graphics = std::static_pointer_cast<ql32::graphics::Service>(graphics);
     services.network = std::shared_ptr<ql32::runtime::NetworkService>(
@@ -682,6 +780,23 @@ void setup() {
         &boardSystemControl, [](ql32::runtime::SystemControlService*) {});
     services.memory = std::shared_ptr<ql32::runtime::MemoryService>(
         &boardMemory, [](ql32::runtime::MemoryService*) {});
+    // QL/32-specific admission limits, below the measured working states
+    // (4 workers + music: ~38 KB free / 17 KB largest at music start).
+    ql32::runtime::AdmissionPolicy admission;
+    admission.workerTotalBytes = 14 * 1024;
+    admission.workerContiguousBytes = 6 * 1024;
+    // Measured: first audio start + a YM song takes ~31 KB; a later song ~10 KB.
+    admission.musicStartTotalBytes = 32 * 1024;
+    admission.musicStartContiguousBytes = 8 * 1024;
+    admission.musicPlayTotalBytes = 14 * 1024;
+    admission.displayModeGuard = true;
+    // A full-screen canvas is 38400 bytes in one block; leave room for the music service.
+    admission.canvasGuard = true;
+    admission.canvasHeadroomBytes = 8 * 1024;
+    boardMemory.setAdmissionPolicy(admission);
+    ql32::platform::esp32::installFailedAllocLogger();
+    std::static_pointer_cast<ql32::platform::olimex_vga::MusicService>(services.music)
+        ->setMemoryService(services.memory);
     services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
         &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
     graphics->setConsoleLayer([](std::uint32_t y, std::uint32_t x,
@@ -703,6 +818,9 @@ void setup() {
     remoteCapabilities.screenCapture = true;
     remoteDebugger = std::make_unique<ql32::platform::esp32::RemoteDebugProtocol>(
         std::move(remoteCapabilities));
+    // QL/32-specific: tile-sized worker canvases by default (as WINDOWMODE
+    // ISOLATED); the startup program is compiled, so it cannot issue the command.
+    (void)scheduler->setWindowMode(ql32::runtime::WindowMode::Isolated);
     replTask = scheduler->launchInteractive(*basicOutput, std::move(startupProgram));
 }
 

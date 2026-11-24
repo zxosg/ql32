@@ -96,32 +96,35 @@ void testBinaryRoundTripAndBackup() {
         require(receiveError.empty(), "YMODEM receiver failed during binary round-trip");
         require(targetStorage.readText("payload.bin") == bytes,
                 "YMODEM changed binary file contents");
-        require(!targetStorage.exists("payload.bin.BAK"),
-                "successful YMODEM receive retained its backup");
+        require(!targetStorage.exists(".q32-r") && !targetStorage.exists(".q32-rb"),
+                "successful YMODEM receive left temporary files");
 
         targetStorage.writeText("rollback.bin", "old contents");
-        targetStorage.writeText("rollback.bin.BAK", "existing backup");
+        targetStorage.writeText(".q32-r", "partial");
         ql32::runtime::YModemIo unused;
         unused.readByte = [](std::uint32_t) { return -1; };
         unused.writeBytes = [](const std::uint8_t*, std::size_t) {};
-        bool conflictRejected = false;
+        bool failedReceive = false;
         try {
             ql32::runtime::ymodemReceiveFile("rollback.bin", targetStorage,
                 targetChannels, 3, unused);
-        } catch (const std::exception&) { conflictRejected = true; }
-        require(conflictRejected && targetStorage.readText("rollback.bin") == "old contents" &&
-                    targetStorage.readText("rollback.bin.BAK") == "existing backup",
-                "existing .BAK did not stop receive without changing files");
-        targetStorage.remove("rollback.bin.BAK");
+        } catch (const std::exception&) { failedReceive = true; }
+        require(failedReceive && targetStorage.readText("rollback.bin") == "old contents" &&
+                    !targetStorage.exists(".q32-r") && !targetStorage.exists(".q32-rb") &&
+                    !targetStorage.exists("rollback.bin.BAK"),
+                "failed receive did not leave the original intact and no stray files");
 
-        bool failedReceive = false;
+        // Interrupted install: only the backup remains, so it is restored.
+        targetStorage.remove("rollback.bin");
+        targetStorage.writeText(".q32-rb", "original");
+        failedReceive = false;
         try {
             ql32::runtime::ymodemReceiveFile("rollback.bin", targetStorage,
                 targetChannels, 4, unused);
         } catch (const std::exception&) { failedReceive = true; }
-        require(failedReceive && targetStorage.readText("rollback.bin") == "old contents" &&
-                    !targetStorage.exists("rollback.bin.BAK"),
-                "failed receive did not restore its previous file");
+        require(failedReceive && targetStorage.readText("rollback.bin") == "original" &&
+                    !targetStorage.exists(".q32-rb"),
+                "orphaned backup was not restored by the next receive");
     } catch (...) {
         std::error_code ignored;
         std::filesystem::remove_all(root, ignored);
@@ -180,9 +183,108 @@ void testGeneratedSourceRoundTrip() {
     std::filesystem::remove_all(root);
 }
 
+class LimitedStorage : public ql32::platform::linux_host::DirectoryStorage {
+public:
+    using DirectoryStorage::DirectoryStorage;
+    ql32::runtime::StorageSpace fake;
+    std::int64_t sizeSkew = 0;
+
+    ql32::runtime::StorageSpace space(const std::string&) override { return fake; }
+    std::uintmax_t size(const std::string& path) override {
+        const auto actual = DirectoryStorage::size(path);
+        return path.find(".q32-r") != std::string::npos
+            ? static_cast<std::uintmax_t>(static_cast<std::int64_t>(actual) + sizeSkew)
+            : actual;
+    }
+};
+
+struct TransferResult {
+    std::string sendError;
+    std::string receiveError;
+};
+
+TransferResult transfer(LimitedStorage& storage,
+                        ql32::platform::linux_host::DirectoryChannels& channels,
+                        std::size_t size) {
+    ql32::runtime::YModemSource source;
+    source.filename = "up.bin";
+    source.size = size;
+    source.read = [](std::uint64_t offset, std::uint8_t* output, std::size_t count) {
+        for (std::size_t i = 0; i < count; ++i)
+            output[i] = static_cast<std::uint8_t>((offset + i) * 13);
+    };
+    Link link;
+    const auto senderIo = link.endpoint(true);
+    const auto receiverIo = link.endpoint(false);
+    TransferResult result;
+    std::thread sender([&] {
+        try { ql32::runtime::ymodemSendSource(source, senderIo); }
+        catch (const std::exception& error) { result.sendError = error.what(); }
+    });
+    std::thread receiver([&] {
+        try { ql32::runtime::ymodemReceiveFile("up.bin", storage, channels, 5, receiverIo); }
+        catch (const std::exception& error) { result.receiveError = error.what(); }
+    });
+    sender.join();
+    receiver.join();
+    return result;
+}
+
+void testSpaceCheckAndSizeVerification() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-ymodem-space-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+    try {
+        LimitedStorage storage(root);
+        ql32::platform::linux_host::DirectoryChannels channels(root);
+        storage.writeText("up.bin", "original");
+        storage.fake.known = true;
+        storage.fake.total = 100000;
+        storage.fake.free = 10000;
+        storage.fake.reserve = 1000;
+
+        auto result = transfer(storage, channels, 20000);
+        require(result.receiveError == "not enough space: need 20000, free 9000",
+                "oversize YMODEM was not rejected with the space error");
+        require(result.sendError.find("cancelled") != std::string::npos,
+                "oversize YMODEM did not cancel the sender");
+        require(storage.readText("up.bin") == "original" && !storage.exists(".q32-r") &&
+                    !storage.exists(".q32-rb"),
+                "rejected YMODEM touched the original or left temporary files");
+
+        result = transfer(storage, channels, 9001);
+        require(!result.receiveError.empty(), "one byte over the usable space was accepted");
+        result = transfer(storage, channels, 9000);
+        require(result.receiveError.empty() && result.sendError.empty() &&
+                    storage.readText("up.bin").size() == 9000,
+                "exact-fit YMODEM was rejected");
+
+        storage.fake.known = false;
+        result = transfer(storage, channels, 20000);
+        require(result.receiveError.empty(), "YMODEM was rejected on a drive with unknown space");
+
+        // A write that lost data without an error must not replace the file.
+        storage.writeText("up.bin", "original");
+        storage.sizeSkew = -1;
+        result = transfer(storage, channels, 3000);
+        require(result.receiveError.find("does not match declared") != std::string::npos,
+                "short stored file was not detected");
+        require(storage.readText("up.bin") == "original" && !storage.exists(".q32-r") &&
+                    !storage.exists(".q32-rb"),
+                "size mismatch replaced the original or left temporary files");
+    } catch (...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 int main() {
     testBinaryRoundTripAndBackup();
     testGeneratedSourceRoundTrip();
+    testSpaceCheckAndSizeVerification();
 }

@@ -99,7 +99,8 @@ RequestId QueuedService::beginInput(SessionId session, std::string prompt,
 void QueuedService::showInfo(SessionId session, std::string text,
                              std::uint32_t durationMs, int positionX,
                              int positionY, std::uint8_t ink,
-                             std::uint8_t paper, std::uint8_t displayMode) {
+                             std::uint8_t paper, std::uint8_t displayMode,
+                             std::int16_t frame) {
     std::lock_guard lock(mutex_);
     if (nextInfoId_ == 0) nextInfoId_ = 1;
     const RequestId id = nextInfoId_++;
@@ -110,6 +111,7 @@ void QueuedService::showInfo(SessionId session, std::string text,
     infoToasts_[session].ink = ink;
     infoToasts_[session].paper = paper;
     infoToasts_[session].displayMode = displayMode;
+    infoToasts_[session].frame = frame;
 }
 
 void QueuedService::showBusy(SessionId session, std::string text,

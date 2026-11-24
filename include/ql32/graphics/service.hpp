@@ -5,9 +5,12 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace ql32::graphics {
 
@@ -89,11 +92,42 @@ public:
         (void)channel;
         line(session, from, to);
     }
+    virtual void setGraphicsPosition(SessionId, ChannelId, Point) {
+        throw std::runtime_error("graphics cursor unsupported");
+    }
+    virtual Point graphicsPosition(SessionId, ChannelId) const {
+        throw std::runtime_error("graphics cursor unsupported");
+    }
     virtual void pixel(SessionId session, Point position) {
         line(session, position, position);
     }
     virtual void pixel(SessionId session, ChannelId channel, Point position) {
         line(session, channel, position, position);
+    }
+    virtual ColorIndex inkColor(SessionId, ChannelId) { return 7; }
+    virtual void drawIndexedRow(SessionId session, ChannelId channel, Point topLeft,
+                                const std::uint8_t* pixels, std::size_t count,
+                                std::optional<ColorIndex> transparentIndex = {}) {
+        if (!pixels && count != 0)
+            throw std::invalid_argument("bitmap row is null");
+        const auto previousInk = inkColor(session, channel);
+        try {
+            for (std::size_t x = 0; x < count; ++x) {
+                const auto color = pixels[x];
+                if (transparentIndex && color == *transparentIndex) continue;
+                const auto coordinateX = static_cast<std::int64_t>(topLeft.x) +
+                    static_cast<std::int64_t>(x);
+                if (coordinateX < std::numeric_limits<std::int32_t>::min() ||
+                    coordinateX > std::numeric_limits<std::int32_t>::max()) continue;
+                setInk(session, channel, static_cast<ColorIndex>(color));
+                pixel(session, channel,
+                      {static_cast<std::int32_t>(coordinateX), topLeft.y});
+            }
+        } catch (...) {
+            try { setInk(session, channel, previousInk); } catch (...) {}
+            throw;
+        }
+        setInk(session, channel, previousInk);
     }
     virtual void rectangle(SessionId session, Point topLeft,
                            std::int32_t width, std::int32_t height) = 0;
@@ -170,6 +204,8 @@ public:
     }
     virtual void setTextFont(SessionId, ChannelId, const BitmapFont*, FontStyle) {}
     virtual void setGraphicsFont(SessionId, ChannelId, const BitmapFont*, FontStyle) {}
+    virtual void resetTextFont(SessionId, ChannelId) {}
+    virtual void resetGraphicsFont(SessionId, ChannelId) {}
     virtual void clearFontSelections(SessionId, ChannelId) {}
     virtual void writeText(SessionId session, const std::string& value) {
         text(session, {0, 0}, value);
@@ -179,6 +215,14 @@ public:
         (void)channel;
         writeText(session, value);
     }
+    // Group the graphics changes caused by one BASIC PRINT statement into a
+    // single presentation. Adapters that present immediately may ignore this.
+    virtual void beginTextOutputBatch(SessionId, ChannelId) {}
+    virtual void endTextOutputBatch(SessionId, ChannelId) {}
+    virtual void flushTextOutputBatches(SessionId) {}
+    // Coalesce a related graphics/UI transition into one composed frame.
+    virtual void beginPresentationBatch(SessionId) {}
+    virtual void endPresentationBatch(SessionId) {}
     virtual bool setTextPosition(SessionId, ChannelId, std::uint32_t,
                                  std::uint32_t) { return false; }
     virtual void clear(SessionId session) = 0;
@@ -193,6 +237,9 @@ public:
         (void)channel;
         closeWindow(session);
     }
+    // Re-arrange retained windows for the active display. Unsupported adapters
+    // leave the current layout untouched and report false.
+    virtual bool tileWindows() { return false; }
     virtual void closeSession(SessionId session) = 0;
     // Discard session-owned graphics state when the task is cancelled or
     // terminated. Services that retain completed output may override this;
@@ -202,8 +249,18 @@ public:
     // Update suppression controls the shared physical display. Drawing still
     // updates retained canvases while automatic presentation is disabled.
     virtual void setUpdateMode(SessionId, UpdateMode) {}
+    // Skip automatic frame presentations while continuing to update retained
+    // drawing state. A value of N presents one request, then skips N requests.
+    virtual void setFrameSkip(SessionId, std::uint32_t) {}
     // Force the current composed screen to be presented without changing mode.
     virtual void update(SessionId) {}
+    // Restore normal automatic updates, disable frame skipping, and present the
+    // current composed screen. This state remains active until changed again.
+    virtual void resetUpdateState(SessionId session) {
+        setFrameSkip(session, 0);
+        setUpdateMode(session, UpdateMode::Auto);
+        update(session);
+    }
 
     virtual WindowInfo windowInfo(SessionId session) = 0;
     virtual WindowInfo windowInfo(SessionId session, ChannelId channel) {
@@ -216,6 +273,12 @@ public:
         (void)channel;
         return paletteColor(session, index);
     }
+    // Replace a contiguous range in the display-wide palette. Retained pixels
+    // keep their indices, so every window using those indices changes color.
+    virtual void setPaletteColors(SessionId, std::uint16_t,
+                                  const std::vector<RgbColor>&) {
+        throw std::runtime_error("palette changes unsupported");
+    }
     virtual void setWindowBounds(SessionId, Rect) {
         throw std::runtime_error("window positioning unsupported");
     }
@@ -223,6 +286,8 @@ public:
         (void)channel;
         setWindowBounds(session, bounds);
     }
+    // Raise every window owned by the session as a group.
+    virtual void raiseWindows(SessionId) {}
     virtual void setTaskViewport(SessionId, TaskViewport) {
         throw std::runtime_error("task viewport positioning unsupported");
     }
@@ -230,6 +295,8 @@ public:
     virtual std::pair<std::uint32_t, std::uint32_t> displaySize() const noexcept {
         return {0, 0};
     }
+    virtual bool setDisplaySize(std::uint32_t, std::uint32_t) { return false; }
+    virtual bool lastDisplayResizeDiscardedWindows() const noexcept { return false; }
     virtual void setRotation(SessionId, std::uint16_t degrees) {
         throw std::runtime_error("display rotation unsupported");
     }

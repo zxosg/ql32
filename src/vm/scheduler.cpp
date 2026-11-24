@@ -29,13 +29,15 @@ public:
     explicit SchedulerTaskControl(SessionScheduler& scheduler) : scheduler_(scheduler) {}
 
     runtime::TaskId startTask(std::string source, std::ostream& output,
-                              runtime::TaskId caller, std::uint32_t flags) override {
+                              runtime::TaskId caller, std::uint32_t flags,
+                              std::string name) override {
         if ((flags & ~static_cast<std::uint32_t>(runtime::TaskStartWait)) != 0)
             throw runtime::Error(runtime::ErrorCode::InvalidArgument,
                                  "unknown TASK option bits");
         if ((flags & runtime::TaskStartWait) != 0)
-            return scheduler_.launchAndWait(std::move(source), output, caller);
-        return scheduler_.launchWorker(std::move(source), output);
+            return scheduler_.launchAndWait(std::move(source), output, caller,
+                                              std::move(name));
+        return scheduler_.launchWorker(std::move(source), output, std::move(name));
     }
 
     bool killTask(runtime::TaskId id) override {
@@ -71,6 +73,9 @@ public:
     }
     bool setWindowMode(runtime::WindowMode mode) override {
         return scheduler_.setWindowMode(mode);
+    }
+    bool displayGeometryChanged() override {
+        return scheduler_.displayGeometryChanged();
     }
 
     std::vector<runtime::ChannelInfo> listChannels(runtime::TaskId id) const override {
@@ -118,7 +123,7 @@ public:
                               info.openChannels, info.viewport.originX,
                               info.viewport.originY, info.viewport.canvasWidth,
                               info.viewport.canvasHeight, info.viewport.offsetX,
-                              info.viewport.offsetY});
+                              info.viewport.offsetY, info.name});
         }
         return result;
     }
@@ -132,6 +137,7 @@ private:
 struct SessionScheduler::Task {
     TaskId id = 0;
     std::string source;
+    std::string name;
     std::ostream* output = nullptr;
     std::unique_ptr<Interpreter> interpreter;
     TaskStatus status = TaskStatus::Runnable;
@@ -144,6 +150,7 @@ struct SessionScheduler::Task {
     TaskId waitingChildId = 0;
     TaskId waitingParentId = 0;
     bool started = false;
+    bool programExecutionActive = false;
     bool interactive = false;
     bool supervisor = false;
     bool interactiveSubmission = false;
@@ -183,16 +190,31 @@ void SessionScheduler::removeFromSchedule(Task& task) noexcept {
     task.schedulerEligibleThisTick = false;
 }
 
-TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
+namespace {
+void requireTaskMemory(const Services& services) {
+    if (!services.memory) return;
+    const auto& policy = services.memory->admissionPolicy();
+    if (const auto failure = services.memory->admissionFailure(
+            "a new task", policy.workerTotalBytes, policy.workerContiguousBytes))
+        throw runtime::Error::memoryRefused(*failure);
+}
+} // namespace
+
+TaskId SessionScheduler::launch(std::string source, std::ostream& output,
+                                std::string name) {
     if (nextId_ == 0) throw std::overflow_error("scheduler task IDs exhausted");
+    requireTaskMemory(services_);
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
+    task->name = runtime::taskDisplayName(name);
+    task->programExecutionActive = true;
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes,
+        services_.systemInfo, services_.music);
     const TaskId id = task->id;
     tasks_.push_back(std::move(task));
     if (windowMode_ == runtime::WindowMode::Isolated)
@@ -200,16 +222,22 @@ TaskId SessionScheduler::launch(std::string source, std::ostream& output) {
     return id;
 }
 
-TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) {
+TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output,
+                                      std::string name) {
     if (nextId_ == 0) throw std::overflow_error("scheduler task IDs exhausted");
+    requireTaskMemory(services_);
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(source);
+    task->name = runtime::taskDisplayName(name);
+    task->programExecutionActive = true;
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes,
+        services_.systemInfo, services_.music);
+    task->interpreter->setPersistentSessionResources(true);
     task->interactive = true;
     task->hasPendingSource = true;
     const TaskId id = task->id;
@@ -220,7 +248,7 @@ TaskId SessionScheduler::launchWorker(std::string source, std::ostream& output) 
 }
 
 TaskId SessionScheduler::launchAndWait(std::string source, std::ostream& output,
-                                       TaskId parentId) {
+                                       TaskId parentId, std::string name) {
     Task* parent = nullptr;
     for (auto& task : tasks_)
         if (task->id == parentId) parent = task.get();
@@ -231,13 +259,15 @@ TaskId SessionScheduler::launchAndWait(std::string source, std::ostream& output,
     if (parent->waitingChildId != 0)
         throw runtime::Error(runtime::ErrorCode::InvalidTaskState,
                              "caller is already waiting for a child task");
-    const TaskId childId = launch(std::move(source), output);
+    const TaskId childId = launch(std::move(source), output, std::move(name));
     Task* child = tasks_.back().get();
     parent->waitingChildId = childId;
     child->waitingParentId = parentId;
     child->priority = parent->priority;
     child->resumePriority = parent->resumePriority;
     focusedTaskId_ = childId;
+    if (services_.graphics)
+        services_.graphics->raiseWindows(child->interpreter->graphicsSessionId());
     return childId;
 }
 
@@ -247,11 +277,14 @@ TaskId SessionScheduler::launchInteractive(std::ostream& output,
     auto task = std::make_unique<Task>();
     task->id = nextId_++;
     task->source = std::move(initialProgram);
+    task->programExecutionActive = !task->source.empty();
     task->output = &output;
     task->interpreter = std::make_unique<Interpreter>(
         services_.storage, services_.channels, services_.ui, services_.graphics,
         services_.network, services_.memory, taskControl_, task->id,
-        services_.systemControl, services_.cpuFrequency);
+        services_.systemControl, services_.cpuFrequency, services_.displayModes,
+        services_.systemInfo, services_.music);
+    task->interpreter->setPersistentSessionResources(true);
     task->interactive = true;
     task->supervisor = true;
     task->hasPendingSource = !task->source.empty();
@@ -290,6 +323,17 @@ std::optional<InteractiveLineEdit> SessionScheduler::takePendingLineEdit(
     return std::nullopt;
 }
 
+std::optional<InteractiveLineEdit> SessionScheduler::navigateProgramEdit(
+    TaskId id, int currentLine, int direction) {
+    for (auto& current : tasks_) {
+        if (current->id != id || !current->interactive ||
+            current->status != TaskStatus::WaitingInput || !current->interpreter)
+            continue;
+        return current->interpreter->navigateProgramEdit(currentLine, direction);
+    }
+    return std::nullopt;
+}
+
 bool SessionScheduler::logon(TaskId id) {
     for (const auto& current : tasks_) {
         if (current->id != id || current->supervisor || !current->interactive ||
@@ -308,6 +352,53 @@ TaskId SessionScheduler::logoff() {
 
 TaskId SessionScheduler::focusedTask() const noexcept {
     return focusedTaskId_ != 0 ? focusedTaskId_ : supervisorId_;
+}
+
+bool SessionScheduler::focusNextTask() {
+    Task* first = nullptr;
+    Task* current = nullptr;
+    Task* next = nullptr;
+    bool afterCurrent = false;
+    const auto isActive = [](const Task& task) {
+        return task.status != TaskStatus::Completed &&
+               task.status != TaskStatus::Failed &&
+               task.status != TaskStatus::Cancelled;
+    };
+
+    for (auto& task : tasks_) {
+        if (!isActive(*task)) continue;
+        if (!first) first = task.get();
+        if (afterCurrent) {
+            next = task.get();
+            break;
+        }
+        if (task->id == focusedTask()) {
+            current = task.get();
+            afterCurrent = true;
+        }
+    }
+    if (!first) return false;
+    if (!next) next = first;
+    if (next == current || (current == nullptr && next->id == focusedTask()))
+        return false;
+
+    focusedTaskId_ = next->id;
+    if (services_.graphics && next->interpreter)
+        services_.graphics->raiseWindows(next->interpreter->graphicsSessionId());
+    return true;
+}
+
+std::size_t SessionScheduler::focusedTaskNumber() const noexcept {
+    std::size_t number = 0;
+    for (const auto& current : tasks_) {
+        if (current->status == TaskStatus::Completed ||
+            current->status == TaskStatus::Failed ||
+            current->status == TaskStatus::Cancelled)
+            continue;
+        ++number;
+        if (current->id == focusedTask()) return number;
+    }
+    return 0;
 }
 
 bool SessionScheduler::suspendTask(TaskId id) noexcept {
@@ -642,6 +733,11 @@ bool SessionScheduler::setWindowMode(runtime::WindowMode mode) {
     return true;
 }
 
+bool SessionScheduler::displayGeometryChanged() {
+    if (windowMode_ == runtime::WindowMode::Shared) return true;
+    return reflowIsolatedViewports(false);
+}
+
 std::string SessionScheduler::takeError(TaskId id) {
     for (auto& current : tasks_)
         if (current->id == id) {
@@ -674,6 +770,9 @@ bool SessionScheduler::tick() {
                 parent.started = true;
                 parent.status = TaskStatus::Runnable;
                 focusedTaskId_ = parent.id;
+                if (services_.graphics && parent.interpreter)
+                    services_.graphics->raiseWindows(
+                        parent.interpreter->graphicsSessionId());
             }
             break;
         }
@@ -737,9 +836,21 @@ bool SessionScheduler::tick() {
     Task& current = *selectedTask;
     const bool submittedInteractiveCommand =
         current.interactive && current.interactiveSubmission;
+    const auto resetGraphicsUpdateState = [&] {
+        if (!current.programExecutionActive) return;
+        current.programExecutionActive = false;
+        if (!services_.graphics || !current.interpreter) return;
+        try {
+            services_.graphics->resetUpdateState(
+                current.interpreter->graphicsSessionId());
+        } catch (...) {
+            // Returning control to the console must survive display failures.
+        }
+    };
     const auto handleFailure = [&](std::string message, runtime::ErrorCode code,
-                                   std::string detail) {
-        const bool outOfMemory = code == runtime::ErrorCode::OutOfMemory;
+                                   std::string detail, bool refusal = false) {
+        resetGraphicsUpdateState();
+        const bool outOfMemory = code == runtime::ErrorCode::OutOfMemory && !refusal;
         if (outOfMemory) {
             if (services_.memory) (void)services_.memory->releaseEmergencyReserve();
             std::string{}.swap(current.error);
@@ -767,6 +878,7 @@ bool SessionScheduler::tick() {
         } else {
             removeFromSchedule(current);
             current.status = TaskStatus::Failed;
+            if (services_.music) services_.music->stopSession(current.id);
             if (current.interpreter)
                 current.interpreter->discardGraphicsResources();
             current.interpreter.reset();
@@ -812,12 +924,14 @@ bool SessionScheduler::tick() {
             current.pendingInteractiveTail =
                 current.interpreter->takePendingInteractiveTail();
             current.hasPendingSource = !current.source.empty();
+            current.programExecutionActive = true;
             current.started = false;
             current.status = current.hasPendingSource ? TaskStatus::Runnable :
                                                         TaskStatus::WaitingInput;
             return true;
         }
         if (result == ExecutionStatus::ProgramStopped) {
+            resetGraphicsUpdateState();
             current.started = false;
             removeFromSchedule(current);
             if (current.interactive) {
@@ -833,6 +947,7 @@ bool SessionScheduler::tick() {
                     current.releaseSource();
                 }
             } else {
+                if (services_.music) services_.music->stopSession(current.id);
                 current.status = TaskStatus::Completed;
                 current.releaseSource();
                 current.interpreter.reset();
@@ -841,6 +956,7 @@ bool SessionScheduler::tick() {
             return true;
         }
         if (result == ExecutionStatus::Completed) {
+            resetGraphicsUpdateState();
             current.started = false;
             removeFromSchedule(current);
             if (current.interactive) {
@@ -851,17 +967,14 @@ bool SessionScheduler::tick() {
                     current.interactiveSubmission = true;
                     current.status = TaskStatus::Runnable;
                 } else {
-                    // A worker remains a live interactive session after its
-                    // startup source completes. Keep its windows and channels
-                    // available while it waits for LOGON. The supervisor's
-                    // one-shot startup program can release graphics resources;
-                    // submitted REPL commands already keep the session alive.
-                    if (current.supervisor && !submittedInteractiveCommand)
-                        current.interpreter->releaseGraphicsResources();
+                    // Interactive sessions remain alive at the prompt, so
+                    // their opened channels and configured windows remain
+                    // available until explicitly closed or the session ends.
                     current.status = TaskStatus::WaitingInput;
                     current.releaseSource();
                 }
             } else {
+                if (services_.music) services_.music->stopSession(current.id);
                 current.status = TaskStatus::Completed;
                 current.releaseSource();
                 current.interpreter.reset();
@@ -889,9 +1002,10 @@ bool SessionScheduler::tick() {
             current.status = TaskStatus::Runnable;
         }
     } catch (const runtime::Error& error) {
-        handleFailure(error.what(), error.code(), error.detail());
+        handleFailure(error.what(), error.code(), error.detail(), error.memoryRefusal());
     } catch (const runtime::ServiceError& error) {
-        handleFailure(error.what(), error.languageCode(), error.detail());
+        handleFailure(error.what(), error.languageCode(), error.detail(),
+                      error.code() == runtime::ServiceErrorCode::OutOfMemory);
     } catch (const std::bad_alloc& error) {
         handleFailure(error.what(), runtime::ErrorCode::OutOfMemory, error.what());
     } catch (const std::invalid_argument& error) {
@@ -917,7 +1031,17 @@ bool SessionScheduler::cancel(TaskId id) {
         if (task->id != id || task->status == TaskStatus::Completed ||
             task->status == TaskStatus::Failed || task->status == TaskStatus::Cancelled)
             continue;
+        if (task->programExecutionActive && services_.graphics && task->interpreter) {
+            try {
+                services_.graphics->resetUpdateState(
+                    task->interpreter->graphicsSessionId());
+            } catch (...) {
+                // Cancellation must still release the session if presentation fails.
+            }
+            task->programExecutionActive = false;
+        }
         if (task->interpreter) task->interpreter->discardGraphicsResources();
+        if (services_.music) services_.music->stopSession(task->id);
         task->interpreter.reset();
         removeFromSchedule(*task);
         task->releaseSource();
@@ -972,7 +1096,11 @@ bool SessionScheduler::kill(TaskId id) {
             tasks_.erase(task);
             return true;
         }
-        return cancel(id);
+        const bool awaited = (*task)->waitingParentId != 0;
+        if (!cancel(id)) return false;
+        // A killed task nobody is waiting on has no result to keep, so drop its record now.
+        if (!awaited) (void)reap(id);
+        return true;
     }
     return false;
 }
@@ -1001,6 +1129,7 @@ std::optional<TaskInfo> SessionScheduler::task(TaskId id) const {
                             current->priority, current->resumePriority,
                             current->paused,
                             current->interpreter ? current->interpreter->openChannelCount() : 0};
+            info.name = current->name;
             if (services_.graphics && current->interpreter)
                 info.viewport = services_.graphics->taskViewport(
                     current->interpreter->graphicsSessionId());
@@ -1019,6 +1148,7 @@ std::vector<TaskInfo> SessionScheduler::tasks() const {
                           current->priority, current->resumePriority,
                           current->paused,
                           current->interpreter ? current->interpreter->openChannelCount() : 0};
+        info.name = current->name;
         if (services_.graphics && current->interpreter)
             info.viewport = services_.graphics->taskViewport(
                 current->interpreter->graphicsSessionId());

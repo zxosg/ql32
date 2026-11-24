@@ -40,6 +40,15 @@ struct FileEntry {
     bool isDirectory = false;
 };
 
+struct StorageSpace {
+    std::uint64_t total = 0;
+    std::uint64_t used = 0;
+    std::uint64_t free = 0;
+    // Bytes of free space a writer cannot use (e.g. SPIFFS GC reserve).
+    std::uint64_t reserve = 0;
+    bool known = false;
+};
+
 class TextStreamSink {
 public:
     virtual ~TextStreamSink() = default;
@@ -58,6 +67,17 @@ public:
     virtual std::uint64_t size() const noexcept = 0;
     virtual std::size_t readAt(std::uint64_t offset, std::uint8_t* destination,
                                std::size_t capacity) = 0;
+};
+
+// Incremental binary writer. Adapters return one so a long copy can be split
+// into bounded slices instead of one blocking call. close() makes the data
+// durable and must be called exactly once on success; destroying the handle
+// without close() abandons the file (the caller removes it).
+class StorageWriteHandle {
+public:
+    virtual ~StorageWriteHandle() = default;
+    virtual void write(const std::uint8_t* data, std::size_t size) = 0;
+    virtual void close() = 0;
 };
 
 class MemoryStorageReadHandle final : public StorageReadHandle {
@@ -87,6 +107,11 @@ public:
         (void)path;
         throw ServiceError(ServiceErrorCode::Unavailable,
                            "storage: bounded random-access reads are unavailable");
+    }
+    virtual std::unique_ptr<StorageWriteHandle> openWrite(const std::string& path) {
+        (void)path;
+        throw ServiceError(ServiceErrorCode::Unavailable,
+                           "storage: incremental writes are unavailable");
     }
     virtual void writeText(const std::string& path, const std::string& contents) = 0;
     // Adapters override this to stream chunks without assembling the complete
@@ -156,9 +181,16 @@ public:
     virtual std::uintmax_t size(const std::string& path) = 0;
     virtual void rename(const std::string& path, const std::string& newPath) = 0;
     virtual void remove(const std::string& path) = 0;
+    // Creates one directory; the parent must exist. Flat filesystems may succeed
+    // without creating anything because a directory exists once it holds files.
+    virtual void createDirectory(const std::string&) {
+        throw ServiceError(ServiceErrorCode::Unavailable, "storage: directory creation unavailable");
+    }
     virtual void removeDirectory(const std::string&) {
         throw ServiceError(ServiceErrorCode::Unavailable, "storage: directory removal unavailable");
     }
+    // Capacity of the drive that holds path; known=false when unsupported.
+    virtual StorageSpace space(const std::string&) { return {}; }
     virtual void format(const std::string&) {
         throw ServiceError(ServiceErrorCode::Unavailable, "storage: format unavailable");
     }

@@ -2,7 +2,9 @@ REM Animated attractor ported from the supplied p5.js sketch.
 REM Uses the target's full graphics window and its QL eight-color palette.
 REM PLOT draws one pixel in the current ink color.
 REM Set rowStep=2 and sampleStep=1 for the source sketch's full point density.
+REM SINGLE is the faster measured default; see attractor-double.bas for DOUBLE.
 
+CONST KOptMathDouble = 0
 CONST KOptMathSingle = 1
 CONST KEspCpuFreq240 = 240
 OPTION KOptMathSingle
@@ -26,10 +28,13 @@ REPeat animation
   FOR i = 1 TO 50 STEP rowStep
     inkIndex = (c - 1) MOD 7 + 1
     INK inkIndex
+    rowAngle = r * i
     FOR j = 1 TO 50 STEP sampleStep
       REM j controls sample count; the recurrence intentionally advances each point.
-      u = SIN(i + v) + SIN(r * i + x)
-      v = COS(i + v) + COS(r * i + x)
+      angleV = i + v
+      angleX = rowAngle + x
+      u = SIN(angleV) + SIN(angleX)
+      v = COS(angleV) + COS(angleX)
       x = u + t
       px = INT(cx + u * sc)
       py = INT(cy + v * sc)

@@ -3,6 +3,7 @@
 #include "execution_state.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -86,7 +87,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             validTarget(instruction, instruction.target);
             break;
         case Op::ForInit:
-            if (instruction.forItems.empty()) invalid(instruction, "FOR has no range items");
+            if (instruction.extra().forItems.empty()) invalid(instruction, "FOR has no range items");
             validTarget(instruction, instruction.target);
             break;
         case Op::ForNext:
@@ -96,7 +97,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Call:
             if (!instruction.builtin && instruction.target >= code.size())
                 invalid(instruction, "call target is invalid");
-            if (!instruction.builtin && instruction.parameters.size() != instruction.argCount)
+            if (!instruction.builtin && instruction.extra().parameters.size() != instruction.argCount())
                 invalid(instruction, "call argument metadata is inconsistent");
             break;
         case Op::DimArray:
@@ -105,7 +106,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             if (instruction.rank == 0) invalid(instruction, "array rank must be positive");
             break;
         case Op::SelectMatch:
-            if (instruction.selectItems.empty()) invalid(instruction, "SELECT arm is empty");
+            if (instruction.extra().selectItems.empty()) invalid(instruction, "SELECT arm is empty");
             break;
         case Op::Push:
         case Op::PushArrayRef:
@@ -134,11 +135,15 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::PrintChannel:
         case Op::PrintStyle:
         case Op::PrintSeparator:
+        case Op::PrintCommit:
         case Op::PrintEnd:
         case Op::PrintBegin:
         case Op::At:
         case Op::ChannelDefault:
         case Op::ChannelRoute:
+        case Op::ChannelMirror:
+        case Op::ChannelMirrorDelete:
+        case Op::ChannelMirrorList:
         case Op::ChannelSeek:
         case Op::ChannelRead:
         case Op::ChannelWrite:
@@ -149,6 +154,8 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::TrapEnd:
         case Op::Raise:
         case Op::Pause:
+        case Op::Beep:
+        case Op::Volume:
         case Op::Return:
         case Op::FunctionEnd:
         case Op::SelectBegin:
@@ -238,7 +245,13 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             consumed = 1;
             break;
         case Op::ChannelRoute:
+        case Op::ChannelMirror:
             consumed = 2;
+            break;
+        case Op::ChannelMirrorDelete:
+            consumed = 1;
+            break;
+        case Op::ChannelMirrorList:
             break;
         case Op::ChannelSeek:
         case Op::ChannelRead:
@@ -262,15 +275,29 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             break;
         case Op::Raise:
         case Op::Pause:
+        case Op::Volume:
             consumed = 1;
             break;
+        case Op::Beep:
+            consumed = instruction.argCount();
+            break;
+        case Op::MusicPlay:
+        case Op::MusicWav:
+            consumed = 1;
+            break;
+        case Op::MusicTest:
+        case Op::MusicStop:
+        case Op::MusicPause:
+        case Op::MusicResume:
+        case Op::MusicStatus:
+            break;
         case Op::ForInit:
-            for (const ForItemSpec& item : instruction.forItems)
+            for (const ForItemSpec& item : instruction.extra().forItems)
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd) +
                             static_cast<std::size_t>(item.hasStep);
             break;
         case Op::Call:
-            consumed = instruction.argCount;
+            consumed = instruction.argCount();
             produced = instruction.expectsValue ? 1 : 0;
             break;
         case Op::Return:
@@ -292,7 +319,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
             consumed = instruction.rank + 1;
             break;
         case Op::SelectMatch:
-            for (const SelectItemSpec& item : instruction.selectItems)
+            for (const SelectItemSpec& item : instruction.extra().selectItems)
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd);
             produced = 1;
             break;
@@ -304,6 +331,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::ExitLoop:
         case Op::FunctionEnd:
         case Op::PrintSeparator:
+        case Op::PrintCommit:
         case Op::PrintEnd:
         case Op::PrintBegin:
         case Op::SelectEnd:
@@ -344,6 +372,27 @@ double numeric(const Value& value, const Instruction& at) {
     const std::string detail = "line " + std::to_string(line) + ", column " +
                                std::to_string(at.column) + ": " + message;
     throw runtime::Error(runtime::errorCodeForMessage(detail), detail);
+}
+
+// Waveform is a number 0..4 or a case-insensitive name.
+runtime::ToneWaveform waveformArgument(const Value& value, const Instruction& at) {
+    using runtime::ToneWaveform;
+    if (const auto* number = std::get_if<double>(&value)) {
+        if (std::isfinite(*number) && std::trunc(*number) == *number &&
+            *number >= 0 && *number <= 4)
+            return static_cast<ToneWaveform>(static_cast<int>(*number));
+    } else if (const auto* text = std::get_if<std::string>(&value)) {
+        std::string upper;
+        for (const char c : *text)
+            upper.push_back(c >= 'a' && c <= 'z' ? static_cast<char>(c - 32) : c);
+        if (upper == "SQUARE") return ToneWaveform::Square;
+        if (upper == "SINE") return ToneWaveform::Sine;
+        if (upper == "TRIANGLE") return ToneWaveform::Triangle;
+        if (upper == "SAW" || upper == "SAWTOOTH" || upper == "/|")
+            return ToneWaveform::SawtoothRising;
+        if (upper == "SAWDOWN" || upper == "|\\") return ToneWaveform::SawtoothFalling;
+    }
+    runtimeError(at, "BEEP waveform must be 0-4 or SQUARE, SINE, TRIANGLE, SAW, SAWDOWN");
 }
 
 std::size_t utf8Length(const std::string& text) {
@@ -501,6 +550,10 @@ const char* opcodeName(Op op) {
     case Op::PrintChannel: return "PRINT_CHANNEL"; case Op::PrintStyle: return "PRINT_STYLE";
     case Op::Print: return "PRINT";
     case Op::PrintSeparator: return "PRINT_SEPARATOR"; case Op::PrintEnd: return "PRINT_END";
+    case Op::PrintCommit: return "PRINT_COMMIT";
+    case Op::ChannelMirror: return "CHANNEL_MIRROR";
+    case Op::ChannelMirrorDelete: return "CHANNEL_MIRROR_DELETE";
+    case Op::ChannelMirrorList: return "CHANNEL_MIRROR_LIST";
     case Op::ChannelDefault: return "CHANNEL_DEFAULT"; case Op::ChannelRoute: return "CHANNEL_ROUTE";
     case Op::ChannelSeek: return "CHANNEL_SEEK"; case Op::ChannelRead: return "CHANNEL_READ";
     case Op::ChannelWrite: return "CHANNEL_WRITE"; case Op::Read: return "READ";
@@ -508,6 +561,15 @@ const char* opcodeName(Op op) {
     case Op::Input: return "INPUT";
     case Op::At: return "AT";
     case Op::Pause: return "PAUSE";
+    case Op::Beep: return "BEEP";
+    case Op::Volume: return "VOLUME";
+    case Op::MusicPlay: return "MUSIC_PLAY";
+    case Op::MusicWav: return "MUSIC_WAV";
+    case Op::MusicTest: return "MUSIC_TEST";
+    case Op::MusicStop: return "MUSIC_STOP";
+    case Op::MusicPause: return "MUSIC_PAUSE";
+    case Op::MusicResume: return "MUSIC_RESUME";
+    case Op::MusicStatus: return "MUSIC_STATUS";
     case Op::JumpIfFalse: return "JUMP_IF_FALSE"; case Op::Jump: return "JUMP";
     case Op::ForInit: return "FOR_INIT"; case Op::ForNext: return "FOR_NEXT";
     case Op::LoopNext: return "LOOP_NEXT"; case Op::ExitLoop: return "EXIT_LOOP";
@@ -637,15 +699,17 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
                                           std::size_t instructionBudget,
                                           runtime::CancellationToken stop) {
     if (hasPendingInteractivePager()) return resumeInteractivePager(output);
+    if (hasPendingFileJob()) return resumeFileJob(output);
     if (!execution_) throw std::runtime_error("interpreter has no suspended execution");
     if (instructionBudget == 0)
         throw std::invalid_argument("instruction budget must be positive");
+    const bool keepChannels = execution_->interactiveSubmission;
     try {
         const auto status = runExecution(output, stop, instructionBudget);
         if (status == ExecutionStatus::Completed) {
             if (ui_) ui_->clearBusy(session_id_);
             execution_.reset();
-            closeExecutionChannels();
+            if (!keepChannels) closeExecutionChannels();
         } else if (status == ExecutionStatus::ProgramStopped) {
             stoppedExecution_ = std::move(execution_);
         }
@@ -653,32 +717,32 @@ ExecutionStatus Interpreter::resumeSlice(std::ostream& output,
     } catch (const runtime::Error& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(error.code(), error.detail());
         throw;
     } catch (const runtime::ServiceError& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(error.languageCode(), error.detail());
         throw;
     } catch (const std::bad_alloc&) {
         if (memory_) (void)memory_->releaseEmergencyReserve();
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(runtime::ErrorCode::OutOfMemory, {});
         throw std::runtime_error("out of memory resuming BASIC program");
     } catch (const std::exception& error) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(runtime::errorCodeFor(error), runtime::extendedErrorText(error));
         throw;
     } catch (...) {
         if (ui_) ui_->cancelSession(session_id_);
         execution_.reset();
-        closeExecutionChannels();
+        if (!keepChannels) closeExecutionChannels();
         setErrorContext(runtime::ErrorCode::GeneralFailure, "unknown BASIC execution failure");
         throw;
     }
@@ -915,36 +979,47 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             offset += dimensionIndex * stride;
             stride *= array.lengths[i];
         }
-        array.values[offset] = std::move(value);
+        array.set(offset, std::move(value));
     };
     auto writePrintText = [&](const std::string& text, const Instruction& at) {
         if (state.printChannel == 0) {
-            output << text;
             output_column_ += utf8Length(text);
         } else if (state.printChannel == 1) {
-            if (graphics_) graphics_->writeText(session_id_, text);
-            else {
-                output << text;
-                output_column_ += utf8Length(text);
-            }
+            if (!graphics_) output_column_ += utf8Length(text);
             state.printChannelColumn += utf8Length(text);
+        } else if (!channels_) {
+            runtimeError(at, "channel output is unavailable");
         } else {
-            if (!channels_) runtimeError(at, "channel output is unavailable");
-            const auto opened = channels_->listOpen(session_id_);
-            const auto endpoint = std::find_if(opened.begin(), opened.end(),
-                [&](const runtime::ChannelInfo& info) {
-                    return info.handle == state.printChannel;
-                });
-            if (endpoint != opened.end() && endpoint->type == runtime::ChannelType::Window) {
-                if (!graphics_) runtimeError(at, "screen output is unavailable");
-                graphics_->writeText(session_id_, state.printChannel, text);
-            } else {
-                channels_->write(session_id_, state.printChannel, text);
-            }
+            // Routed channels (serial, file) track the column within the
+            // current PRINT statement so ! and , behave like other channels.
+            std::size_t& column = state.routedColumns[state.printChannel];
+            const auto newline = text.rfind('\n');
+            column = newline == std::string::npos ? column + utf8Length(text)
+                                                  : utf8Length(text.substr(newline + 1));
         }
+        emitText(output, state.printChannel, text);
+    };
+    auto selectPrintBatch = [&](runtime::ChannelId channel) {
+        if (!graphics_) return;
+        if (state.printBatchChannel) {
+            graphics_->endTextOutputBatch(session_id_, *state.printBatchChannel);
+            state.printBatchChannel.reset();
+        }
+        // Channel 0 also batches its screen-console invalidations through the
+        // graphics service, while preserving immediate writes to the serial
+        // stream. Other adapters may treat this as a no-op.
+        graphics_->beginTextOutputBatch(session_id_, channel);
+        state.printBatchChannel = channel;
+    };
+    auto finishPrintBatch = [&]() {
+        if (!graphics_ || !state.printBatchChannel) return;
+        graphics_->endTextOutputBatch(session_id_, *state.printBatchChannel);
+        state.printBatchChannel.reset();
     };
     auto printColumn = [&]() -> std::size_t& {
-        return state.printChannel == 0 ? output_column_ : state.printChannelColumn;
+        if (state.printChannel == 0) return output_column_;
+        if (state.printChannel == 1) return state.printChannelColumn;
+        return state.routedColumns[state.printChannel];
     };
     auto resolveArrayName = [&](const Instruction& instruction) {
         std::string name = instruction.name;
@@ -967,9 +1042,14 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
              value < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
              value > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
             runtimeError(instruction, "Int32 value out of range");
-        if (!callFrames.empty() && callFrames.back().locals.count(instruction.name))
-            callFrames.back().locals[instruction.name] = value;
-        else variables_[instruction.name] = value;
+        if (!callFrames.empty()) {
+            const auto local = callFrames.back().locals.find(instruction.name);
+            if (local != callFrames.back().locals.end()) {
+                local->second = value;
+                return;
+            }
+        }
+        variables_[instruction.name] = value;
     };
     auto rangeContains = [](const ForRange& range, double value) {
         if (range.single) return true;
@@ -1050,6 +1130,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
         state.pendingUiRequest.reset();
         state.pendingUiBuilderHandle = 0;
     }
+    constexpr std::size_t PrintLineBudgetCost = 48;
     std::size_t instructionsExecuted = 0;
     while (pc < code.size()) {
         if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
@@ -1117,8 +1198,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             return ExecutionStatus::ProgramStopped;
         case Op::Call: {
             if (state.diagnosticsEnabled && !instruction.builtin) ++state.procedureCalls;
-            std::vector<StackEntry> arguments(instruction.argCount);
-            for (std::size_t i = instruction.argCount; i-- > 0;)
+            std::vector<StackEntry> arguments(instruction.argCount());
+            for (std::size_t i = instruction.argCount(); i-- > 0;)
                 arguments[i] = popEntry();
             std::optional<runtime::ChannelId> selectedChannel;
             if (instruction.channelArgument) {
@@ -1132,6 +1213,115 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 arguments.erase(arguments.begin());
             }
             if (instruction.builtin) {
+                if (instruction.name == "TILE") {
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "session supervisor unavailable");
+                    const auto tasks = taskControl_->listTasks();
+                    const auto self = std::find_if(tasks.begin(), tasks.end(),
+                        [this](const runtime::ManagedTaskInfo& task) {
+                            return task.id == task_id_;
+                        });
+                    if (self == tasks.end() || !self->supervisor)
+                        runtimeError(instruction, "TILE is supervisor-only");
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    if (!graphics_->tileWindows())
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "window tiling is unsupported");
+                } else if (instruction.name == "MODE") {
+                    if (!displayModes_ || !graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "display mode service unavailable");
+                    const auto integerArgument = [&](std::size_t index) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number || !std::isfinite(*number) ||
+                            std::trunc(*number) != *number || *number < 0 ||
+                            *number > static_cast<double>(
+                                std::numeric_limits<std::uint32_t>::max()))
+                            runtimeError(instruction,
+                                "MODE arguments must be nonnegative 32-bit integers");
+                        return static_cast<std::uint32_t>(*number);
+                    };
+
+                    if (instruction.expectsValue) {
+                        if (arguments.size() != 1)
+                            runtimeError(instruction, "MODE query expects one selector");
+                        const auto selector = integerArgument(0);
+                        const auto current = displayModes_->currentDisplayMode();
+                        if (selector == 0)
+                            pushValue(static_cast<double>(current.id));
+                        else if (selector == 1)
+                            pushValue(static_cast<double>(current.options));
+                        else
+                            runtimeError(instruction,
+                                "MODE selector must be KModeCurrent or KModeOptions");
+                        break;
+                    }
+
+                    if (!taskControl_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "session supervisor unavailable");
+                    const auto tasks = taskControl_->listTasks();
+                    const auto self = std::find_if(tasks.begin(), tasks.end(),
+                        [this](const runtime::ManagedTaskInfo& task) {
+                            return task.id == task_id_;
+                        });
+                    if (self == tasks.end() || !self->supervisor)
+                        runtimeError(instruction, "MODE is supervisor-only");
+
+                    if (arguments.empty() || arguments.size() > 2)
+                        runtimeError(instruction,
+                            "MODE statement expects mode id and optional options");
+                    const auto modeId = integerArgument(0);
+                    const auto previousMode = displayModes_->currentDisplayMode();
+                    const auto options = arguments.size() > 1 ? integerArgument(1) :
+                        previousMode.options;
+                    const auto previousSize = graphics_->displaySize();
+                    if (memory_) {
+                        for (const auto& mode : displayModes_->availableModes()) {
+                            if (mode.id != modeId) continue;
+                            if (const auto failure = memory_->displayModeFailure(
+                                    previousSize.first, previousSize.second, mode.width,
+                                    mode.height, mode.name))
+                                throw runtime::Error::memoryRefused(*failure);
+                        }
+                    }
+                    const auto applied = displayModes_->setMode(modeId, options);
+                    bool viewportsRetiled = true;
+                    try {
+                        if (!graphics_->setDisplaySize(applied.width, applied.height))
+                            throw std::runtime_error(
+                                "graphics service cannot change display geometry");
+                        if (previousSize.first == applied.width &&
+                            previousSize.second == applied.height &&
+                            (previousMode.id != applied.id ||
+                             previousMode.options != applied.options))
+                            graphics_->update(session_id_);
+                        viewportsRetiled = taskControl_->displayGeometryChanged();
+                    } catch (...) {
+                        try {
+                            (void)displayModes_->setMode(previousMode.id,
+                                                         previousMode.options);
+                        } catch (...) {}
+                        try {
+                            (void)graphics_->setDisplaySize(previousSize.first,
+                                                            previousSize.second);
+                        } catch (...) {}
+                        throw;
+                    }
+                    const bool discarded = graphics_->lastDisplayResizeDiscardedWindows();
+                    writePrintText("Display mode set to " + applied.name + " (" +
+                        std::to_string(applied.width) + "x" +
+                        std::to_string(applied.height) + "); " +
+                        (discarded ? "window contents cleared.\n" :
+                                     "window contents preserved where possible.") +
+                        (viewportsRetiled ? "\n" :
+                            " Task viewports could not be retiled.\n"),
+                        instruction);
+                    break;
+                }
                 if (instruction.name == "INKEY" || instruction.name == "INKEY$") {
                     const auto* timeout = arguments.empty() ? nullptr : std::get_if<double>(&arguments[0]);
                     if (!arguments.empty() && !timeout)
@@ -1174,7 +1364,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     }
                     const std::string source = storage_->readText(*path);
                     const runtime::TaskId id = taskControl_->startTask(
-                        source, output, task_id_, flags);
+                        source, output, task_id_, flags, *path);
                     setErrorContext(runtime::ErrorCode::None);
                     if (instruction.expectsValue) {
                         pushValue(static_cast<double>(id));
@@ -1314,7 +1504,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         *numericCode >= std::ldexp(1.0, 63))
                         runtimeError(instruction, "ERR$ error code is out of range");
                     const auto value = static_cast<std::int64_t>(*numericCode);
-                    if (value < 0 || value > 21)
+                    if (value < 0 || value > static_cast<std::int64_t>(runtime::ErrorCode::ResourceBusy))
                         pushValue("Unknown QL/32 error code " + std::to_string(value));
                     else
                         pushValue(std::string(runtime::errorText(
@@ -1414,6 +1604,20 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     else
                         result = std::floor(*number);
                     pushValue(result);
+                    break;
+                }
+                if (instruction.name == "RGB") {
+                    std::uint32_t packed = 0;
+                    for (std::size_t index = 0; index < 3; ++index) {
+                        const auto* component = std::get_if<double>(&arguments[index]);
+                        if (!component || !std::isfinite(*component) ||
+                            std::trunc(*component) != *component ||
+                            *component < 0 || *component > 255)
+                            runtimeError(instruction,
+                                "RGB components must be integers in range 0..255");
+                        packed = (packed << 8) | static_cast<std::uint32_t>(*component);
+                    }
+                    pushValue(static_cast<double>(packed));
                     break;
                 }
                 if (instruction.name == "BAND" || instruction.name == "BOR" ||
@@ -1752,11 +1956,12 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         std::string values = std::to_string(memory_->freeBytes());
                         if (const auto info = memory_->fragmentationInfo()) {
                             values += "," + std::to_string(info->largestFreeBlockBytes) +"," +
-                                      std::to_string(info->freeBlockCount);
+                                      std::to_string(info->freeBlockCount) + "," +
+                                      std::to_string(info->allocatedBlockCount);
                         } else {
                             // Preserve CSV column positions on platforms that
                             // cannot report allocator fragmentation details.
-                            values += ",,";
+                            values += ",,,";
                         }
                         pushValue(std::move(values));
                         break;
@@ -1764,8 +1969,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     std::uint64_t selector = 0;
                     const auto* number = std::get_if<double>(&arguments[0]);
                     if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
-                        *number < 0 || *number > 2)
-                        runtimeError(instruction, "FREE selector must be 0, 1, or 2");
+                        *number < 0 || *number > 3)
+                        runtimeError(instruction, "FREE selector must be 0, 1, 2, or 3");
                     selector = static_cast<std::uint64_t>(*number);
                     if (selector == 0) {
                         pushValue(static_cast<double>(memory_->freeBytes()));
@@ -1775,9 +1980,15 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                             throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                 "heap fragmentation metrics unavailable on this platform");
                         const auto value = selector == 1 ? info->largestFreeBlockBytes :
-                                                           info->freeBlockCount;
+                                           selector == 2 ? info->freeBlockCount :
+                                                           info->allocatedBlockCount;
                         pushValue(static_cast<double>(value));
                     }
+                    break;
+                }
+                if (instruction.name == "CPUFREQ") {
+                    pushValue(static_cast<double>(cpuFrequency_ ?
+                        cpuFrequency_->currentFrequencyMHz() : 0));
                     break;
                 }
                 if (instruction.name == "GETCHANNEL") {
@@ -1886,6 +2097,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     instruction.name == "GDEPTH" || instruction.name == "GORIGINX" ||
                     instruction.name == "GORIGINY" || instruction.name == "GROTATION" ||
                     instruction.name == "GPALETTESIZE" || instruction.name == "GPALETTE$" ||
+                    instruction.name == "GX" || instruction.name == "GY" ||
                     instruction.name == "ROTATE") {
                     if (!graphics_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -1916,6 +2128,10 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                             result[2 + i * 2] = hex[channels[i] & 0x0F];
                         }
                         pushValue(std::move(result));
+                    } else if (instruction.name == "GX" || instruction.name == "GY") {
+                        const auto position = graphics_->graphicsPosition(session_id_, 1);
+                        pushValue(static_cast<double>(instruction.name == "GX" ?
+                            position.x : position.y));
                     } else {
                         const auto info = graphics_->windowInfo(session_id_);
                         if (instruction.name == "GWIDTH") pushValue(static_cast<double>(info.width));
@@ -1974,15 +2190,15 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         break;
                     }
                     std::uint8_t ink = 0, paper = 7, displayMode = 0;
-                    for (std::size_t i = 0; i < instruction.optionCount; ++i) {
+                    for (std::size_t i = 0; i < instruction.optionCount(); ++i) {
                         const auto* option = std::get_if<double>(&arguments[i]);
                         if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
                             runtimeError(instruction, "BUSY style values must be integers");
-                        if (instruction.parameters[i] == "INK" ||
-                            instruction.parameters[i] == "PAPER") {
+                        if (instruction.extra().parameters[i] == "INK" ||
+                            instruction.extra().parameters[i] == "PAPER") {
                             if (*option < 0 || *option > 7)
                                 runtimeError(instruction, "BUSY ink and paper must be in 0..7");
-                            if (instruction.parameters[i] == "INK")
+                            if (instruction.extra().parameters[i] == "INK")
                                 ink = static_cast<std::uint8_t>(*option);
                             else paper = static_cast<std::uint8_t>(*option);
                         } else {
@@ -1991,7 +2207,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                             displayMode = static_cast<std::uint8_t>(*option);
                         }
                     }
-                    const auto textIndex = instruction.optionCount;
+                    const auto textIndex = instruction.optionCount();
                     const auto* text = std::get_if<std::string>(&arguments[textIndex]);
                     if (!text) runtimeError(instruction, "BUSY text must be a string");
                     int positionX = -1;
@@ -2023,15 +2239,15 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     if (!ui_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                            "UI service unavailable");
                     std::uint8_t ink = 0, paper = 7, displayMode = 0;
-                    for (std::size_t i = 0; i < instruction.optionCount; ++i) {
+                    for (std::size_t i = 0; i < instruction.optionCount(); ++i) {
                         const auto* option = std::get_if<double>(&arguments[i]);
                         if (!option || !std::isfinite(*option) || std::trunc(*option) != *option)
                             runtimeError(instruction, "IPRINT style values must be integers");
-                        if (instruction.parameters[i] == "INK" ||
-                            instruction.parameters[i] == "PAPER") {
+                        if (instruction.extra().parameters[i] == "INK" ||
+                            instruction.extra().parameters[i] == "PAPER") {
                             if (*option < 0 || *option > 7)
                                 runtimeError(instruction, "IPRINT ink and paper must be in 0..7");
-                            if (instruction.parameters[i] == "INK")
+                            if (instruction.extra().parameters[i] == "INK")
                                 ink = static_cast<std::uint8_t>(*option);
                             else paper = static_cast<std::uint8_t>(*option);
                         } else {
@@ -2040,7 +2256,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                             displayMode = static_cast<std::uint8_t>(*option);
                         }
                     }
-                    const auto textIndex = instruction.optionCount;
+                    const auto textIndex = instruction.optionCount();
                     const auto* text = std::get_if<std::string>(&arguments[textIndex]);
                     if (!text) runtimeError(instruction, "IPRINT text must be a string");
                     double durationSeconds = 3.0;
@@ -2090,6 +2306,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     };
                     const std::string title = textArgument(0);
                     const std::string message = textArgument(1);
+                    if (graphics_) graphics_->resetUpdateState(session_id_);
                     state.pendingUiKind = instruction.name == "ALERT" ?
                         ui::RequestKind::Alert : ui::RequestKind::Confirm;
                     state.pendingUiRequest = instruction.name == "ALERT" ?
@@ -2103,7 +2320,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     instruction.name == "DCHOICE" || instruction.name == "DCHECK" ||
                     instruction.name == "DBUTTONS" || instruction.name == "DIALOG" ||
                     instruction.name == "DGET" || instruction.name == "DGET$" ||
-                    instruction.name == "MCARD" || instruction.name == "MENU") {
+                    instruction.name == "MCARD" || instruction.name == "MENABLE" ||
+                    instruction.name == "MENU") {
                     const auto stringArgument = [&](std::size_t index) -> const std::string& {
                         if (const auto* value = std::get_if<std::string>(&arguments[index]))
                             return *value;
@@ -2251,6 +2469,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         } else {
                             if (!ui_) throw runtime::ServiceError(
                                 runtime::ServiceErrorCode::Unavailable, "UI service unavailable");
+                            if (graphics_) graphics_->resetUpdateState(session_id_);
                             dialog.hasResults = false;
                             state.pendingUiKind = ui::RequestKind::Dialog;
                             state.pendingUiBuilderHandle = handle;
@@ -2273,6 +2492,29 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                             if (item.commandId == id)
                                 runtimeError(instruction, "duplicate menu command ID");
                         found->second.items.push_back({id, stringArgument(2), stringArgument(3), true});
+                    } else if (instruction.name == "MENABLE") {
+                        const std::uint64_t handle = handleArgument(0);
+                        const auto found = uiSession_->menus.find(handle);
+                        if (found == uiSession_->menus.end())
+                            runtimeError(instruction, "unknown menu handle");
+                        const double rawId = numericArgument(1);
+                        if (!std::isfinite(rawId) || std::trunc(rawId) != rawId ||
+                            rawId < 1 || rawId > static_cast<double>(
+                                std::numeric_limits<std::uint32_t>::max()))
+                            runtimeError(instruction,
+                                "menu command ID must be a positive 32-bit integer");
+                        const double rawEnabled = numericArgument(2);
+                        if (!std::isfinite(rawEnabled) || std::trunc(rawEnabled) != rawEnabled ||
+                            (rawEnabled != 0 && rawEnabled != 1))
+                            runtimeError(instruction, "menu enabled flag must be 0 or 1");
+                        const auto id = static_cast<std::uint32_t>(rawId);
+                        const auto item = std::find_if(found->second.items.begin(),
+                            found->second.items.end(), [id](const ui::MenuItem& candidate) {
+                                return candidate.commandId == id;
+                            });
+                        if (item == found->second.items.end())
+                            runtimeError(instruction, "unknown menu command ID");
+                        item->enabled = rawEnabled == 1;
                     } else if (instruction.name == "MENU") {
                         if (!ui_) throw runtime::ServiceError(
                             runtime::ServiceErrorCode::Unavailable, "UI service unavailable");
@@ -2282,6 +2524,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                             runtimeError(instruction, "unknown menu handle");
                         found->second.hasResult = false;
                         found->second.selectedCommand = 0;
+                        if (graphics_) graphics_->resetUpdateState(session_id_);
                         state.pendingUiKind = ui::RequestKind::Menu;
                         state.pendingUiBuilderHandle = handle;
                         state.pendingUiRequest = ui_->beginMenu(
@@ -2296,6 +2539,18 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                                                     "graphics service unavailable");
                     if (arguments.empty()) {
                         graphics_->update(session_id_);
+                    } else if (arguments.size() == 2) {
+                        const auto* option = std::get_if<std::string>(&arguments[0]);
+                        const auto* frames = std::get_if<double>(&arguments[1]);
+                        if (!option || *option != "SKIP")
+                            runtimeError(instruction, "GUPDATE option must be SKIP");
+                        if (!frames || !std::isfinite(*frames) ||
+                            std::trunc(*frames) != *frames || *frames < 0 ||
+                            *frames > std::numeric_limits<std::uint32_t>::max())
+                            runtimeError(instruction,
+                                "GUPDATE SKIP count must be a nonnegative 32-bit integer");
+                        graphics_->setFrameSkip(session_id_,
+                            static_cast<std::uint32_t>(*frames));
                     } else {
                         const auto* mode = std::get_if<double>(&arguments[0]);
                         if (!mode || !std::isfinite(*mode) || std::trunc(*mode) != *mode)
@@ -2310,11 +2565,128 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     }
                     break;
                 }
+                if (instruction.name == "PALETTE") {
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    if (arguments.size() < 2)
+                        runtimeError(instruction,
+                            "PALETTE expects a start index and at least one RGB color");
+                    const auto integerArgument = [&](std::size_t index,
+                                                     const char* description,
+                                                     std::uint32_t maximum) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number) runtimeError(instruction, "numeric value required");
+                        if (!std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < 0 || *number > maximum)
+                            runtimeError(instruction, description);
+                        return static_cast<std::uint32_t>(*number);
+                    };
+                    const auto first = integerArgument(0,
+                        "palette start index must be an integer in range", 255);
+                    const auto paletteSize = graphics_->windowInfo(session_id_).paletteSize;
+                    if (first >= paletteSize || arguments.size() - 1 > paletteSize - first)
+                        runtimeError(instruction, "palette range exceeds the active palette");
+                    std::vector<graphics::RgbColor> colors;
+                    colors.reserve(arguments.size() - 1);
+                    for (std::size_t index = 1; index < arguments.size(); ++index) {
+                        const auto value = integerArgument(index,
+                            "RGB color must be an integer in range 0..16777215", 0xFFFFFF);
+                        colors.push_back({
+                            static_cast<std::uint8_t>((value >> 16) & 0xFF),
+                            static_cast<std::uint8_t>((value >> 8) & 0xFF),
+                            static_cast<std::uint8_t>(value & 0xFF)});
+                    }
+                    graphics_->setPaletteColors(session_id_,
+                        static_cast<std::uint16_t>(first), colors);
+                    break;
+                }
+                if (instruction.name == "PALROT" || instruction.name == "PALSHIFT" ||
+                    instruction.name == "PALFADE") {
+                    if (!graphics_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "graphics service unavailable");
+                    const auto integerArgument = [&](std::size_t index,
+                                                     const char* description,
+                                                     std::int64_t minimum,
+                                                     std::int64_t maximum) {
+                        const auto* number = std::get_if<double>(&arguments[index]);
+                        if (!number || !std::isfinite(*number) || std::trunc(*number) != *number ||
+                            *number < static_cast<double>(minimum) ||
+                            *number > static_cast<double>(maximum))
+                            runtimeError(instruction, description);
+                        return static_cast<std::int64_t>(*number);
+                    };
+                    const auto first = integerArgument(0,
+                        "palette start must be an integer", 0, 255);
+                    const auto count = integerArgument(1,
+                        "palette count must be a positive integer", 1, 256);
+                    const auto paletteSize = graphics_->windowInfo(session_id_).paletteSize;
+                    if (first >= paletteSize || count > paletteSize - first)
+                        runtimeError(instruction, "palette range exceeds the active palette");
+                    std::vector<graphics::RgbColor> colors;
+                    colors.reserve(static_cast<std::size_t>(count));
+                    for (std::int64_t offset = 0; offset < count; ++offset)
+                        colors.push_back(graphics_->paletteColor(session_id_,
+                            static_cast<std::uint16_t>(first + offset)));
+
+                    if (instruction.name == "PALROT") {
+                        const auto steps = integerArgument(2,
+                            "palette rotation steps must be an integer", INT32_MIN, INT32_MAX);
+                        const auto length = static_cast<std::int64_t>(count);
+                        const auto right = (steps % length + length) % length;
+                        if (right != 0)
+                            std::rotate(colors.begin(), colors.end() - right, colors.end());
+                    } else if (instruction.name == "PALSHIFT") {
+                        const auto direction = integerArgument(2,
+                            "palette shift direction must be -1 or 1", -1, 1);
+                        if (direction == 0)
+                            runtimeError(instruction, "palette shift direction must be -1 or 1");
+                        const auto packed = integerArgument(3,
+                            "RGB color must be an integer in range 0..16777215", 0, 0xFFFFFF);
+                        const graphics::RgbColor inserted{
+                            static_cast<std::uint8_t>((packed >> 16) & 0xFF),
+                            static_cast<std::uint8_t>((packed >> 8) & 0xFF),
+                            static_cast<std::uint8_t>(packed & 0xFF)};
+                        if (direction > 0) {
+                            std::move_backward(colors.begin(), colors.end() - 1, colors.end());
+                            colors.front() = inserted;
+                        } else {
+                            std::move(colors.begin() + 1, colors.end(), colors.begin());
+                            colors.back() = inserted;
+                        }
+                    } else {
+                        const auto packed = integerArgument(2,
+                            "target RGB must be an integer in range 0..16777215", 0, 0xFFFFFF);
+                        const auto* amountValue = std::get_if<double>(&arguments[3]);
+                        if (!amountValue || !std::isfinite(*amountValue) ||
+                            *amountValue < 0.0 || *amountValue > 1.0)
+                            runtimeError(instruction, "fade amount must be in the range 0..1");
+                        const graphics::RgbColor target{
+                            static_cast<std::uint8_t>((packed >> 16) & 0xFF),
+                            static_cast<std::uint8_t>((packed >> 8) & 0xFF),
+                            static_cast<std::uint8_t>(packed & 0xFF)};
+                        const auto mix = [amount = *amountValue](std::uint8_t from,
+                                                                 std::uint8_t to) {
+                            return static_cast<std::uint8_t>(std::lround(
+                                from + (static_cast<double>(to) - from) * amount));
+                        };
+                        for (auto& color : colors) {
+                            color.red = mix(color.red, target.red);
+                            color.green = mix(color.green, target.green);
+                            color.blue = mix(color.blue, target.blue);
+                        }
+                    }
+                    graphics_->setPaletteColors(session_id_,
+                        static_cast<std::uint16_t>(first), colors);
+                    break;
+                }
                 if (instruction.name == "INK" || instruction.name == "PAPER" ||
                     instruction.name == "OVER" || instruction.name == "PLOT" ||
                     instruction.name == "LINE" ||
                     instruction.name == "RECT" ||
                     instruction.name == "CIRCLE" || instruction.name == "TEXT" ||
+                    instruction.name == "BLIT" ||
                     instruction.name == "FONT" || instruction.name == "GFONT" ||
                     instruction.name == "CLS" || instruction.name == "WINDOW" ||
                     instruction.name == "CLOSEWINDOW") {
@@ -2339,6 +2711,22 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                     "graphics service unavailable");
                     if (!nullSink) {
+                    // Mirrored destinations receive the same command as-is and keep
+                    // their own attributes; WINDOW and CLOSEWINDOW are never forwarded.
+                    const auto sourceChannel = channel;
+                    std::vector<runtime::ChannelId> graphicsTargets{sourceChannel};
+                    if (instruction.name != "WINDOW" && instruction.name != "CLOSEWINDOW")
+                        for (const auto destination : graphicsMirrorTargets(sourceChannel))
+                            graphicsTargets.push_back(destination);
+                    const bool batchTargets = graphicsTargets.size() > 1 &&
+                        instruction.name != "BLIT";
+                    if (batchTargets) graphics_->beginPresentationBatch(session_id_);
+                    try {
+                    for (std::size_t targetIndex = 0; targetIndex < graphicsTargets.size();
+                         ++targetIndex) {
+                    const auto channel = graphicsTargets[targetIndex];
+                    const bool mirrorTarget = targetIndex != 0;
+                    try {
                     const auto integerArgument = [&](std::size_t index,
                                                      const char* description) {
                         const auto* number = std::get_if<double>(&arguments[index]);
@@ -2371,16 +2759,101 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                             runtimeError(instruction, "fill flag must be 0 or 1");
                         return fill == 1;
                     };
-                    if (instruction.name == "FONT" || instruction.name == "GFONT") {
+                    if (instruction.name == "BLIT") {
+                        const auto handle = integerArgument(0,
+                            "bitmap handle must be a positive integer");
+                        if (handle <= 0)
+                            runtimeError(instruction, "bitmap handle must be a positive integer");
+                        const auto destination = graphics::Point{
+                            pixelArgument(1, "pixel coordinate out of range"),
+                            pixelArgument(2, "pixel coordinate out of range")};
+                        const auto bitmapHandle = static_cast<graphics::BitmapHandle>(handle);
+                        const auto& bitmap = bitmapRegistry_.get(bitmapHandle);
+                        const auto info = bitmap.info();
+                        const auto paletteSize = graphics_->windowInfo(session_id_, channel).paletteSize;
+                        std::array<graphics::ColorIndex, 16> paletteMap{};
+                        for (std::size_t sourceIndex = 0;
+                             sourceIndex < paletteMap.size(); ++sourceIndex) {
+                            const auto& sourceColor = bitmap.palette()[sourceIndex];
+                            std::uint32_t bestDistance = std::numeric_limits<std::uint32_t>::max();
+                            for (std::uint16_t targetIndex = 0;
+                                 targetIndex < paletteSize; ++targetIndex) {
+                                const auto targetColor = graphics_->paletteColor(
+                                    session_id_, channel, targetIndex);
+                                const auto red = static_cast<int>(sourceColor[0]) - targetColor.red;
+                                const auto green = static_cast<int>(sourceColor[1]) - targetColor.green;
+                                const auto blue = static_cast<int>(sourceColor[2]) - targetColor.blue;
+                                const auto distance = static_cast<std::uint32_t>(
+                                    red * red + green * green + blue * blue);
+                                if (distance < bestDistance) {
+                                    bestDistance = distance;
+                                    paletteMap[sourceIndex] =
+                                        static_cast<graphics::ColorIndex>(targetIndex);
+                                }
+                            }
+                        }
+                        std::optional<graphics::ColorIndex> transparent;
+                        if (arguments.size() > 3) {
+                            const auto index = integerArgument(3,
+                                "transparent palette index must be an integer from 0 to 15");
+                            if (index < 0 || index > 15)
+                                runtimeError(instruction,
+                                    "transparent palette index must be from 0 to 15");
+                            transparent = static_cast<graphics::ColorIndex>(index);
+                        }
+                        std::vector<std::uint8_t> row;
+                        for (std::uint32_t y = 0; y < info.height; ++y) {
+                            if (!bitmap.readRow(y, row))
+                                runtimeError(instruction, "QIMG row is unavailable");
+                        }
+                        graphics_->beginPresentationBatch(session_id_);
+                        try {
+                            for (std::uint32_t y = 0; y < info.height; ++y) {
+                                if (!bitmap.readRow(y, row))
+                                    runtimeError(instruction, "QIMG row is unavailable");
+                                for (auto& index : row) {
+                                    index = transparent && index == *transparent
+                                        ? std::numeric_limits<graphics::ColorIndex>::max()
+                                        : paletteMap[index];
+                                }
+                                const auto rowY = static_cast<std::int64_t>(destination.y) + y;
+                                if (rowY < std::numeric_limits<std::int32_t>::min() ||
+                                    rowY > std::numeric_limits<std::int32_t>::max()) continue;
+                                graphics_->drawIndexedRow(session_id_, channel,
+                                    {destination.x, static_cast<std::int32_t>(rowY)},
+                                    row.data(), row.size(),
+                                    transparent ? std::optional<graphics::ColorIndex>(
+                                        std::numeric_limits<graphics::ColorIndex>::max())
+                                        : std::nullopt);
+                            }
+                        } catch (...) {
+                            try { graphics_->endPresentationBatch(session_id_); } catch (...) {}
+                            throw;
+                        }
+                        graphics_->endPresentationBatch(session_id_);
+                    } else if (instruction.name == "FONT" || instruction.name == "GFONT") {
                         const auto handle = integerArgument(0,
                             "font handle must be a positive integer");
                         const auto style = integerArgument(1,
                             "font style must be a combination of style flags");
-                        if (handle <= 0 || static_cast<std::uint64_t>(handle) >
+                        if (handle < 0 || static_cast<std::uint64_t>(handle) >
                                 std::numeric_limits<graphics::FontHandle>::max())
                             runtimeError(instruction, "font handle is out of range");
                         if (style < 0 || style > 3)
                             runtimeError(instruction, "font style must be 0..3");
+                        if (handle == 0) {
+                            if (style != 0)
+                                runtimeError(instruction,
+                                    "default font handle 0 requires normal style 0");
+                            if (instruction.name == "FONT") {
+                                fontRegistry_.resetText(channel);
+                                graphics_->resetTextFont(session_id_, channel);
+                            } else {
+                                fontRegistry_.resetGraphics(channel);
+                                graphics_->resetGraphicsFont(session_id_, channel);
+                            }
+                            continue;
+                        }
                         try {
                             const auto fontHandle = static_cast<graphics::FontHandle>(handle);
                             const auto styleBits = static_cast<std::uint8_t>(style);
@@ -2432,11 +2905,29 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     } else if (instruction.name == "PLOT") {
                         graphics_->pixel(session_id_, channel, pointArguments());
                     } else if (instruction.name == "LINE") {
-                        const auto from = pointArguments();
-                        const auto to = graphics::Point{
-                            pixelArgument(2, "pixel coordinate out of range"),
-                            pixelArgument(3, "pixel coordinate out of range")};
-                        graphics_->line(session_id_, channel, from, to);
+                        const std::string lineForm = instruction.extra().parameters.empty() ?
+                            std::string{} : instruction.extra().parameters[0];
+                        if (lineForm == "MOVE") {
+                            graphics_->setGraphicsPosition(session_id_, channel,
+                                                           pointArguments());
+                        } else if (lineForm == "TO") {
+                            const auto to = pointArguments();
+                            graphics_->line(session_id_, channel,
+                                graphics_->graphicsPosition(session_id_, channel), to);
+                        } else if (lineForm == "FROM_TO") {
+                            const auto from = pointArguments();
+                            const auto to = graphics::Point{
+                                pixelArgument(2, "pixel coordinate out of range"),
+                                pixelArgument(3, "pixel coordinate out of range")};
+                            graphics_->setGraphicsPosition(session_id_, channel, from);
+                            graphics_->line(session_id_, channel, from, to);
+                        } else {
+                            const auto from = pointArguments();
+                            const auto to = graphics::Point{
+                                pixelArgument(2, "pixel coordinate out of range"),
+                                pixelArgument(3, "pixel coordinate out of range")};
+                            graphics_->line(session_id_, channel, from, to);
+                        }
                     } else if (instruction.name == "RECT") {
                         const auto topLeft = pointArguments();
                         const auto width = pixelArgument(2, "rectangle size must be positive");
@@ -2484,6 +2975,18 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     } else {
                         graphics_->clear(session_id_, channel);
                     }
+                    } catch (...) {
+                        if (!mirrorTarget) throw;
+                        failMirror(sourceChannel, channel, "graphics command failed");
+                    }
+                    }
+                    } catch (...) {
+                        if (batchTargets) {
+                            try { graphics_->endPresentationBatch(session_id_); } catch (...) {}
+                        }
+                        throw;
+                    }
+                    if (batchTargets) graphics_->endPresentationBatch(session_id_);
                     }
                     break;
                 }
@@ -2514,7 +3017,26 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         runtimeError(instruction, label);
                     return static_cast<std::uint64_t>(*number);
                 };
-                if (instruction.name == "LOADFONT") {
+                if (instruction.name == "LOADIMAGE") {
+                    const auto* path = std::get_if<std::string>(&arguments[0]);
+                    if (!path) runtimeError(instruction, "image path must be a string");
+                    try {
+                        pushValue(static_cast<double>(bitmapRegistry_.load(*path)));
+                    } catch (const std::invalid_argument& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                } else if (instruction.name == "UNLOADIMAGE") {
+                    const auto handle = integerArgument(0,
+                        "bitmap handle must be a positive integer", 1,
+                        std::numeric_limits<std::uint32_t>::max());
+                    if (handle <= 0)
+                        runtimeError(instruction, "bitmap handle must be a positive integer");
+                    try {
+                        bitmapRegistry_.unload(static_cast<graphics::BitmapHandle>(handle));
+                    } catch (const std::invalid_argument& error) {
+                        runtimeError(instruction, error.what());
+                    }
+                } else if (instruction.name == "LOADFONT") {
                     const auto* path = std::get_if<std::string>(&arguments[0]);
                     if (!path) runtimeError(instruction, "font path must be a string");
                     try {
@@ -2544,6 +3066,17 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     } catch (const std::invalid_argument& error) {
                         runtimeError(instruction, error.what());
                     }
+                } else if (instruction.name == "SYSINFO$") {
+                    const auto selector = integerArgument(0,
+                        "system information selector must be an integer", 0, 6);
+                    pushValue(systemInfo_->value(
+                        static_cast<runtime::SystemInfoSelector>(selector)));
+                } else if (instruction.name == "CAPABILITY") {
+                    const auto* query = std::get_if<std::string>(&arguments[0]);
+                    if (!query) runtimeError(instruction,
+                        "capability query must be a string");
+                    const auto supported = systemInfo_->capability(*query);
+                    pushValue(supported ? (*supported ? 1.0 : 0.0) : -1.0);
                 } else if (instruction.name == "OPEN") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2569,29 +3102,34 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         parameters.emplace_back(textArgument(0));
                         parameters.emplace_back(textArgument(1));
                     }
-                    std::optional<runtime::ChannelId> opened;
-                    if (device == runtime::ChannelDevice::Directory) {
-                        if (arguments.size() != 4) throw runtime::Error(runtime::ErrorCode::InvalidArgument, "directory OPEN requires path, wildcard and options");
-                        const auto* mask = std::get_if<double>(&arguments[3]);
-                        if (!mask) throw runtime::Error(runtime::ErrorCode::TypeMismatch, "directory options must be numeric");
-                        if (!std::isfinite(*mask) || std::trunc(*mask) != *mask || *mask < 0 || *mask > 2147483647)
-                            throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid directory options");
-                        opened = channels_->pollDirectoryOpen(session_id_, textArgument(1), textArgument(2), static_cast<std::uint32_t>(*mask));
-                        if (!opened) {
-                            // Retry only CALL, with the already evaluated operands.
-                            stack.reserve(stack.size() + arguments.size());
-                            for (auto& argument : arguments) stack.push_back(std::move(argument));
-                            --pc; return ExecutionStatus::Yielded;
-                        }
-                    } else opened = channels_->openTypedDevice(session_id_, device, parameters);
-                    const auto id = *opened;
                     try {
-                        if (!state.interactiveSubmission) executionChannels_.push_back(id);
-                        pushValue(static_cast<double>(id));
-                    } catch (...) {
-                        executionChannels_.erase(std::remove(executionChannels_.begin(), executionChannels_.end(), id), executionChannels_.end());
-                        try { channels_->close(session_id_, id); } catch (...) {}
-                        throw;
+                        std::optional<runtime::ChannelId> opened;
+                        if (device == runtime::ChannelDevice::Directory) {
+                            if (arguments.size() != 4) throw runtime::Error(runtime::ErrorCode::InvalidArgument, "directory OPEN requires path, wildcard and options");
+                            const auto* mask = std::get_if<double>(&arguments[3]);
+                            if (!mask) throw runtime::Error(runtime::ErrorCode::TypeMismatch, "directory options must be numeric");
+                            if (!std::isfinite(*mask) || std::trunc(*mask) != *mask || *mask < 0 || *mask > 2147483647)
+                                throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid directory options");
+                            opened = channels_->pollDirectoryOpen(session_id_, textArgument(1), textArgument(2), static_cast<std::uint32_t>(*mask));
+                            if (!opened) {
+                                // Retry only CALL, with the already evaluated operands.
+                                stack.reserve(stack.size() + arguments.size());
+                                for (auto& argument : arguments) stack.push_back(std::move(argument));
+                                --pc; return ExecutionStatus::Yielded;
+                            }
+                        } else opened = channels_->openTypedDevice(session_id_, device, parameters);
+                        const auto id = *opened;
+                        try {
+                            if (!state.interactiveSubmission) executionChannels_.push_back(id);
+                            pushValue(static_cast<double>(id));
+                        } catch (...) {
+                            executionChannels_.erase(std::remove(executionChannels_.begin(), executionChannels_.end(), id), executionChannels_.end());
+                            try { channels_->close(session_id_, id); } catch (...) {}
+                            throw;
+                        }
+                    } catch (const runtime::ServiceError& error) {
+                        if (error.code() != runtime::ServiceErrorCode::ResourceBusy) throw;
+                        pushValue(-static_cast<double>(runtime::ErrorCode::ResourceBusy));
                     }
                 } else if (instruction.name == "IN") {
                     if (!channels_) throw runtime::ServiceError(
@@ -2652,6 +3190,16 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     const auto selector = static_cast<unsigned>(*selectorValue);
                     if (instruction.name == "DIRINFO$") pushValue(channels_->directoryInfoText(session_id_, channel, static_cast<unsigned>(selector)));
                     else pushValue(channels_->directoryInfo(session_id_, channel, static_cast<unsigned>(selector), singlePrecision));
+                } else if (instruction.name == "FPOS" || instruction.name == "FLEN") {
+                    if (!channels_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "channel service unavailable");
+                    const auto fileChannel = resolveChannel(channelArgument(0));
+                    if (fileChannel <= 1)
+                        runtimeError(instruction, "selected channel is not a file");
+                    pushValue(static_cast<double>(instruction.name == "FPOS"
+                        ? channels_->position(session_id_, fileChannel)
+                        : channels_->length(session_id_, fileChannel)));
                 } else if (instruction.name == "READ$") {
                     if (!channels_)
                         throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
@@ -2699,18 +3247,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 } else if (instruction.name == "WRITE") {
                     const auto channel = resolveChannel(channelArgument(0));
                     const std::string text = textArgument(1) + "\n";
-                    if (channel == 0) {
-                        output << text;
-                        output_column_ = 0;
-                    } else if (channel == 1) {
-                        if (graphics_) graphics_->writeText(session_id_, text);
-                        else output << text;
-                    } else {
-                        if (!channels_)
-                            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                                        "channel service unavailable");
-                        channels_->write(session_id_, channel, text);
-                    }
+                    emitText(output, channel, text);
+                    if (channel == 0) output_column_ = 0;
                 } else if (instruction.name == "CLOSE") {
                     closeChannel(channelArgument(0));
                 } else if (instruction.name == "DEALLOC") {
@@ -2777,8 +3315,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             frame.callBasicLine = instruction.basicLine;
             frame.function = instruction.expectsValue;
             frame.name = instruction.name;
-            for (std::size_t i = 0; i < instruction.parameters.size(); ++i) {
-                const std::string& parameter = instruction.parameters[i];
+            for (std::size_t i = 0; i < instruction.extra().parameters.size(); ++i) {
+                const std::string& parameter = instruction.extra().parameters[i];
                 if (const auto* array = std::get_if<ArrayReference>(&arguments[i])) {
                     std::string actualName = array->name;
                     if (!callFrames.empty()) {
@@ -2797,7 +3335,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     frame.locals[parameter] = std::get<std::string>(arguments[i]);
                 }
             }
-            for (const std::string& local : instruction.localNames) {
+            for (const std::string& local : instruction.extra().localNames) {
                 if (frame.locals.find(local) == frame.locals.end()) {
                     if (!local.empty() && local.back() == '$') frame.locals[local] = std::string{};
                     else frame.locals[local] = 0.0;
@@ -2871,18 +3409,32 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 elements *= length;
                 lengths[i] = length;
             }
+            // Fail cleanly before a contiguous allocation that cannot fit,
+            // instead of exhausting the heap and unwinding through bad_alloc.
+            if (memory_) {
+                if (const auto info = memory_->fragmentationInfo()) {
+                    const std::size_t elementBytes =
+                        !instruction.name.empty() && instruction.name.back() == '$'
+                            ? sizeof(std::string) : sizeof(double);
+                    if (static_cast<std::uint64_t>(elements) * elementBytes >
+                        info->largestFreeBlockBytes)
+                        runtimeError(instruction, "array exceeds available memory");
+                }
+            }
             RuntimeArray array;
             array.lengths = std::move(lengths);
-            if (!instruction.name.empty() && instruction.name.back() == '$')
-                array.values.resize(elements, std::string{});
-            else
-                array.values.resize(elements, 0.0);
+            if (!instruction.name.empty() && instruction.name.back() == '$') {
+                array.isString = true;
+                array.strings.resize(elements);
+            } else {
+                array.numbers.resize(elements, 0.0);
+            }
             arrays[instruction.name] = std::move(array);
             break;
         }
         case Op::ArrayGet: {
             auto [array, offset] = arrayOffset(instruction);
-            pushValue(array->values[offset],
+            pushValue(array->get(offset),
                       !instruction.name.empty() && instruction.name.back() == '%');
             break;
         }
@@ -2943,7 +3495,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                      number > static_cast<double>(std::numeric_limits<std::int32_t>::max())))
                     runtimeError(instruction, "Int32 array element out of range");
             }
-            array->values[offset] = std::move(value);
+            array->set(offset, std::move(value));
             break;
         }
         case Op::SelectBegin: {
@@ -2954,8 +3506,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
         case Op::SelectMatch: {
             if (selectStates.empty()) runtimeError(instruction, "inactive SELECT block");
             bool matched = false;
-            for (std::size_t i = instruction.selectItems.size(); i-- > 0;) {
-                const SelectItemSpec& item = instruction.selectItems[i];
+            for (std::size_t i = instruction.extra().selectItems.size(); i-- > 0;) {
+                const SelectItemSpec& item = instruction.extra().selectItems[i];
                 double end = 0;
                 if (item.hasEnd) end = numeric(pop(), instruction);
                 const double start = numeric(pop(), instruction);
@@ -2981,9 +3533,9 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             break;
         case Op::ForInit: {
             ForState state;
-            state.ranges.resize(instruction.forItems.size());
-            for (std::size_t i = instruction.forItems.size(); i-- > 0;) {
-                const ForItemSpec& spec = instruction.forItems[i];
+            state.ranges.resize(instruction.extra().forItems.size());
+            for (std::size_t i = instruction.extra().forItems.size(); i-- > 0;) {
+                const ForItemSpec& spec = instruction.extra().forItems[i];
                 ForRange& range = state.ranges[i];
                 if (spec.hasStep) range.step = numeric(pop(), instruction);
                 if (spec.hasEnd) range.end = numeric(pop(), instruction);
@@ -3002,19 +3554,25 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             const double initial = state.ranges[state.item].start;
             assignLoopValue(instruction, initial);
             state.callDepth = callFrames.size();
-            forStates[{instruction.loopId, callFrames.size()}] = std::move(state);
+            forStates[{instruction.loopId(), callFrames.size()}] = std::move(state);
             break;
         }
         case Op::ForNext: {
             selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
-            auto found = forStates.find({instruction.loopId, callFrames.size()});
+            auto found = forStates.find({instruction.loopId(), callFrames.size()});
             if (found == forStates.end()) runtimeError(instruction, "inactive FOR loop");
             ForState& state = found->second;
-            auto& scope = !callFrames.empty() && callFrames.back().locals.count(instruction.name)
-                ? callFrames.back().locals : variables_;
-            const auto variable = scope.find(instruction.name);
-            if (variable == scope.end()) runtimeError(instruction, "missing FOR variable");
-            const double current = numeric(variable->second, instruction);
+            const Value* loopValue = nullptr;
+            if (!callFrames.empty()) {
+                const auto local = callFrames.back().locals.find(instruction.name);
+                if (local != callFrames.back().locals.end()) loopValue = &local->second;
+            }
+            if (!loopValue) {
+                const auto variable = variables_.find(instruction.name);
+                if (variable != variables_.end()) loopValue = &variable->second;
+            }
+            if (!loopValue) runtimeError(instruction, "missing FOR variable");
+            const double current = numeric(*loopValue, instruction);
             const ForRange& range = state.ranges[state.item];
             const double next = range.single ? current :
                 singlePrecision &&
@@ -3027,7 +3585,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             if (!range.single && rangeContains(range, next)) {
                 assignLoopValue(instruction, next);
                 for (auto loop = forStates.begin(); loop != forStates.end();) {
-                    if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId) loop = forStates.erase(loop);
+                    if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId()) loop = forStates.erase(loop);
                     else ++loop;
                 }
                 pc = instruction.target;
@@ -3048,7 +3606,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             }
             assignLoopValue(instruction, state.ranges[state.item].start);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
@@ -3057,7 +3615,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
         case Op::LoopNext:
             selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first > instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
@@ -3065,7 +3623,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
         case Op::ExitLoop:
             selectStates.resize((callFrames.empty() ? 0 : callFrames.back().selectBase) + instruction.rank);
             for (auto loop = forStates.begin(); loop != forStates.end();) {
-                if (loop->second.callDepth == callFrames.size() && loop->first.first >= instruction.loopId) loop = forStates.erase(loop);
+                if (loop->second.callDepth == callFrames.size() && loop->first.first >= instruction.loopId()) loop = forStates.erase(loop);
                 else ++loop;
             }
             pc = instruction.target;
@@ -3079,7 +3637,10 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
         case Op::Jump:
             pc = instruction.target;
             break;
-        case Op::Push: pushValue(instruction.value); break;
+        case Op::Push:
+            pushValue(instruction.textLiteral ? Value{instruction.name.str()}
+                                              : Value{instruction.literal()});
+            break;
         case Op::PushArrayRef: stack.emplace_back(ArrayReference{instruction.name}); break;
         case Op::Load: {
             bool foundLocal = false;
@@ -3293,10 +3854,22 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             writePrintText("\n", instruction);
             if (state.printChannel == 0) output_column_ = 0;
             else if (state.printChannel == 1) state.printChannelColumn = 0;
+            else state.routedColumns[state.printChannel] = 0;
+            finishPrintBatch();
+            state.printChannel = 1;
+            // A finished output line costs far more wall time than a plain
+            // instruction (text scroll and display update), so charge it to
+            // the slice budget to keep PRINT-heavy sessions from starving others.
+            instructionsExecuted += PrintLineBudgetCost;
+            break;
+        case Op::PrintCommit:
+            finishPrintBatch();
             state.printChannel = 1;
             break;
         case Op::PrintBegin:
+            finishPrintBatch();
             state.printChannel = resolveChannel(default_output_channel_);
+            selectPrintBatch(state.printChannel);
             break;
         case Op::At: {
             const double columnValue = numeric(pop(), instruction);
@@ -3325,6 +3898,14 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 runtimeError(instruction, "AT supports only console and screen channels");
             const auto row = static_cast<std::uint32_t>(rowValue - 1);
             const auto column = static_cast<std::uint32_t>(columnValue - 1);
+            for (const auto destination : graphicsMirrorTargets(channel)) {
+                try {
+                    if (graphics_) (void)graphics_->setTextPosition(session_id_, destination,
+                                                                    row, column);
+                } catch (...) {
+                    failMirror(channel, destination, "AT failed");
+                }
+            }
             const bool positioned = graphics_ && graphics_->setTextPosition(session_id_,
                 channel, row, column);
             if (!positioned && channel == 0) {
@@ -3365,7 +3946,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             break;
         }
         case Op::Restore:
-            state.dataPointer = std::min(instruction.target, code.dataItems.size());
+            state.dataPointer = std::min<std::size_t>(instruction.target, code.dataItems.size());
             break;
         case Op::PrintChannel: {
             const double channel = numeric(pop(), instruction);
@@ -3373,6 +3954,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 channel > static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
                 runtimeError(instruction, "channel handle must be a nonnegative integer");
             state.printChannel = resolveChannel(static_cast<std::uint64_t>(channel));
+            selectPrintBatch(state.printChannel);
             break;
         }
         case Op::ChannelDefault: {
@@ -3396,17 +3978,47 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         static_cast<std::uint64_t>(destination));
             break;
         }
+        case Op::ChannelMirror: {
+            const double destination = numeric(pop(), instruction);
+            const double source = numeric(pop(), instruction);
+            const auto validHandle = [](double handle) {
+                return std::isfinite(handle) && std::trunc(handle) == handle && handle >= 0 &&
+                    handle <= static_cast<double>(std::numeric_limits<std::uint64_t>::max());
+            };
+            if (!validHandle(source) || !validHandle(destination))
+                runtimeError(instruction, "channel handles must be nonnegative integers");
+            addMirror(static_cast<std::uint64_t>(source),
+                      static_cast<std::uint64_t>(destination));
+            break;
+        }
+        case Op::ChannelMirrorDelete: {
+            const double destination = numeric(pop(), instruction);
+            if (!std::isfinite(destination) || std::trunc(destination) != destination ||
+                destination < 0 ||
+                destination > static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
+                runtimeError(instruction, "channel handle must be a nonnegative integer");
+            deleteMirrors(static_cast<std::uint64_t>(destination));
+            break;
+        }
+        case Op::ChannelMirrorList:
+            writeTextToChannel(output, default_output_channel_, mirrorListing());
+            break;
         case Op::ChannelSeek: {
             if (!channels_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "channel service unavailable");
             const double offset = numeric(pop(), instruction);
             const double channel = numeric(pop(), instruction);
             if (!std::isfinite(channel) || std::trunc(channel) != channel || channel < 0 ||
-                channel > 9007199254740991.0 || !std::isfinite(offset) ||
-                std::trunc(offset) != offset || offset < 0 || offset > 9007199254740991.0)
-                runtimeError(instruction, "channel and offset must be nonnegative integers");
-            channels_->seek(session_id_, resolveChannel(static_cast<runtime::ChannelId>(channel)),
-                            static_cast<std::uint64_t>(offset));
+                channel > 9007199254740991.0)
+                runtimeError(instruction, "invalid channel handle");
+            if (!std::isfinite(offset) || std::trunc(offset) != offset || offset < 0 ||
+                offset > 9007199254740991.0)
+                runtimeError(instruction, "channel offset out of range: must be a nonnegative integer");
+            const auto target = resolveChannel(static_cast<runtime::ChannelId>(channel));
+            if (static_cast<std::uint64_t>(offset) > channels_->length(session_id_, target))
+                throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfRange,
+                                            "channel offset is beyond the end of the file");
+            channels_->seek(session_id_, target, static_cast<std::uint64_t>(offset));
             break;
         }
         case Op::ChannelRead: {
@@ -3421,11 +4033,11 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             Value value(channels_->readBytes(session_id_,
                 resolveChannel(static_cast<runtime::ChannelId>(channel)),
                 static_cast<std::size_t>(count)));
-            if (instruction.targetVariable.empty() || instruction.targetVariable.back() != '$')
+            if (instruction.extra().targetVariable.empty() || instruction.extra().targetVariable.back() != '$')
                 runtimeError(instruction, "binary IN target must be a string variable");
-            if (!callFrames.empty() && callFrames.back().locals.count(instruction.targetVariable.get()))
-                callFrames.back().locals[instruction.targetVariable.get()] = std::move(value);
-            else variables_[instruction.targetVariable.get()] = std::move(value);
+            if (!callFrames.empty() && callFrames.back().locals.count(instruction.extra().targetVariable.get()))
+                callFrames.back().locals[instruction.extra().targetVariable.get()] = std::move(value);
+            else variables_[instruction.extra().targetVariable.get()] = std::move(value);
             break;
         }
         case Op::ChannelWrite: {
@@ -3456,6 +4068,40 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             state.pauseUntil = std::chrono::steady_clock::now() +
                 std::chrono::milliseconds(requestedPauseDurationMs_);
             return ExecutionStatus::WaitingTime;
+        }
+        case Op::Beep: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "audio service unavailable");
+            runtime::ToneWaveform waveform = runtime::ToneWaveform::Square;
+            if (instruction.argCount() == 3) waveform = waveformArgument(pop(), instruction);
+            const double pitch = numeric(pop(), instruction);
+            const double duration = numeric(pop(), instruction);
+            if (!std::isfinite(duration) || std::trunc(duration) != duration ||
+                duration < 1 || duration > 600000)
+                runtimeError(instruction,
+                    "BEEP duration must be an integer from 1 through 600000 milliseconds");
+            if (!std::isfinite(pitch) || std::trunc(pitch) != pitch ||
+                pitch < 20 || pitch > 10000)
+                runtimeError(instruction, "BEEP pitch must be an integer from 20 through 10000 Hz");
+            music_->beep(task_id_ != 0 ? task_id_ : session_id_,
+                         static_cast<std::uint32_t>(duration),
+                         static_cast<std::uint32_t>(pitch), waveform);
+            // Only this session waits for the tone; the scheduler keeps running.
+            requestedPauseDurationMs_ = static_cast<std::uint32_t>(duration);
+            state.pauseUntil = std::chrono::steady_clock::now() +
+                std::chrono::milliseconds(requestedPauseDurationMs_);
+            return ExecutionStatus::WaitingTime;
+        }
+        case Op::Volume: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "audio service unavailable");
+            const double level = numeric(pop(), instruction);
+            if (!std::isfinite(level) || std::trunc(level) != level || level < 0 || level > 255)
+                runtimeError(instruction, "VOLUME must be an integer from 0 through 255");
+            music_->setVolume(static_cast<std::uint8_t>(level));
+            break;
         }
         case Op::Input: {
             std::string prompt;
@@ -3489,6 +4135,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 promptChannel = static_cast<runtime::ChannelId>(channel);
             }
             inputChannel = resolveChannel(inputChannel);
+            if (inputChannel == 0 && graphics_)
+                graphics_->resetUpdateState(session_id_);
             if (instruction.expectsValue) {
                 state.printChannel = resolveChannel(promptChannel);
                 writePrintText(prompt, instruction);
@@ -3528,17 +4176,66 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             }
             state.pendingChannelRead.reset();
             if (!line) runtimeError(instruction, "end of file during INPUT");
-            if (instruction.inputVariables.size() <= 1) {
-                const std::string& target = instruction.inputVariables.empty() ?
-                    instruction.name : instruction.inputVariables[0];
+            if (instruction.extra().inputVariables.size() <= 1) {
+                const std::string& target = instruction.extra().inputVariables.empty() ?
+                    instruction.name.str() : instruction.extra().inputVariables[0];
                 storeInputValue(target, *line, instruction);
             } else {
                 const auto fields = splitInputRecord(*line);
-                if (fields.size() != instruction.inputVariables.size())
+                if (fields.size() != instruction.extra().inputVariables.size())
                     runtimeError(instruction, "INPUT field count does not match destinations");
                 for (std::size_t index = 0; index < fields.size(); ++index)
-                    storeInputValue(instruction.inputVariables[index], fields[index], instruction);
+                    storeInputValue(instruction.extra().inputVariables[index], fields[index], instruction);
             }
+            break;
+        }
+        case Op::MusicPlay: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const Value pathValue = pop();
+            const auto* path = std::get_if<std::string>(&pathValue);
+            if (!path) runtimeError(instruction, "MUSIC PLAY requires a string path");
+            music_->play(task_id_ != 0 ? task_id_ : session_id_, *path);
+            break;
+        }
+        case Op::MusicWav: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const Value pathValue = pop();
+            const auto* path = std::get_if<std::string>(&pathValue);
+            if (!path) runtimeError(instruction, "MUSIC WAV requires a string path");
+            music_->playWav(task_id_ != 0 ? task_id_ : session_id_, *path);
+            break;
+        }
+        case Op::MusicTest: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            music_->testTone(task_id_ != 0 ? task_id_ : session_id_);
+            break;
+        }
+        case Op::MusicStop:
+        case Op::MusicPause:
+        case Op::MusicResume: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const runtime::MusicSessionId owner = task_id_ != 0 ? task_id_ : session_id_;
+            if (instruction.op == Op::MusicStop) music_->stop(owner);
+            else if (instruction.op == Op::MusicPause) music_->pause(owner);
+            else music_->resume(owner);
+            break;
+        }
+        case Op::MusicStatus: {
+            if (!music_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "music service unavailable");
+            const char* state = "STOPPED";
+            if (music_->state() == runtime::MusicPlaybackState::Playing) state = "PLAYING";
+            else if (music_->state() == runtime::MusicPlaybackState::Paused) state = "PAUSED";
+            writePrintText(std::string("MUSIC ") + state + "\n", instruction);
             break;
         }
         }
@@ -3753,12 +4450,13 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
         using detail::Op;
         switch (instruction.op) {
         case Op::Push:
-            if (const auto* literal = std::get_if<double>(&instruction.value)) {
+            if (!instruction.textLiteral) {
+                const double literal = instruction.literal();
                 const double rounded = execution_->code.numericPrecision ==
                     detail::NumericPrecision::Single ?
-                    static_cast<double>(static_cast<float>(*literal)) : *literal;
+                    static_cast<double>(static_cast<float>(literal)) : literal;
                 values.emplace_back(rounded);
-            } else values.push_back(instruction.value);
+            } else values.push_back(Value{instruction.name.str()});
             break;
         case Op::Load: {
             bool found = false;
@@ -3807,7 +4505,7 @@ std::optional<runtime::DebugValue> Interpreter::debugEvaluate(
                 offset += indexes[i] * stride;
                 stride *= array->second.lengths[i];
             }
-            values.push_back(array->second.values.at(offset));
+            values.push_back(array->second.get(offset));
             break;
         }
         case Op::Negate: values.emplace_back(-number(popValue())); break;

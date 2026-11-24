@@ -1,4 +1,6 @@
 #include "ql32/interpreter.hpp"
+#include "ql32/runtime/file_ops.hpp"
+#include "ql32/runtime/path_glob.hpp"
 #include "bytecode.hpp"
 #include "../vm/execution_state.hpp"
 
@@ -17,6 +19,7 @@
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
+#include <cstring>
 #include <string_view>
 #include <thread>
 #include <unordered_set>
@@ -25,6 +28,8 @@
 
 namespace ql32 {
 namespace {
+using runtime::hasWildcard;
+using runtime::wildcardMatch;
 std::atomic<runtime::SessionId> nextInterpreterSessionId{1};
 
 ui::DialogOptions pagerInputOptions() {
@@ -34,6 +39,13 @@ ui::DialogOptions pagerInputOptions() {
     options.keyInput = true;
     options.positionX = 1;
     options.positionY = 1;
+    return options;
+}
+
+// Typed answer (Y + Enter), unlike the pager's single-key prompt.
+ui::DialogOptions confirmInputOptions() {
+    auto options = pagerInputOptions();
+    options.keyInput = false;
     return options;
 }
 
@@ -104,12 +116,14 @@ constexpr Keyword keywords[] = {
 
 constexpr std::string_view builtinCommands[] = {
     "WRITE", "CLOSE", "INPUT", "ALERT", "IPRINT", "BUSY", "DTEXT", "DEDIT", "DINT", "DFLOAT",
-    "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "GETNET", "DISNET",
-    "INK", "PAPER", "OVER", "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
+    "DCHOICE", "DCHECK", "DBUTTONS", "MCARD", "MENABLE", "GETNET", "DISNET",
+    "INK", "PAPER", "OVER", "PALETTE", "PALROT", "PALSHIFT", "PALFADE",
+    "FLASH", "PLOT", "LINE", "RECT", "CIRCLE", "TEXT",
     "FONT", "GFONT", "UNLOADFONT",
     "CLS", "ROTATE", "WINDOW",
-    "CLOSEWINDOW", "GUPDATE", "KILL", "TASKVIEW", "OUT", "POKE", "POKE_W", "POKE_L",
-    "DEALLOC", "XFER", "PAUSE", "RANDOMIZE"
+    "CLOSEWINDOW", "GUPDATE", "MODE", "TILE", "KILL", "TASKVIEW", "BLIT", "UNLOADIMAGE",
+    "OUT", "POKE", "POKE_W", "POKE_L",
+    "DEALLOC", "XFER", "PAUSE", "RANDOMIZE", "MUSIC", "BEEP", "VOLUME"
 };
 
 constexpr std::string_view builtinFunctions[] = {
@@ -118,20 +132,21 @@ constexpr std::string_view builtinFunctions[] = {
     "STR$", "VAL", "EVAL", "EVAL$",
     "BAND", "BOR", "BXOR", "BNOT", "ROL", "ROR", "SRA", "SRL", "SLA", "SLL",
     "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
-    "EOF", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
+    "EOF", "FPOS", "FLEN", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
-    "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$",
-    "LOADFONT", "GETFONT", "RND"
+    "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$", "GX", "GY",
+    "LOADFONT", "GETFONT", "LOADIMAGE", "SYSINFO$", "CAPABILITY",
+    "RND", "RGB", "MODE", "CPUFREQ"
 };
 
 constexpr std::string_view shellHelpCommands[] = {
-    "HELP", "RUN", "LIST", "EDIT", "DIR", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "FORMAT",
-    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "TASKRESULT", "LOGON",
+    "HELP", "RUN", "LIST", "EDIT", "RENUMBER", "DIR", "CAT", "PAGER", "NEW", "LOAD", "SAVE", "DELETE", "RENAME", "COPY", "MOVE", "MKDIR", "RMDIR", "FORMAT",
+    "CD", "REBOOT", "TASKS", "TASKCHANNELS", "KILL", "TASKVIEW", "WINDOWMODE", "MODE", "TASKRESULT", "LOGON",
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
     "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
-    "DIAGNOSTICS", "TRACE", "DEBUGBAR"
+    "DIAGNOSTICS", "TRACE", "DEBUGBAR", "MUSIC"
 };
 
 template <typename Range>
@@ -149,10 +164,20 @@ std::string commandHelpListing() {
     std::ostringstream listing;
     listing << "Shell commands:\n";
     appendHelpNames(listing, shellHelpCommands);
-    listing << "EDIT [lineNumber] opens a stored line; bare EDIT reopens the last "
-            << "edited line, or the first program line.\n";
+    listing << "LIST [line [TO [end]]] lists all stored lines, one line, or an "
+            << "inclusive range.\n"
+            << "LIST [#ch,] PROC|FN [name] lists definition signatures or one "
+            << "definition; LIST GLOBALS|LOCALS lists variables.\n"
+            << "EDIT [lineNumber] opens a stored line; bare EDIT reopens the last "
+            << "edited line or the first line. Up/Down selects adjacent lines; "
+            << "Ctrl+Left/Right moves by word.\n"
+            << "RENUMBER [start, step] renumbers the stored program (default 10, 10).\n";
     listing << "DELETE lineNumber1,... atomically deletes numbered program lines; "
-            << "DELETE path$ removes a file.\n";
+            << "DELETE path$ removes a file; wildcards remove several (FORCE skips the prompt).\n"
+            << "COPY src TO dst [FORCE], MOVE src TO dst [FORCE]: files or #channels; "
+            << "FORCE overwrites. MKDIR dir creates a directory. RMDIR dir [FORCE] removes a directory (FORCE: recursive).\n"
+            << "MIRROR #src TO #dst copies text and graphics commands to another channel; "
+            << "MIRROR DELETE #dst, MIRROR LIST.\n";
     listing << "BASIC statements and commands:\n";
     bool first = true;
     for (const Keyword& keyword : keywords) {
@@ -172,6 +197,52 @@ std::string commandHelpListing() {
     listing << "Some commands require optional runtime services (storage, task control, "
             << "debugger, graphics, network, or system control).\n";
     return listing.str();
+}
+
+// CAT listing: directories first, then files; each group sorted
+// case-insensitively with the exact name as a deterministic tie-break.
+std::string catListing(std::vector<runtime::FileEntry> entries,
+                       const runtime::StorageSpace& space) {
+    const auto lower = [](const std::string& value) {
+        std::string result = value;
+        for (char& c : result) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return result;
+    };
+    std::stable_sort(entries.begin(), entries.end(), [&](const auto& left, const auto& right) {
+        if (left.isDirectory != right.isDirectory) return left.isDirectory;
+        const std::string a = lower(left.name), b = lower(right.name);
+        return a != b ? a < b : left.name < right.name;
+    });
+    std::size_t files = 0, directories = 0;
+    std::uintmax_t bytes = 0;
+    std::size_t nameWidth = 0, sizeWidth = 5;
+    for (const auto& entry : entries) {
+        nameWidth = std::max(nameWidth, entry.name.size() + (entry.isDirectory ? 1 : 0));
+        if (entry.isDirectory) { ++directories; continue; }
+        ++files;
+        bytes += entry.size;
+        sizeWidth = std::max(sizeWidth, std::to_string(entry.size).size());
+    }
+    const auto pad = [](const std::string& value, std::size_t width) {
+        return std::string(width > value.size() ? width - value.size() : 0, ' ') + value;
+    };
+    std::string listing;
+    for (const auto& entry : entries) {
+        std::string name = entry.name + (entry.isDirectory ? "/" : "");
+        name.resize(nameWidth, ' ');
+        listing += name + " " +
+            pad(entry.isDirectory ? "<DIR>" : std::to_string(entry.size), sizeWidth) + "\n";
+    }
+    listing += std::to_string(files) + " file(s), " + std::to_string(directories) +
+        " dir(s), " + std::to_string(bytes) + " bytes\n";
+    if (space.known) {
+        const std::size_t width = std::max({std::to_string(space.total).size(),
+            std::to_string(space.used).size(), std::to_string(space.free).size()});
+        listing += "Total: " + pad(std::to_string(space.total), width) + " bytes\n";
+        listing += "Used:  " + pad(std::to_string(space.used), width) + " bytes\n";
+        listing += "Free:  " + pad(std::to_string(space.free), width) + " bytes\n";
+    }
+    return listing;
 }
 
 std::string wrapListingText(const std::string& text, std::size_t columns) {
@@ -236,6 +307,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "TASKVIEW") return {5, false};
     if (instruction.name == "TASK") return {1, instruction.expectsValue};
     if (instruction.name == "TASKRESULT") return {2, true};
+    if (instruction.name == "RGB") return {3, true};
+    if (instruction.name == "MODE") return {1, instruction.expectsValue};
     if (instruction.name == "IPRINT") return {1, false};
     if (instruction.name == "BUSY") return {1, false};
     if (instruction.name == "INKEY" || instruction.name == "INKEY$") return {0, true};
@@ -262,6 +335,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "SIN" || instruction.name == "COS" ||
         instruction.name == "INT") return {1, true};
     if (instruction.name == "RND") return {0, true};
+    if (instruction.name == "CPUFREQ") return {0, true};
     if (instruction.name == "RANDOMIZE") return {1, false};
     if (instruction.name == "FREE") return {0, true};
     if (instruction.name == "GETCHANNEL") return {1, true};
@@ -280,6 +354,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "DEALLOC") return {1, false};
     if (instruction.name == "POKE_W" || instruction.name == "POKE_L") return {2, false};
     if (instruction.name == "READ$") return {1, true};
+    if (instruction.name == "FPOS" || instruction.name == "FLEN") return {1, true};
     if (instruction.name == "EOF") return {0, true};
     if (instruction.name == "WRITE") return {2, false};
     if (instruction.name == "CLOSE") return {1, false};
@@ -293,8 +368,13 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "DIALOG" || instruction.name == "MENU") return {1, true};
     if (instruction.name == "DGET" || instruction.name == "DGET$") return {2, true};
     if (instruction.name == "MCARD") return {4, false};
+    if (instruction.name == "MENABLE") return {3, false};
     if (instruction.name == "INK" || instruction.name == "PAPER") return {1, false};
     if (instruction.name == "OVER") return {1, false};
+    if (instruction.name == "PALETTE") return {2, false};
+    if (instruction.name == "PALROT") return {3, false};
+    if (instruction.name == "PALSHIFT") return {4, false};
+    if (instruction.name == "PALFADE") return {4, false};
     if (instruction.name == "PLOT") return {2, false};
     if (instruction.name == "LINE" || instruction.name == "RECT") return {4, false};
     if (instruction.name == "CIRCLE") return {3, false};
@@ -303,15 +383,22 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "UNLOADFONT") return {1, false};
     if (instruction.name == "LOADFONT") return {1, true};
     if (instruction.name == "GETFONT") return {2, true};
+    if (instruction.name == "LOADIMAGE") return {1, true};
+    if (instruction.name == "SYSINFO$") return {1, true};
+    if (instruction.name == "CAPABILITY") return {1, true};
+    if (instruction.name == "UNLOADIMAGE") return {1, false};
+    if (instruction.name == "BLIT") return {3, false};
     if (instruction.name == "CLS") return {2, false};
     if (instruction.name == "ROTATE") return {1, false};
     if (instruction.name == "WINDOW") return {4, false};
     if (instruction.name == "CLOSEWINDOW") return {0, false};
+    if (instruction.name == "TILE") return {0, false};
     if (instruction.name == "GUPDATE") return {0, false};
     if (instruction.name == "GWIDTH" || instruction.name == "GHEIGHT" ||
         instruction.name == "GORIGINX" || instruction.name == "GORIGINY" ||
         instruction.name == "GDEPTH" || instruction.name == "GROTATION" ||
-        instruction.name == "GPALETTESIZE") return {0, true};
+        instruction.name == "GPALETTESIZE" || instruction.name == "GX" ||
+        instruction.name == "GY") return {0, true};
     if (instruction.name == "GPALETTE$") return {1, true};
     return {0, false};
 }
@@ -443,9 +530,10 @@ private:
         if (errno == ERANGE || parsedEnd != text.c_str() + text.size() ||
             !std::isfinite(value))
             fail("invalid number");
-        return {Kind::Number, text, value, line_, column};
+        return {Kind::Number, text, value, line_, column, start, offset_ - start};
     }
     Token radixNumber() {
+        const auto start = offset_;
         const int column = column_;
         advance();
         const char prefix = static_cast<char>(std::toupper(static_cast<unsigned char>(peek())));
@@ -470,7 +558,8 @@ private:
         if (digits == 0) fail("radix prefix must be followed by digits");
         if (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_')
             fail("invalid digit in radix integer literal");
-        return {Kind::Number, std::string{}, static_cast<double>(value), line_, column};
+        return {Kind::Number, std::string{}, static_cast<double>(value), line_, column,
+                start, offset_ - start};
     }
     Token string() {
         const int column = column_;
@@ -502,6 +591,8 @@ private:
         std::string text(source_.substr(start, offset_ - start));
         std::string upper = text;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (upper == "MODE" && peek() == '(')
+            return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
         if (upper == "TASK" || upper == "ERR" || upper == "ERR$" || upper == "ERRX$" ||
             (upper == "LOC" && peek() == '('))
             return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
@@ -571,6 +662,119 @@ std::string canonicalizeKeywords(const std::string& source) {
     return result;
 }
 
+std::string expandCompactEnd(const std::string& source) {
+    const auto first = source.find_first_not_of(" \t\r");
+    if (first == std::string::npos) return source;
+    std::size_t end = first;
+    while (end < source.size() &&
+           (std::isalnum(static_cast<unsigned char>(source[end])) || source[end] == '$'))
+        ++end;
+    if (end < source.size() && source[end] != ' ' && source[end] != '\t' &&
+        source[end] != '\r' && source[end] != ':')
+        return source;
+
+    std::string word = source.substr(first, end - first);
+    std::transform(word.begin(), word.end(), word.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    const char* secondWord = nullptr;
+    if (word == "ENDIF") secondWord = "IF";
+    else if (word == "ENDSEL") secondWord = "SEL";
+    else if (word == "ENDREP") secondWord = "REP";
+    else if (word == "ENDFOR") secondWord = "FOR";
+    else if (word == "ENDDEF") secondWord = "DEF";
+    if (!secondWord) return source;
+
+    std::string expanded;
+    expanded.reserve(source.size() + 4);
+    expanded.append(source, 0, first);
+    expanded += "END ";
+    expanded += secondWord;
+    expanded.append(source, end, std::string::npos);
+    return expanded;
+}
+
+struct ProgramDefinition {
+    bool function = false;
+    std::string name;
+    std::string signature;
+    int firstLine = 0;
+    int lastLine = 0;
+};
+
+// Text scan of stored lines: DEFine PROCedure/FuNction ... END DEFine.
+std::vector<ProgramDefinition> scanProgramDefinitions(const std::map<int, std::string>& program) {
+    std::vector<ProgramDefinition> definitions;
+    const auto nextWord = [](const std::string& text, std::size_t& pos) {
+        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+        const std::size_t begin = pos;
+        while (pos < text.size() && !std::isspace(static_cast<unsigned char>(text[pos])) &&
+               text[pos] != '(' && text[pos] != ':')
+            ++pos;
+        std::string word = text.substr(begin, pos - begin);
+        std::transform(word.begin(), word.end(), word.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        return word;
+    };
+    bool open = false;
+    int previous = 0;
+    for (const auto& [number, body] : program) {
+        std::size_t pos = 0;
+        const std::string first = nextWord(body, pos);
+        const std::string second = nextWord(body, pos);
+        if (first == "DEFINE" && (second == "PROCEDURE" || second == "FUNCTION")) {
+            if (open) definitions.back().lastLine = previous;
+            ProgramDefinition definition;
+            definition.function = second == "FUNCTION";
+            definition.firstLine = number;
+            definition.lastLine = number;
+            const std::size_t begin = body.find_first_not_of(" \t", pos);
+            definition.signature = begin == std::string::npos ? std::string{} :
+                body.substr(begin);
+            while (!definition.signature.empty() &&
+                   std::isspace(static_cast<unsigned char>(definition.signature.back())))
+                definition.signature.pop_back();
+            const std::size_t nameEnd = definition.signature.find_first_of(" \t(");
+            definition.name = definition.signature.substr(0, nameEnd);
+            definitions.push_back(std::move(definition));
+            open = true;
+        } else if (first == "END" && second == "DEFINE" && open) {
+            definitions.back().lastLine = number;
+            open = false;
+        }
+        previous = number;
+    }
+    if (open) definitions.back().lastLine = previous;
+    return definitions;
+}
+
+template <typename Values, typename Arrays>
+void appendSortedVariables(std::ostringstream& listing, const Values& values,
+                           const Arrays& arrays) {
+    std::vector<std::string> names;
+    names.reserve(values.size());
+    for (const auto& entry : values) names.push_back(entry.first);
+    std::sort(names.begin(), names.end());
+    for (const auto& name : names) {
+        listing << name << " = ";
+        const auto& value = values.at(name);
+        if (const auto* number = std::get_if<double>(&value)) listing << *number;
+        else listing << '"' << std::get<std::string>(value) << '"';
+        listing << '\n';
+    }
+    auto sortedArrays = arrays;
+    std::sort(sortedArrays.begin(), sortedArrays.end(),
+              [](const auto& left, const auto& right) { return left.first < right.first; });
+    for (const auto& [name, dimensions] : sortedArrays) {
+        listing << name << "(";
+        for (std::size_t i = 0; i < dimensions.size(); ++i) {
+            if (i != 0) listing << ",";
+            listing << (dimensions[i] == 0 ? 0 : dimensions[i] - 1);
+        }
+        listing << ")\n";
+    }
+}
+
 struct DefinitionInfo {
     std::size_t address = 0;
     bool function = false;
@@ -594,6 +798,7 @@ public:
         : tokens_(std::move(tokens)) {
         if (enclosing) {
             enclosingFunctions_ = enclosing->functions;
+            code_.textPool = enclosing->textPool;
             arrays_ = enclosing->arrays;
             constants_ = enclosing->constants;
             for (const auto& [name, function] : enclosing->functions) {
@@ -613,6 +818,7 @@ public:
     InstructionSequence compile(bool tolerateUnresolvedCalls = false,
                                  bool tolerateIncompleteBlocks = false,
                                  bool tolerateUnresolvedSourceJumps = false) {
+        detail::TextPoolScope textScope(code_.textPool);
         try {
             block(true);
             if (!check(Kind::End)) error(peek(), "unexpected block terminator");
@@ -642,6 +848,7 @@ public:
     }
 
     InstructionSequence compileExpression() {
+        detail::TextPoolScope textScope(code_.textPool);
         expression();
         if (!check(Kind::End)) error(peek(), "unexpected text after expression");
         resolveCalls(false);
@@ -714,13 +921,13 @@ private:
             const SourceTarget* target = nullptr;
             if (instruction.targetIsLineNumber) {
                 static const SourceTarget beginning{};
-                if (instruction.sourceLineTarget == 0) target = &beginning;
+                if (instruction.sourceLineTarget() == 0) target = &beginning;
                 else {
-                    const auto found = lineTargets_.find(instruction.sourceLineTarget);
+                    const auto found = lineTargets_.find(instruction.sourceLineTarget());
                     if (found != lineTargets_.end()) target = &found->second;
                 }
             } else {
-                const auto found = labels_.find(instruction.ownerDefinition.get() + "\x1f" + instruction.name);
+                const auto found = labels_.find(instruction.extra().ownerDefinition.get() + "\x1f" + instruction.name);
                 if (found != labels_.end()) target = &found->second;
             }
             if (!target) {
@@ -728,11 +935,11 @@ private:
                 error(instruction, instruction.targetIsLineNumber ?
                       "GOTO line number does not exist" : "GOTO label does not exist");
             }
-            if (target->ownerDefinition != instruction.ownerDefinition.get())
+            if (target->ownerDefinition != instruction.extra().ownerDefinition.get())
                 error(instruction, "GOTO cannot cross a procedure or function boundary");
-            if (target->scopes.size() != instruction.jumpScopes.size() ||
+            if (target->scopes.size() != instruction.extra().jumpScopes.size() ||
                 !std::equal(target->scopes.begin(), target->scopes.end(),
-                            instruction.jumpScopes.begin()))
+                            instruction.extra().jumpScopes.begin()))
                 error(instruction, "GOTO cannot enter or leave a structured loop or SELECT block");
             instruction.target = target->address;
         }
@@ -750,7 +957,7 @@ private:
                 std::size_t item = 0;
                 while (item < code_.dataItems.size() &&
                        (code_.dataItems[item].basicLine == 0 ||
-                        code_.dataItems[item].basicLine < instruction.sourceLineTarget))
+                        code_.dataItems[item].basicLine < instruction.sourceLineTarget()))
                     ++item;
                 instruction.target = item;
                 continue;
@@ -758,7 +965,7 @@ private:
             if (instruction.name.empty()) continue;
 
             const auto label = labels_.find(
-                instruction.ownerDefinition.get() + "\x1f" + instruction.name);
+                instruction.extra().ownerDefinition.get() + "\x1f" + instruction.name);
             if (label == labels_.end())
                 error(instruction, "RESTORE label does not exist");
             std::size_t item = 0;
@@ -798,6 +1005,8 @@ private:
                 tokens_[current_ + 1].kind == Kind::Stop ||
                 tokens_[current_ + 1].kind == Kind::If ||
                 tokens_[current_ + 1].kind == Kind::Else ||
+                tokens_[current_ + 1].kind == Kind::Const ||
+                tokens_[current_ + 1].kind == Kind::Option ||
                 tokens_[current_ + 1].kind == Kind::EndKeyword ||
                 tokens_[current_ + 1].kind == Kind::For ||
                 tokens_[current_ + 1].kind == Kind::Next ||
@@ -830,19 +1039,25 @@ private:
     }
     void emit(Op op, const Token& token, Value value = 0.0, std::string name = {},
               PrintSeparator separator = PrintSeparator::None) {
-        code_.push_back({op, std::move(value), std::move(name), token.line,
-                         token.column, separator});
+        Instruction instruction{op, 0.0, std::move(name), token.line, token.column, separator};
+        if (const auto* text = std::get_if<std::string>(&value)) {
+            instruction.name = *text;
+            instruction.textLiteral = true;
+        } else {
+            instruction.setLiteral(std::get<double>(value));
+        }
+        code_.push_back(std::move(instruction));
     }
     void resolveCalls(bool tolerateUnresolvedCalls) {
         for (Instruction& instruction : code_) {
             if (instruction.op != Op::Call) continue;
             if (isBuiltinName(instruction.name)) {
                 const auto [arguments, returnsValue] = builtinSignature(instruction);
-                if (instruction.channelArgument && instruction.argCount == 0)
+                if (instruction.channelArgument && instruction.argCount() == 0)
                     error(instruction, "channel selector is missing");
-                const std::size_t passedArguments = instruction.argCount -
+                const std::size_t passedArguments = instruction.argCount() -
                     static_cast<std::size_t>(instruction.channelArgument) -
-                    instruction.optionCount;
+                    instruction.optionCount();
                 if (instruction.name == "INKEY" || instruction.name == "INKEY$") {
                     if (passedArguments > 1) error(instruction, "INKEY expects zero or one timeout");
                 } else if (instruction.name == "FREE") {
@@ -884,6 +1099,9 @@ private:
                 } else if (instruction.name == "TASKVIEW") {
                     if (passedArguments != 5 && passedArguments != 7)
                         error(instruction, "TASKVIEW expects task ID, origin X/Y, canvas width/height, and optional offset X/Y");
+                } else if (instruction.name == "MENABLE") {
+                    if (passedArguments != 3)
+                        error(instruction, "MENABLE expects menu handle, command ID, and enabled flag");
                 } else if (instruction.name == "DINIT") {
                     if (passedArguments > 2)
                         error(instruction, "DINIT expects an optional title and options mask");
@@ -897,14 +1115,41 @@ private:
                     if (passedArguments < 2 || passedArguments > 3)
                         error(instruction, "MID$ expects a string, start, and optional length");
                 } else if (instruction.name == "GUPDATE") {
-                    if (passedArguments > 1)
-                        error(instruction, "GUPDATE accepts one numeric mode or no argument");
+                    if (passedArguments > 2)
+                        error(instruction, "GUPDATE accepts a mode or SKIP and a frame count");
+                } else if (instruction.name == "MODE") {
+                    if ((instruction.expectsValue && passedArguments != 1) ||
+                        (!instruction.expectsValue &&
+                         (passedArguments < 1 || passedArguments > 2)))
+                        error(instruction, instruction.expectsValue ?
+                            "MODE query expects one selector" :
+                            "MODE expects a mode ID and optional options");
                 } else if (instruction.name == "RECT") {
                     if (passedArguments < 4 || passedArguments > 5)
                         error(instruction, "RECT expects x, y, width, height, and optional fill flag");
                 } else if (instruction.name == "CIRCLE") {
                     if (passedArguments < 3 || passedArguments > 4)
                         error(instruction, "CIRCLE expects x, y, radius, and optional fill flag");
+                } else if (instruction.name == "LINE") {
+                    if (passedArguments != 2 && passedArguments != 4)
+                        error(instruction,
+                            "LINE expects x,y, optional TO x,y, or four coordinates");
+                } else if (instruction.name == "PALETTE") {
+                    if (passedArguments < 2)
+                        error(instruction, "PALETTE expects a start index and at least one RGB color");
+                } else if (instruction.name == "PALROT") {
+                    if (passedArguments != 3)
+                        error(instruction, "PALROT expects start, count, and signed steps");
+                } else if (instruction.name == "PALSHIFT") {
+                    if (passedArguments != 4)
+                        error(instruction, "PALSHIFT expects start, count, direction, and RGB color");
+                } else if (instruction.name == "PALFADE") {
+                    if (passedArguments != 4)
+                        error(instruction, "PALFADE expects start, count, target RGB, and amount");
+                } else if (instruction.name == "BLIT") {
+                    if (passedArguments != 3 && passedArguments != 4)
+                        error(instruction,
+                            "BLIT expects image handle, x, y, and optional transparent index");
                 } else if (instruction.name == "CLS") {
                     if (passedArguments != 0 && passedArguments != 2)
                         error(instruction, "CLS expects no colors or ink and paper colors");
@@ -914,6 +1159,13 @@ private:
                            instruction.name != "EOF" &&
                            instruction.name != "TASKVIEW" && instruction.name != "DINIT" &&
                            instruction.name != "IPRINT" && instruction.name != "BUSY" &&
+                           instruction.name != "PALETTE" &&
+                           instruction.name != "PALROT" &&
+                           instruction.name != "PALSHIFT" &&
+                           instruction.name != "PALFADE" &&
+                           instruction.name != "BLIT" &&
+                           instruction.name != "LINE" &&
+                           instruction.name != "MODE" &&
                            passedArguments != arguments) {
                     error(instruction, "incorrect argument count");
                 }
@@ -928,15 +1180,15 @@ private:
             if (found == definitions_.end()) {
                 const auto array = arrays_.find(instruction.name);
                 if (instruction.expectsValue && array != arrays_.end()) {
-                    if (instruction.argCount != array->second)
+                    if (instruction.argCount() != array->second)
                         error(instruction, "incorrect array rank");
                     instruction.op = Op::ArrayGet;
                     instruction.rank = array->second;
                     continue;
                 }
                 if (tolerateUnresolvedCalls) continue;
-                if (!instruction.ownerDefinition.empty()) {
-                    const auto owner = definitions_.find(instruction.ownerDefinition.get());
+                if (!instruction.extra().ownerDefinition.empty()) {
+                    const auto owner = definitions_.find(instruction.extra().ownerDefinition.get());
                     if (owner != definitions_.end() &&
                         std::find(owner->second.parameters.begin(), owner->second.parameters.end(),
                                   instruction.name) != owner->second.parameters.end())
@@ -947,12 +1199,12 @@ private:
             const DefinitionInfo& definition = found->second;
             if (instruction.expectsValue != definition.function)
                 error(instruction, "procedure/function used in the wrong context");
-            if (instruction.argCount != definition.parameters.size())
+            if (instruction.argCount() != definition.parameters.size())
                 error(instruction, "incorrect argument count");
             instruction.target = definition.address;
-            instruction.parameters = definition.parameters;
-            instruction.localNames = definition.locals;
-            for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
+            instruction.mutableExtra().parameters = definition.parameters;
+            instruction.mutableExtra().localNames = definition.locals;
+            for (const ArrayArgumentCandidate& argument : instruction.extra().arrayArgumentCandidates) {
                 const auto array = arrays_.find(argument.name);
                 if (array == arrays_.end()) continue;
                 std::size_t& parameterRank =
@@ -967,11 +1219,11 @@ private:
         while (propagated) {
             propagated = false;
             for (Instruction& instruction : code_) {
-                if (instruction.op != Op::Call || instruction.ownerDefinition.empty()) continue;
-                const auto caller = definitions_.find(instruction.ownerDefinition.get());
+                if (instruction.op != Op::Call || instruction.extra().ownerDefinition.empty()) continue;
+                const auto caller = definitions_.find(instruction.extra().ownerDefinition.get());
                 const auto callee = definitions_.find(instruction.name);
                 if (caller == definitions_.end() || callee == definitions_.end()) continue;
-                for (const ArrayArgumentCandidate& argument : instruction.arrayArgumentCandidates) {
+                for (const ArrayArgumentCandidate& argument : instruction.extra().arrayArgumentCandidates) {
                     const auto parameter = std::find(caller->second.parameters.begin(),
                                                      caller->second.parameters.end(), argument.name);
                     if (parameter == caller->second.parameters.end()) continue;
@@ -997,19 +1249,19 @@ private:
             if (callee == definitions_.end()) continue;
             for (std::size_t i = 0; i < callee->second.parameterArrayRanks.size(); ++i) {
                 if (callee->second.parameterArrayRanks[i] == 0) continue;
-                const auto argument = std::find_if(instruction.arrayArgumentCandidates.begin(),
-                    instruction.arrayArgumentCandidates.end(),
+                const auto argument = std::find_if(instruction.extra().arrayArgumentCandidates.begin(),
+                    instruction.extra().arrayArgumentCandidates.end(),
                     [&](const ArrayArgumentCandidate& candidate) {
                         return candidate.parameterIndex == i;
                     });
-                if (argument == instruction.arrayArgumentCandidates.end() ||
+                if (argument == instruction.extra().arrayArgumentCandidates.end() ||
                     code_[argument->loadInstruction].op != Op::PushArrayRef)
                     error(instruction, "array argument required for array parameter");
             }
         }
         for (Instruction& instruction : code_) {
-            if (instruction.op == Op::Call && !instruction.ownerDefinition.empty()) {
-                const auto owner = definitions_.find(instruction.ownerDefinition.get());
+            if (instruction.op == Op::Call && !instruction.extra().ownerDefinition.empty()) {
+                const auto owner = definitions_.find(instruction.extra().ownerDefinition.get());
                 if (owner != definitions_.end()) {
                     const auto parameter = std::find(owner->second.parameters.begin(),
                                                      owner->second.parameters.end(), instruction.name);
@@ -1018,11 +1270,11 @@ private:
                             parameter - owner->second.parameters.begin());
                         const std::size_t rank = owner->second.parameterArrayRanks[index];
                         if (rank == 0) error(instruction, "array parameter has no array argument");
-                        if (instruction.argCount != rank)
+                        if (instruction.argCount() != rank)
                             throw std::runtime_error("line " + std::to_string(instruction.line) +
                                 ", column " + std::to_string(instruction.column) +
                                 ": incorrect array rank (indexes " +
-                                std::to_string(instruction.argCount) + ", rank " +
+                                std::to_string(instruction.argCount()) + ", rank " +
                                 std::to_string(rank) + ")");
                         instruction.op = Op::ArrayGet;
                         instruction.rank = rank;
@@ -1030,8 +1282,8 @@ private:
                     }
                 }
             }
-            if (instruction.op == Op::ArraySet && !instruction.ownerDefinition.empty()) {
-                const auto owner = definitions_.find(instruction.ownerDefinition.get());
+            if (instruction.op == Op::ArraySet && !instruction.extra().ownerDefinition.empty()) {
+                const auto owner = definitions_.find(instruction.extra().ownerDefinition.get());
                 if (owner != definitions_.end()) {
                     const auto parameter = std::find(owner->second.parameters.begin(),
                                                      owner->second.parameters.end(), instruction.name);
@@ -1113,7 +1365,7 @@ private:
         if (!loop.isFor) {
             Instruction instruction{Op::LoopNext, 0.0, nameToken.text, keyword.line, keyword.column};
             instruction.target = loop.body;
-            instruction.loopId = loop.id;
+            instruction.setLoopId(loop.id);
             instruction.rank = loop.selectDepth;
             code_.push_back(std::move(instruction));
             loop.nextInstructions.push_back(code_.size() - 1);
@@ -1121,7 +1373,7 @@ private:
         }
         Instruction instruction{Op::ForNext, 0.0, nameToken.text, keyword.line, keyword.column};
         instruction.target = loop.body;
-        instruction.loopId = loop.id;
+        instruction.setLoopId(loop.id);
         instruction.rank = loop.selectDepth;
         instruction.explicitNext = explicitNext;
         code_.push_back(std::move(instruction));
@@ -1130,7 +1382,7 @@ private:
     void emitExit(const Token& keyword, const Token& nameToken) {
         LoopContext& loop = findLoop(nameToken);
         Instruction instruction{Op::ExitLoop, 0.0, nameToken.text, keyword.line, keyword.column};
-        instruction.loopId = loop.id;
+        instruction.setLoopId(loop.id);
         instruction.rank = loop.selectDepth;
         code_.push_back(std::move(instruction));
         loop.exitInstructions.push_back(code_.size() - 1);
@@ -1185,11 +1437,11 @@ private:
                   std::vector<ArrayArgumentCandidate> arrayCandidates = {},
                   bool channelArgument = false) {
         Instruction instruction{Op::Call, 0.0, name.text, name.line, name.column};
-        instruction.argCount = arguments + static_cast<std::size_t>(channelArgument);
+        instruction.setArgCount(arguments + static_cast<std::size_t>(channelArgument));
         instruction.channelArgument = channelArgument;
         instruction.expectsValue = expectsValue;
-        instruction.arrayArgumentCandidates = std::move(arrayCandidates);
-        instruction.ownerDefinition = currentDefinitionName_;
+        instruction.mutableExtra().arrayArgumentCandidates = std::move(arrayCandidates);
+        instruction.mutableExtra().ownerDefinition = currentDefinitionName_;
         code_.push_back(std::move(instruction));
     }
     void blockDim() {
@@ -1271,7 +1523,7 @@ private:
                     if (!match(Kind::Comma)) break;
                 }
                 Instruction compare{Op::SelectMatch, 0.0, {}, armToken.line, armToken.column};
-                compare.selectItems = std::move(items);
+                compare.mutableExtra().selectItems = std::move(items);
                 code_.push_back(std::move(compare));
                 falseJump = code_.size();
                 emit(Op::JumpIfFalse, armToken);
@@ -1421,12 +1673,12 @@ private:
 
         const std::size_t initIndex = code_.size();
         Instruction init{Op::ForInit, 0.0, variable.text, keyword.line, keyword.column};
-        init.loopId = nextLoopId_++;
-        init.forItems = std::move(items);
+        init.setLoopId(nextLoopId_++);
+        init.mutableExtra().forItems = std::move(items);
         code_.push_back(std::move(init));
         const std::size_t body = code_.size();
-        controlScopes_.push_back(code_[initIndex].loopId);
-        loops_.push_back({code_[initIndex].loopId, variable.text, body, true, {}, {}});
+        controlScopes_.push_back(code_[initIndex].loopId());
+        loops_.push_back({code_[initIndex].loopId(), variable.text, body, true, {}, {}});
         loops_.back().selectDepth = selectDepth_;
 
         if (match(Kind::Colon)) {
@@ -1555,15 +1807,15 @@ private:
             error(peek(), "expected TO after GO");
         Instruction jump{Op::Jump, 0.0, {}, keyword.line, keyword.column};
         jump.sourceJump = true;
-        jump.jumpScopes = controlScopes_;
-        jump.ownerDefinition = currentDefinitionName_;
+        jump.mutableExtra().jumpScopes = controlScopes_;
+        jump.mutableExtra().ownerDefinition = currentDefinitionName_;
         if (check(Kind::Number)) {
             const Token target = advance();
             if (!std::isfinite(target.number) || std::trunc(target.number) != target.number ||
                 target.number < 0 || target.number > 32767)
                 error(target, "GOTO target must be a line number in 0..32767");
             jump.targetIsLineNumber = true;
-            jump.sourceLineTarget = static_cast<int>(target.number);
+            jump.setSourceLineTarget(static_cast<int>(target.number));
         } else if (check(Kind::Identifier)) {
             jump.name = advance().text;
         } else {
@@ -1736,7 +1988,7 @@ private:
                 Instruction read{Op::Read, 0.0, target.text,
                                  keyword.line, keyword.column};
                 read.rank = rank;
-                read.ownerDefinition = currentDefinitionName_;
+                read.mutableExtra().ownerDefinition = currentDefinitionName_;
                 code_.push_back(std::move(read));
 
                 if (!match(Kind::Comma)) break;
@@ -1750,14 +2002,14 @@ private:
         if (match(Kind::Restore)) {
             const Token keyword = previous();
             Instruction restore{Op::Restore, 0.0, {}, keyword.line, keyword.column};
-            restore.ownerDefinition = currentDefinitionName_;
+            restore.mutableExtra().ownerDefinition = currentDefinitionName_;
             if (check(Kind::Number)) {
                 const Token line = advance();
                 if (!std::isfinite(line.number) || std::trunc(line.number) != line.number ||
                     line.number < 0 || line.number > 32767)
                     error(line, "RESTORE line number must be an integer in 0..32767");
                 restore.targetIsLineNumber = true;
-                restore.sourceLineTarget = static_cast<int>(line.number);
+                restore.setSourceLineTarget(static_cast<int>(line.number));
             } else if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
                        commandArgumentTerminatorAt(current_ + 1)) {
                 restore.name = advance().text;
@@ -1834,7 +2086,7 @@ private:
                 if (target.text.empty() || target.text.back() != '$')
                     error(target, "binary IN target must be a string variable ending in '$'");
                 instruction.op = Op::ChannelRead;
-                instruction.targetVariable = target.text;
+                instruction.mutableExtra().targetVariable = target.text;
             } else if (operationName == "OUT") {
                 expression();
                 if (!match(Kind::Comma)) error(peek(), "expected ',' before output length");
@@ -1874,10 +2126,94 @@ private:
             }
             return;
         }
+        if (check(Kind::Identifier) && uppercaseAscii(peek().text) == "MIRROR" &&
+            current_ + 1 < tokens_.size()) {
+            const Kind next = tokens_[current_ + 1].kind;
+            const bool nextIsWord = next == Kind::Identifier || next == Kind::BuiltinCommand;
+            const std::string word = nextIsWord ? uppercaseAscii(tokens_[current_ + 1].text) : "";
+            if (next == Kind::Hash) {
+                const Token name = advance();
+                advance();
+                expression();
+                if (!match(Kind::To)) error(peek(), "expected TO after MIRROR #source");
+                if (!match(Kind::Hash)) error(peek(), "expected destination '#channel' after TO");
+                expression();
+                emit(Op::ChannelMirror, name);
+                return;
+            }
+            if (word == "DELETE" && current_ + 2 < tokens_.size() &&
+                tokens_[current_ + 2].kind == Kind::Hash) {
+                const Token name = advance();
+                advance();
+                advance();
+                expression();
+                emit(Op::ChannelMirrorDelete, name);
+                return;
+            }
+            if (word == "LIST") {
+                const Token name = advance();
+                advance();
+                emit(Op::ChannelMirrorList, name);
+                return;
+            }
+        }
         if (check(Kind::BuiltinCommand)) {
             const Token name = advance();
             if (check(Kind::LeftParen))
                 error(peek(), "commands take arguments without call parentheses");
+            if (name.text == "MUSIC") {
+                if (!check(Kind::Identifier) && !check(Kind::BuiltinCommand) &&
+                    !check(Kind::Stop))
+                    error(peek(), "expected MUSIC subcommand");
+                const Token subcommand = advance();
+                const std::string action = uppercaseAscii(subcommand.text);
+                detail::Op op;
+                if (action == "PLAY") op = Op::MusicPlay;
+                else if (action == "WAV") op = Op::MusicWav;
+                else if (action == "TEST") op = Op::MusicTest;
+                else if (action == "STOP") op = Op::MusicStop;
+                else if (action == "PAUSE") op = Op::MusicPause;
+                else if (action == "RESUME") op = Op::MusicResume;
+                else if (action == "STATUS") op = Op::MusicStatus;
+                else error(subcommand, "MUSIC expects PLAY, WAV, TEST, STOP, PAUSE, RESUME, or STATUS");
+                Instruction music{op, 0.0, {}, name.line, name.column};
+                if (op == Op::MusicPlay || op == Op::MusicWav) {
+                    if (commandArgumentTerminator()) error(name, "MUSIC PLAY and MUSIC WAV require a file path");
+                    expression();
+                    if (!commandArgumentTerminator())
+                        error(peek(), "expected end of statement after MUSIC PLAY or WAV path");
+                } else if (!commandArgumentTerminator()) {
+                    error(peek(), "MUSIC subcommand takes no arguments");
+                }
+                code_.push_back(std::move(music));
+                return;
+            }
+            if (name.text == "BEEP") {
+                if (commandArgumentTerminator())
+                    error(name, "BEEP requires a duration in milliseconds and a pitch in Hz");
+                expression();
+                if (!match(Kind::Comma)) error(peek(), "expected ',' and pitch after BEEP duration");
+                expression();
+                Instruction beep{Op::Beep, 0.0, {}, name.line, name.column};
+                beep.setArgCount(2);
+                if (match(Kind::Comma)) {
+                    expression();
+                    beep.setArgCount(3);
+                }
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of statement after BEEP arguments");
+                code_.push_back(std::move(beep));
+                return;
+            }
+            if (name.text == "VOLUME") {
+                if (commandArgumentTerminator())
+                    error(name, "VOLUME requires a value from 0 through 255");
+                expression();
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of statement after VOLUME value");
+                code_.push_back({Op::Volume, 0.0, {}, name.line, name.column});
+                return;
+            }
             if (name.text == "PAUSE") {
                 if (commandArgumentTerminator())
                     error(name, "PAUSE requires a delay in milliseconds");
@@ -1942,9 +2278,9 @@ private:
                     if (!check(Kind::Identifier))
                         error(peek(), "expected INPUT destination variable");
                     const Token target = advance();
-                    input.inputVariables.push_back(target.text);
+                    input.mutableExtra().inputVariables.push_back(target.text);
                 } while (match(Kind::Comma));
-                input.name = input.inputVariables[0];
+                input.name = input.extra().inputVariables[0];
                 if (input.expectsValue && !hasPromptChannel) {
                     // The prompt channel is the standard output channel #1.
                     input.target = 1;
@@ -1953,6 +2289,17 @@ private:
                 return;
             }
             if (name.text == "GUPDATE") {
+                if (check(Kind::Identifier) && uppercaseAscii(peek().text) == "SKIP") {
+                    const Token skip = advance();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' after GUPDATE SKIP");
+                    emit(Op::Push, skip, std::string("SKIP"));
+                    expression();
+                    if (!commandArgumentTerminator())
+                        error(peek(), "expected end of line after GUPDATE SKIP count");
+                    emitCall(name, 2, false);
+                    return;
+                }
                 const bool hasMode = !commandArgumentTerminator();
                 if (hasMode) expression();
                 if (!commandArgumentTerminator())
@@ -1975,8 +2322,8 @@ private:
                 if (arguments < 1 || arguments > 3)
                     error(name, "IPRINT expects text, optional duration, and optional position");
                 emitCall(name, options.size() + arguments, false);
-                code_.back().optionCount = options.size();
-                code_.back().parameters = std::move(options);
+                code_.back().setOptionCount(options.size());
+                code_.back().mutableExtra().parameters = std::move(options);
                 return;
             }
             if (name.text == "BUSY") {
@@ -2001,8 +2348,58 @@ private:
                 if (arguments < 1 || arguments > 2)
                     error(name, "BUSY expects text and an optional position, or OFF");
                 emitCall(name, options.size() + arguments, false);
-                code_.back().optionCount = options.size();
-                code_.back().parameters = std::move(options);
+                code_.back().setOptionCount(options.size());
+                code_.back().mutableExtra().parameters = std::move(options);
+                return;
+            }
+            if (name.text == "LINE") {
+                const bool hasChannelArgument = match(Kind::Hash);
+                if (hasChannelArgument) {
+                    expression();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' after graphics channel selector");
+                }
+                const auto isToKeyword = [&]() {
+                    return check(Kind::To);
+                };
+                std::size_t arguments = 0;
+                std::string lineForm;
+                if (isToKeyword()) {
+                    advance();
+                    expression();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' between LINE coordinates");
+                    expression();
+                    arguments = 2;
+                    lineForm = "TO";
+                } else {
+                    expression();
+                    if (!match(Kind::Comma))
+                        error(peek(), "expected ',' between LINE coordinates");
+                    expression();
+                    arguments = 2;
+                    if (isToKeyword()) {
+                        advance();
+                        expression();
+                        if (!match(Kind::Comma))
+                            error(peek(), "expected ',' between LINE coordinates");
+                        expression();
+                        arguments = 4;
+                        lineForm = "FROM_TO";
+                    } else if (match(Kind::Comma)) {
+                        expression();
+                        if (!match(Kind::Comma))
+                            error(peek(), "expected ',' between LINE coordinates");
+                        expression();
+                        arguments = 4;
+                    } else {
+                        lineForm = "MOVE";
+                    }
+                }
+                if (!commandArgumentTerminator())
+                    error(peek(), "expected end of statement after LINE coordinates");
+                emitCall(name, arguments, false, {}, hasChannelArgument);
+                code_.back().mutableExtra().parameters = {std::move(lineForm)};
                 return;
             }
             const bool supportsChannelSelector =
@@ -2010,6 +2407,7 @@ private:
                 name.text == "PLOT" ||
                 name.text == "LINE" ||
                 name.text == "RECT" || name.text == "CIRCLE" || name.text == "TEXT" ||
+                name.text == "BLIT" ||
                 name.text == "FONT" || name.text == "GFONT" ||
                 name.text == "CLS" || name.text == "WINDOW" || name.text == "CLOSEWINDOW" ||
                 name.text == "XFER";
@@ -2049,7 +2447,7 @@ private:
             expression();
             Instruction instruction{Op::ArraySet, 0.0, name.text, name.line, name.column};
             instruction.rank = rank;
-            instruction.ownerDefinition = currentDefinitionName_;
+            instruction.mutableExtra().ownerDefinition = currentDefinitionName_;
             code_.push_back(std::move(instruction));
             return;
         }
@@ -2082,6 +2480,7 @@ private:
                 preceding = separatorKind(separator.kind);
                 if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End)) {
                     emit(Op::PrintSeparator, separator, 0.0, {}, preceding);
+                    emit(Op::PrintCommit, keyword);
                     return;
                 }
             }
@@ -2511,13 +2910,19 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<runtime::TaskControlService> taskControl,
                          runtime::TaskId taskId,
                          std::shared_ptr<runtime::SystemControlService> systemControl,
-                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency)
+                         std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency,
+                         std::shared_ptr<runtime::DisplayModeService> displayModes,
+                         std::shared_ptr<runtime::SystemInfoService> systemInfo,
+                         std::shared_ptr<runtime::MusicService> music)
     : uiSession_(std::make_unique<detail::UISessionState>()),
-    storage_(std::move(storage)), fontRegistry_(storage_),
+    storage_(std::move(storage)), fontRegistry_(storage_), bitmapRegistry_(storage_),
     channels_(std::move(channels)), ui_(std::move(ui)),
       graphics_(std::move(graphics)), network_(std::move(network)),
       memory_(std::move(memory)),
       cpuFrequency_(std::move(cpuFrequency)),
+      displayModes_(std::move(displayModes)),
+      systemInfo_(systemInfo ? std::move(systemInfo) : runtime::makeHostSystemInfoService()),
+      music_(std::move(music)),
       taskControl_(std::move(taskControl)),
       systemControl_(std::move(systemControl)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)),
@@ -2533,6 +2938,10 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
 
 void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
     hasTrappedDetail_ = false;
+    if (graphics_) {
+        try { graphics_->flushTextOutputBatches(session_id_); }
+        catch (...) { /* Preserve the original runtime error. */ }
+    }
     errorCode_ = code;
     errorDetail_ = std::move(detail);
 }
@@ -2545,6 +2954,7 @@ void Interpreter::abortExecution() noexcept {
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();
     clearPager();
+    clearFileJob();
     closeExecutionChannels();
     requestedPauseDurationMs_ = 0;
 }
@@ -2559,6 +2969,25 @@ std::string Interpreter::takePendingInteractiveTail() noexcept {
 
 std::optional<InteractiveLineEdit> Interpreter::takePendingLineEdit() noexcept {
     return std::exchange(pendingLineEdit_, std::nullopt);
+}
+
+std::optional<InteractiveLineEdit> Interpreter::navigateProgramEdit(
+    int currentLine, int direction) {
+    if (direction != -1 && direction != 1) return std::nullopt;
+    auto found = program_.find(currentLine);
+    if (found == program_.end()) return std::nullopt;
+    if (direction < 0) {
+        if (found == program_.begin()) return std::nullopt;
+        --found;
+    } else {
+        ++found;
+        if (found == program_.end()) return std::nullopt;
+    }
+    lastEditedLine_ = found->first;
+    return InteractiveLineEdit{
+        std::to_string(found->first) +
+            (found->second.empty() ? std::string{} : " " + found->second),
+        found->first};
 }
 
 bool Interpreter::hasPendingInteractivePager() const noexcept {
@@ -2584,18 +3013,8 @@ void Interpreter::writePagerPage(std::ostream& output, std::size_t lineCount) {
     const std::string page = pendingPagerText_.substr(
         pendingPagerOffset_, end - pendingPagerOffset_);
     const runtime::ChannelId channel = resolveChannel(pendingPagerChannel_);
-    if (channel == 0) {
-        output << page;
-        if (page.find('\n') != std::string::npos) output_column_ = 0;
-    } else if (channel == 1) {
-        if (graphics_) graphics_->writeText(session_id_, page);
-        else output << page;
-    } else {
-        if (!channels_)
-            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                        "channel output unavailable");
-        channels_->write(session_id_, channel, page);
-    }
+    emitText(output, channel, page, false);
+    if (channel == 0 && page.find('\n') != std::string::npos) output_column_ = 0;
     output.flush();
     pendingPagerOffset_ = end;
 }
@@ -2636,6 +3055,259 @@ ExecutionStatus Interpreter::resumeInteractivePager(std::ostream& output) {
     clearPager();
     return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
                                              ExecutionStatus::InteractivePending;
+}
+
+void Interpreter::clearFileJob() noexcept {
+    pendingFileConfirm_.reset();
+    pendingFileJob_.reset();
+    fileJobOutput_ = nullptr;
+}
+
+void Interpreter::writeTextToChannel(std::ostream& output, runtime::ChannelId channel,
+                                     std::string_view text) {
+    channel = resolveChannel(channel);
+    emitText(output, channel, std::string(text));
+    if (channel == 0 && text.find('\n') != std::string_view::npos) output_column_ = 0;
+}
+
+void Interpreter::writeEndpoint(std::ostream& output, runtime::ChannelId endpoint,
+                                const std::string& text) {
+    if (endpoint == 0) {
+        output << text;
+    } else if (endpoint == 1) {
+        if (graphics_) graphics_->writeText(session_id_, text);
+        else output << text;
+    } else {
+        if (!channels_)
+            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                        "channel output unavailable");
+        const auto opened = channels_->listOpen(session_id_);
+        const auto info = std::find_if(opened.begin(), opened.end(),
+            [&](const runtime::ChannelInfo& item) { return item.handle == endpoint; });
+        if (info != opened.end() && info->type == runtime::ChannelType::Window) {
+            if (!graphics_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "screen output is unavailable");
+            graphics_->writeText(session_id_, endpoint, text);
+        } else {
+            channels_->write(session_id_, endpoint, text);
+        }
+    }
+}
+
+void Interpreter::emitText(std::ostream& output, runtime::ChannelId endpoint,
+                           const std::string& text, bool mirror) {
+    writeEndpoint(output, endpoint, text);
+    if (mirror && !mirrors_.empty()) mirrorText(output, endpoint, text);
+}
+
+void Interpreter::mirrorText(std::ostream& output, runtime::ChannelId source,
+                             const std::string& text) {
+    const auto found = mirrors_.find(source);
+    if (found == mirrors_.end() || emittingMirror_) return;
+    emittingMirror_ = true;
+    for (auto& mirror : found->second) {
+        if (mirror.disabled) continue;
+        try {
+            if (!channelIsOpen(mirror.destination)) {
+                mirror.disabled = true;
+                mirror.failure = "target closed";
+            } else if (mirror.destination > 1 && channels_) {
+                const auto opened = channels_->listOpen(session_id_);
+                const auto info = std::find_if(opened.begin(), opened.end(),
+                    [&](const runtime::ChannelInfo& item) {
+                        return item.handle == mirror.destination;
+                    });
+                if (info != opened.end() && info->type != runtime::ChannelType::Window)
+                    mirror.dropped += channels_->writeNonBlocking(
+                        session_id_, mirror.destination, text);
+                else
+                    writeEndpoint(output, mirror.destination, text);
+            } else {
+                writeEndpoint(output, mirror.destination, text);
+            }
+        } catch (const std::exception& error) {
+            mirror.disabled = true;
+            mirror.failure = error.what();
+        } catch (...) {
+            mirror.disabled = true;
+            mirror.failure = "write failed";
+        }
+    }
+    emittingMirror_ = false;
+}
+
+void Interpreter::failMirror(runtime::ChannelId source, runtime::ChannelId destination,
+                             const std::string& reason) {
+    const auto found = mirrors_.find(source);
+    if (found == mirrors_.end()) return;
+    for (auto& mirror : found->second)
+        if (mirror.destination == destination) {
+            mirror.disabled = true;
+            mirror.failure = reason;
+        }
+}
+
+std::vector<runtime::ChannelId> Interpreter::graphicsMirrorTargets(
+        runtime::ChannelId source) {
+    std::vector<runtime::ChannelId> targets;
+    const auto found = mirrors_.find(source);
+    if (found == mirrors_.end() || emittingMirror_) return targets;
+    std::vector<runtime::ChannelInfo> opened;
+    if (channels_) opened = channels_->listOpen(session_id_);
+    for (auto& mirror : found->second) {
+        if (mirror.disabled) continue;
+        const auto destination = mirror.destination;
+        if (destination <= 1) { targets.push_back(destination); continue; }
+        const auto info = std::find_if(opened.begin(), opened.end(),
+            [&](const runtime::ChannelInfo& item) { return item.handle == destination; });
+        if (info == opened.end()) {
+            mirror.disabled = true;
+            mirror.failure = "target closed";
+        } else if (info->type == runtime::ChannelType::Window) {
+            targets.push_back(destination);
+        }
+    }
+    return targets;
+}
+
+void Interpreter::addMirror(runtime::ChannelId source, runtime::ChannelId destination) {
+    const runtime::ChannelId from = resolveChannel(source);
+    const runtime::ChannelId to = resolveChannel(destination);
+    if (from == to)
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "a channel cannot mirror to itself");
+    if (to > 1) {
+        const auto opened = channels_ ? channels_->listOpen(session_id_)
+                                      : std::vector<runtime::ChannelInfo>{};
+        const auto info = std::find_if(opened.begin(), opened.end(),
+            [&](const runtime::ChannelInfo& item) { return item.handle == to; });
+        if (info == opened.end() ||
+            (info->type != runtime::ChannelType::Window &&
+             info->type != runtime::ChannelType::File &&
+             info->type != runtime::ChannelType::Serial &&
+             info->type != runtime::ChannelType::Null))
+            throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                        "mirror target must be a text output channel");
+    }
+    // Mirrors apply to primary writes only, so a relation may not chain or loop.
+    if (mirrors_.count(to))
+        throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                    "mirror chains and cycles are not supported");
+    for (const auto& entry : mirrors_)
+        for (const auto& mirror : entry.second)
+            if (mirror.destination == from)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidHandle,
+                                            "mirror chains and cycles are not supported");
+    auto& list = mirrors_[from];
+    for (auto& mirror : list) {
+        if (mirror.destination != to) continue;
+        mirror = Mirror{to, false, 0, {}};
+        return;
+    }
+    if (list.size() >= 4) {
+        if (list.empty()) mirrors_.erase(from);
+        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                    "a channel can have at most 4 mirrors");
+    }
+    list.push_back(Mirror{to, false, 0, {}});
+}
+
+void Interpreter::deleteMirrors(runtime::ChannelId destination) {
+    runtime::ChannelId target = destination;
+    try { target = resolveChannel(destination); } catch (const runtime::ServiceError&) {}
+    for (auto entry = mirrors_.begin(); entry != mirrors_.end();) {
+        auto& list = entry->second;
+        list.erase(std::remove_if(list.begin(), list.end(),
+            [&](const Mirror& mirror) {
+                return mirror.destination == target || mirror.destination == destination;
+            }), list.end());
+        if (list.empty()) entry = mirrors_.erase(entry);
+        else ++entry;
+    }
+}
+
+void Interpreter::removeMirrorsFor(runtime::ChannelId channel) {
+    mirrors_.erase(channel);
+    deleteMirrors(channel);
+}
+
+std::string Interpreter::mirrorListing() const {
+    std::string listing;
+    for (const auto& entry : mirrors_)
+        for (const auto& mirror : entry.second) {
+            listing += "MIRROR #" + std::to_string(entry.first) + " TO #" +
+                       std::to_string(mirror.destination);
+            if (mirror.dropped != 0)
+                listing += " dropped " + std::to_string(mirror.dropped) + " bytes";
+            if (mirror.disabled) listing += " DISABLED: " + mirror.failure;
+            listing += "\n";
+        }
+    return listing.empty() ? "No mirrors\n" : listing;
+}
+
+ExecutionStatus Interpreter::startFileJob(runtime::fileops::Plan plan, std::ostream& output,
+                                          const char* commandName) {
+    clearFileJob();
+    const bool confirm = plan.needsConfirmation;
+    const std::string prompt = plan.confirmation;
+    pendingFileJob_ = std::make_unique<runtime::fileops::Job>(*storage_, std::move(plan));
+    if (confirm) {
+        if (!ui_) {
+            clearFileJob();
+            throw std::runtime_error(std::string(commandName) +
+                " needs confirmation but no interactive UI is available; add FORCE");
+        }
+        pendingFileConfirm_ = ui_->beginInput(session_id_, prompt, confirmInputOptions());
+        return ExecutionStatus::Suspended;
+    }
+    return runFileJob(output);
+}
+
+ExecutionStatus Interpreter::runFileJob(std::ostream& output) {
+    fileJobOutput_ = &output;
+    bool done = false;
+    try {
+        done = pendingFileJob_->run(std::chrono::milliseconds(20));
+    } catch (...) {
+        clearFileJob();
+        pendingInteractiveTail_.clear();
+        throw;
+    }
+    if (!done) return ExecutionStatus::Yielded;
+    const auto& plan = pendingFileJob_->plan();
+    if (plan.steps.size() > 1 || plan.recursive)
+        writeTextToChannel(output, default_output_channel_, pendingFileJob_->summary() + "\n");
+    clearFileJob();
+    return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
+                                             ExecutionStatus::InteractivePending;
+}
+
+ExecutionStatus Interpreter::resumeFileJob(std::ostream& output) {
+    if (pendingFileConfirm_) {
+        if (!ui_) {
+            clearFileJob();
+            return ExecutionStatus::Completed;
+        }
+        const auto result = ui_->poll(*pendingFileConfirm_);
+        if (!result) return ExecutionStatus::Suspended;
+        pendingFileConfirm_.reset();
+        std::string answer;
+        if (result->kind == ui::ResultKind::Submitted && !result->fields.empty()) {
+            if (const auto* submitted = std::get_if<std::string>(&result->fields.front()))
+                answer = *submitted;
+        }
+        const auto first = answer.find_first_not_of(" \t\r\n");
+        const bool yes = first != std::string::npos &&
+            std::toupper(static_cast<unsigned char>(answer[first])) == 'Y';
+        if (!yes) {
+            writeTextToChannel(output, default_output_channel_, "Cancelled\n");
+            clearFileJob();
+            return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
+                                                     ExecutionStatus::InteractivePending;
+        }
+    }
+    return runFileJob(output);
 }
 
 void Interpreter::releaseGraphicsResources() noexcept {
@@ -2755,6 +3427,7 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
     executionChannels_.erase(std::remove(executionChannels_.begin(),
         executionChannels_.end(), channel), executionChannels_.end());
     channel_bindings_.erase(channel);
+    removeMirrorsFor(channel);
     for (auto binding = channel_bindings_.begin(); binding != channel_bindings_.end();) {
         if (binding->second == channel) binding = channel_bindings_.erase(binding);
         else ++binding;
@@ -2762,8 +3435,13 @@ void Interpreter::closeChannel(runtime::ChannelId channel) {
 }
 
 void Interpreter::closeExecutionChannels() noexcept {
+    if (graphics_) {
+        try { graphics_->flushTextOutputBatches(session_id_); }
+        catch (...) { /* Cleanup must not replace the program's result or error. */ }
+    }
     if (channels_) channels_->cancelPendingOperations(session_id_);
     if (ui_ && ui_->keyInput()) ui_->keyInput()->release(session_id_);
+    if (persistentSessionResources_) return;
     if (!channels_) {
         executionChannels_.clear();
         return;
@@ -2800,8 +3478,9 @@ std::string detail::expandIncludes(const std::string& source,
 void Interpreter::executeInteractive(const std::string& source, std::ostream& output) {
     auto status = executeInteractiveResumable(source, output);
     while (status == ExecutionStatus::WaitingTime || status == ExecutionStatus::Yielded) {
-        if (status == ExecutionStatus::WaitingTime) std::this_thread::sleep_for(
-            std::chrono::milliseconds(requestedPauseDurationMs_));
+        if (status == ExecutionStatus::WaitingTime)
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(requestedPauseDurationMs_));
         status = resume(output);
     }
     if (status == ExecutionStatus::Suspended || status == ExecutionStatus::WaitingChannel ||
@@ -2947,6 +3626,39 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             parsePathValue(text.substr(0, separator), "RENAME"),
             parsePathValue(text.substr(separator + 1), "RENAME")};
     };
+    // Splits on whitespace outside double quotes; quoted text stays in its token.
+    auto splitCommandWords = [&](const std::string& text) {
+        std::vector<std::string> words;
+        std::string current;
+        bool quoted = false;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            const char c = text[i];
+            if (c == '"') {
+                if (quoted && i + 1 < text.size() && text[i + 1] == '"') {
+                    current += "\"\"";
+                    ++i;
+                    continue;
+                }
+                quoted = !quoted;
+                current.push_back(c);
+            } else if (!quoted && std::isspace(static_cast<unsigned char>(c))) {
+                if (!current.empty()) words.push_back(std::move(current));
+                current.clear();
+            } else {
+                current.push_back(c);
+            }
+        }
+        if (quoted) throw std::runtime_error("unterminated quoted path");
+        if (!current.empty()) words.push_back(std::move(current));
+        return words;
+    };
+    auto takeForce = [&](std::vector<std::string>& words) {
+        if (words.size() > 1 && uppercaseAscii(words.back()) == "FORCE") {
+            words.pop_back();
+            return true;
+        }
+        return false;
+    };
     auto parseChannelSelector = [&](std::string selector, const char* commandName) {
         selector = trim(std::move(selector));
         if (selector.empty() || selector.front() != '#')
@@ -2972,19 +3684,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         return static_cast<std::uint64_t>(*number);
     };
     auto writeChannelText = [&](std::uint64_t channel, const std::string& text) {
-        channel = resolveChannel(channel);
-        if (channel == 0) {
-            output << text;
-            if (text.find('\n') != std::string::npos) output_column_ = 0;
-        } else if (channel == 1) {
-            if (graphics_) graphics_->writeText(session_id_, text);
-            else output << text;
-        } else {
-            if (!channels_)
-                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
-                                            "channel output unavailable");
-            channels_->write(session_id_, channel, text);
-        }
+        writeTextToChannel(output, channel, text);
     };
     auto writeGeneratedListing = [&](std::uint64_t channel,
                                      const std::string& listing) {
@@ -3011,14 +3711,40 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             return false;
         }
 
+        // Mirrors receive the whole listing once; only the display is paged.
+        mirrorText(output, endpoint, listing);
         pendingPagerText_ = wrapped;
         pendingPagerOffset_ = 0;
         pendingPagerPageRows_ = pageRows;
         pendingPagerChannel_ = channel;
-        writePagerPage(output, pageRows);
+        if (graphics_) graphics_->beginPresentationBatch(session_id_);
+        try {
+            if (graphics_) graphics_->resetUpdateState(session_id_);
+            writePagerPage(output, pageRows);
+        } catch (...) {
+            if (graphics_) graphics_->endPresentationBatch(session_id_);
+            throw;
+        }
+        if (graphics_) graphics_->endPresentationBatch(session_id_);
         pendingPagerRequest_ = ui_->beginInput(session_id_,
             "Enter=Page, L=Line, Q=Quit", pagerInputOptions());
         return true;
+    };
+    // Debug snapshot when a DEBUG task is attached, otherwise the session variables.
+    const auto variableListing = [&](bool globals) {
+        std::ostringstream listing;
+        using ArrayList = std::vector<std::pair<std::string, std::vector<std::size_t>>>;
+        if (taskControl_ && debugTaskId_ != 0) {
+            const auto snapshot = taskControl_->debugInspect(debugTaskId_);
+            if (!snapshot) throw std::runtime_error("debug task is unavailable");
+            if (globals) appendSortedVariables(listing, snapshot->globals, snapshot->arrays);
+            else if (!snapshot->frames.empty())
+                appendSortedVariables(listing, snapshot->frames.back().locals,
+                                      snapshot->frames.back().arrays);
+        } else if (globals) {
+            appendSortedVariables(listing, variables_, ArrayList{});
+        }
+        return listing.str();
     };
     bool commandMode = false;
     std::istringstream probe(source);
@@ -3026,19 +3752,26 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
         const std::size_t numberEnd = lineNumberEnd(line);
         const std::string word = command(line);
         if (numberEnd != 0 || word == "HELP" || word == "EDIT" ||
-            word.rfind("EDIT ", 0) == 0 || word == "PAGER" ||
+            word.rfind("EDIT ", 0) == 0 || word == "RENUMBER" ||
+            word.rfind("RENUMBER ", 0) == 0 || word == "PAGER" ||
             word.rfind("PAGER ", 0) == 0 || word == "RUN" || word == "LIST" ||
             word.rfind("LIST ", 0) == 0 || word.rfind("LIST#", 0) == 0 ||
             word == "NEW" || word == "REBOOT" ||
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
             word.rfind("SAVE ", 0) == 0 || word == "DIR" ||
             word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
+            word == "CAT" || word.rfind("CAT ", 0) == 0 || word.rfind("CAT#", 0) == 0 ||
             word == "DELETE" || word.rfind("DELETE ", 0) == 0 ||
             word == "RENAME" || word.rfind("RENAME ", 0) == 0 ||
+            word == "COPY" || word.rfind("COPY ", 0) == 0 ||
+            word == "MOVE" || word.rfind("MOVE ", 0) == 0 ||
+            word == "MKDIR" || word.rfind("MKDIR ", 0) == 0 ||
+            word == "RMDIR" || word.rfind("RMDIR ", 0) == 0 ||
             word == "FORMAT" || word.rfind("FORMAT ", 0) == 0 ||
             word == "CD" || word.rfind("CD ", 0) == 0 ||
             word == "TASKS" || word.rfind("TASKS ", 0) == 0 ||
             word == "WINDOWMODE" || word.rfind("WINDOWMODE ", 0) == 0 ||
+            word == "MODE" || word.rfind("MODE ", 0) == 0 ||
             word == "DEBUGBAR" || word.rfind("DEBUGBAR ", 0) == 0 ||
             word == "DEBUG" || word.rfind("DEBUG ", 0) == 0 ||
             word == "BREAK" || word.rfind("BREAK ", 0) == 0 ||
@@ -3089,7 +3822,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const auto parsed = std::from_chars(line.data(), line.data() + numberEnd, number);
             if (parsed.ec != std::errc{} || number < 1 || number > 32767)
                 throw std::runtime_error("program line number must be in 1..32767");
-            std::string body = canonicalizeKeywords(trim(line.substr(numberEnd)));
+            std::string body = canonicalizeKeywords(
+                expandCompactEnd(trim(line.substr(numberEnd))));
             std::map<int, std::string> candidate = program_;
             if (body.empty()) candidate.erase(number);
             else candidate[number] = std::move(body);
@@ -3131,6 +3865,92 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 lineNumber};
             preserveInteractiveTail();
             return ExecutionStatus::InteractivePending;
+        } else if (word == "RENUMBER" || word.rfind("RENUMBER ", 0) == 0) {
+            const std::string argument = trim(normalizedLine.substr(8));
+            int first = 10;
+            int step = 10;
+            if (!argument.empty()) {
+                const auto comma = argument.find(',');
+                if (comma == std::string::npos ||
+                    argument.find(',', comma + 1) != std::string::npos)
+                    throw std::runtime_error("RENUMBER syntax is RENUMBER [start, step]");
+                const std::string firstText = trim(argument.substr(0, comma));
+                const std::string stepText = trim(argument.substr(comma + 1));
+                const auto parseInteger = [](const std::string& text, int& value) {
+                    if (text.empty()) return false;
+                    const auto parsed = std::from_chars(text.data(),
+                        text.data() + text.size(), value);
+                    return parsed.ec == std::errc{} &&
+                        parsed.ptr == text.data() + text.size();
+                };
+                if (!parseInteger(firstText, first) ||
+                    !parseInteger(stepText, step))
+                    throw std::runtime_error("RENUMBER requires integer start and step values");
+            }
+            if (first < 1 || first > 32767 || step < 1 || step > 32767)
+                throw std::runtime_error("RENUMBER start and step must be in 1..32767");
+
+            std::map<int, int> mapping;
+            int next = first;
+            for (const auto& [oldLine, unusedBody] : program_) {
+                (void)unusedBody;
+                if (next > 32767)
+                    throw std::runtime_error("RENUMBER would exceed line 32767");
+                mapping.emplace(oldLine, next);
+                if (mapping.size() < program_.size()) {
+                    if (step > 32767 - next)
+                        throw std::runtime_error("RENUMBER would exceed line 32767");
+                    next += step;
+                }
+            }
+
+            std::map<int, std::string> candidate;
+            for (const auto& [oldLine, body] : program_) {
+                std::string rewritten = body;
+                const std::vector<Token> tokens = Lexer(body).scan();
+                struct Replacement {
+                    std::size_t offset;
+                    std::size_t length;
+                    std::string text;
+                };
+                std::vector<Replacement> replacements;
+                for (std::size_t i = 0; i < tokens.size(); ++i) {
+                    std::size_t target = i + 1;
+                    if (tokens[i].kind == Kind::Go && target < tokens.size() &&
+                        tokens[target].kind == Kind::To)
+                        ++target;
+                    else if (tokens[i].kind != Kind::Goto &&
+                             tokens[i].kind != Kind::Restore)
+                        continue;
+                    if (target >= tokens.size() || tokens[target].kind != Kind::Number ||
+                        tokens[target].sourceLength == 0 || tokens[target].text.empty() ||
+                        !std::all_of(tokens[target].text.begin(), tokens[target].text.end(),
+                            [](unsigned char c) { return std::isdigit(c); }))
+                        continue;
+                    int referencedLine = 0;
+                    const auto parsed = std::from_chars(tokens[target].text.data(),
+                        tokens[target].text.data() + tokens[target].text.size(),
+                        referencedLine);
+                    if (parsed.ec != std::errc{}) continue;
+                    const auto mapped = mapping.find(referencedLine);
+                    if (mapped != mapping.end())
+                        replacements.push_back({tokens[target].sourceStart,
+                            tokens[target].sourceLength, std::to_string(mapped->second)});
+                    i = target;
+                }
+                for (auto replacement = replacements.rbegin();
+                     replacement != replacements.rend(); ++replacement)
+                    rewritten.replace(replacement->offset, replacement->length,
+                                      replacement->text);
+                candidate.emplace(mapping.at(oldLine), std::move(rewritten));
+            }
+            validateProgramLines(candidate, storage_.get());
+            program_.swap(candidate);
+            if (lastEditedLine_) {
+                const auto mapped = mapping.find(*lastEditedLine_);
+                if (mapped == mapping.end()) lastEditedLine_.reset();
+                else lastEditedLine_ = mapped->second;
+            }
         } else if (word == "HELP") {
             if (writeGeneratedListing(default_output_channel_, commandHelpListing())) {
                 preserveInteractiveTail();
@@ -3154,15 +3974,164 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word.rfind("LIST#", 0) == 0) {
             std::uint64_t channel = default_output_channel_;
             std::string selector = trim(normalizedLine.substr(4));
-            if (!selector.empty()) {
-                channel = parseChannelSelector(selector, "LIST");
+            std::transform(selector.begin(), selector.end(), selector.begin(),
+                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+            // "#ch" alone, or "#ch, rest"; returns the remaining text.
+            const auto takeChannel = [&](const std::string& text) {
+                const auto comma = text.find(',');
+                channel = parseChannelSelector(
+                    comma == std::string::npos ? text : trim(text.substr(0, comma)), "LIST");
+                return comma == std::string::npos ? std::string{} :
+                    trim(text.substr(comma + 1));
+            };
+            std::string definitionKind;
+            std::string definitionName;
+            {
+                std::string rest = selector;
+                if (!rest.empty() && rest.front() == '#') rest = takeChannel(rest);
+                const auto wordEnd = rest.find_first_of(" \t#");
+                const std::string first = rest.substr(0, wordEnd);
+                if (first == "GLOBALS" || first == "LOCALS" || first == "PROC" ||
+                    first == "PROCEDURE" || first == "PROCEDURES" || first == "FN" ||
+                    first == "FUNCTION" || first == "FUNCTIONS") {
+                    definitionKind = first;
+                    rest = wordEnd == std::string::npos ? std::string{} :
+                        trim(rest.substr(wordEnd));
+                    if (!rest.empty() && rest.front() == '#') rest = takeChannel(rest);
+                    const auto channelPos = rest.find(" #");
+                    if (channelPos != std::string::npos) {
+                        takeChannel(trim(rest.substr(channelPos + 1)));
+                        rest = trim(rest.substr(0, channelPos));
+                    }
+                    definitionName = rest;
+                    selector.clear();
+                } else if (!selector.empty() && selector.front() == '#') {
+                    selector = rest;
+                }
             }
+            if (!definitionKind.empty()) {
+                const bool variables = definitionKind == "GLOBALS" || definitionKind == "LOCALS";
+                const bool function = definitionKind.front() == 'F';
+                if (variables && !definitionName.empty())
+                    throw std::runtime_error("LIST " + definitionKind + " takes no name");
+                std::string listing;
+                if (variables) {
+                    listing = variableListing(definitionKind == "GLOBALS");
+                } else {
+                    const char* kindName = function ? "FUNCTION" : "PROCEDURE";
+                    const auto definitions = scanProgramDefinitions(program_);
+                    if (definitionName.empty()) {
+                        for (const auto& definition : definitions)
+                            if (definition.function == function)
+                                listing += definition.signature + "\n";
+                    } else {
+                        const ProgramDefinition* match = nullptr;
+                        const ProgramDefinition* other = nullptr;
+                        for (const auto& definition : definitions) {
+                            std::string upper = definition.name;
+                            std::transform(upper.begin(), upper.end(), upper.begin(),
+                                [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                            if (upper != definitionName) continue;
+                            if (definition.function == function) { match = &definition; break; }
+                            if (!other) other = &definition;
+                        }
+                        if (!match) {
+                            throw std::runtime_error(std::string(kindName) + " " + definitionName +
+                                (other ? std::string(" is a ") + (function ? "procedure" : "function") :
+                                         std::string(" not found")));
+                        }
+                        for (const auto& [number, body] : program_) {
+                            if (number < match->firstLine || number > match->lastLine) continue;
+                            listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
+                        }
+                    }
+                }
+                if (writeGeneratedListing(channel, listing)) {
+                    preserveInteractiveTail();
+                    return ExecutionStatus::Suspended;
+                }
+            } else {
+            if (selector.empty()) {
+                // Whole program.
+            } else if (selector.front() == '#') {
+                channel = parseChannelSelector(selector, "LIST");
+                selector.clear();
+            } else {
+                const auto channelPos = selector.find(" #");
+                if (channelPos != std::string::npos) {
+                    channel = parseChannelSelector(trim(selector.substr(channelPos + 1)),
+                                                   "LIST");
+                    selector = trim(selector.substr(0, channelPos));
+                }
+            }
+            enum class RangeKind { All, Exact, From, Through, Between };
+            RangeKind rangeKind = RangeKind::All;
+            int rangeStart = 0;
+            int rangeEnd = 32767;
+            const auto parseLineNumber = [](const std::string& text, int& number) {
+                if (text.empty()) return false;
+                const auto parsed = std::from_chars(text.data(),
+                    text.data() + text.size(), number);
+                return parsed.ec == std::errc{} &&
+                    parsed.ptr == text.data() + text.size() &&
+                    number >= 1 && number <= 32767;
+            };
+            if (!selector.empty()) {
+                const bool beginsWithTo = selector.rfind("TO ", 0) == 0;
+                const bool endsWithTo = selector.size() >= 3 &&
+                    selector.compare(selector.size() - 3, 3, " TO") == 0;
+                const auto to = beginsWithTo ? std::size_t{0} :
+                    (endsWithTo ? selector.size() - 3 : selector.find(" TO "));
+                if (to != std::string::npos) {
+                    const std::string left = beginsWithTo ? std::string{} :
+                        trim(selector.substr(0, to));
+                    const std::string right = endsWithTo ? std::string{} : trim(
+                        selector.substr(beginsWithTo ? 3 : to + 4));
+                    if (left.empty()) {
+                        rangeKind = RangeKind::Through;
+                        if (!parseLineNumber(right, rangeEnd))
+                            throw std::runtime_error("LIST TO requires an end line in 1..32767");
+                    } else {
+                        if (!parseLineNumber(left, rangeStart))
+                            throw std::runtime_error("LIST requires a start line in 1..32767");
+                        if (right.empty()) rangeKind = RangeKind::From;
+                        else {
+                            rangeKind = RangeKind::Between;
+                            if (!parseLineNumber(right, rangeEnd))
+                                throw std::runtime_error("LIST requires an end line in 1..32767");
+                        }
+                    }
+                } else {
+                    const auto dash = selector.find('-');
+                    if (dash == std::string::npos) {
+                        rangeKind = RangeKind::Exact;
+                        if (!parseLineNumber(selector, rangeStart))
+                            throw std::runtime_error("LIST line must be in 1..32767");
+                        rangeEnd = rangeStart;
+                    } else {
+                        rangeKind = RangeKind::Between;
+                        if (!parseLineNumber(trim(selector.substr(0, dash)), rangeStart) ||
+                            !parseLineNumber(trim(selector.substr(dash + 1)), rangeEnd))
+                            throw std::runtime_error("LIST range syntax is LIST start-end");
+                    }
+                }
+            }
+            if (rangeKind == RangeKind::Between && rangeStart > rangeEnd)
+                throw std::runtime_error("LIST range start must not exceed end");
             std::string listing;
-            for (const auto& [number, body] : program_)
+            for (const auto& [number, body] : program_) {
+                if ((rangeKind == RangeKind::Exact && number != rangeStart) ||
+                    (rangeKind == RangeKind::From && number < rangeStart) ||
+                    (rangeKind == RangeKind::Through && number > rangeEnd) ||
+                    (rangeKind == RangeKind::Between &&
+                     (number < rangeStart || number > rangeEnd)))
+                    continue;
                 listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
+            }
             if (writeGeneratedListing(channel, listing)) {
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;
+            }
             }
         } else if (word == "REBOOT") {
             if (!systemControl_)
@@ -3313,14 +4282,229 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 if (!storage_)
                     throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                 "storage service unavailable");
-                const std::string path = normalizePath(parsePathValue(argument, "DELETE"));
-                storage_->remove(path);
+                auto words = splitCommandWords(argument);
+                const bool force = takeForce(words);
+                if (words.size() != 1)
+                    throw std::runtime_error("DELETE syntax is DELETE path [FORCE]");
+                const std::string path = normalizePath(commandPathValue(words[0], "DELETE"));
+                const auto status = startFileJob(
+                    runtime::fileops::planDelete(*storage_, path, force), output, "DELETE");
+                if (status != ExecutionStatus::Completed) {
+                    preserveInteractiveTail();
+                    return status;
+                }
             }
         } else if (word == "RENAME" || word.rfind("RENAME ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
-            const auto paths = splitRenamePaths(normalizedLine.substr(6));
+            const auto renameWords = splitCommandWords(normalizedLine.substr(6));
+            const auto paths = renameWords.size() == 3 && uppercaseAscii(renameWords[1]) == "TO" ?
+                std::pair<std::string, std::string>{
+                    parsePathValue(renameWords[0], "RENAME"),
+                    parsePathValue(renameWords[2], "RENAME")} :
+                splitRenamePaths(normalizedLine.substr(6));
             storage_->rename(normalizePath(paths.first), normalizePath(paths.second));
+        } else if (word == "COPY" || word.rfind("COPY ", 0) == 0 ||
+                   word == "MOVE" || word.rfind("MOVE ", 0) == 0) {
+            const bool move = word.rfind("MOVE", 0) == 0;
+            const char* commandName = move ? "MOVE" : "COPY";
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            auto words = splitCommandWords(normalizedLine.substr(4));
+            const bool force = takeForce(words);
+            std::size_t toIndex = words.size();
+            for (std::size_t i = 0; i < words.size(); ++i) {
+                if (uppercaseAscii(words[i]) != "TO") continue;
+                if (toIndex != words.size())
+                    throw std::runtime_error(std::string(commandName) + " requires exactly one TO");
+                toIndex = i;
+            }
+            if (toIndex != 1 || words.size() != 3)
+                throw std::runtime_error(std::string(commandName) +
+                                         " syntax is " + commandName + " source TO destination [FORCE]");
+            const bool sourceChannel = words[0].front() == '#';
+            const bool destinationChannel = words[2].front() == '#';
+            if (move && (sourceChannel || destinationChannel))
+                throw std::runtime_error("MOVE does not accept channels");
+            const std::uint64_t sessionId = session_id_;
+            auto makeSource = [&](const std::string& token) {
+                const runtime::ChannelId channel = resolveChannel(
+                    parseChannelSelector(token, commandName));
+                if (!channels_)
+                    throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                "channel service unavailable");
+                // Keyboard lines come from the UI service; Ctrl-Z ends the stream
+                // and Esc/cancel aborts. A serial source also watches the keyboard
+                // for those two keys so it can be stopped locally.
+                class UiLines {
+                public:
+                    enum class Event { None, Line, Cancelled };
+                    UiLines(std::shared_ptr<ui::Service> ui, std::uint64_t session)
+                        : ui_(std::move(ui)), session_(session) {}
+                    ~UiLines() {
+                        if (!request_) return;
+                        try { ui_->cancel(*request_); } catch (...) {}
+                    }
+                    Event poll(std::string& line) {
+                        if (!request_) request_ = ui_->beginInput(session_, {});
+                        const auto result = ui_->poll(*request_);
+                        if (!result) return Event::None;
+                        request_.reset();
+                        if (result->kind == ui::ResultKind::Cancelled) return Event::Cancelled;
+                        line.clear();
+                        if (!result->fields.empty())
+                            if (const auto* text = std::get_if<std::string>(&result->fields.front()))
+                                line = *text;
+                        return Event::Line;
+                    }
+                private:
+                    std::shared_ptr<ui::Service> ui_;
+                    std::uint64_t session_;
+                    std::optional<ui::RequestId> request_;
+                };
+                class ChannelSource final : public runtime::fileops::ByteSource {
+                public:
+                    ChannelSource(std::shared_ptr<runtime::ChannelService> channels,
+                                  std::shared_ptr<ui::Service> ui,
+                                  std::uint64_t session, runtime::ChannelId channel)
+                        : channels_(std::move(channels)), session_(session), channel_(channel),
+                          keyboard_(channel == 0), hardware_(channel > 1 && channels_ &&
+                              channels_->isHardwareChannel(session, channel)) {
+                        if (keyboard_ && !ui)
+                            throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                "keyboard input service unavailable");
+                        if ((keyboard_ || hardware_) && ui)
+                            lines_ = std::make_unique<UiLines>(std::move(ui), session);
+                    }
+                    std::size_t read(std::uint8_t* destination, std::size_t capacity) override {
+                        if (!keyboard_ && !hardware_) {
+                            if (channels_->atEnd(session_, channel_)) return 0;
+                            const std::string bytes = channels_->readBytes(session_, channel_, capacity);
+                            std::memcpy(destination, bytes.data(), bytes.size());
+                            return bytes.size();
+                        }
+                        std::string line;
+                        if (!ended_ && lines_) {
+                            const auto event = lines_->poll(line);
+                            if (event == UiLines::Event::Cancelled)
+                                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                            "cancelled");
+                            if (keyboard_ && event == UiLines::Event::Line) {
+                                const auto end = line.find('\x1a');
+                                if (end != std::string::npos) { line.resize(end); ended_ = true; }
+                                else line += '\n';
+                                pending_ += line;
+                            } else if (hardware_ && event == UiLines::Event::Line) {
+                                if (line.find('\x1a') != std::string::npos) ended_ = true;
+                            }
+                        }
+                        if (hardware_ && !ended_ && pending_.empty()) {
+                            const std::string bytes = channels_->readBytes(
+                                session_, channel_, std::min<std::size_t>(capacity, 256));
+                            const auto end = bytes.find('\x1a');
+                            pending_ += bytes.substr(0, end);
+                            if (end != std::string::npos) ended_ = true;
+                        }
+                        if (!pending_.empty()) {
+                            const std::size_t count = std::min(capacity, pending_.size());
+                            std::memcpy(destination, pending_.data(), count);
+                            pending_.erase(0, count);
+                            return count;
+                        }
+                        return ended_ ? 0 : runtime::fileops::ByteSource::NoData;
+                    }
+                private:
+                    std::shared_ptr<runtime::ChannelService> channels_;
+                    std::uint64_t session_;
+                    runtime::ChannelId channel_;
+                    bool keyboard_;
+                    bool hardware_;
+                    bool ended_ = false;
+                    std::string pending_;
+                    std::unique_ptr<UiLines> lines_;
+                };
+                return std::shared_ptr<runtime::fileops::ByteSource>(
+                    std::make_shared<ChannelSource>(channels_, ui_, sessionId, channel));
+            };
+            auto makeSink = [&](const std::string& token) {
+                const runtime::ChannelId channel = resolveChannel(
+                    parseChannelSelector(token, commandName));
+                class ChannelSink final : public runtime::fileops::ByteSink {
+                public:
+                    ChannelSink(Interpreter& owner, std::uint64_t session,
+                                runtime::ChannelId channel)
+                        : owner_(owner), session_(session), channel_(channel) {}
+                    void write(const std::uint8_t* data, std::size_t size) override {
+                        const std::string_view text(reinterpret_cast<const char*>(data), size);
+                        if (channel_ > 1) {
+                            if (!owner_.channels_)
+                                throw runtime::ServiceError(
+                                    runtime::ServiceErrorCode::Unavailable,
+                                    "channel service unavailable");
+                            owner_.channels_->writeBytes(session_, channel_, text);
+                        } else {
+                            std::ostringstream discard;
+                            owner_.writeTextToChannel(
+                                owner_.fileJobOutput_ ? *owner_.fileJobOutput_ : discard,
+                                channel_, text);
+                        }
+                    }
+                private:
+                    Interpreter& owner_;
+                    std::uint64_t session_;
+                    runtime::ChannelId channel_;
+                };
+                return std::shared_ptr<runtime::fileops::ByteSink>(
+                    std::make_shared<ChannelSink>(*this, sessionId, channel));
+            };
+            runtime::fileops::Plan plan;
+            if (sourceChannel && destinationChannel) {
+                plan = runtime::fileops::planStream(makeSource(words[0]), makeSink(words[2]));
+            } else if (sourceChannel) {
+                const std::string rawDestination = commandPathValue(words[2], commandName);
+                plan = runtime::fileops::planStreamToFile(
+                    *storage_, normalizePath(rawDestination), force, makeSource(words[0]));
+            } else if (destinationChannel) {
+                const std::string rawSource = commandPathValue(words[0], commandName);
+                plan = runtime::fileops::planFileToStream(
+                    *storage_, normalizePath(rawSource), makeSink(words[2]));
+            } else {
+                const std::string rawSource = commandPathValue(words[0], commandName);
+                const std::string rawDestination = commandPathValue(words[2], commandName);
+                const bool directoryHint = !rawDestination.empty() &&
+                    (rawDestination.back() == '/' || rawDestination.back() == ':');
+                plan = runtime::fileops::planTransfer(
+                    *storage_, normalizePath(rawSource), normalizePath(rawDestination),
+                    directoryHint, force, move);
+            }
+            const auto status = startFileJob(std::move(plan), output, commandName);
+            if (status != ExecutionStatus::Completed) {
+                preserveInteractiveTail();
+                return status;
+            }
+        } else if (word == "MKDIR" || word.rfind("MKDIR ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            const auto words = splitCommandWords(normalizedLine.substr(5));
+            if (words.size() != 1)
+                throw std::runtime_error("MKDIR syntax is MKDIR directory");
+            runtime::fileops::makeDirectory(
+                *storage_, normalizePath(commandPathValue(words[0], "MKDIR")));
+        } else if (word == "RMDIR" || word.rfind("RMDIR ", 0) == 0) {
+            if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                        "storage service unavailable");
+            auto words = splitCommandWords(normalizedLine.substr(5));
+            const bool force = takeForce(words);
+            if (words.size() != 1)
+                throw std::runtime_error("RMDIR syntax is RMDIR directory [FORCE]");
+            const std::string path = normalizePath(commandPathValue(words[0], "RMDIR"));
+            const auto status = startFileJob(
+                runtime::fileops::planRemoveDirectory(*storage_, path, current_directory_, force),
+                output, "RMDIR");
+            if (status != ExecutionStatus::Completed) {
+                preserveInteractiveTail();
+                return status;
+            }
         } else if (word == "FORMAT" || word.rfind("FORMAT ", 0) == 0) {
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
@@ -3333,7 +4517,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             storage_->list(path);
             current_directory_ = path;
         } else if (word == "DIR" || word.rfind("DIR ", 0) == 0 ||
-                   word.rfind("DIR#", 0) == 0) {
+                   word.rfind("DIR#", 0) == 0 || word == "CAT" ||
+                   word.rfind("CAT ", 0) == 0 || word.rfind("CAT#", 0) == 0) {
+            const bool catalog = word.rfind("CAT", 0) == 0;
+            const char* commandName = catalog ? "CAT" : "DIR";
             if (!storage_) throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
                                                         "storage service unavailable");
             std::uint64_t channel = default_output_channel_;
@@ -3341,16 +4528,41 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!argument.empty() && argument.front() == '#') {
                 const auto separator = argument.find_first_of(" \t");
                 const std::string channelToken = argument.substr(0, separator);
-                channel = parseChannelSelector(channelToken, "DIR");
+                channel = parseChannelSelector(channelToken, commandName);
                 argument = separator == std::string::npos ? std::string{} :
                     trim(argument.substr(separator));
             }
+            if (uppercaseAscii(argument) == "DETAILS" ||
+                uppercaseAscii(argument).rfind("DETAILS ", 0) == 0)
+                throw std::runtime_error("DIR DETAILS was replaced by CAT");
             std::string path;
-            if (!argument.empty()) path = normalizePath(commandPathValue(argument, "DIR"));
-            else path = current_directory_;
+            std::string pattern;
+            if (!argument.empty()) {
+                std::string raw = commandPathValue(argument, commandName);
+                const auto separator = raw.find_last_of("/:");
+                const std::string leaf = separator == std::string::npos ? raw :
+                    raw.substr(separator + 1);
+                if (hasWildcard(leaf)) {
+                    pattern = leaf;
+                    raw.erase(separator == std::string::npos ? 0 : separator + 1);
+                    if (raw.empty()) raw = ".";
+                }
+                path = normalizePath(raw);
+            } else {
+                path = current_directory_;
+            }
+            auto entries = storage_->list(path);
+            if (!pattern.empty())
+                entries.erase(std::remove_if(entries.begin(), entries.end(),
+                    [&](const auto& entry) { return !wildcardMatch(pattern, entry.name); }),
+                    entries.end());
             std::string listing;
-            for (const auto& entry : storage_->list(path))
-                listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
+            if (catalog) {
+                listing = catListing(std::move(entries), storage_->space(path));
+            } else {
+                for (const auto& entry : entries)
+                    listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
+            }
             if (writeGeneratedListing(channel, listing)) {
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;
@@ -3396,6 +4608,119 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!taskControl_->setWindowMode(mode))
                 throw std::runtime_error("unable to apply window mode");
             writeChannelText(0, std::string("Window mode set to ") + argument + "\n");
+        } else if (word == "MODE" || word.rfind("MODE ", 0) == 0) {
+            if (!displayModes_ || !graphics_)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "display mode service unavailable");
+            const auto tasks = taskControl_ ? taskControl_->listTasks() :
+                std::vector<runtime::ManagedTaskInfo>{};
+            const auto self = std::find_if(tasks.begin(), tasks.end(), [this](const auto& task) {
+                return task.id == task_id_;
+            });
+            if (self == tasks.end() || !self->supervisor)
+                throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                            "MODE is supervisor-only");
+            const auto argument = command(trim(normalizedLine.substr(4)));
+            if (argument.empty() || argument == "LIST") {
+                std::ostringstream listing;
+                const auto current = displayModes_->currentMode();
+                const auto viewport = graphics_->displaySize();
+                listing << "Display mode: " << current << " (viewport "
+                        << viewport.first << 'x' << viewport.second << ")\n";
+                const auto currentSettings = displayModes_->currentDisplayMode();
+                for (const auto& mode : displayModes_->availableModes()) {
+                    listing << mode.id << ": " << mode.name << "  "
+                            << mode.width << 'x' << mode.height;
+                    if (mode.refreshHz) listing << " @" << mode.refreshHz << "Hz";
+                    listing << " options="
+                            << (mode.id == currentSettings.id ? currentSettings.options :
+                                mode.options);
+                    if (mode.name == current) listing << " *";
+                    listing << '\n';
+                }
+                writeChannelText(default_output_channel_, listing.str());
+                continue;
+            }
+
+            const auto previousMode = displayModes_->currentDisplayMode();
+            const auto previousSize = graphics_->displaySize();
+            std::optional<runtime::DisplayMode> appliedMode;
+            const auto requireModeMemory = [&](const runtime::DisplayMode& target) {
+                if (!memory_) return;
+                if (const auto failure = memory_->displayModeFailure(
+                        previousSize.first, previousSize.second, target.width,
+                        target.height, target.name))
+                    throw runtime::Error::memoryRefused(*failure);
+            };
+            const auto comma = argument.find(',');
+            const bool numericId = !argument.empty() &&
+                std::all_of(argument.begin(), comma == std::string::npos ?
+                    argument.end() : argument.begin() + comma,
+                    [](unsigned char ch) { return std::isdigit(ch); });
+            if (numericId) {
+                const auto parseModeNumber = [](std::string_view value) {
+                    while (!value.empty() && std::isspace(
+                               static_cast<unsigned char>(value.front())))
+                        value.remove_prefix(1);
+                    while (!value.empty() && std::isspace(
+                               static_cast<unsigned char>(value.back())))
+                        value.remove_suffix(1);
+                    std::uint32_t parsed = 0;
+                    const auto [end, error] = std::from_chars(
+                        value.data(), value.data() + value.size(), parsed);
+                    if (value.empty() || error != std::errc{} ||
+                        end != value.data() + value.size())
+                        throw std::invalid_argument(
+                            "MODE expects a numeric mode ID and optional options");
+                    return parsed;
+                };
+                const auto modeId = parseModeNumber(std::string_view(argument).substr(
+                    0, comma == std::string::npos ? argument.size() : comma));
+                const auto options = comma == std::string::npos ?
+                    displayModes_->currentDisplayMode().options :
+                    parseModeNumber(std::string_view(argument).substr(comma + 1));
+                for (const auto& mode : displayModes_->availableModes())
+                    if (mode.id == modeId) requireModeMemory(mode);
+                appliedMode = displayModes_->setMode(modeId, options);
+            } else {
+                for (const auto& mode : displayModes_->availableModes())
+                    if (mode.name.size() == argument.size() &&
+                        std::equal(argument.begin(), argument.end(), mode.name.begin(),
+                                   [](unsigned char a, unsigned char b) {
+                                       return std::toupper(a) == std::toupper(b);
+                                   }))
+                        requireModeMemory(mode);
+                appliedMode = displayModes_->setMode(argument);
+            }
+            const auto applied = *appliedMode;
+            bool viewportsRetiled = true;
+            try {
+                if (!graphics_->setDisplaySize(applied.width, applied.height))
+                    throw std::runtime_error("graphics service cannot change display geometry");
+                if (previousSize.first == applied.width &&
+                    previousSize.second == applied.height &&
+                    (previousMode.id != applied.id ||
+                     previousMode.options != applied.options))
+                    graphics_->update(task_id_);
+                if (taskControl_)
+                    viewportsRetiled = taskControl_->displayGeometryChanged();
+            } catch (...) {
+                try {
+                    (void)displayModes_->setMode(previousMode.id,
+                                                 previousMode.options);
+                } catch (...) {}
+                try {
+                    (void)graphics_->setDisplaySize(previousSize.first, previousSize.second);
+                } catch (...) {}
+                throw;
+            }
+            writeChannelText(0, "Display mode set to " + applied.name + " (" +
+                std::to_string(applied.width) + "x" + std::to_string(applied.height) +"); " +
+                (graphics_->lastDisplayResizeDiscardedWindows() ?
+                    "window contents cleared.\n" :
+                    "window contents preserved where possible.") +
+                (viewportsRetiled ? "\n" :
+                    " Task viewports could not be retiled.\n"));
         } else if (word == "TASKS" || word.rfind("TASKS ", 0) == 0) {
             const std::string argument = trim(normalizedLine.substr(5));
             const std::uint64_t outputChannel = argument.empty() ?
@@ -3409,8 +4734,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             for (const auto& task : tasks) {
                 if (task.state == runtime::TaskState::Cancelled) continue;
                 listing += std::to_string(task.id) + " ";
-                if (task.supervisor) listing += "SUPERVISOR ";
-                else listing += "WORKER ";
+                listing += task.supervisor ? "SUPERVISOR" :
+                    (task.name.empty() ? "(inline)" : task.name);
+                listing += " ";
                 if (task.priority == 0) {
                     if (task.resumePriority == 0) {
                         listing += "P=0 DISABLED (no saved resume priority)";
@@ -3527,7 +4853,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (!taskControl_->debugSetDiagnostics(debugTaskId_, enabled, trace))
                 throw std::runtime_error("debug task is unavailable");
             writeChannelText(0, word + "\n");
-        } else if (word == "WHERE" || word == "LOCALS" || word == "GLOBALS" ||
+        } else if (word == "LOCALS" || word == "GLOBALS") {
+            if (writeGeneratedListing(0, variableListing(word == "GLOBALS"))) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
+            }
+        } else if (word == "WHERE" ||
                    word == "STACK" || word == "STATS" || word == "WATCHES" ||
                    word == "BREAKPOINTS") {
             if (!taskControl_ || debugTaskId_ == 0)
@@ -3535,25 +4866,6 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const auto snapshot = taskControl_->debugInspect(debugTaskId_);
             if (!snapshot) throw std::runtime_error("debug task is unavailable");
             std::ostringstream listing;
-            const auto printMap = [&](const std::unordered_map<std::string, runtime::DebugValue>& values) {
-                if (values.empty()) { listing << "(none)\n"; return; }
-                for (const auto& [name, value] : values) {
-                    listing << name << " = ";
-                    if (const auto* number = std::get_if<double>(&value)) listing << *number;
-                    else listing << '"' << std::get<std::string>(value) << '"';
-                    listing << '\n';
-                }
-            };
-            const auto printArrays = [&](const auto& arrays) {
-                for (const auto& [name, dimensions] : arrays) {
-                    listing << name << "(";
-                    for (std::size_t i = 0; i < dimensions.size(); ++i) {
-                        if (i != 0) listing << ",";
-                        listing << (dimensions[i] == 0 ? 0 : dimensions[i] - 1);
-                    }
-                    listing << ")\n";
-                }
-            };
             if (word == "WHERE") {
                 listing << (snapshot->paused ? "PAUSED " : "RUNNING ");
                 if (snapshot->location.basicLine != 0)
@@ -3561,15 +4873,6 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 listing << "source " << snapshot->location.sourceLine << ":" <<
                     snapshot->location.column << " bytecode " << snapshot->location.instruction << '\n';
                 if (!snapshot->frames.empty()) listing << "in " << snapshot->frames.back().name << '\n';
-            } else if (word == "LOCALS") {
-                if (snapshot->frames.empty()) listing << "(no local frame)\n";
-                else {
-                    printMap(snapshot->frames.back().locals);
-                    printArrays(snapshot->frames.back().arrays);
-                }
-            } else if (word == "GLOBALS") {
-                printMap(snapshot->globals);
-                printArrays(snapshot->arrays);
             } else if (word == "STACK") {
                 if (snapshot->frames.empty()) listing << "(no call frames)\n";
                 for (std::size_t i = 0; i < snapshot->frames.size(); ++i)
@@ -3685,6 +4988,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 runtime::taskStateName(found->state)) + "\n";
             detail += "Kind: " + std::string(found->supervisor ? "SUPERVISOR" :
                 (found->interactive ? "WORKER" : "PROGRAM")) + "\n";
+            detail += "File: " + (found->name.empty() ? std::string("(none)") :
+                                  found->name) + "\n";
             detail += "Priority: " + std::to_string(found->priority) + "\n";
             detail += "Resume priority: " + std::to_string(found->resumePriority) + "\n";
             detail += "Open channels: " + std::to_string(found->openChannels) + "\n";
@@ -3857,6 +5162,10 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
                     status = resume(output);
                     continue;
                 }
+                if (status == ExecutionStatus::Yielded) {
+                    status = resume(output);
+                    continue;
+                }
                 if (status == ExecutionStatus::WaitingTime) {
                     std::this_thread::sleep_for(
                         std::chrono::milliseconds(requestedPauseDurationMs_));
@@ -3877,6 +5186,7 @@ void Interpreter::runRepl(std::istream& input, std::ostream& output,
             if (ui_) ui_->cancelSession(session_id_);
             execution_.reset();
             clearPager();
+            clearFileJob();
             diagnostics << "ql32: " << error.what() << '\n';
         }
     }
@@ -3890,6 +5200,7 @@ void Interpreter::clear() {
     pendingInteractiveTail_.clear();
     pendingLineEdit_.reset();
     clearPager();
+    clearFileJob();
     closeExecutionChannels();
     *uiSession_ = detail::UISessionState{};
     variables_.clear();

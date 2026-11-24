@@ -98,6 +98,32 @@ void testExactByteIoAndRandomAccess() {
                         [&] { channels.seek(3, append, 0); });
 }
 
+void testUpdateModePositionAndLength() {
+    fs::FS filesystem;
+    filesystem.contents("/data.bin") = "0123456789";
+    ql32::platform::esp32::SdChannels channels(filesystem);
+    const auto update = channels.open(5, "data.bin", ql32::runtime::ChannelMode::Update);
+    require(channels.length(5, update) == 10 && channels.position(5, update) == 0,
+            "UPDATE did not open at the start without truncating");
+    channels.seek(5, update, 2);
+    channels.writeBytes(5, update, "abc");
+    require(channels.position(5, update) == 5, "position did not follow a write");
+    channels.seek(5, update, 0);
+    require(channels.readBytes(5, update, 6) == "01abc5", "UPDATE read failed");
+    channels.seek(5, update, 10);
+    channels.writeBytes(5, update, "XY");
+    require(channels.length(5, update) == 12 &&
+                filesystem.contents("/data.bin") == "01abc56789XY",
+            "UPDATE did not extend the file at its end");
+    channels.close(5, update);
+    requireServiceError(ql32::runtime::ServiceErrorCode::NotFound, [&] {
+        channels.open(5, "missing.bin", ql32::runtime::ChannelMode::Update);
+    });
+    const auto append = channels.open(5, "data.bin", ql32::runtime::ChannelMode::Append);
+    requireServiceError(ql32::runtime::ServiceErrorCode::InvalidHandle,
+                        [&] { (void)channels.position(5, append); });
+}
+
 } // namespace
 
 int main() {
@@ -106,6 +132,7 @@ int main() {
         testPathConfinementAndUnmountedCard();
         testCloseSession();
         testExactByteIoAndRandomAccess();
+        testUpdateModePositionAndLength();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

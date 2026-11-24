@@ -13,6 +13,17 @@ namespace {
 using runtime::ServiceError;
 using runtime::ServiceErrorCode;
 
+// SPIFFS has no directories: Arduino's open() returns a "directory" handle for
+// a missing name. A handle without children on FFS is therefore a missing file.
+bool isPhantomDirectory(const std::string& drive, fs::File& directory) {
+    if (drive != "FFS") return false;
+    directory.rewindDirectory();
+    fs::File entry = directory.openNextFile();
+    if (!entry) return true;
+    entry.close();
+    return false;
+}
+
 std::string fileName(const char* path) {
     if (!path) return {};
     const std::string value(path);
@@ -36,6 +47,35 @@ std::string entryPathRelativeTo(const std::string& directory,
     if (!path.empty() && path.front() != '/') return path;
     return fileName(path.c_str());
 }
+
+class SdWriteHandle final : public runtime::StorageWriteHandle {
+public:
+    SdWriteHandle(fs::File file, runtime::BulkWriteGate* gate)
+        : file_(std::move(file)), gate_(gate) {}
+    ~SdWriteHandle() override {
+        if (file_) file_.close();
+    }
+    void write(const std::uint8_t* data, std::size_t size) override {
+        runtime::BulkWriteScope hold(gate_);
+        std::size_t offset = 0;
+        while (offset < size) {
+            const auto written = file_.write(data + offset, size - offset);
+            if (written == 0)
+                throw ServiceError(ServiceErrorCode::IoError,
+                                   "storage: incomplete write");
+            offset += written;
+        }
+    }
+    void close() override {
+        runtime::BulkWriteScope hold(gate_);
+        file_.flush();
+        file_.close();
+    }
+
+private:
+    fs::File file_;
+    runtime::BulkWriteGate* gate_;
+};
 
 class SdReadHandle final : public runtime::StorageReadHandle {
 public:
@@ -127,7 +167,11 @@ std::string SdStorage::readText(const std::string& path) {
         throw ServiceError(ServiceErrorCode::NotFound,
                            "storage: file not found: " + path);
     if (file.isDirectory()) {
+        const bool phantom = isPhantomDirectory(drive_, file);
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "storage: path names a directory: " + path);
     }
@@ -157,14 +201,34 @@ std::unique_ptr<runtime::StorageReadHandle> SdStorage::openRead(
         throw ServiceError(ServiceErrorCode::NotFound,
                            "storage: file not found: " + path);
     if (file.isDirectory()) {
+        const bool phantom = isPhantomDirectory(drive_, file);
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "storage: path names a directory: " + path);
     }
     return std::make_unique<SdReadHandle>(std::move(file));
 }
 
+std::unique_ptr<runtime::StorageWriteHandle> SdStorage::openWrite(
+        const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    fs::File file;
+    {
+        runtime::BulkWriteScope hold(bulkWriteGate_);
+        file = filesystem_.open(resolved.c_str(), FILE_WRITE);
+    }
+    if (!file)
+        throw ServiceError(ServiceErrorCode::IoError,
+                           "storage: cannot open for writing: " + path);
+    return std::make_unique<SdWriteHandle>(std::move(file), bulkWriteGate_);
+}
+
 void SdStorage::writeText(const std::string& path, const std::string& contents) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string resolved = resolve(path, false);
     ensureAvailable();
     fs::File file = filesystem_.open(resolved.c_str(), FILE_WRITE);
@@ -182,6 +246,7 @@ void SdStorage::writeText(const std::string& path, const std::string& contents) 
 
 void SdStorage::writeTextStream(
         const std::string& path, const runtime::TextStreamSource& source) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string resolved = resolve(path, false);
     ensureAvailable();
     fs::File file = filesystem_.open(resolved.c_str(), FILE_WRITE);
@@ -261,6 +326,23 @@ std::vector<runtime::FileEntry> SdStorage::list(const std::string& path) {
     return entries;
 }
 
+runtime::StorageSpace SdStorage::space(const std::string&) {
+    runtime::StorageSpace result;
+    std::uint64_t total = 0;
+    std::uint64_t used = 0;
+    if (!spaceProvider_) return result;
+    ensureAvailable();
+    if (!spaceProvider_(total, used)) return result;
+    result.total = total;
+    result.used = std::min(used, total);
+    result.free = total - result.used;
+    // SPIFFS reports free blocks it still refuses to fill (GC needs spare
+    // blocks); measured about 49 KB unusable on a 475 KB volume.
+    if (drive_ == "FFS") result.reserve = std::max<std::uint64_t>(total / 8, 16384);
+    result.known = true;
+    return result;
+}
+
 bool SdStorage::exists(const std::string& path) {
     const std::string resolved = resolve(path, false);
     ensureAvailable();
@@ -275,7 +357,11 @@ std::uintmax_t SdStorage::size(const std::string& path) {
         throw ServiceError(ServiceErrorCode::NotFound,
                            "storage: file not found: " + path);
     if (file.isDirectory()) {
+        const bool phantom = isPhantomDirectory(drive_, file);
         file.close();
+        if (phantom)
+            throw ServiceError(ServiceErrorCode::NotFound,
+                               "storage: file not found: " + path);
         throw ServiceError(ServiceErrorCode::InvalidPath,
                            "storage: path names a directory: " + path);
     }
@@ -285,6 +371,7 @@ std::uintmax_t SdStorage::size(const std::string& path) {
 }
 
 void SdStorage::rename(const std::string& path, const std::string& newPath) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string source = resolve(path, false);
     const std::string destination = resolve(newPath, false);
     ensureAvailable();
@@ -306,6 +393,7 @@ void SdStorage::rename(const std::string& path, const std::string& newPath) {
 }
 
 void SdStorage::remove(const std::string& path) {
+    runtime::BulkWriteScope hold(bulkWriteGate_);
     const std::string resolved = resolve(path, false);
     ensureAvailable();
     fs::File file = filesystem_.open(resolved.c_str(), FILE_READ);
@@ -320,6 +408,15 @@ void SdStorage::remove(const std::string& path) {
     if (!filesystem_.remove(resolved.c_str()))
         throw ServiceError(ServiceErrorCode::IoError,
                            "storage: remove failed: " + path);
+}
+
+void SdStorage::createDirectory(const std::string& path) {
+    const std::string resolved = resolve(path, false);
+    ensureAvailable();
+    if (filesystem_.mkdir(resolved.c_str())) return;
+    // SPIFFS has no directories; the name becomes a directory when a file is created in it.
+    if (drive_ == "FFS") return;
+    throw ServiceError(ServiceErrorCode::IoError, "storage: could not create directory: " + path);
 }
 
 void SdStorage::removeDirectory(const std::string& path) {

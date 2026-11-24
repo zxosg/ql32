@@ -36,7 +36,8 @@ enum class ErrorCode : std::int32_t {
     TaskLimit = 18,
     UnsupportedOperation = 19,
     InvalidSelector = 20,
-    TaskStillRunning = 21
+    TaskStillRunning = 21,
+    ResourceBusy = 22
 };
 
 enum class ServiceErrorCode {
@@ -45,7 +46,10 @@ enum class ServiceErrorCode {
     PermissionDenied,
     IoError,
     Unavailable,
-    InvalidHandle
+    InvalidHandle,
+    ResourceBusy,
+    OutOfRange,
+    OutOfMemory
 };
 
 inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
@@ -56,6 +60,9 @@ inline ErrorCode languageErrorCode(ServiceErrorCode code) noexcept {
     case ServiceErrorCode::IoError: return ErrorCode::IoError;
     case ServiceErrorCode::Unavailable: return ErrorCode::ServiceUnavailable;
     case ServiceErrorCode::InvalidHandle: return ErrorCode::InvalidHandle;
+    case ServiceErrorCode::ResourceBusy: return ErrorCode::ResourceBusy;
+    case ServiceErrorCode::OutOfRange: return ErrorCode::OutOfRange;
+    case ServiceErrorCode::OutOfMemory: return ErrorCode::OutOfMemory;
     }
     return ErrorCode::GeneralFailure;
 }
@@ -103,6 +110,7 @@ inline const char* errorText(ErrorCode code) noexcept {
     case ErrorCode::UnsupportedOperation: return "Operation not supported";
     case ErrorCode::InvalidSelector: return "Invalid task result selector";
     case ErrorCode::TaskStillRunning: return "Task has not completed";
+    case ErrorCode::ResourceBusy: return "Resource is already in use";
     }
     return "Unknown QL/32 error code";
 }
@@ -159,12 +167,22 @@ public:
         : std::runtime_error(detail.empty() ? errorText(code) : detail),
           code_(code), detail_(std::move(detail)) {}
 
+    // A deliberate admission-control refusal: the heap is still healthy, so the
+    // message is kept and the emergency reserve is not consumed.
+    static Error memoryRefused(std::string message) {
+        Error error(ErrorCode::OutOfMemory, std::move(message));
+        error.refusal_ = true;
+        return error;
+    }
+
     ErrorCode code() const noexcept { return code_; }
     const std::string& detail() const noexcept { return detail_; }
+    bool memoryRefusal() const noexcept { return refusal_; }
 
 private:
     ErrorCode code_;
     std::string detail_;
+    bool refusal_ = false;
 };
 
 inline ErrorCode errorCodeFor(const std::exception& error) {

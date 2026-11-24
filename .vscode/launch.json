@@ -12,9 +12,9 @@
             "type": "platformio-debug",
             "request": "launch",
             "name": "PIO Debug",
-            "executable": "/home/omega/Github/QL32/.pio/build/lilygo_vga32/firmware.elf",
+            "executable": "/home/osg/GitHub/QL32/.pio/build/lilygo_vga32/firmware.elf",
             "projectEnvName": "esp32_2432s028_spiffs_debug",
-            "toolchainBinDir": "/home/omega/.platformio/packages/toolchain-xtensa-esp32/bin",
+            "toolchainBinDir": "/home/osg/.platformio/packages/toolchain-xtensa-esp32/bin",
             "internalConsoleOptions": "openOnSessionStart",
             "preLaunchTask": {
                 "type": "PlatformIO",
@@ -25,18 +25,18 @@
             "type": "platformio-debug",
             "request": "launch",
             "name": "PIO Debug (skip Pre-Debug)",
-            "executable": "/home/omega/Github/QL32/.pio/build/lilygo_vga32/firmware.elf",
+            "executable": "/home/osg/GitHub/QL32/.pio/build/lilygo_vga32/firmware.elf",
             "projectEnvName": "esp32_2432s028_spiffs_debug",
-            "toolchainBinDir": "/home/omega/.platformio/packages/toolchain-xtensa-esp32/bin",
+            "toolchainBinDir": "/home/osg/.platformio/packages/toolchain-xtensa-esp32/bin",
             "internalConsoleOptions": "openOnSessionStart"
         },
         {
             "type": "platformio-debug",
             "request": "launch",
             "name": "PIO Debug (without uploading)",
-            "executable": "/home/omega/Github/QL32/.pio/build/lilygo_vga32/firmware.elf",
+            "executable": "/home/osg/GitHub/QL32/.pio/build/lilygo_vga32/firmware.elf",
             "projectEnvName": "esp32_2432s028_spiffs_debug",
-            "toolchainBinDir": "/home/omega/.platformio/packages/toolchain-xtensa-esp32/bin",
+            "toolchainBinDir": "/home/osg/.platformio/packages/toolchain-xtensa-esp32/bin",
             "internalConsoleOptions": "openOnSessionStart",
             "loadMode": "manual"
         }

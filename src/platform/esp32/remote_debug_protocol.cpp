@@ -282,7 +282,7 @@ void RemoteDebugProtocol::handle(std::string_view line, vm::SessionScheduler& sc
             payload.push_back(']');
         } else if (operation == "task.start") {
             requireArgs(1);
-            auto task = scheduler.launchWorker(storage.readText(args[0]), taskOutput);
+            auto task = scheduler.launchWorker(storage.readText(args[0]), taskOutput, args[0]);
             if (!scheduler.debugAttach(task)) {
                 scheduler.kill(task);
                 throw std::runtime_error("could not attach debugger to new task");

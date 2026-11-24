@@ -1,7 +1,8 @@
 REM Exercise three full-screen canvas allocations and releases on the CYD.
+REM Requires ql32_mem_array.bas and ql32_mem_channel.bas on FFS (uploaded by tools/ql32-memory-test.py).
 serial_probe = OPEN(2)
-array_worker = TASK("FFS:/arrwrk.bas")
-channel_worker = TASK("FFS:/chanwrk.bas")
+array_worker = TASK("FFS:/ql32_mem_array.bas")
+channel_worker = TASK("FFS:/ql32_mem_channel.bas")
 PRINT #serial_probe, "WORKERS|started|"; array_worker; ","; channel_worker; "|"; FREE(0); ","; FREE(1)
 FOR cycle = 1 TO 3
   PRINT #serial_probe, "MBFULL|start|"; cycle; "|"; FREE(0); ","; FREE(1)

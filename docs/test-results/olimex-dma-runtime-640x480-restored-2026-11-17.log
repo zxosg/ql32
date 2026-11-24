@@ -1,0 +1,5 @@
+> 
+> DMADIAG> DMADIAG
+PSRAM VGA IRQ detail: empty=0, unexpected-mask=0x00000000
+PSRAM VGA scanout stats: frames=1984, rows=952320, EOF-events=15872, refills=952320, late-refills=0, spurious-IRQ=0, palette-applies=1, PSRAM-stress-bytes=0, checksum=0, frame-clones=39, clone-bytes=593264, pending-reuses=9, refill-batches=15872, refill-max-us=2286, refill-row-max-us=111, active-slot-overwrites=0, refill-max-rows=60, backlog-max-rows=60, obsolete-skipped=0
+> 

@@ -156,3 +156,13 @@ CONST KErrTaskLimit = 18
 CONST KErrUnsupportedOperation = 19
 CONST KErrInvalidSelector = 20
 CONST KErrTaskStillRunning = 21
+' MODE statement and MODE(selector) query values
+CONST KModeCurrent = 0
+CONST KModeOptions = 1
+CONST KVgaMode320x200 = 0
+CONST KVgaMode320x240 = 1
+CONST KVgaMode400x300 = 2
+CONST KVgaMode640x400 = 3
+CONST KVgaMode640x480 = 4
+CONST KVgaDisplayOptionsDefault = 0
+CONST KVgaDisplayOptionDoubleBuffered = 1
