@@ -79,6 +79,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         if (instruction.line < 1 || instruction.column < 1)
             invalid(instruction, "source location is invalid");
         switch (instruction.op) {
+        case Op::TrapBegin:
         case Op::Jump:
         case Op::JumpIfFalse:
         case Op::LoopNext:
@@ -150,6 +151,8 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         case Op::Restore:
         case Op::Stop:
         case Op::Input:
+        case Op::TrapEnd:
+        case Op::Raise:
         case Op::Pause:
         case Op::Beep:
         case Op::Volume:
@@ -270,6 +273,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
                        static_cast<std::size_t>(instruction.channelArgument) +
                        static_cast<std::size_t>(instruction.clearTarget);
             break;
+        case Op::Raise:
         case Op::Pause:
         case Op::Volume:
             consumed = 1;
@@ -319,6 +323,8 @@ void verifyBytecode(const detail::InstructionSequence& code) {
                 consumed += 1 + static_cast<std::size_t>(item.hasEnd);
             produced = 1;
             break;
+        case Op::TrapBegin:
+        case Op::TrapEnd:
         case Op::Jump:
         case Op::ForNext:
         case Op::LoopNext:
@@ -334,6 +340,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         }
         if (depth < consumed) invalid(instruction, "operand stack underflow");
         const std::size_t after = depth - consumed + produced;
+        if (instruction.op == Op::TrapBegin) merge(instruction.target, after, instruction);
         if (instruction.op == Op::Return || instruction.op == Op::FunctionEnd) {
             if (after != 0) invalid(instruction, "definition exits with values on the stack");
             continue;
@@ -356,7 +363,7 @@ void verifyBytecode(const detail::InstructionSequence& code) {
 double numeric(const Value& value, const Instruction& at) {
     if (const auto* number = std::get_if<double>(&value)) return *number;
     const int line = at.basicLine != 0 ? at.basicLine : at.line;
-    throw std::runtime_error("line " + std::to_string(line) + ", column " +
+    throw runtime::Error(runtime::ErrorCode::TypeMismatch, "line " + std::to_string(line) + ", column " +
                              std::to_string(at.column) + ": numeric value required");
 }
 
@@ -743,6 +750,67 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                                            runtime::CancellationToken stop,
                                            std::size_t instructionBudget) {
     auto& state = *execution_;
+    state.sliceInstructions = 0;
+    for (;;) {
+        runtime::ErrorCode caught = runtime::ErrorCode::None;
+        // Reserve is allocated before installing the first protected statement.
+        // Capturing an allocation error never requires a new diagnostic allocation.
+        char detail[97]{};
+        auto capture = [&](std::string_view message) {
+            std::size_t size = std::min<std::size_t>(96, message.size());
+            while (size < message.size() && size &&
+                   (static_cast<unsigned char>(message[size]) & 0xc0) == 0x80) --size;
+            std::copy_n(message.data(), size, detail);
+        };
+        try {
+            const auto remaining = instructionBudget == 0 ? 0 :
+                instructionBudget - std::min(instructionBudget, state.sliceInstructions);
+            if (instructionBudget && remaining == 0) return ExecutionStatus::Yielded;
+            return runExecutionBody(output, stop, remaining);
+        } catch (const runtime::Error& error) {
+            // Program compilation occurs before protection is installed.
+            // EVAL parsing happens at runtime and is a catchable operation.
+            if (error.code() == runtime::ErrorCode::TaskCancelled) throw;
+            caught = error.code(); capture(error.detail());
+            if (!state.traps || !state.traps->count) throw;
+        } catch (const runtime::ServiceError& error) {
+            caught = error.languageCode(); capture(error.detail());
+            if (!state.traps || !state.traps->count) throw;
+        } catch (const std::bad_alloc&) {
+            caught = runtime::ErrorCode::OutOfMemory;
+            if (!state.traps || !state.traps->count) throw;
+        }
+        const auto saved = state.traps->records[--state.traps->count];
+        state.stack.resize(saved.stackDepth);
+        state.callFrames.resize(saved.callDepth);
+        state.selectStates.resize(saved.selectDepth);
+        for (auto it = state.forStates.begin(); it != state.forStates.end();) {
+            if (it->second.callDepth > saved.callDepth) it = state.forStates.erase(it);
+            else ++it;
+        }
+        if (state.code.size() > saved.codeSize)
+            state.code.erase(state.code.begin() + saved.codeSize, state.code.end());
+        if (state.pendingUiRequest && ui_) ui_->cancel(*state.pendingUiRequest);
+        state.pendingUiRequest.reset();
+        state.pendingChannelRead.reset();
+        state.pauseUntil.reset();
+        state.pendingInputVariable.clear();
+        state.pendingUiBuilderHandle = 0;
+        state.printChannel = saved.printChannel;
+        state.printChannelColumn = saved.printColumn;
+        state.pc = saved.continuation;
+        errorCode_ = caught;
+        std::copy_n(detail, sizeof detail, trappedDetail_);
+        hasTrappedDetail_ = true;
+        errorDetail_.clear();
+    }
+}
+
+ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
+                                           runtime::CancellationToken stop,
+                                           std::size_t instructionBudget) {
+    if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
+    auto& state = *execution_;
     auto& code = state.code;
     auto& stack = state.stack;
     auto& forStates = state.forStates;
@@ -804,7 +872,9 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             char* end = nullptr;
             const double number = std::strtod(text.c_str(), &end);
             if (text.empty() || end != text.c_str() + text.size() || !std::isfinite(number))
-                runtimeError(at, "numeric input required");
+                throw runtime::Error(runtime::ErrorCode::TypeMismatch,
+                    "line " + std::to_string(at.basicLine != 0 ? at.basicLine : at.line) +
+                    ", column " + std::to_string(at.column) + ": numeric input required");
             if (!name.empty() && name.back() == '%' &&
                 (std::trunc(number) != number ||
                  number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
@@ -985,7 +1055,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (found == arrays.end()) runtimeError(instruction, "array is not dimensioned");
         RuntimeArray& array = found->second;
         if (array.lengths.size() != instruction.rank)
-            throw std::runtime_error("line " + std::to_string(instruction.line) +
+            throw runtime::Error(runtime::ErrorCode::InvalidArgument, "line " + std::to_string(instruction.line) +
                 ", column " + std::to_string(instruction.column) +
                 ": incorrect array rank (expected " + std::to_string(instruction.rank) +
                 ", actual " + std::to_string(array.lengths.size()) + ")");
@@ -1005,7 +1075,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
     };
 
     if (state.pendingUiRequest) {
-        if (!ui_) throw std::runtime_error("UI service unavailable");
+        if (!ui_) throw runtime::Error(runtime::ErrorCode::ServiceUnavailable, "UI service unavailable");
         const auto result = ui_->poll(*state.pendingUiRequest);
         if (!result) return ExecutionStatus::Suspended;
         if (state.pendingUiKind == ui::RequestKind::Confirm)
@@ -1033,7 +1103,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         } else if (state.pendingUiKind == ui::RequestKind::Input) {
             if (result->kind != ui::ResultKind::Submitted || result->fields.empty() ||
                 !std::holds_alternative<std::string>(result->fields.front()))
-                throw std::runtime_error("input cancelled");
+                throw runtime::Error(runtime::ErrorCode::TaskCancelled, "input cancelled");
             storeInputValue(state.pendingInputVariable,
                             std::get<std::string>(result->fields.front()),
                             code.at(state.pc == 0 ? 0 : state.pc - 1));
@@ -1067,6 +1137,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         const auto& instruction = code[pc++];
         activeInstruction = &instruction;
         ++instructionsExecuted;
+        ++state.sliceInstructions;
         if (state.diagnosticsEnabled) ++state.bytecodes;
         if (state.traceEnabled) {
             state.trace.push_back(std::to_string(instruction.line) + ":" +
@@ -1077,6 +1148,34 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
         if (state.debugMode != runtime::DebugResumeMode::Continue &&
             !state.stepStarted) state.stepStarted = true;
         switch (instruction.op) {
+        case Op::TrapBegin:
+            if (!state.traps) {
+                state.traps = std::make_unique<detail::TrapState>();
+            }
+            if (state.traps->count == state.traps->records.size())
+                throw runtime::Error(runtime::ErrorCode::TaskLimit, "TRAP nesting limit reached");
+            state.traps->records[state.traps->count++] = {
+                stack.size(), callFrames.size(), selectStates.size(), code.size(), instruction.target,
+                state.printChannel, state.printChannelColumn};
+            errorCode_ = runtime::ErrorCode::None;
+            hasTrappedDetail_ = false;
+            errorDetail_.clear();
+            break;
+        case Op::TrapEnd:
+            if (!state.traps || !state.traps->count)
+                throw std::logic_error("internal VM trap underflow");
+            --state.traps->count;
+            errorCode_ = runtime::ErrorCode::None;
+            hasTrappedDetail_ = false;
+            errorDetail_.clear();
+            break;
+        case Op::Raise: {
+            const double number = numeric(pop(), instruction);
+            if (!std::isfinite(number) || std::trunc(number) != number ||
+                number < 1 || number > 21 || number == 17)
+                throw runtime::Error(runtime::ErrorCode::InvalidArgument, "invalid RAISE code");
+            throw runtime::Error(static_cast<runtime::ErrorCode>(static_cast<int>(number)), "RAISE");
+        }
         case Op::Stop:
             return ExecutionStatus::ProgramStopped;
         case Op::Call: {
@@ -1373,7 +1472,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     break;
                 }
                 if (instruction.name == "ERRX$") {
-                    pushValue(errorDetail_);
+                    pushValue(errorDetail());
                     break;
                 }
                 if (instruction.name == "VAL") {
@@ -2855,6 +2954,12 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (const auto* text = std::get_if<std::string>(&arguments[index])) return *text;
                     runtimeError(instruction, "string value required");
                 };
+                const auto numericDeviceArgument = [&](std::size_t index) {
+                    const auto* value = std::get_if<double>(&arguments[index]);
+                    if (!value) throw runtime::Error(runtime::ErrorCode::TypeMismatch,
+                        "numeric device argument required");
+                    return *value;
+                };
                 const auto channelArgument = [&](std::size_t index) {
                     const auto* number = std::get_if<double>(&arguments[index]);
                     if (!number) runtimeError(instruction, "numeric value required");
@@ -2949,7 +3054,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         for (std::size_t index = 1; index < arguments.size(); ++index) {
                             if (const auto* text = std::get_if<std::string>(&arguments[index]))
                                 parameters.emplace_back(*text);
-                            else parameters.emplace_back(std::get<double>(arguments[index]));
+                            else parameters.emplace_back(numericDeviceArgument(index));
                         }
                     } else {
                         if (arguments.size() != 2)
@@ -2971,7 +3076,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         runtime::ServiceErrorCode::Unavailable, "channel service unavailable");
                     const auto channel = resolveChannel(channelArgument(0));
                     std::optional<double> reg;
-                    if (arguments.size() == 2) reg = std::get<double>(arguments[1]);
+                    if (arguments.size() == 2) reg = numericDeviceArgument(1);
                     pushValue(channels_->readValue(session_id_, channel, reg));
                 } else if (instruction.name == "ALLOC") {
                     const auto size = integerArgument(0, "ALLOC size must be a positive integer",
@@ -2993,7 +3098,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                         const auto channel = resolveChannel(channelArgument(0));
                         const bool hasRegister = arguments.size() == 3;
                         const std::optional<double> reg = hasRegister ?
-                            std::optional<double>(std::get<double>(arguments[1])) : std::nullopt;
+                            std::optional<double>(numericDeviceArgument(1)) : std::nullopt;
                         const std::size_t addressIndex = hasRegister ? 2 : 1;
                         const auto address = integerArgument(addressIndex,
                             "invalid buffer address", 0, 9007199254740991.0);
@@ -3088,8 +3193,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     const auto channel = resolveChannel(channelArgument(0));
                     const bool hasRegister = arguments.size() == 3;
                     const std::optional<double> reg = hasRegister ?
-                        std::optional<double>(std::get<double>(arguments[1])) : std::nullopt;
-                    const double value = std::get<double>(arguments[hasRegister ? 2 : 1]);
+                        std::optional<double>(numericDeviceArgument(1)) : std::nullopt;
+                    const double value = numericDeviceArgument(hasRegister ? 2 : 1);
                     channels_->writeValue(session_id_, channel, value, reg);
                 } else if (instruction.name == "XFER") {
                     if (!channels_ || !selectedChannel)
@@ -3184,6 +3289,13 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     runtimeError(instruction, "EVAL expression must return a number");
                 }
             }
+            selectStates.resize(frame.selectBase);
+            for (auto loop = forStates.begin(); loop != forStates.end();) {
+                if (loop->second.callDepth == callFrames.size()) loop = forStates.erase(loop);
+                else ++loop;
+            }
+            if (state.traps) while (state.traps->count &&
+                state.traps->records[state.traps->count - 1].callDepth >= callFrames.size()) --state.traps->count;
             callFrames.pop_back();
             if (dynamicEvaluation && !dataRead)
                 code.erase(code.begin() + static_cast<std::ptrdiff_t>(dynamicCodeStart),
@@ -3474,7 +3586,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             Value value = pop();
             if (!instruction.name.empty() && instruction.name.back() == '$') {
                 if (!std::holds_alternative<std::string>(value))
-                    throw std::runtime_error("line " + std::to_string(instruction.line) +
+                    throw runtime::Error(runtime::ErrorCode::TypeMismatch, "line " + std::to_string(instruction.line) +
                                              ", column " + std::to_string(instruction.column) +
                                              ": string value required");
             } else {
@@ -3483,7 +3595,7 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
                     if (std::trunc(number) != number ||
                         number < static_cast<double>(std::numeric_limits<std::int32_t>::min()) ||
                         number > static_cast<double>(std::numeric_limits<std::int32_t>::max()))
-                        throw std::runtime_error("line " + std::to_string(instruction.line) +
+                        throw runtime::Error(runtime::ErrorCode::OutOfRange, "line " + std::to_string(instruction.line) +
                                                  ", column " + std::to_string(instruction.column) +
                                                  ": Int32 value out of range");
                 }

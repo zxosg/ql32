@@ -70,6 +70,9 @@ target_include_directories(ql32_bytecode_footprint PRIVATE src)
 
 if(QL32_BUILD_TESTS)
   enable_testing()
+  add_executable(ql32_application_extensions_tests tests/application_extensions_tests.cpp)
+  target_link_libraries(ql32_application_extensions_tests PRIVATE ql32_host)
+  add_test(NAME ql32_application_extensions_tests COMMAND ql32_application_extensions_tests)
   find_package(Python3 COMPONENTS Interpreter QUIET)
   if(Python3_Interpreter_FOUND)
     add_test(NAME ql32_font_converter_tests
