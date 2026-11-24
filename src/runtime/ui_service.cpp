@@ -11,6 +11,7 @@ RequestId QueuedService::begin(SessionId session, RequestKind kind, std::string 
                                std::string message, std::vector<DialogField> fields,
                                std::vector<MenuItem> items, std::string acceptLabel,
                                std::string cancelLabel, DialogOptions dialogOptions) {
+    if (keyInput_) keyInput_->release(session);
     std::lock_guard lock(mutex_);
     while (nextId_ == 0 || requests_.find(nextId_) != requests_.end()) {
         ++nextId_;
@@ -177,6 +178,7 @@ void QueuedService::cancel(RequestId request) {
 }
 
 void QueuedService::cancelSession(SessionId session) {
+    if (keyInput_) keyInput_->release(session);
     std::lock_guard lock(mutex_);
     for (auto request = requests_.begin(); request != requests_.end();) {
         if (request->second.request.session == session) request = requests_.erase(request);

@@ -1,4 +1,5 @@
 #include "ql32/interpreter.hpp"
+#include "ql32/platform/linux/console_keys.hpp"
 #include "ql32/platform/linux/directory_channels.hpp"
 #include "ql32/platform/linux/virtual_hardware.hpp"
 #include "ql32/platform/linux/directory_storage.hpp"
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
                     std::cout.flush();
                 }, hardware);
             auto ui = std::make_shared<ql32::ui::QueuedService>();
+            ui->setKeyInput(std::make_shared<ql32::platform::linux_host::ConsoleKeys>());
             auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
                 "ql32-screen.ppm");
             auto graphics = std::make_shared<ql32::graphics::WindowedService>(
@@ -79,6 +81,7 @@ int main(int argc, char** argv) {
                 std::cout.flush();
             }, hardware);
         auto ui = std::make_shared<ql32::ui::QueuedService>();
+            ui->setKeyInput(std::make_shared<ql32::platform::linux_host::ConsoleKeys>());
         auto presenter = std::make_shared<ql32::platform::linux_host::PpmPresenter>(
             "ql32-screen.ppm");
         std::shared_ptr<ql32::graphics::Service> graphics;
