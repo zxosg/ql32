@@ -61,7 +61,7 @@ enum class Kind {
     End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
     Print, At, Data, Read, Restore, Stop, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
     Select, On, Remainder, Remark,
-    For, To, Step, Next, Repeat, While, Until, Exit, Define, Procedure, Function, Local, Return,
+    For, To, Step, Next, Repeat, While, Until, Trap, Raise, Exit, Define, Procedure, Function, Local, Return,
     Plus, Minus, Star, Slash, Div, Mod, Power,
     Equal, NotEqual, Less, LessEqual, Greater, GreaterEqual,
     And, Or, Xor, Not,
@@ -101,6 +101,7 @@ constexpr Keyword keywords[] = {
     {"FOR", "FOR", Kind::For, "FOR"}, {"TO", "TO", Kind::To, "TO"},
     {"STEP", "STEP", Kind::Step, "STEP"}, {"NEXT", "NEXT", Kind::Next, "NEXT"},
     {"WHILE", "WHILE", Kind::While, "WHILE"}, {"UNTIL", "UNTIL", Kind::Until, "UNTIL"},
+    {"TRAP", "TRAP", Kind::Trap, "TRAP"}, {"RAISE", "RAISE", Kind::Raise, "RAISE"},
     {"REPEAT", "REP", Kind::Repeat, "REPeat"}, {"EXIT", "EXIT", Kind::Exit, "EXIT"},
     {"DEFINE", "DEF", Kind::Define, "DEFine"},
     {"PROCEDURE", "PROC", Kind::Procedure, "PROCedure"},
@@ -993,7 +994,9 @@ private:
     const Token& advance() { if (!check(Kind::End)) ++current_; return previous(); }
     bool isLineNumber() const {
         return current_ + 1 < tokens_.size() &&
-               (tokens_[current_ + 1].kind == Kind::Print ||
+               (tokens_[current_ + 1].kind == Kind::Trap ||
+                tokens_[current_ + 1].kind == Kind::Raise ||
+                tokens_[current_ + 1].kind == Kind::Print ||
                 tokens_[current_ + 1].kind == Kind::At ||
                 tokens_[current_ + 1].kind == Kind::Data ||
                 tokens_[current_ + 1].kind == Kind::Read ||
@@ -1832,6 +1835,29 @@ private:
         }
     }
     void statementBody(bool moduleScope) {
+        if (match(Kind::Trap)) {
+            const Token keyword = previous();
+            if (check(Kind::Trap) || check(Kind::If) || check(Kind::For) ||
+                check(Kind::Repeat) || check(Kind::Select) || check(Kind::Define) ||
+                check(Kind::Dim) || check(Kind::Const) || check(Kind::Option) ||
+                check(Kind::Data) || check(Kind::Local) || check(Kind::Return) ||
+                check(Kind::Stop) || check(Kind::Next) || check(Kind::Exit) ||
+                check(Kind::Go) || check(Kind::Goto) || check(Kind::EndKeyword) ||
+                (check(Kind::BuiltinCommand) && peek().text == "KILL"))
+                error(peek(), "TRAP requires one simple executable statement");
+            const std::size_t begin = code_.size();
+            emit(Op::TrapBegin, keyword);
+            statementBody(false);
+            emit(Op::TrapEnd, keyword);
+            code_[begin].target = code_.size();
+            return;
+        }
+        if (match(Kind::Raise)) {
+            const Token keyword = previous();
+            expression();
+            emit(Op::Raise, keyword);
+            return;
+        }
         if (check(Kind::Option)) {
             const Token keyword = advance();
             if (!moduleScope || inDefinition_)
@@ -2912,6 +2938,7 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
 }
 
 void Interpreter::setErrorContext(runtime::ErrorCode code, std::string detail) {
+    hasTrappedDetail_ = false;
     if (graphics_) {
         try { graphics_->flushTextOutputBatches(session_id_); }
         catch (...) { /* Preserve the original runtime error. */ }

@@ -71,7 +71,25 @@ struct MenuBuilder {
     bool hasResult = false;
 };
 
+struct TrapRecord {
+    std::size_t stackDepth, callDepth, selectDepth, codeSize, continuation;
+    runtime::ChannelId printChannel;
+    std::size_t printColumn;
+};
+struct TrapState {
+    std::array<TrapRecord, 8> records{};
+    std::size_t count = 0;
+};
+struct PendingKey {
+    std::optional<std::chrono::steady_clock::time_point> deadline;
+    std::optional<std::int32_t> ready;
+    bool text = false;
+};
 struct VMExecutionState {
+    std::optional<PendingKey> pendingKey;
+    bool interactiveSubmission = false;
+    std::unique_ptr<TrapState> traps;
+    std::size_t sliceInstructions = 0;
     InstructionSequence code;
     std::vector<StackEntry> stack;
     std::map<std::pair<std::size_t, std::size_t>, ForState> forStates;

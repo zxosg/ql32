@@ -29,7 +29,7 @@ enum class Op : std::uint8_t {
     ForInit, ForNext, LoopNext, ExitLoop, Call, Return, FunctionEnd,
     DimArray, ArrayGet, ArraySet, StringSlice, PushArrayRef, SelectBegin, SelectMatch, SelectRemainder, SelectEnd,
     Pause, Beep, Volume, MusicPlay, MusicWav, MusicTest, MusicStop, MusicPause, MusicResume, MusicStatus,
-    ChannelMirror, ChannelMirrorDelete, ChannelMirrorList
+    ChannelMirror, ChannelMirrorDelete, ChannelMirrorList, TrapBegin, TrapEnd, Raise
 };
 
 struct ForItemSpec {
