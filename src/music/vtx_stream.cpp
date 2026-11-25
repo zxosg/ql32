@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <string_view>
 
 namespace ql32::music {
@@ -620,6 +621,9 @@ VtxSong openVtxStreamed(runtime::StorageService& storage, const std::string& pat
                 lastError = "cache verification failed on " + root;
             } catch (const DecodeFailure& failure) {
                 throw std::runtime_error(failure.message);
+            } catch (const std::bad_alloc&) {
+                throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfMemory,
+                                            "music: not enough memory (heap fragmented)");
             } catch (const std::exception& error) {
                 lastError = error.what();
             }
@@ -1060,6 +1064,9 @@ YmSong openYmStreamed(runtime::StorageService& storage, const std::string& path,
                 lastError = "cache verification failed on " + root;
             } catch (const DecodeFailure& failure) {
                 throw std::runtime_error(failure.message);
+            } catch (const std::bad_alloc&) {
+                throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfMemory,
+                                            "music: not enough memory (heap fragmented)");
             } catch (const std::exception& error) {
                 lastError = error.what();
             }

@@ -506,13 +506,24 @@ public:
     // Counts tokens without storing them so scan() can allocate the exact
     // contiguous block once. Geometric vector growth needs old and new buffers
     // at the same time and can never fit the CYD's largest free block.
-    std::size_t countTokens(std::unordered_set<std::string>* functions = nullptr) const {
+    // `operations` receives the number of tokens that normally produce bytecode
+    // (everything except separators and brackets), which tracks code size far
+    // better than the raw token count.
+    std::size_t countTokens(std::unordered_set<std::string>* functions = nullptr,
+                            std::size_t* operations = nullptr) const {
         struct Counter {
             std::size_t count = 0;
+            std::size_t operations = 0;
             std::unordered_set<std::string>* functions;
             Kind previous[2] = {Kind::End, Kind::End};
             void push_back(const Token& token) {
                 ++count;
+                switch (token.kind) {
+                case Kind::Newline: case Kind::Colon: case Kind::Comma:
+                case Kind::LeftParen: case Kind::RightParen: case Kind::Semicolon:
+                case Kind::End: break;
+                default: ++operations;
+                }
                 if (functions && previous[0] == Kind::Define && previous[1] == Kind::Function &&
                     token.kind == Kind::Identifier)
                     functions->insert(std::string(token.text));
@@ -524,6 +535,7 @@ public:
         Lexer counting(source_);
         counting.counting_ = true;
         counting.scanInto(counter);
+        if (operations) *operations = counter.operations;
         return counter.count;
     }
 
@@ -3724,10 +3736,13 @@ detail::InstructionSequence detail::compileSource(const std::string& source,
                                                   const runtime::MemoryService* memory) {
     Lexer lexer(source);
     std::unordered_set<std::string> declared;
-    const std::size_t tokenCount = lexer.countTokens(&declared);
+    std::size_t operations = 0;
+    const std::size_t tokenCount = lexer.countTokens(&declared, &operations);
     if (memory) {
         // Tokens are streamed per line; bytecode and tables dominate the peak.
-        const std::uint64_t estimate = std::uint64_t{tokenCount} * 56;
+        // Calibrated on the CYD: ~58 B of peak heap per instruction, and
+        // bytecode-producing tokens track instruction count better than all tokens.
+        const std::uint64_t estimate = std::uint64_t{operations} * 60;
         if (const auto failure = memory->admissionFailure(
                 "program of " + std::to_string(tokenCount) + " tokens", estimate, 2048))
             throw std::runtime_error(*failure + "; shorten the program");
