@@ -165,7 +165,8 @@ void verifyBytecode(const detail::InstructionSequence& code) {
         }
     }
 
-    std::vector<std::optional<std::size_t>> stackDepth(code.size() + 1);
+    // Chunked: a per-instruction vector needs one large contiguous block.
+    std::deque<std::optional<std::size_t>> stackDepth(code.size() + 1);
     std::deque<std::size_t> pending;
     const auto merge = [&](std::size_t target, std::size_t depth,
                            const Instruction& source) {
