@@ -96,10 +96,10 @@ void check(const char* name, int lines, std::size_t largestBound, std::size_t pe
 
 int main() {
 #if INTPTR_MAX == INT64_MAX && !defined(__SANITIZE_ADDRESS__)
-    // Compact 24 B tokens (16 B on the 32-bit targets), reserved exactly: about
-    // 28 KB / 67 KB for the token block. Before: 119 KB / 262 KB; peak 179 KB / 393 KB.
-    check("~1190 tokens (85 lines)", 85, 40000, 100000);
-    check("~2800 tokens (200 lines)", 200, 90000, 220000);
+    // Compact tokens in a chunked deque: no allocation above one node. Before P1
+    // the token vector alone needed 119 KB / 262 KB; peak was 179 KB / 393 KB.
+    check("~1190 tokens (85 lines)", 85, 8192, 100000);
+    check("~2800 tokens (200 lines)", 200, 8192, 220000);
 #endif
     return 0;
 }

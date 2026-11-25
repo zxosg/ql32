@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cctype>
 #include <cstdint>
+#include <deque>
 #include <cstdlib>
 #include <limits>
 #include <memory>
@@ -168,7 +169,8 @@ struct TokenSpan {
 };
 
 struct TokenList {
-    std::vector<Token> items;
+    // Chunked: no token block needs one large contiguous allocation.
+    std::deque<Token> items;
     std::unique_ptr<TokenArena> arena;
 };
 
@@ -516,16 +518,10 @@ public:
     }
 
     TokenList scan(std::vector<TokenSpan>* spans = nullptr) {
-        return scan(countTokens(), spans);
-    }
-
-    TokenList scan(std::size_t tokenCount, std::vector<TokenSpan>* spans = nullptr) {
         TokenList list;
-        list.items.reserve(tokenCount);
         list.arena = std::make_unique<TokenArena>();
         arena_ = list.arena.get();
         spans_ = spans;
-        if (spans_) spans_->reserve(tokenCount);
         scanInto(list.items);
         return list;
     }
@@ -850,15 +846,15 @@ struct ProgramDefinition {
 };
 
 // Text scan of stored lines: DEFine PROCedure/FuNction ... END DEFine.
-std::vector<ProgramDefinition> scanProgramDefinitions(const std::map<int, std::string>& program) {
+std::vector<ProgramDefinition> scanProgramDefinitions(const ProgramStore& program) {
     std::vector<ProgramDefinition> definitions;
-    const auto nextWord = [](const std::string& text, std::size_t& pos) {
+    const auto nextWord = [](std::string_view text, std::size_t& pos) {
         while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
         const std::size_t begin = pos;
         while (pos < text.size() && !std::isspace(static_cast<unsigned char>(text[pos])) &&
                text[pos] != '(' && text[pos] != ':')
             ++pos;
-        std::string word = text.substr(begin, pos - begin);
+        std::string word(text.substr(begin, pos - begin));
         std::transform(word.begin(), word.end(), word.begin(),
                        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         return word;
@@ -1016,7 +1012,7 @@ public:
     }
 
 private:
-    std::vector<Token> tokens_;
+    std::deque<Token> tokens_;
     std::unique_ptr<TokenArena> arena_;
     InstructionSequence code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
@@ -2878,8 +2874,9 @@ private:
     }
 };
 
-std::string joinProgramLines(const std::map<int, std::string>& program) {
+std::string joinProgramLines(const ProgramStore& program) {
     std::string source;
+    source.reserve(program.listingBytes());
     for (const auto& [number, body] : program) {
         source += std::to_string(number);
         source.push_back(' ');
@@ -3172,7 +3169,7 @@ std::optional<InteractiveLineEdit> Interpreter::navigateProgramEdit(
     lastEditedLine_ = found->first;
     return InteractiveLineEdit{
         std::to_string(found->first) +
-            (found->second.empty() ? std::string{} : " " + found->second),
+            (found->second.empty() ? std::string{} : " " + std::string(found->second)),
         found->first};
 }
 
@@ -3648,14 +3645,14 @@ detail::InstructionSequence detail::compileSource(const std::string& source,
     Lexer lexer(source);
     const std::size_t tokenCount = lexer.countTokens();
     if (memory) {
-        // The token list is one contiguous block; bytecode and tables follow.
+        // Tokens are chunked, so only the total matters; bytecode and tables follow.
         const std::uint64_t tokenBytes = std::uint64_t{tokenCount} * sizeof(Token);
         const std::uint64_t estimate = tokenBytes + std::uint64_t{tokenCount} * 50;
         if (const auto failure = memory->admissionFailure(
-                "program of " + std::to_string(tokenCount) + " tokens", estimate, tokenBytes))
+                "program of " + std::to_string(tokenCount) + " tokens", estimate, 2048))
             throw std::runtime_error(*failure + "; shorten the program");
     }
-    Compiler compiler(lexer.scan(tokenCount));
+    Compiler compiler(lexer.scan());
     return compiler.compile();
 }
 
@@ -4025,7 +4022,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 program_.erase(number);
             } else {
                 validateProgramLine(number, body);
-                program_[number] = std::move(body);
+                program_.set(number, body);
             }
             stoppedExecution_.reset();
             continue;
@@ -4059,7 +4056,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             lastEditedLine_ = lineNumber;
             pendingLineEdit_ = InteractiveLineEdit{
                 std::to_string(lineNumber) +
-                    (line->second.empty() ? std::string{} : " " + line->second),
+                    (line->second.empty() ? std::string{} : " " + std::string(line->second)),
                 lineNumber};
             preserveInteractiveTail();
             return ExecutionStatus::InteractivePending;
@@ -4102,12 +4099,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 }
             }
 
-            std::map<int, std::string> candidate;
+            ProgramStore candidate;
             for (const auto& [oldLine, body] : program_) {
-                std::string rewritten = body;
+                std::string rewritten(body);
                 std::vector<TokenSpan> spans;
                 const TokenList list = Lexer(body).scan(&spans);
-                const std::vector<Token>& tokens = list.items;
+                const std::deque<Token>& tokens = list.items;
                 struct Replacement {
                     std::size_t offset;
                     std::size_t length;
@@ -4144,7 +4141,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                      replacement != replacements.rend(); ++replacement)
                     rewritten.replace(replacement->offset, replacement->length,
                                       replacement->text);
-                candidate.emplace(mapping.at(oldLine), std::move(rewritten));
+                candidate.set(mapping.at(oldLine), rewritten);
             }
             program_.swap(candidate);
             if (lastEditedLine_) {
@@ -4243,7 +4240,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                         }
                         for (const auto& [number, body] : program_) {
                             if (number < match->firstLine || number > match->lastLine) continue;
-                            listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
+                            listing += std::to_string(number) + (body.empty() ? std::string() : " " + std::string(body)) + "\n";
                         }
                     }
                 }
@@ -4327,7 +4324,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                     (rangeKind == RangeKind::Between &&
                      (number < rangeStart || number > rangeEnd)))
                     continue;
-                listing += std::to_string(number) + (body.empty() ? "" : " " + body) + "\n";
+                listing += std::to_string(number) + (body.empty() ? std::string() : " " + std::string(body)) + "\n";
             }
             if (writeGeneratedListing(channel, listing)) {
                 preserveInteractiveTail();
@@ -4361,13 +4358,16 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                                                         "storage service unavailable");
             const std::string argument = trim(normalizedLine.substr(4));
             const std::string path = normalizePath(parseQuotedPath(argument, "LOAD"));
-            const std::string contents = storage_->readText(path);
-            std::map<int, std::string> candidate;
-            std::istringstream file(contents);
+            std::string contents = storage_->readText(path);
+            ProgramStore candidate;
             enum class LoadFormat { Unknown, Numbered, Unnumbered };
             LoadFormat format = LoadFormat::Unknown;
             int nextAutomaticLine = 10;
-            for (std::string fileLine; std::getline(file, fileLine);) {
+            std::string fileLine;
+            for (std::size_t cursor = 0; cursor < contents.size();) {
+                const std::size_t lineEnd = std::min(contents.find('\n', cursor), contents.size());
+                fileLine.assign(contents, cursor, lineEnd - cursor);
+                cursor = lineEnd + 1;
                 const std::string sourceLine = trim(fileLine);
                 if (sourceLine.empty()) continue;
                 const std::size_t storedNumberEnd = lineNumberEnd(fileLine);
@@ -4396,8 +4396,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                     body = canonicalizeKeywords(sourceLine);
                 }
                 if (body.empty()) candidate.erase(number);
-                else candidate[number] = body;
+                else candidate.set(number, body);
             }
+            std::string().swap(contents);
             program_.swap(candidate);
             stoppedExecution_.reset();
             lastEditedLine_.reset();
@@ -4409,7 +4410,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const std::string path = normalizePath(parseQuotedPath(argument, "SAVE"));
             class ProgramSource final : public runtime::TextStreamSource {
             public:
-                explicit ProgramSource(const std::map<int, std::string>& program)
+                explicit ProgramSource(const ProgramStore& program)
                     : program_(program) {}
 
                 void writeTo(runtime::TextStreamSink& sink) const override {
@@ -4432,7 +4433,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 }
 
             private:
-                const std::map<int, std::string>& program_;
+                const ProgramStore& program_;
             } source(program_);
             runtime::EmergencyReserveLease reserve(memory_.get());
             storage_->writeTextStreamAtomic(path, source);
