@@ -401,7 +401,10 @@ struct InstructionSequence : std::deque<Instruction> {
     std::shared_ptr<TextPool> textPool = std::make_shared<TextPool>();
 };
 
-InstructionSequence compileSource(const std::string& source);
+// When `memory` is given, a program whose token list cannot fit the free heap
+// is refused with a clear message instead of failing inside the allocator.
+InstructionSequence compileSource(const std::string& source,
+                                  const runtime::MemoryService* memory = nullptr);
 InstructionSequence compileExpression(const std::string& source,
                                       const InstructionSequence& enclosing);
 std::string expandIncludes(const std::string& source, runtime::StorageService* storage);

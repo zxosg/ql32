@@ -408,12 +408,31 @@ class Lexer {
 public:
     explicit Lexer(std::string_view source) : source_(source) {}
 
-    std::vector<Token> scan() {
+    // Counts tokens without storing them so scan() can allocate the exact
+    // contiguous block once. Geometric vector growth needs old and new buffers
+    // at the same time and can never fit the CYD's largest free block.
+    std::size_t countTokens() const {
+        struct Counter {
+            std::size_t count = 0;
+            void push_back(const Token&) { ++count; }
+            void push_back(Token&&) { ++count; }
+        } counter;
+        Lexer(source_).scanInto(counter);
+        return counter.count;
+    }
+
+    std::vector<Token> scan() { return scan(countTokens()); }
+
+    std::vector<Token> scan(std::size_t tokenCount) {
         std::vector<Token> tokens;
-        // Avoid repeated geometric growth and its transient old+new buffer
-        // overlap on the memory-constrained ESP32 target. BASIC source is
-        // whitespace-heavy, so use a bounded, conservative estimate.
-        tokens.reserve(std::min<std::size_t>(source_.size() / 6 + 1, 512));
+        tokens.reserve(tokenCount);
+        scanInto(tokens);
+        return tokens;
+    }
+
+private:
+    template <typename Sink>
+    void scanInto(Sink& tokens) {
         while (!atEnd()) {
             const char c = peek();
             if (c == ' ' || c == '\t' || c == '\r') {
@@ -467,10 +486,8 @@ public:
             }
         }
         tokens.push_back({Kind::End, "", 0, line_, column_});
-        return tokens;
     }
 
-private:
     std::string_view source_;
     std::size_t offset_ = 0;
     std::size_t lineStartOffset_ = 0;
@@ -848,6 +865,15 @@ public:
         return std::move(code_);
     }
 
+    // Statement-level check of a single stored line; name, jump, and block
+    // resolution needs the whole program and is left to RUN.
+    void checkLine() {
+        detail::TextPoolScope textScope(code_.textPool);
+        lineMode_ = true;
+        block(true);
+        if (!check(Kind::End)) error(peek(), "unexpected block terminator");
+    }
+
     InstructionSequence compileExpression() {
         detail::TextPoolScope textScope(code_.textPool);
         expression();
@@ -886,6 +912,7 @@ private:
     std::vector<LoopContext> loops_;
     std::size_t nextLoopId_ = 1;
     bool inDefinition_ = false;
+    bool lineMode_ = false;
     bool moduleCodeStarted_ = false;
     bool numericPrecisionDeclared_ = false;
     bool cpuFrequencyDeclared_ = false;
@@ -2057,7 +2084,7 @@ private:
         if (check(Kind::Select)) { blockSelect(); return; }
         if (match(Kind::Return)) {
             const Token keyword = previous();
-            if (!inDefinition_) error(keyword, "RETURN is only valid inside a definition");
+            if (!inDefinition_ && !lineMode_) error(keyword, "RETURN is only valid inside a definition");
             const bool hasValue = !check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End);
             if (hasValue) expression();
             Instruction instruction{Op::Return, 0.0, {}, keyword.line, keyword.column};
@@ -2515,6 +2542,11 @@ private:
             emitCall(name, arguments, false, std::move(arrayCandidates));
             return;
         }
+        if (lineMode_ && check(Kind::Equal)) {
+            // A SELECT arm line; its enclosing SELECT is on another line.
+            while (!check(Kind::End) && !check(Kind::Newline) && !check(Kind::Colon)) advance();
+            return;
+        }
         error(peek(), "expected assignment or PRINT");
     }
     static bool isPrintSeparator(Kind kind) {
@@ -2895,14 +2927,32 @@ std::string expandIncludesRecursive(const std::string& source,
     return expanded;
 }
 
-void validateProgramLines(const std::map<int, std::string>& program,
-                          runtime::StorageService* storage) {
-    std::vector<std::string> activePaths;
-    std::size_t expandedBytes = 0;
-    const std::string source = expandIncludesRecursive(joinProgramLines(program), storage,
-        {}, activePaths, 0, expandedBytes);
-    Compiler compiler(Lexer(source).scan());
-    (void)compiler.compile(true, true, true);
+// Edit-time check of one line only: lexical and statement syntax. Cross-line
+// rules (labels, procedure arity, block pairing) are reported when RUN compiles
+// the whole program, so an edit never needs a whole-program copy or compile.
+void validateProgramLine(int number, const std::string& body) {
+    std::string source = std::to_string(number);
+    source.push_back(' ');
+    source += body;
+    source.push_back('\n');
+    std::string upper = source;
+    std::transform(upper.begin(), upper.end(), upper.begin(),
+        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    if (upper.find("INCLUDE") != std::string::npos) {
+        (void)Lexer(source).scan();
+        return;
+    }
+    try {
+        Compiler(Lexer(source).scan()).checkLine();
+    } catch (const std::runtime_error& error) {
+        const std::string_view message = error.what();
+        for (const char* crossLine : {"unexpected block terminator", "expected END ",
+                                      "LOCAL must follow a definition header",
+                                      "loop name does not identify an open loop",
+                                      "SELECT requires at least one arm"})
+            if (message.find(crossLine) != std::string_view::npos) return;
+        throw;
+    }
 }
 
 } // namespace
@@ -3463,8 +3513,19 @@ void Interpreter::closeExecutionChannels() noexcept {
     }
 }
 
-detail::InstructionSequence detail::compileSource(const std::string& source) {
-    Compiler compiler(Lexer(source).scan());
+detail::InstructionSequence detail::compileSource(const std::string& source,
+                                                  const runtime::MemoryService* memory) {
+    Lexer lexer(source);
+    const std::size_t tokenCount = lexer.countTokens();
+    if (memory) {
+        // The token list is one contiguous block; bytecode and tables follow.
+        const std::uint64_t tokenBytes = std::uint64_t{tokenCount} * sizeof(Token);
+        const std::uint64_t estimate = tokenBytes + std::uint64_t{tokenCount} * 56;
+        if (const auto failure = memory->admissionFailure(
+                "program of " + std::to_string(tokenCount) + " tokens", estimate, tokenBytes))
+            throw std::runtime_error(*failure + "; shorten the program");
+    }
+    Compiler compiler(lexer.scan(tokenCount));
     return compiler.compile();
 }
 
@@ -3830,11 +3891,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 throw std::runtime_error("program line number must be in 1..32767");
             std::string body = canonicalizeKeywords(
                 expandCompactEnd(trim(line.substr(numberEnd))));
-            std::map<int, std::string> candidate = program_;
-            if (body.empty()) candidate.erase(number);
-            else candidate[number] = std::move(body);
-            validateProgramLines(candidate, storage_.get());
-            program_.swap(candidate);
+            if (body.empty()) {
+                program_.erase(number);
+            } else {
+                validateProgramLine(number, body);
+                program_[number] = std::move(body);
+            }
             stoppedExecution_.reset();
             continue;
         }
@@ -3950,7 +4012,6 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                                       replacement->text);
                 candidate.emplace(mapping.at(oldLine), std::move(rewritten));
             }
-            validateProgramLines(candidate, storage_.get());
             program_.swap(candidate);
             if (lastEditedLine_) {
                 const auto mapped = mapping.find(*lastEditedLine_);
@@ -4152,9 +4213,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             clear();
         } else if (word == "RUN") {
             clear();
-            const std::string programSource = joinProgramLines(program_);
+            std::string programSource = joinProgramLines(program_);
             if (taskControl_ && !programSource.empty()) {
-                pendingRunSource_ = programSource;
+                pendingRunSource_ = std::move(programSource);
                 pendingInteractiveTail_.assign(std::istreambuf_iterator<char>(input),
                                                std::istreambuf_iterator<char>());
                 return ExecutionStatus::RunPending;
@@ -4275,14 +4336,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 std::sort(lineNumbers.begin(), lineNumbers.end());
                 lineNumbers.erase(std::unique(lineNumbers.begin(), lineNumbers.end()),
                                   lineNumbers.end());
-                auto candidate = program_;
                 for (const int number : lineNumbers) {
-                    if (candidate.erase(number) == 0)
+                    if (program_.find(number) == program_.end())
                         throw std::runtime_error("DELETE line not found: " +
                                                  std::to_string(number));
                 }
-                validateProgramLines(candidate, storage_.get());
-                program_.swap(candidate);
+                for (const int number : lineNumbers) program_.erase(number);
                 stoppedExecution_.reset();
             } else {
                 if (!storage_)
