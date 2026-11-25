@@ -506,15 +506,32 @@ public:
     // Counts tokens without storing them so scan() can allocate the exact
     // contiguous block once. Geometric vector growth needs old and new buffers
     // at the same time and can never fit the CYD's largest free block.
-    std::size_t countTokens() const {
+    std::size_t countTokens(std::unordered_set<std::string>* functions = nullptr) const {
         struct Counter {
             std::size_t count = 0;
-            void push_back(const Token&) { ++count; }
-            void push_back(Token&&) { ++count; }
+            std::unordered_set<std::string>* functions;
+            Kind previous[2] = {Kind::End, Kind::End};
+            void push_back(const Token& token) {
+                ++count;
+                if (functions && previous[0] == Kind::Define && previous[1] == Kind::Function &&
+                    token.kind == Kind::Identifier)
+                    functions->insert(std::string(token.text));
+                previous[0] = previous[1];
+                previous[1] = token.kind;
+            }
         } counter;
+        counter.functions = functions;
         Lexer counting(source_);
+        counting.counting_ = true;
         counting.scanInto(counter);
         return counter.count;
+    }
+
+    // Streaming interface: appends the tokens of one source line (through its
+    // Newline) and returns false once the End token has been appended.
+    bool scanLine(std::deque<Token>& tokens, TokenArena* arena) {
+        arena_ = arena;
+        return scanLineInto(tokens);
     }
 
     TokenList scan(std::vector<TokenSpan>* spans = nullptr) {
@@ -529,6 +546,11 @@ public:
 private:
     template <typename Sink>
     void scanInto(Sink& tokens) {
+        while (scanLineInto(tokens)) {}
+    }
+
+    template <typename Sink>
+    bool scanLineInto(Sink& tokens) {
         while (!atEnd()) {
             const char c = peek();
             if (c == ' ' || c == '\t' || c == '\r') {
@@ -539,6 +561,7 @@ private:
                 ++line_;
                 column_ = 1;
                 lineStartOffset_ = offset_;
+                return true;
             } else if (c == '\'') {
                 skipComment();
             } else if (std::isdigit(static_cast<unsigned char>(c)) ||
@@ -582,10 +605,13 @@ private:
             }
         }
         emit(tokens, Token(Kind::End, "", line_, column_));
+        return false;
     }
 
     std::string_view source_;
     TokenArena* arena_ = nullptr;
+    bool counting_ = false;
+    std::string scratch_;
     std::vector<TokenSpan>* spans_ = nullptr;
     std::size_t tokenStart_ = 0;
     std::size_t tokenLength_ = 0;
@@ -602,6 +628,14 @@ private:
         tokenStart_ = tokenLength_ = 0;
     }
     Text keep(std::string_view text) {
+        // Text that is already spelled this way in the source needs no copy.
+        if (tokenLength_ == text.size() && !text.empty() &&
+            source_.compare(tokenStart_, text.size(), text) == 0)
+            return Text(source_.data() + tokenStart_, text.size());
+        if (counting_) {
+            scratch_.assign(text);
+            return Text(scratch_.data(), scratch_.size());
+        }
         return arena_ ? Text(arena_->store(text.data(), text.size()), text.size()) : Text();
     }
     Text keepNumber(double value) {
@@ -934,11 +968,57 @@ struct SourceTarget {
     int column = 1;
 };
 
+// Token source for the compiler. A lazy window lexes one line at a time and
+// drops tokens the compiler can no longer revisit, so only the current line is
+// resident. The eager form wraps a complete TokenList.
+class TokenWindow {
+public:
+    explicit TokenWindow(TokenList list)
+        : items_(std::move(list.items)), arena_(std::move(list.arena)), eof_(true) {}
+    explicit TokenWindow(std::string_view source)
+        : lexer_(source), arena_(std::make_unique<TokenArena>()) {}
+
+    const Token& operator[](std::size_t index) {
+        fill(index);
+        return items_[index - base_];
+    }
+    bool has(std::size_t index) {
+        fill(index);
+        return index < base_ + items_.size();
+    }
+    std::size_t eagerSize() const { return base_ + items_.size(); }
+    void release(std::size_t keepFrom) {
+        while (base_ < keepFrom && !items_.empty()) {
+            items_.pop_front();
+            ++base_;
+        }
+    }
+
+private:
+    void fill(std::size_t index) {
+        while (!eof_ && index >= base_ + items_.size())
+            eof_ = !lexer_.scanLine(items_, arena_.get());
+    }
+
+    Lexer lexer_{std::string_view{}};
+    std::deque<Token> items_;
+    std::unique_ptr<TokenArena> arena_;
+    std::size_t base_ = 0;
+    bool eof_ = false;
+};
+
 class Compiler {
 public:
+    // Streams `source` line by line. `declared` lists DEFine FuNction names found
+    // by the caller's counting pass.
+    Compiler(std::string_view source, std::unordered_set<std::string> declared)
+        : tokens_(source) {
+        declaredFunctions_ = std::move(declared);
+    }
+
     explicit Compiler(TokenList list,
                       const InstructionSequence* enclosing = nullptr)
-        : tokens_(std::move(list.items)), arena_(std::move(list.arena)) {
+        : tokens_(std::move(list)) {
         if (enclosing) {
             enclosingFunctions_ = enclosing->functions;
             code_.textPool = enclosing->textPool;
@@ -951,7 +1031,7 @@ public:
                 declaredFunctions_.insert(name);
             }
         }
-        for (std::size_t i = 0; i + 2 < tokens_.size(); ++i) {
+        for (std::size_t i = 0; i + 2 < tokens_.eagerSize(); ++i) {
             if (tokens_[i].kind == Kind::Define && tokens_[i + 1].kind == Kind::Function &&
                 tokens_[i + 2].kind == Kind::Identifier)
                 declaredFunctions_.insert(tokens_[i + 2].text);
@@ -1012,8 +1092,7 @@ public:
     }
 
 private:
-    std::deque<Token> tokens_;
-    std::unique_ptr<TokenArena> arena_;
+    mutable TokenWindow tokens_;
     InstructionSequence code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
     std::unordered_map<std::string, std::size_t> arrays_;
@@ -1060,7 +1139,7 @@ private:
         currentBasicLine_ = static_cast<int>(number);
     }
     bool labelDeclaration() const {
-        return check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+        return check(Kind::Identifier) && tokens_.has(current_ + 1) &&
                tokens_[current_ + 1].kind == Kind::Colon;
     }
     void registerLabel() {
@@ -1148,7 +1227,7 @@ private:
     }
     const Token& advance() { if (!check(Kind::End)) ++current_; return previous(); }
     bool isLineNumber() const {
-        return current_ + 1 < tokens_.size() &&
+        return tokens_.has(current_ + 1) &&
                (tokens_[current_ + 1].kind == Kind::Trap ||
                 tokens_[current_ + 1].kind == Kind::Raise ||
                 tokens_[current_ + 1].kind == Kind::Print ||
@@ -1458,6 +1537,7 @@ private:
     }
     void block(bool moduleScope = false) {
         while (!check(Kind::End) && !check(Kind::Else) && !check(Kind::EndKeyword)) {
+            tokens_.release(current_ == 0 ? 0 : current_ - 1);
             if (match(Kind::Newline) || match(Kind::Colon)) continue;
             if (check(Kind::Number) && isLineNumber()) {
                 const Token lineNumber = advance();
@@ -1550,7 +1630,7 @@ private:
         std::size_t count = 0;
         if (!check(Kind::RightParen)) {
             do {
-                const bool bareName = check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+                const bool bareName = check(Kind::Identifier) && tokens_.has(current_ + 1) &&
                     (tokens_[current_ + 1].kind == Kind::Comma ||
                      tokens_[current_ + 1].kind == Kind::RightParen);
                 const std::string candidateName = bareName ? peek().text : std::string{};
@@ -1572,7 +1652,7 @@ private:
         std::size_t count = 0;
         if (commandArgumentTerminator()) return count;
         while (true) {
-            const bool bareName = check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+            const bool bareName = check(Kind::Identifier) && tokens_.has(current_ + 1) &&
                 (tokens_[current_ + 1].kind == Kind::Comma ||
                  commandArgumentTerminatorAt(current_ + 1));
             const std::string candidateName = bareName ? peek().text : std::string{};
@@ -1618,7 +1698,7 @@ private:
     }
     void selectArm() {
         while (!check(Kind::End) && !check(Kind::EndKeyword) && !check(Kind::Equal) &&
-               !(check(Kind::Number) && isLineNumber() && current_ + 1 < tokens_.size() &&
+               !(check(Kind::Number) && isLineNumber() && tokens_.has(current_ + 1) &&
                  tokens_[current_ + 1].kind == Kind::Equal)) {
             if (match(Kind::Newline) || match(Kind::Colon)) continue;
             if (check(Kind::Number) && isLineNumber()) {
@@ -1653,7 +1733,7 @@ private:
         std::size_t remainderFalseJump = std::numeric_limits<std::size_t>::max();
         std::size_t armCount = 0;
         while (check(Kind::Equal) ||
-               (check(Kind::Number) && isLineNumber() && current_ + 1 < tokens_.size() &&
+               (check(Kind::Number) && isLineNumber() && tokens_.has(current_ + 1) &&
                 tokens_[current_ + 1].kind == Kind::Equal)) {
             if (hasRemainder) error(peek(), "REMAINDER must be the final SELECT arm");
             if (check(Kind::Number) && isLineNumber()) advance();
@@ -2168,7 +2248,7 @@ private:
                     error(line, "RESTORE line number must be an integer in 0..32767");
                 restore.targetIsLineNumber = true;
                 restore.setSourceLineTarget(static_cast<int>(line.number()));
-            } else if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+            } else if (check(Kind::Identifier) && tokens_.has(current_ + 1) &&
                        commandArgumentTerminatorAt(current_ + 1)) {
                 restore.name = advance().text;
             } else if (!commandArgumentTerminator()) {
@@ -2271,7 +2351,7 @@ private:
             return;
         }
         if (check(Kind::Identifier) && uppercaseAscii(peek().text) == "CHANNEL" &&
-            current_ + 1 < tokens_.size() && tokens_[current_ + 1].kind == Kind::Hash) {
+            tokens_.has(current_ + 1) && tokens_[current_ + 1].kind == Kind::Hash) {
             const Token name = advance();
             advance(); // selector marker
             expression();
@@ -2285,7 +2365,7 @@ private:
             return;
         }
         if (check(Kind::Identifier) && uppercaseAscii(peek().text) == "MIRROR" &&
-            current_ + 1 < tokens_.size()) {
+            tokens_.has(current_ + 1)) {
             const Kind next = tokens_[current_ + 1].kind;
             const bool nextIsWord = next == Kind::Identifier || next == Kind::BuiltinCommand;
             const std::string word = nextIsWord ? uppercaseAscii(tokens_[current_ + 1].text) : "";
@@ -2299,7 +2379,7 @@ private:
                 emit(Op::ChannelMirror, name);
                 return;
             }
-            if (word == "DELETE" && current_ + 2 < tokens_.size() &&
+            if (word == "DELETE" && tokens_.has(current_ + 2) &&
                 tokens_[current_ + 2].kind == Kind::Hash) {
                 const Token name = advance();
                 advance();
@@ -2387,14 +2467,14 @@ private:
                 const auto followedByInputSeparator = [&](std::size_t position,
                                                            bool channelAfterComma) {
                     std::size_t depth = 0;
-                    for (std::size_t i = position; i < tokens_.size(); ++i) {
+                    for (std::size_t i = position; tokens_.has(i); ++i) {
                         const Kind kind = tokens_[i].kind;
                         if (kind == Kind::LeftParen) ++depth;
                         else if (kind == Kind::RightParen && depth != 0) --depth;
                         else if (depth == 0 && kind == Kind::Semicolon) return !channelAfterComma;
                         else if (depth == 0 && kind == Kind::Hash) return !channelAfterComma;
                         else if (depth == 0 && kind == Kind::Comma)
-                            return channelAfterComma && i + 1 < tokens_.size() &&
+                            return channelAfterComma && tokens_.has(i + 1) &&
                                    tokens_[i + 1].kind == Kind::Hash;
                         else if (depth == 0 && (kind == Kind::Newline || kind == Kind::Colon ||
                                                 kind == Kind::End)) return false;
@@ -2587,7 +2667,7 @@ private:
             return;
         }
         if (check(Kind::BuiltinFunction) && peek().text == "TASK" &&
-            current_ + 1 < tokens_.size() &&
+            tokens_.has(current_ + 1) &&
             tokens_[current_ + 1].kind != Kind::LeftParen) {
             const Token name = advance();
             const std::size_t arguments = commandArguments();
@@ -2597,7 +2677,7 @@ private:
         if (check(Kind::BuiltinFunction))
             error(peek(), "function call must be used as a value");
         if (check(Kind::Identifier) && (arrays_.find(peek().text) != arrays_.end() || isCurrentParameter(peek().text)) &&
-            current_ + 1 < tokens_.size() && tokens_[current_ + 1].kind == Kind::LeftParen) {
+            tokens_.has(current_ + 1) && tokens_[current_ + 1].kind == Kind::LeftParen) {
             const Token name = advance();
             const std::size_t rank = callArguments();
             if (arrays_.find(name.text) != arrays_.end() && rank != arrays_.at(name.text))
@@ -2646,7 +2726,7 @@ private:
             emit(Op::PrintEnd, keyword);
             return;
         }
-        if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
+        if (check(Kind::Identifier) && tokens_.has(current_ + 1) &&
             tokens_[current_ + 1].kind == Kind::Equal) {
             const Token name = advance();
             if (constants_.find(name.text) != constants_.end())
@@ -2755,10 +2835,10 @@ private:
     }
     bool startsStringSlice() const {
         if (!check(Kind::LeftParen)) return false;
-        if (current_ + 1 < tokens_.size() &&
+        if (tokens_.has(current_ + 1) &&
             tokens_[current_ + 1].kind == Kind::RightParen) return true;
         std::size_t depth = 0;
-        for (std::size_t i = current_ + 1; i < tokens_.size(); ++i) {
+        for (std::size_t i = current_ + 1; tokens_.has(i); ++i) {
             if (tokens_[i].kind == Kind::LeftParen) ++depth;
             else if (tokens_[i].kind == Kind::RightParen) {
                 if (depth == 0) return false;
@@ -3643,16 +3723,16 @@ void Interpreter::closeExecutionChannels() noexcept {
 detail::InstructionSequence detail::compileSource(const std::string& source,
                                                   const runtime::MemoryService* memory) {
     Lexer lexer(source);
-    const std::size_t tokenCount = lexer.countTokens();
+    std::unordered_set<std::string> declared;
+    const std::size_t tokenCount = lexer.countTokens(&declared);
     if (memory) {
-        // Tokens are chunked, so only the total matters; bytecode and tables follow.
-        const std::uint64_t tokenBytes = std::uint64_t{tokenCount} * sizeof(Token);
-        const std::uint64_t estimate = tokenBytes + std::uint64_t{tokenCount} * 50;
+        // Tokens are streamed per line; bytecode and tables dominate the peak.
+        const std::uint64_t estimate = std::uint64_t{tokenCount} * 56;
         if (const auto failure = memory->admissionFailure(
                 "program of " + std::to_string(tokenCount) + " tokens", estimate, 2048))
             throw std::runtime_error(*failure + "; shorten the program");
     }
-    Compiler compiler(lexer.scan());
+    Compiler compiler(source, std::move(declared));
     return compiler.compile();
 }
 

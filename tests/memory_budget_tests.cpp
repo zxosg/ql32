@@ -98,8 +98,8 @@ int main() {
 #if INTPTR_MAX == INT64_MAX && !defined(__SANITIZE_ADDRESS__)
     // Compact tokens in a chunked deque: no allocation above one node. Before P1
     // the token vector alone needed 119 KB / 262 KB; peak was 179 KB / 393 KB.
-    check("~1190 tokens (85 lines)", 85, 8192, 100000);
-    check("~2800 tokens (200 lines)", 200, 8192, 220000);
+    check("~1190 tokens (85 lines)", 85, 8192, 72000);
+    check("~2800 tokens (200 lines)", 200, 8192, 150000);
 #endif
     return 0;
 }
