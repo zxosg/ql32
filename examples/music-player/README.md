@@ -20,3 +20,21 @@ Limits: 200 entries, flat list, no subfolders, no error trapping (a bad
 file ends the program), pause state is tracked by the program, not read
 from the player. Do not type REPL commands on the serial console while it
 runs; they feed the menus.
+
+# Directory player (`dirplayer.bas`)
+
+Lists songs straight from a directory channel (no playlist file): tries
+`SDC:/music/`, `SDC:/`, then `FFS:/`; opens `OPEN(14, dir, "*", 2)` (sorted,
+no folders), keeps `.vtx .pt3 .sqt .wav .ym` (max 120). Pixel UI sized from
+`GWIDTH()/GHEIGHT()`, 6x8 font. One-row scrolling uses `GCOPY`.
+
+Keys (numeric `INKEY(300)` codes; PR #28 `INKEY$` names are not on main):
+Up/Down move, Enter play, Space pause/resume, `s` stop, `+`/`-` volume
+(step 16), `q`/Esc quit. Status shows state, volume bar, song count, item
+number, title being played, and play errors (trapped with `TRAP`/`ERR$`).
+
+Host: works with `build/macos/ql32 dirplayer.bas` in a terminal, but there
+is no audio, so Enter reports "Service unavailable". CYD: **does not
+compile on current main** (token vector needs more RAM than is free, see
+`docs/notes/dirplayer-workarounds.md`). Workarounds and language gaps are
+listed there.
