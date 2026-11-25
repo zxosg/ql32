@@ -124,7 +124,7 @@ The source is session keyboard console `#0`, resolved using the existing session
 
 Special codes begin at `0x110000`, outside Unicode. NUL, releases, modifier-only events and unsupported events are not delivered as keys. Modifiers may affect produced text but are not returned separately. Break/cancel remains a supervisor action and cannot be swallowed by `INKEY` or `TRAP`.
 
-`INKEY$` consumes the same event and returns its printable UTF-8 scalar, or `""` for timeout or a nonprinting key. It does not keep waiting after consuming a special key. This agreed convenience form deliberately loses that distinction; use numeric `INKEY` for application controls. No echo and no Enter requirement. Neither form flushes pending input.
+`INKEY$` consumes the same event. It returns the printable UTF-8 scalar for printable keys (including a space), the key name for special keys, or `""` for timeout. It does not keep waiting after consuming a special key. Names (uppercase): `ENTER`, `ESC`, `BACKSPACE`, `TAB`, `INS`, `DEL`, `HOME`, `END`, `PGUP`, `PGDN`, `LEFT`, `RIGHT`, `UP`, `DOWN`, `F1` through `F12`. Compare against the names (for example `key$ = "UP"`); a printable key is a single character, so it never equals a name. No echo and no Enter requirement. Neither form flushes pending input.
 
 ### 4.2 Routing and continuations
 
