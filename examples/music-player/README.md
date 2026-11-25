@@ -24,17 +24,20 @@ runs; they feed the menus.
 # Directory player (`dirplayer.bas`)
 
 Lists songs straight from a directory channel (no playlist file): tries
-`SDC:/music/`, `SDC:/`, then `FFS:/`; opens `OPEN(14, dir, "*", 2)` (sorted,
-no folders), keeps `.vtx .pt3 .sqt .wav .ym` (max 120). Pixel UI sized from
-`GWIDTH()/GHEIGHT()`, 6x8 font. One-row scrolling uses `GCOPY`.
+`SDC:/music/`, `SDC:/`, then `FFS:/`; opens `OPEN(14, dir, "*", 3)` (folders
+first, sorted; falls back to unsorted when the 14 KB sort buffer is not
+available), keeps `.vtx .pt3 .sqt .wav .ym` (max 120). Folders show as
+`[name]`, `../` goes up. Long names are truncated with `~`. One-row scrolling
+uses `GCOPY`; bigger jumps redraw.
 
-Keys (numeric `INKEY(300)` codes; PR #28 `INKEY$` names are not on main):
-Up/Down move, Enter play, Space pause/resume, `s` stop, `+`/`-` volume
-(step 16), `q`/Esc quit. Status shows state, volume bar, song count, item
-number, title being played, and play errors (trapped with `TRAP`/`ERR$`).
+Keys (`INKEY$` names): Up/Down, PgUp/PgDn move; Enter plays a song or opens a
+folder; Backspace goes up; Space pause/resume; `s` stop; `+`/Right and
+`-`/Left volume; `d` switch SDC:/FFS:; `q` quit. Status area: state, volume
+bar, song count, entry n/N, now playing, approximate time (counted from
+`INKEY$` timeouts: no clock exists), and trapped errors.
 
-Host: works with `build/macos/ql32 dirplayer.bas` in a terminal, but there
-is no audio, so Enter reports "Service unavailable". CYD: **does not
-compile on current main** (token vector needs more RAM than is free, see
-`docs/notes/dirplayer-workarounds.md`). Workarounds and language gaps are
-listed there.
+Host: no audio, Enter reports "Service unavailable". CYD: compile admission
+needs 56 B per token (about 2150 tokens free at idle), so the app was
+trimmed to fit (no scroll bar, Home/End, sort/filter toggles, playing-row
+marker). Playing knuckle.ym and z00m.vtx from the app fails with allocation
+errors (heap fragmentation). See `docs/notes/dirplayer-workarounds.md`.

@@ -2,20 +2,26 @@
 
 Format: wanted / limitation / did instead / suggested improvement.
 
-## Blocker: app does not run on the CYD (esp32_2432s028_spiffs, main 5152917)
-- Wanted: a ~300-line BASIC app (620 instructions, 4 KB source).
-- Limitation: `RUN` fails with `ALLOCFAIL ... out of memory`. The lexer holds
-  every token of the whole source in one `std::vector<Token>`; a Token is
-  ~112 B on ESP32 and the vector doubles. `LOAD` also keeps ~75 KB.
-  Measured: programs above ~170-330 instructions (~300 tokens) fail even with
-  142 KB free at idle. Deque storage (tried and reverted) is not enough:
-  the heap is then exhausted (free=168 B), i.e. total token memory is the limit.
-- Did instead: shrank the app 1460 -> 978 -> 821 -> 694 -> 620 instructions
-  (dropped folder navigation, drive key, Home/End, scroll bar, playing marker,
-  PgUp/PgDn, unsorted fallback). Still too big. Verified on host only.
-- Suggest: streaming lexer/parser (no whole-file token list), compact Token
-  (no std::string, interned text), free source/tokens after compile, and
-  `LOAD` not retaining a second copy.
+## Memory (CYD, esp32_2432s028_spiffs, main e7fbb9b)
+- Wanted: full app (scroll bar, Home/End, filter/sort toggles, playing
+  marker, IsSong function, ESC): 2787 tokens / 1255 instructions.
+- Limitation: compile admission needs `tokens * 56 B` free; idle has ~120 KB,
+  so max ~2150 tokens ("not enough memory for program of 2787 tokens").
+  Lowering the estimate to 8 B crashes (ALLOCFAIL), so it is real.
+- Did instead: cut those features (~25%). Now fits and runs.
+- Suggest: compact tokens / streaming parser so 56 B/token drops sharply.
+- Sorted `OPEN` needs a 14 KB block; fails during playback: unsorted
+  fallback (mode 1) added.
+- Per-song test from the app on a fresh board (7 songs on FFS:): 5 play;
+  knuckle.ym fails (ALLOCFAIL 1752 B, largest 1588, reported "Invalid path")
+  and z00m.vtx fails (ALLOCFAIL 8192 B, reported "Input/output error").
+  From the bare REPL both play (largest block 94196, failedalloc=0).
+  So the loaded app fragments the heap. Suggest correct error text for
+  allocation failures and a pre-reserved decoder buffer.
+- Heap (FREE()/largest): idle in app 58/25.6 KB; playing 26/5-6 KB; after
+  MUSIC STOP 41.5/15.9 KB. HEAP STATS after quit: free=110764 largest=21492
+  min=18028 failedalloc=5 lastfail=8192.
+- `HEAP STATS` is REPL-only; while an app runs, serial keys go to the app.
 
 ## Language gaps and workarounds
 1. `INSTR` missing (spec text mentions it): looped over characters instead.
@@ -27,7 +33,7 @@ Format: wanted / limitation / did instead / suggested improvement.
    into a variable first.
 5. `INCLUDE "ql32.inc"` needs the file on FFS: and costs compile RAM: numeric
    literals for key codes and options. Suggest built-in named constants.
-6. `INKEY$` special-key names are not on main (PR #28): numeric INKEY codes.
+6. (Resolved) `INKEY$` names now used.
 7. No playback state/volume/metadata readback, no end-of-song event:
    app tracks state itself, no auto-advance, title = file name. Suggest
    `MUSIC STATE()`, `VOLUME()`, `MUSIC POS()`/finished flag.
@@ -42,3 +48,8 @@ Format: wanted / limitation / did instead / suggested improvement.
 12. CYD: `TASK "FFS:/x.bas"` fails (114 KB graphics canvas); serial `PRINT`
     goes to the screen, use `OPEN(2)`. Host: no audio, `MUSIC PLAY`/`VOLUME`
     raise "Service unavailable" (trapped).
+13. `SELect ON` is numeric only: key dispatch is a long IF chain (costs
+    tokens). Single-line `IF c THEN stmt` unsupported. Suggest string SELect.
+14. Number-to-string concatenation needs `STR$()`. Suggest implicit.
+15. No clock: "Time" counts `INKEY$(250)` timeouts, approximate. Suggest
+    `TICKS()`/`TIMER`.

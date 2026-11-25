@@ -1,53 +1,68 @@
-REM QL/32 directory music player: sorted directory channel, GCOPY scrolling.
-REM Up/Down/PgUp/PgDn move, Enter plays, Space pause/resume, S stop,
-REM +/- volume, Q or Esc quit. See README.md.
-REM Kept small on purpose: the CYD compiles at most ~512 instructions.
+REM QL/32 directory music player: directory channel, GCOPY scrolling, INKEY$.
+REM Up/Down/PgUp/PgDn/Home/End move, Enter plays or opens a folder,
+REM Backspace goes up, Space pause/resume, S stop, +/- or Left/Right volume,
+REM D drive, Q or Esc quit.
+REM See README.md and docs/notes/dirplayer-workarounds.md.
 DIM nm$(120)
 DIM root$(2)
 root$(0) = "SDC:/music/"
 root$(1) = "SDC:/"
 root$(2) = "FFS:/"
-hlp$ = "ENTER play SPC pause S stop +/- vol Q quit"
-msg$ = hlp$
+hlp$ = "Ent play Spc pause S stop +- vol D drive Q quit"
 now$ = "-"
 vol = 128
 GW = GWIDTH()
 GH = GHEIGHT()
-cols = INT(GW / 6) - 1
-SY = GH - 44
-rows = INT((SY - 19) / 10)
+LY = 14
+SY = GH - 56
+rows = INT((SY - LY) / 10)
+cols = INT((GW - 8) / 6)
 TRAP VOLUME vol
-REPeat find WHILE total < 1 AND r < 3
-  LoadDir r
-  r = r + 1
-END REPeat find
-IF total < 1 THEN
-  PRINT "No songs found in SDC:/music, SDC:/ or FFS:/"
-  STOP
-END IF
-base$ = root$(r - 1)
 PAPER 0
 INK 7
 CLS
-TEXT 2, 2, "QL/32 MUSIC  " + base$
-ShowList
-DrawStatus
-REPeat main WHILE k <> 113 AND k <> 1114113
-  k = INKEY(300)
-  IF k <> 0 THEN
-    HandleKey k
+REPeat find WHILE nsong < 1 AND r < 3
+  path$ = root$(r)
+  LoadDir
+  r = r + 1
+END REPeat find
+msg$ = hlp$
+Redraw
+REPeat main WHILE quit = 0
+  k$ = INKEY$(250)
+  IF k$ = "" THEN
+    IF state = 1 THEN
+      ticks = ticks + 1
+      IF ticks MOD 4 = 0 THEN
+        DrawTime
+      END IF
+    END IF
+  ELSE
+    TRAP HandleKey k$
+    IF ERR <> 0 THEN
+      msg$ = "Error: " + ERR$(ERR)
+      DrawStatus
+    END IF
   END IF
 END REPeat main
 TRAP MUSIC STOP
-PAPER 0
 CLS
-PRINT "Bye"
 
-DEFine PROCedure LoadDir(r)
-  LOCal d, n$, x$
+DEFine PROCedure LoadDir
+  LOCal d, n$, x$, dirf, s
+  total = 0
+  nsong = 0
+  IF RIGHT$(path$, 2) <> ":/" THEN
+    nm$(0) = "../"
+    total = 1
+  END IF
   d = 0
-  TRAP d = OPEN(14, root$(r), "*", 2)
+  TRAP d = OPEN(14, path$, "*", 3)
   IF d = 0 THEN
+    TRAP d = OPEN(14, path$, "*", 1)
+  END IF
+  IF d = 0 THEN
+    msg$ = "Cannot open " + path$ + ": " + ERR$(ERR)
     RETurn
   END IF
   REPeat scan WHILE EOF(d) = 0 AND total < 120
@@ -55,14 +70,56 @@ DEFine PROCedure LoadDir(r)
     IF ERR <> 0 THEN
       EXIT scan
     END IF
-    x$ = UPPER$(RIGHT$(n$, 4))
-    IF LEFT$(n$, 1) <> "." AND (x$ = ".VTX" OR x$ = ".PT3" OR x$ = ".SQT" OR x$ = ".WAV" OR RIGHT$(x$, 3) = ".YM") THEN
-      nm$(total) = n$
-      total = total + 1
+    dirf = DIRINFO(d, 1)
+    IF LEFT$(n$, 1) <> "." THEN
+      IF dirf <> 0 THEN
+        nm$(total) = n$ + "/"
+        total = total + 1
+      ELSE
+        x$ = UPPER$(RIGHT$(n$, 4))
+        s = (x$ = ".VTX") + (x$ = ".PT3") + (x$ = ".SQT") + (x$ = ".WAV") + (RIGHT$(x$, 3) = ".YM")
+        nsong = nsong + s
+        IF s = 1 THEN
+          nm$(total) = n$
+          total = total + 1
+        END IF
+      END IF
     END IF
   END REPeat scan
   CLOSE d
 END DEFine LoadDir
+
+DEFine PROCedure Redraw
+  cur = 0
+  top = 0
+  INK 0
+  RECT 0, 0, GW, LY, 1
+  INK 6
+  TEXT 2, 3, LEFT$("QL/32 " + path$, cols)
+  ShowList
+  DrawStatus
+END DEFine Redraw
+
+DEFine PROCedure Clamp
+  IF cur > total - 1 THEN
+    cur = total - 1
+  END IF
+  IF cur < 0 THEN
+    cur = 0
+  END IF
+  IF top > total - rows THEN
+    top = total - rows
+  END IF
+  IF top < 0 THEN
+    top = 0
+  END IF
+  IF cur < top THEN
+    top = cur
+  END IF
+  IF cur >= top + rows THEN
+    top = cur - rows + 1
+  END IF
+END DEFine Clamp
 
 DEFine PROCedure ShowList
   LOCal i
@@ -72,13 +129,23 @@ DEFine PROCedure ShowList
 END DEFine ShowList
 
 DEFine PROCedure DrawRow(s)
-  LOCal i, y, t$
-  y = 16 + s * 10
+  LOCal i, y, t$, n$
+  y = LY + s * 10
   i = top + s
   INK 0
   RECT 0, y, GW, 10, 1
+  IF total = 0 AND s = 0 THEN
+    INK 2
+    TEXT 2, y + 1, "(no songs: D = other drive)"
+    RETurn
+  END IF
   IF i >= total THEN
     RETurn
+  END IF
+  n$ = nm$(i)
+  t$ = " " + n$
+  IF LEN(t$) > cols THEN
+    t$ = LEFT$(t$, cols - 1) + "~"
   END IF
   INK 7
   IF i = cur THEN
@@ -86,9 +153,17 @@ DEFine PROCedure DrawRow(s)
     RECT 0, y, GW, 10, 1
     INK 0
   END IF
-  t$ = LEFT$(nm$(i), cols)
   TEXT 2, y + 1, t$
 END DEFine DrawRow
+
+DEFine PROCedure DrawTime
+  LOCal s
+  s = INT(ticks / 4)
+  INK 0
+  RECT 0, SY + 33, GW, 10, 1
+  INK 7
+  TEXT 2, SY + 35, "Time ~" + STR$(INT(s / 60)) + ":" + RIGHT$("0" + STR$(s MOD 60), 2)
+END DEFine DrawTime
 
 DEFine PROCedure DrawStatus
   LOCal n
@@ -96,68 +171,113 @@ DEFine PROCedure DrawStatus
   RECT 0, SY, GW, GH - SY, 1
   INK 7
   n = INT(vol / 16)
-  TEXT 2, SY + 3, MID$("STOPPED PLAYING PAUSED ", state * 8 + 1, 8) + "Vol " + STR$(vol) + " [" + REPT$("#", n) + REPT$("-", 16 - n) + "]"
-  TEXT 2, SY + 13, STR$(total) + " songs, item " + STR$(cur + 1)
+  TEXT 2, SY + 3, MID$("STOPPED PLAYING PAUSED  ", state * 8 + 1, 8) + "Vol " + STR$(vol) + " [" + REPT$("#", n) + REPT$("-", 16 - n) + "]"
+  TEXT 2, SY + 13, "Songs " + STR$(nsong) + "  Entry " + STR$(cur + 1) + "/" + STR$(total)
   TEXT 2, SY + 23, LEFT$("Now: " + now$, cols)
+  DrawTime
   INK 5
-  TEXT 2, SY + 33, LEFT$(msg$, cols)
+  TEXT 2, SY + 45, LEFT$(msg$, cols)
 END DEFine DrawStatus
 
 DEFine PROCedure MoveTo(n)
-  LOCal old, d
+  LOCal old, d, s
   old = cur
   cur = n
-  IF cur > total - 1 THEN
-    cur = total - 1
-  END IF
-  IF cur < 0 THEN
-    cur = 0
-  END IF
-  msg$ = hlp$
-  DrawRow old - top
-  d = 0
-  IF cur = top + rows THEN
-    d = 1
-  END IF
-  IF cur = top - 1 THEN
-    d = -1
-  END IF
-  IF d <> 0 THEN
-    GCOPY 0, 16 + (d + 1) * 5, GW, rows * 10 - 10, 0, 16 + (1 - d) * 5, 0, 1
-    top = top + d
+  d = top
+  Clamp
+  IF top = d THEN
+    DrawRow old - top
     DrawRow cur - top
   ELSE
-    IF cur < top OR cur >= top + rows THEN
-      top = cur - INT(rows / 2)
-      IF top > total - rows THEN
-        top = total - rows
-      END IF
-      IF top < 0 THEN
-        top = 0
-      END IF
-      ShowList
-    ELSE
+    d = top - d
+    IF d = 1 OR d = -1 THEN
+      DrawRow old - top + d
+      FOR s = 1 TO 2
+        GCOPY 0, LY + (d + 1) * 5 / 2, GW, rows * 10 - 5, 0, LY + (1 - d) * 5 / 2, 0, 1
+      END FOR s
       DrawRow cur - top
+      ELSE
+      ShowList
     END IF
   END IF
   DrawStatus
 END DEFine MoveTo
 
-DEFine PROCedure HandleKey(k)
-  IF k = 1114124 OR k = 1114125 THEN
-    MoveTo cur + (k - 1114124) * 2 - 1
+DEFine PROCedure Enter
+  LOCal n$
+  IF total = 0 THEN
+    RETurn
   END IF
-  IF k = 43 OR k = 45 THEN
-    SetVolume vol + (44 - k) * 16
+  n$ = nm$(cur)
+  IF n$ = "../" THEN
+    GoUp
+  ELSE
+    IF RIGHT$(n$, 1) = "/" THEN
+      path$ = path$ + n$
+      LoadDir
+      Redraw
+    ELSE
+      PlayCur
+    END IF
   END IF
-  IF k = 1114112 THEN
-    PlayCur
+END DEFine Enter
+
+DEFine PROCedure GoUp
+  LOCal i, p$
+  IF RIGHT$(path$, 2) = ":/" THEN
+    RETurn
   END IF
-  IF k = 32 THEN
+  p$ = LEFT$(path$, LEN(path$) - 1)
+  i = LEN(p$)
+  REPeat f WHILE i > 0 AND MID$(p$, i, 1) <> "/"
+    i = i - 1
+  END REPeat f
+  path$ = LEFT$(p$, i)
+  LoadDir
+  Redraw
+END DEFine GoUp
+
+DEFine PROCedure HandleKey(k$)
+  LOCal u$
+  u$ = UPPER$(k$)
+  msg$ = hlp$
+  IF u$ = "UP" THEN
+    MoveTo cur - 1
+  END IF
+  IF u$ = "DOWN" THEN
+    MoveTo cur + 1
+  END IF
+  IF u$ = "PGUP" THEN
+    MoveTo cur - rows + 1
+  END IF
+  IF u$ = "PGDN" THEN
+    MoveTo cur + rows - 1
+  END IF
+  IF u$ = "ENTER" THEN
+    Enter
+  END IF
+  IF u$ = "BACKSPACE" THEN
+    GoUp
+  END IF
+  IF u$ = "+" OR u$ = "RIGHT" THEN
+    SetVolume vol + 16
+  END IF
+  IF u$ = "-" OR u$ = "LEFT" THEN
+    SetVolume vol - 16
+  END IF
+  IF u$ = " " THEN
     TogglePause
   END IF
-  IF k = 115 THEN
+  IF u$ = "S" THEN
     StopPlay
+  END IF
+  IF u$ = "D" THEN
+    path$ = root$(1 + (LEFT$(path$, 3) = "SDC"))
+    LoadDir
+    Redraw
+  END IF
+  IF u$ = "Q" THEN
+    quit = 1
   END IF
 END DEFine HandleKey
 
@@ -177,8 +297,11 @@ DEFine PROCedure PlayCur
   LOCal p$
   TRAP MUSIC STOP
   state = 0
+  ticks = 0
   now$ = nm$(cur)
-  p$ = base$ + now$
+  p$ = path$ + now$
+  msg$ = "Loading " + now$ + " ..."
+  DrawStatus
   IF UPPER$(RIGHT$(p$, 4)) = ".WAV" THEN
     TRAP MUSIC WAV p$
   ELSE
