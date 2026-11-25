@@ -3520,7 +3520,7 @@ detail::InstructionSequence detail::compileSource(const std::string& source,
     if (memory) {
         // The token list is one contiguous block; bytecode and tables follow.
         const std::uint64_t tokenBytes = std::uint64_t{tokenCount} * sizeof(Token);
-        const std::uint64_t estimate = tokenBytes + std::uint64_t{tokenCount} * 28;
+        const std::uint64_t estimate = tokenBytes + std::uint64_t{tokenCount} * 56;
         if (const auto failure = memory->admissionFailure(
                 "program of " + std::to_string(tokenCount) + " tokens", estimate, tokenBytes))
             throw std::runtime_error(*failure + "; shorten the program");
