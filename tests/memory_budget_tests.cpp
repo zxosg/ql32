@@ -74,12 +74,17 @@ Measurement measure(const std::string& source) {
     return result;
 }
 
-void check(const char* name, int lines, std::size_t largestBound) {
+void check(const char* name, int lines, std::size_t largestBound, std::size_t peakBound) {
     const std::string source = program(lines);
     const Measurement m = measure(source);
     std::printf("%s: %zu source B, %zu instr, peak %zu B, retained %zu B, "
                 "largest single allocation %zu B\n",
                 name, source.size(), m.instructions, m.peak, m.retained, m.largest);
+    if (m.peak > peakBound) {
+        std::cerr << "memory budget test failed: " << name << " peak " << m.peak
+                  << " exceeds " << peakBound << '\n';
+        std::exit(1);
+    }
     if (m.largest > largestBound) {
         std::cerr << "memory budget test failed: " << name << " largest allocation "
                   << m.largest << " exceeds " << largestBound << '\n';
@@ -91,10 +96,10 @@ void check(const char* name, int lines, std::size_t largestBound) {
 
 int main() {
 #if INTPTR_MAX == INT64_MAX && !defined(__SANITIZE_ADDRESS__)
-    // Exact token reservation: lines * 14 tokens * 64 B (LP64) is about 76 KB and
-    // 179 KB. Doubling growth would have allocated 131 KB and 262 KB.
-    check("~1190 tokens (85 lines)", 85, 100000);
-    check("~2800 tokens (200 lines)", 200, 200000);
+    // Compact 24 B tokens (16 B on the 32-bit targets), reserved exactly: about
+    // 28 KB / 67 KB for the token block. Before: 119 KB / 262 KB; peak 179 KB / 393 KB.
+    check("~1190 tokens (85 lines)", 85, 40000, 100000);
+    check("~2800 tokens (200 lines)", 200, 90000, 220000);
 #endif
     return 0;
 }

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <istream>
 #include <iterator>
 #include <ostream>
@@ -57,7 +58,7 @@ using detail::Op;
 using detail::PrintSeparator;
 using detail::SelectItemSpec;
 
-enum class Kind {
+enum class Kind : std::uint8_t {
     End, Newline, Number, String, Identifier, BuiltinCommand, BuiltinFunction,
     Print, At, Data, Read, Restore, Stop, If, Then, Else, EndKeyword, Go, Goto, Dim, Const, Option,
     Select, On, Remainder, Remark,
@@ -69,14 +70,106 @@ enum class Kind {
     LeftParen, RightParen, Colon
 };
 
+// Non-owning text. Token spellings live in the source, in static tables or in
+// the token arena, so a token needs no heap block of its own.
+class Text {
+public:
+    Text() = default;
+    Text(const char* text) : data_(text), size_(static_cast<std::uint32_t>(std::strlen(text))) {}
+    Text(const char* text, std::size_t size)
+        : data_(text), size_(static_cast<std::uint32_t>(size)) {}
+    Text(std::string_view text) : data_(text.data()), size_(static_cast<std::uint32_t>(text.size())) {}
+    operator std::string_view() const { return {data_, size_}; }
+    operator std::string() const { return std::string(data_, size_); }
+    const char* data() const { return data_; }
+    std::size_t size() const { return size_; }
+    bool empty() const { return size_ == 0; }
+    char back() const { return data_[size_ - 1]; }
+    char front() const { return data_[0]; }
+    const char* begin() const { return data_; }
+    const char* end() const { return data_ + size_; }
+    friend bool operator==(const Text& a, const Text& b) {
+        return std::string_view(a) == std::string_view(b);
+    }
+    friend bool operator!=(const Text& a, const Text& b) { return !(a == b); }
+    friend bool operator==(const Text& a, std::string_view b) { return std::string_view(a) == b; }
+    friend bool operator!=(const Text& a, std::string_view b) { return !(a == b); }
+    friend bool operator==(const Text& a, const char* b) { return std::string_view(a) == b; }
+    friend bool operator!=(const Text& a, const char* b) { return !(a == b); }
+    friend bool operator==(const Text& a, const std::string& b) { return std::string_view(a) == b; }
+    friend bool operator!=(const Text& a, const std::string& b) { return !(a == b); }
+    friend bool operator==(const std::string& a, const Text& b) { return b == a; }
+    friend bool operator!=(const std::string& a, const Text& b) { return !(b == a); }
+    friend std::string operator+(const std::string& a, const Text& b) {
+        return a + std::string(b);
+    }
+    friend std::string operator+(const char* a, const Text& b) { return std::string(a) + std::string(b); }
+    friend std::string operator+(const Text& a, const char* b) { return std::string(a) + b; }
+    friend std::string operator+(const Text& a, const std::string& b) { return std::string(a) + b; }
+
+private:
+    const char* data_ = "";
+    std::uint32_t size_ = 0;
+};
+
+// 16 bytes on the 32-bit targets. A Number token keeps its double in the arena
+// and points `text` at the 8 raw bytes.
 struct Token {
-    Kind kind;
-    std::string text;
-    double number = 0;
+    Text text;
+    Kind kind = Kind::End;
+    std::uint16_t column16 = 1;
     int line = 1;
-    int column = 1;
-    std::size_t sourceStart = 0;
-    std::size_t sourceLength = 0;
+
+    Token() = default;
+    Token(Kind kindValue, Text textValue, int lineValue, int columnValue)
+        : text(textValue), kind(kindValue),
+          column16(static_cast<std::uint16_t>(std::min(columnValue, 65535))),
+          line(lineValue) {}
+    int column() const { return column16; }
+    double number() const {
+        double value = 0;
+        if (text.size() == sizeof value) std::memcpy(&value, text.data(), sizeof value);
+        return value;
+    }
+};
+
+// Append-only storage in small fixed blocks: no large contiguous allocation and
+// stable addresses, so tokens can point into it.
+class TokenArena {
+public:
+    const char* store(const void* bytes, std::size_t size) {
+        if (size == 0) return "";
+        if (size > kBlock / 4) {
+            blocks_.push_back(std::make_unique<char[]>(size));
+            std::memcpy(blocks_.back().get(), bytes, size);
+            return blocks_.back().get();
+        }
+        if (blocks_.empty() || used_ + size > kBlock || !currentSmall_) {
+            blocks_.push_back(std::make_unique<char[]>(kBlock));
+            used_ = 0;
+            currentSmall_ = true;
+        }
+        char* target = blocks_.back().get() + used_;
+        std::memcpy(target, bytes, size);
+        used_ += size;
+        return target;
+    }
+
+private:
+    static constexpr std::size_t kBlock = 1024;
+    std::vector<std::unique_ptr<char[]>> blocks_;
+    std::size_t used_ = 0;
+    bool currentSmall_ = false;
+};
+
+struct TokenSpan {
+    std::uint32_t start = 0;
+    std::uint32_t length = 0;
+};
+
+struct TokenList {
+    std::vector<Token> items;
+    std::unique_ptr<TokenArena> arena;
 };
 
 struct Keyword {
@@ -417,17 +510,24 @@ public:
             void push_back(const Token&) { ++count; }
             void push_back(Token&&) { ++count; }
         } counter;
-        Lexer(source_).scanInto(counter);
+        Lexer counting(source_);
+        counting.scanInto(counter);
         return counter.count;
     }
 
-    std::vector<Token> scan() { return scan(countTokens()); }
+    TokenList scan(std::vector<TokenSpan>* spans = nullptr) {
+        return scan(countTokens(), spans);
+    }
 
-    std::vector<Token> scan(std::size_t tokenCount) {
-        std::vector<Token> tokens;
-        tokens.reserve(tokenCount);
-        scanInto(tokens);
-        return tokens;
+    TokenList scan(std::size_t tokenCount, std::vector<TokenSpan>* spans = nullptr) {
+        TokenList list;
+        list.items.reserve(tokenCount);
+        list.arena = std::make_unique<TokenArena>();
+        arena_ = list.arena.get();
+        spans_ = spans;
+        if (spans_) spans_->reserve(tokenCount);
+        scanInto(list.items);
+        return list;
     }
 
 private:
@@ -438,7 +538,7 @@ private:
             if (c == ' ' || c == '\t' || c == '\r') {
                 advance();
             } else if (c == '\n') {
-                tokens.push_back(single(Kind::Newline));
+                emit(tokens, single(Kind::Newline));
                 advance();
                 ++line_;
                 column_ = 1;
@@ -447,53 +547,75 @@ private:
                 skipComment();
             } else if (std::isdigit(static_cast<unsigned char>(c)) ||
                        (c == '.' && std::isdigit(static_cast<unsigned char>(peek(1))))) {
-                tokens.push_back(number());
+                emit(tokens, number());
             } else if (c == '&' && (peek(1) == 'H' || peek(1) == 'h' ||
                                     peek(1) == 'B' || peek(1) == 'b')) {
-                tokens.push_back(radixNumber());
+                emit(tokens, radixNumber());
             } else if (c == '"') {
-                tokens.push_back(string());
+                emit(tokens, string());
             } else if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
-                tokens.push_back(identifier());
+                emit(tokens, identifier());
             } else {
                 switch (c) {
-                case '+': tokens.push_back(single(Kind::Plus)); break;
-                case '-': tokens.push_back(single(Kind::Minus)); break;
-                case '*': tokens.push_back(single(Kind::Star)); break;
-                case '/': tokens.push_back(single(Kind::Slash)); break;
-                case '^': tokens.push_back(single(Kind::Power)); break;
-                case '=': tokens.push_back(single(Kind::Equal)); break;
+                case '+': emit(tokens, single(Kind::Plus)); break;
+                case '-': emit(tokens, single(Kind::Minus)); break;
+                case '*': emit(tokens, single(Kind::Star)); break;
+                case '/': emit(tokens, single(Kind::Slash)); break;
+                case '^': emit(tokens, single(Kind::Power)); break;
+                case '=': emit(tokens, single(Kind::Equal)); break;
                 case '<':
-                    if (peek(1) == '=') { tokens.push_back({Kind::LessEqual, "<=", 0, line_, column_}); advance(); }
-                    else if (peek(1) == '>') { tokens.push_back({Kind::NotEqual, "<>", 0, line_, column_}); advance(); }
-                    else tokens.push_back(single(Kind::Less));
+                    if (peek(1) == '=') { emit(tokens, Token(Kind::LessEqual, "<=", line_, column_)); advance(); }
+                    else if (peek(1) == '>') { emit(tokens, Token(Kind::NotEqual, "<>", line_, column_)); advance(); }
+                    else emit(tokens, single(Kind::Less));
                     break;
                 case '>':
-                    if (peek(1) == '=') { tokens.push_back({Kind::GreaterEqual, ">=", 0, line_, column_}); advance(); }
-                    else tokens.push_back(single(Kind::Greater));
+                    if (peek(1) == '=') { emit(tokens, Token(Kind::GreaterEqual, ">=", line_, column_)); advance(); }
+                    else emit(tokens, single(Kind::Greater));
                     break;
-                case ';': tokens.push_back(single(Kind::Semicolon)); break;
-                case ',': tokens.push_back(single(Kind::Comma)); break;
-                case '!': tokens.push_back(single(Kind::Exclamation)); break;
-                case '\\': tokens.push_back(single(Kind::Backslash)); break;
-                case '#': tokens.push_back(single(Kind::Hash)); break;
-                case '(': tokens.push_back(single(Kind::LeftParen)); break;
-                case ')': tokens.push_back(single(Kind::RightParen)); break;
-                case ':': tokens.push_back(single(Kind::Colon)); break;
+                case ';': emit(tokens, single(Kind::Semicolon)); break;
+                case ',': emit(tokens, single(Kind::Comma)); break;
+                case '!': emit(tokens, single(Kind::Exclamation)); break;
+                case '\\': emit(tokens, single(Kind::Backslash)); break;
+                case '#': emit(tokens, single(Kind::Hash)); break;
+                case '(': emit(tokens, single(Kind::LeftParen)); break;
+                case ')': emit(tokens, single(Kind::RightParen)); break;
+                case ':': emit(tokens, single(Kind::Colon)); break;
                 default: fail("unexpected character");
                 }
                 advance();
             }
         }
-        tokens.push_back({Kind::End, "", 0, line_, column_});
+        emit(tokens, Token(Kind::End, "", line_, column_));
     }
 
     std::string_view source_;
+    TokenArena* arena_ = nullptr;
+    std::vector<TokenSpan>* spans_ = nullptr;
+    std::size_t tokenStart_ = 0;
+    std::size_t tokenLength_ = 0;
     std::size_t offset_ = 0;
     std::size_t lineStartOffset_ = 0;
     int line_ = 1;
     int column_ = 1;
 
+    template <typename Sink>
+    void emit(Sink& tokens, Token token) {
+        tokens.push_back(token);
+        if (spans_) spans_->push_back({static_cast<std::uint32_t>(tokenStart_),
+                                       static_cast<std::uint32_t>(tokenLength_)});
+        tokenStart_ = tokenLength_ = 0;
+    }
+    Text keep(std::string_view text) {
+        return arena_ ? Text(arena_->store(text.data(), text.size()), text.size()) : Text();
+    }
+    Text keepNumber(double value) {
+        return arena_ ? Text(arena_->store(&value, sizeof value), sizeof value) : Text();
+    }
+    Token numberToken(double value, int column, std::size_t start) {
+        tokenStart_ = start;
+        tokenLength_ = offset_ - start;
+        return Token(Kind::Number, keepNumber(value), line_, column);
+    }
     bool atEnd() const { return offset_ >= source_.size(); }
     char peek(std::size_t ahead = 0) const {
         return offset_ + ahead < source_.size() ? source_[offset_ + ahead] : '\0';
@@ -520,7 +642,9 @@ private:
             "line " + std::to_string(reportedLine()) + ", column " +
             std::to_string(column_) + ": " + message);
     }
-    Token single(Kind kind) const { return {kind, std::string(1, peek()), 0, line_, column_}; }
+    Token single(Kind kind) const {
+        return Token(kind, Text(source_.data() + offset_, 1), line_, column_);
+    }
     void skipComment() {
         while (!atEnd() && peek() != '\n') advance();
     }
@@ -548,7 +672,7 @@ private:
         if (errno == ERANGE || parsedEnd != text.c_str() + text.size() ||
             !std::isfinite(value))
             fail("invalid number");
-        return {Kind::Number, text, value, line_, column, start, offset_ - start};
+        return numberToken(value, column, start);
     }
     Token radixNumber() {
         const auto start = offset_;
@@ -576,8 +700,7 @@ private:
         if (digits == 0) fail("radix prefix must be followed by digits");
         if (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_')
             fail("invalid digit in radix integer literal");
-        return {Kind::Number, std::string{}, static_cast<double>(value), line_, column,
-                start, offset_ - start};
+        return numberToken(static_cast<double>(value), column, start);
     }
     Token string() {
         const int column = column_;
@@ -590,7 +713,7 @@ private:
                     value.push_back('"');
                     advance();
                 } else {
-                    return {Kind::String, value, 0, line_, column};
+                    return Token(Kind::String, keep(value), line_, column);
                 }
             } else if (peek() == '\n') {
                 fail("newline in string literal");
@@ -606,20 +729,22 @@ private:
         const int column = column_;
         while (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_') advance();
         if (peek() == '%' || peek() == '$') advance();
-        std::string text(source_.substr(start, offset_ - start));
-        std::string upper = text;
+        const std::size_t textLength = offset_ - start;
+        std::string upper(source_.substr(start, textLength));
+        tokenStart_ = start;
+        tokenLength_ = textLength;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         if (upper == "MODE" && peek() == '(')
-            return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
+            return Token(Kind::BuiltinFunction, keep(upper), line_, column);
         if (upper == "TASK" || upper == "ERR" || upper == "ERR$" || upper == "ERRX$" ||
             (upper == "LOC" && peek() == '('))
-            return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
+            return Token(Kind::BuiltinFunction, keep(upper), line_, column);
         if (upper == "OFF" || upper == "AUTO")
-            return {Kind::Identifier, upper, 0, line_, column, start, text.size()};
+            return Token(Kind::Identifier, keep(upper), line_, column);
         if (isBuiltinCommandName(upper))
-            return {Kind::BuiltinCommand, upper, 0, line_, column, start, text.size()};
+            return Token(Kind::BuiltinCommand, keep(upper), line_, column);
         if (isBuiltinFunctionName(upper))
-            return {Kind::BuiltinFunction, upper, 0, line_, column, start, text.size()};
+            return Token(Kind::BuiltinFunction, keep(upper), line_, column);
         const Keyword* matched = nullptr;
         for (const Keyword& keyword : keywords) {
             std::size_t inputIndex = 0;
@@ -643,28 +768,32 @@ private:
         }
         if (matched != nullptr && matched->spelling == "REMARK") {
             skipComment();
-            return {Kind::Newline, "", 0, line_, column};
+            tokenStart_ = tokenLength_ = 0;
+            return Token(Kind::Newline, "", line_, column);
         }
         if (matched != nullptr)
-            return {matched->kind, std::string(matched->canonical), 0, line_, column,
-                    start, text.size()};
-        return {Kind::Identifier, upper, 0, line_, column, start, text.size()};
+            return Token(matched->kind, Text(matched->canonical), line_, column);
+        return Token(Kind::Identifier, keep(upper), line_, column);
     }
 };
 
 std::string canonicalizeKeywords(const std::string& source) {
-    const std::vector<Token> tokens = Lexer(source).scan();
+    std::vector<TokenSpan> spans;
+    const TokenList list = Lexer(source).scan(&spans);
     std::string result;
     std::size_t copiedThrough = 0;
-    for (const Token& token : tokens) {
-        if (token.sourceLength == 0 || token.sourceStart < copiedThrough) continue;
+    for (std::size_t index = 0; index < list.items.size(); ++index) {
+        const Token& token = list.items[index];
+        const std::size_t sourceStart = spans[index].start;
+        const std::size_t sourceLength = spans[index].length;
+        if (sourceLength == 0 || sourceStart < copiedThrough) continue;
         if (token.kind == Kind::BuiltinCommand ||
             (token.kind == Kind::BuiltinFunction &&
              (token.text == "TASK" || token.text == "ERR" ||
               token.text == "ERR$" || token.text == "ERRX$"))) {
-            result.append(source, copiedThrough, token.sourceStart - copiedThrough);
+            result.append(source, copiedThrough, sourceStart - copiedThrough);
             result.append(token.text);
-            copiedThrough = token.sourceStart + token.sourceLength;
+            copiedThrough = sourceStart + sourceLength;
             continue;
         }
         const auto keyword = std::find_if(std::begin(keywords), std::end(keywords),
@@ -672,9 +801,9 @@ std::string canonicalizeKeywords(const std::string& source) {
                 return candidate.kind == token.kind && candidate.kind != Kind::Remark;
             });
         if (keyword == std::end(keywords)) continue;
-        result.append(source, copiedThrough, token.sourceStart - copiedThrough);
+        result.append(source, copiedThrough, sourceStart - copiedThrough);
         result.append(keyword->canonical);
-        copiedThrough = token.sourceStart + token.sourceLength;
+        copiedThrough = sourceStart + sourceLength;
     }
     result.append(source, copiedThrough, std::string::npos);
     return result;
@@ -811,9 +940,9 @@ struct SourceTarget {
 
 class Compiler {
 public:
-    explicit Compiler(std::vector<Token> tokens,
+    explicit Compiler(TokenList list,
                       const InstructionSequence* enclosing = nullptr)
-        : tokens_(std::move(tokens)) {
+        : tokens_(std::move(list.items)), arena_(std::move(list.arena)) {
         if (enclosing) {
             enclosingFunctions_ = enclosing->functions;
             code_.textPool = enclosing->textPool;
@@ -888,6 +1017,7 @@ public:
 
 private:
     std::vector<Token> tokens_;
+    std::unique_ptr<TokenArena> arena_;
     InstructionSequence code_;
     std::unordered_map<std::string, DefinitionInfo> definitions_;
     std::unordered_map<std::string, std::size_t> arrays_;
@@ -923,10 +1053,10 @@ private:
         return currentDefinitionName_ + "\x1f" + name;
     }
     SourceTarget currentSourceTarget(const Token& token) const {
-        return {code_.size(), controlScopes_, currentDefinitionName_, token.line, token.column};
+        return {code_.size(), controlScopes_, currentDefinitionName_, token.line, token.column()};
     }
     void registerLineTarget(const Token& token) {
-        const double number = token.number;
+        const double number = token.number();
         if (!std::isfinite(number) || std::trunc(number) != number || number < 1 || number > 32767)
             error(token, "program line number must be in 1..32767");
         if (!lineTargets_.emplace(static_cast<int>(number), currentSourceTarget(token)).second)
@@ -1058,7 +1188,7 @@ private:
     [[noreturn]] void error(const Token& token, const char* message) const {
         throw runtime::Error(runtime::ErrorCode::Syntax,
             "line " + std::to_string(currentBasicLine_ != 0 ? currentBasicLine_ : token.line) + ", column " +
-            std::to_string(token.column) + ": " + message);
+            std::to_string(token.column()) + ": " + message);
     }
     [[noreturn]] void error(const Instruction& instruction, const char* message) const {
         throw runtime::Error(runtime::ErrorCode::Syntax,
@@ -1067,7 +1197,7 @@ private:
     }
     void emit(Op op, const Token& token, Value value = 0.0, std::string name = {},
               PrintSeparator separator = PrintSeparator::None) {
-        Instruction instruction{op, 0.0, std::move(name), token.line, token.column, separator};
+        Instruction instruction{op, 0.0, std::move(name), token.line, token.column(), separator};
         if (const auto* text = std::get_if<std::string>(&value)) {
             instruction.name = *text;
             instruction.textLiteral = true;
@@ -1395,7 +1525,7 @@ private:
     void emitForNext(const Token& keyword, const Token& nameToken, bool explicitNext = false) {
         LoopContext& loop = findLoop(nameToken);
         if (!loop.isFor) {
-            Instruction instruction{Op::LoopNext, 0.0, nameToken.text, keyword.line, keyword.column};
+            Instruction instruction{Op::LoopNext, 0.0, std::string(nameToken.text), keyword.line, keyword.column()};
             instruction.target = loop.body;
             instruction.setLoopId(loop.id);
             instruction.rank = loop.selectDepth;
@@ -1403,7 +1533,7 @@ private:
             loop.nextInstructions.push_back(code_.size() - 1);
             return;
         }
-        Instruction instruction{Op::ForNext, 0.0, nameToken.text, keyword.line, keyword.column};
+        Instruction instruction{Op::ForNext, 0.0, std::string(nameToken.text), keyword.line, keyword.column()};
         instruction.target = loop.body;
         instruction.setLoopId(loop.id);
         instruction.rank = loop.selectDepth;
@@ -1413,7 +1543,7 @@ private:
     }
     void emitExit(const Token& keyword, const Token& nameToken) {
         LoopContext& loop = findLoop(nameToken);
-        Instruction instruction{Op::ExitLoop, 0.0, nameToken.text, keyword.line, keyword.column};
+        Instruction instruction{Op::ExitLoop, 0.0, std::string(nameToken.text), keyword.line, keyword.column()};
         instruction.setLoopId(loop.id);
         instruction.rank = loop.selectDepth;
         code_.push_back(std::move(instruction));
@@ -1468,7 +1598,7 @@ private:
     void emitCall(const Token& name, std::size_t arguments, bool expectsValue,
                   std::vector<ArrayArgumentCandidate> arrayCandidates = {},
                   bool channelArgument = false) {
-        Instruction instruction{Op::Call, 0.0, name.text, name.line, name.column};
+        Instruction instruction{Op::Call, 0.0, std::string(name.text), name.line, name.column()};
         instruction.setArgCount(arguments + static_cast<std::size_t>(channelArgument));
         instruction.channelArgument = channelArgument;
         instruction.expectsValue = expectsValue;
@@ -1486,7 +1616,7 @@ private:
         const std::size_t rank = callArguments();
         if (rank == 0) error(name, "array needs at least one dimension");
         arrays_[name.text] = rank;
-        Instruction instruction{Op::DimArray, 0.0, name.text, keyword.line, keyword.column};
+        Instruction instruction{Op::DimArray, 0.0, std::string(name.text), keyword.line, keyword.column()};
         instruction.rank = rank;
         code_.push_back(std::move(instruction));
     }
@@ -1515,7 +1645,7 @@ private:
         const Token keyword = advance();
         if (!match(Kind::On)) error(peek(), "expected ON after SELECT");
         expression();
-        Instruction begin{Op::SelectBegin, 0.0, {}, keyword.line, keyword.column};
+        Instruction begin{Op::SelectBegin, 0.0, {}, keyword.line, keyword.column()};
         code_.push_back(std::move(begin));
         controlScopes_.push_back(nextControlScope_++);
         ++selectDepth_;
@@ -1537,7 +1667,7 @@ private:
             std::size_t falseJump = code_.size();
             if (match(Kind::Remainder)) {
                 hasRemainder = true;
-                Instruction remainder{Op::SelectRemainder, 0.0, {}, armToken.line, armToken.column};
+                Instruction remainder{Op::SelectRemainder, 0.0, {}, armToken.line, armToken.column()};
                 code_.push_back(std::move(remainder));
                 falseJump = code_.size();
                 emit(Op::JumpIfFalse, armToken);
@@ -1554,14 +1684,14 @@ private:
                     items.push_back(item);
                     if (!match(Kind::Comma)) break;
                 }
-                Instruction compare{Op::SelectMatch, 0.0, {}, armToken.line, armToken.column};
+                Instruction compare{Op::SelectMatch, 0.0, {}, armToken.line, armToken.column()};
                 compare.mutableExtra().selectItems = std::move(items);
                 code_.push_back(std::move(compare));
                 falseJump = code_.size();
                 emit(Op::JumpIfFalse, armToken);
             }
             selectArm();
-            Instruction skip{Op::Jump, 0.0, {}, armToken.line, armToken.column};
+            Instruction skip{Op::Jump, 0.0, {}, armToken.line, armToken.column()};
             code_.push_back(std::move(skip));
             endJumps.push_back(code_.size() - 1);
             if (falseJump != code_.size() - 1 && !hasRemainder)
@@ -1572,7 +1702,7 @@ private:
         if (!match(Kind::EndKeyword)) error(peek(), "expected END SELECT");
         if (!match(Kind::Select)) error(peek(), "expected SELECT after END");
         const std::size_t selectEnd = code_.size();
-        Instruction finish{Op::SelectEnd, 0.0, {}, keyword.line, keyword.column};
+        Instruction finish{Op::SelectEnd, 0.0, {}, keyword.line, keyword.column()};
         code_.push_back(std::move(finish));
         if (remainderFalseJump != std::numeric_limits<std::size_t>::max())
             code_[remainderFalseJump].target = selectEnd;
@@ -1631,7 +1761,7 @@ private:
             int localBasicLine = 0;
             if (check(Kind::Number) && isLineNumber()) {
                 const Token numberedLine = advance();
-                localBasicLine = static_cast<int>(numberedLine.number);
+                localBasicLine = static_cast<int>(numberedLine.number());
                 while (match(Kind::Newline)) {}
                 if (!check(Kind::Local)) {
                     current_ = numberedLineStart;
@@ -1670,7 +1800,7 @@ private:
             if (endName.text != name.text) error(endName, "END DEFINE name does not match definition");
         }
         Instruction finish{isFunction ? Op::FunctionEnd : Op::Return,
-                           0.0, name.text, defineKeyword.line, defineKeyword.column};
+                           0.0, std::string(name.text), defineKeyword.line, defineKeyword.column()};
         code_.push_back(std::move(finish));
         code_[skipIndex].target = code_.size();
         definitions_[name.text].locals = std::move(locals);
@@ -1704,7 +1834,7 @@ private:
         }
 
         const std::size_t initIndex = code_.size();
-        Instruction init{Op::ForInit, 0.0, variable.text, keyword.line, keyword.column};
+        Instruction init{Op::ForInit, 0.0, std::string(variable.text), keyword.line, keyword.column()};
         init.setLoopId(nextLoopId_++);
         init.mutableExtra().forItems = std::move(items);
         code_.push_back(std::move(init));
@@ -1789,7 +1919,7 @@ private:
                 if (!check(Kind::End) && !check(Kind::Newline) && !match(Kind::Colon))
                     error(peek(), "expected ':' or end of line in inline REPeat");
             }
-            Instruction jump{Op::Jump, 0.0, name.text, keyword.line, keyword.column};
+            Instruction jump{Op::Jump, 0.0, std::string(name.text), keyword.line, keyword.column()};
             jump.target = body;
             code_.push_back(std::move(jump));
             const std::size_t exit = code_.size();
@@ -1817,8 +1947,8 @@ private:
             code_[tailTest].statementStart = true;
             code_[tailTest].basicLine = currentBasicLine_;
         }
-        Instruction jump{postTest ? Op::JumpIfFalse : Op::Jump, 0.0, name.text,
-                         testToken.line, testToken.column};
+        Instruction jump{postTest ? Op::JumpIfFalse : Op::Jump, 0.0, std::string(name.text),
+                         testToken.line, testToken.column()};
         jump.basicLine = currentBasicLine_;
         jump.target = preTest ? test : body;
         code_.push_back(std::move(jump));
@@ -1837,17 +1967,17 @@ private:
         const Token keyword = advance();
         if (keyword.kind == Kind::Go && !match(Kind::To))
             error(peek(), "expected TO after GO");
-        Instruction jump{Op::Jump, 0.0, {}, keyword.line, keyword.column};
+        Instruction jump{Op::Jump, 0.0, {}, keyword.line, keyword.column()};
         jump.sourceJump = true;
         jump.mutableExtra().jumpScopes = controlScopes_;
         jump.mutableExtra().ownerDefinition = currentDefinitionName_;
         if (check(Kind::Number)) {
             const Token target = advance();
-            if (!std::isfinite(target.number) || std::trunc(target.number) != target.number ||
-                target.number < 0 || target.number > 32767)
+            if (!std::isfinite(target.number()) || std::trunc(target.number()) != target.number() ||
+                target.number() < 0 || target.number() > 32767)
                 error(target, "GOTO target must be a line number in 0..32767");
             jump.targetIsLineNumber = true;
-            jump.setSourceLineTarget(static_cast<int>(target.number));
+            jump.setSourceLineTarget(static_cast<int>(target.number()));
         } else if (check(Kind::Identifier)) {
             jump.name = advance().text;
         } else {
@@ -1950,7 +2080,7 @@ private:
             Value value = 0.0;
             if (check(Kind::Number)) {
                 const Token literal = advance();
-                value = negative ? -literal.number : literal.number;
+                value = negative ? -literal.number() : literal.number();
             } else if (check(Kind::String) && !negative) {
                 value = advance().text;
             } else {
@@ -1965,11 +2095,11 @@ private:
             if (commandArgumentTerminator())
                 error(keyword, "DATA requires at least one item");
             const std::size_t skipIndex = code_.size();
-            code_.push_back({Op::Jump, 0.0, {}, keyword.line, keyword.column});
+            code_.push_back({Op::Jump, 0.0, {}, keyword.line, keyword.column()});
             do {
                 const std::size_t address = code_.size();
                 expression();
-                Instruction finish{Op::Return, 0.0, {}, keyword.line, keyword.column};
+                Instruction finish{Op::Return, 0.0, {}, keyword.line, keyword.column()};
                 finish.expectsValue = true;
                 code_.push_back(std::move(finish));
                 code_.dataItems.push_back({address, currentBasicLine_});
@@ -2017,8 +2147,8 @@ private:
                         }
                     }
                 }
-                Instruction read{Op::Read, 0.0, target.text,
-                                 keyword.line, keyword.column};
+                Instruction read{Op::Read, 0.0, std::string(target.text),
+                                 keyword.line, keyword.column()};
                 read.rank = rank;
                 read.mutableExtra().ownerDefinition = currentDefinitionName_;
                 code_.push_back(std::move(read));
@@ -2033,15 +2163,15 @@ private:
         }
         if (match(Kind::Restore)) {
             const Token keyword = previous();
-            Instruction restore{Op::Restore, 0.0, {}, keyword.line, keyword.column};
+            Instruction restore{Op::Restore, 0.0, {}, keyword.line, keyword.column()};
             restore.mutableExtra().ownerDefinition = currentDefinitionName_;
             if (check(Kind::Number)) {
                 const Token line = advance();
-                if (!std::isfinite(line.number) || std::trunc(line.number) != line.number ||
-                    line.number < 0 || line.number > 32767)
+                if (!std::isfinite(line.number()) || std::trunc(line.number()) != line.number() ||
+                    line.number() < 0 || line.number() > 32767)
                     error(line, "RESTORE line number must be an integer in 0..32767");
                 restore.targetIsLineNumber = true;
-                restore.setSourceLineTarget(static_cast<int>(line.number));
+                restore.setSourceLineTarget(static_cast<int>(line.number()));
             } else if (check(Kind::Identifier) && current_ + 1 < tokens_.size() &&
                        commandArgumentTerminatorAt(current_ + 1)) {
                 restore.name = advance().text;
@@ -2057,12 +2187,12 @@ private:
             const Token keyword = previous();
             if (!commandArgumentTerminator())
                 error(peek(), "STOP takes no arguments");
-            code_.push_back({Op::Stop, 0.0, {}, keyword.line, keyword.column});
+            code_.push_back({Op::Stop, 0.0, {}, keyword.line, keyword.column()});
             return;
         }
         if (match(Kind::At)) {
             const Token keyword = previous();
-            Instruction instruction{Op::At, 0.0, {}, keyword.line, keyword.column};
+            Instruction instruction{Op::At, 0.0, {}, keyword.line, keyword.column()};
             if (match(Kind::Hash)) {
                 expression();
                 instruction.channelArgument = true;
@@ -2087,7 +2217,7 @@ private:
             if (!inDefinition_ && !lineMode_) error(keyword, "RETURN is only valid inside a definition");
             const bool hasValue = !check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End);
             if (hasValue) expression();
-            Instruction instruction{Op::Return, 0.0, {}, keyword.line, keyword.column};
+            Instruction instruction{Op::Return, 0.0, {}, keyword.line, keyword.column()};
             instruction.expectsValue = hasValue;
             code_.push_back(std::move(instruction));
             return;
@@ -2104,7 +2234,7 @@ private:
             const Token operation = advance();
             const std::string operationName = uppercaseAscii(operation.text);
             Instruction instruction{Op::ChannelSeek, 0.0, operationName,
-                                    marker.line, marker.column};
+                                    marker.line, marker.column()};
             if (operationName == "AT") {
                 expression();
                 code_.push_back(std::move(instruction));
@@ -2208,7 +2338,7 @@ private:
                 else if (action == "RESUME") op = Op::MusicResume;
                 else if (action == "STATUS") op = Op::MusicStatus;
                 else error(subcommand, "MUSIC expects PLAY, WAV, TEST, STOP, PAUSE, RESUME, or STATUS");
-                Instruction music{op, 0.0, {}, name.line, name.column};
+                Instruction music{op, 0.0, {}, name.line, name.column()};
                 if (op == Op::MusicPlay || op == Op::MusicWav) {
                     if (commandArgumentTerminator()) error(name, "MUSIC PLAY and MUSIC WAV require a file path");
                     expression();
@@ -2226,7 +2356,7 @@ private:
                 expression();
                 if (!match(Kind::Comma)) error(peek(), "expected ',' and pitch after BEEP duration");
                 expression();
-                Instruction beep{Op::Beep, 0.0, {}, name.line, name.column};
+                Instruction beep{Op::Beep, 0.0, {}, name.line, name.column()};
                 beep.setArgCount(2);
                 if (match(Kind::Comma)) {
                     expression();
@@ -2243,7 +2373,7 @@ private:
                 expression();
                 if (!commandArgumentTerminator())
                     error(peek(), "expected end of statement after VOLUME value");
-                code_.push_back({Op::Volume, 0.0, {}, name.line, name.column});
+                code_.push_back({Op::Volume, 0.0, {}, name.line, name.column()});
                 return;
             }
             if (name.text == "PAUSE") {
@@ -2252,11 +2382,11 @@ private:
                 expression();
                 if (!commandArgumentTerminator())
                     error(peek(), "expected end of statement after PAUSE delay");
-                code_.push_back({Op::Pause, 0.0, {}, name.line, name.column});
+                code_.push_back({Op::Pause, 0.0, {}, name.line, name.column()});
                 return;
             }
             if (name.text == "INPUT") {
-                Instruction input{Op::Input, 0.0, {}, name.line, name.column};
+                Instruction input{Op::Input, 0.0, {}, name.line, name.column()};
                 bool hasPromptChannel = false;
                 const auto followedByInputSeparator = [&](std::size_t position,
                                                            bool channelAfterComma) {
@@ -2478,7 +2608,7 @@ private:
                 error(name, "incorrect array rank");
             if (!match(Kind::Equal)) error(peek(), "expected '=' after array index");
             expression();
-            Instruction instruction{Op::ArraySet, 0.0, name.text, name.line, name.column};
+            Instruction instruction{Op::ArraySet, 0.0, std::string(name.text), name.line, name.column()};
             instruction.rank = rank;
             instruction.mutableExtra().ownerDefinition = currentDefinitionName_;
             code_.push_back(std::move(instruction));
@@ -2652,7 +2782,7 @@ private:
         stringSliceSuffix(open);
     }
     void stringSliceSuffix(const Token& open) {
-        Instruction slice{Op::StringSlice, 0.0, {}, open.line, open.column};
+        Instruction slice{Op::StringSlice, 0.0, {}, open.line, open.column()};
         if (!check(Kind::To) && !check(Kind::RightParen)) {
             expression();
             slice.sliceHasStart = true;
@@ -2670,7 +2800,7 @@ private:
         code_.push_back(std::move(slice));
     }
     void primary() {
-        if (match(Kind::Number)) { const Token t = previous(); emit(Op::Push, t, t.number); return; }
+        if (match(Kind::Number)) { const Token t = previous(); emit(Op::Push, t, t.number()); return; }
         if (match(Kind::String)) {
             const Token t = previous();
             emit(Op::Push, t, t.text);
@@ -2681,7 +2811,7 @@ private:
             const Token marker = previous();
             if (match(Kind::Number)) {
                 const Token channel = previous();
-                emit(Op::Push, channel, channel.number);
+                emit(Op::Push, channel, channel.number());
                 return;
             }
             if (match(Kind::Identifier)) {
@@ -3520,7 +3650,7 @@ detail::InstructionSequence detail::compileSource(const std::string& source,
     if (memory) {
         // The token list is one contiguous block; bytecode and tables follow.
         const std::uint64_t tokenBytes = std::uint64_t{tokenCount} * sizeof(Token);
-        const std::uint64_t estimate = tokenBytes + std::uint64_t{tokenCount} * 56;
+        const std::uint64_t estimate = tokenBytes + std::uint64_t{tokenCount} * 50;
         if (const auto failure = memory->admissionFailure(
                 "program of " + std::to_string(tokenCount) + " tokens", estimate, tokenBytes))
             throw std::runtime_error(*failure + "; shorten the program");
@@ -3975,7 +4105,9 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             std::map<int, std::string> candidate;
             for (const auto& [oldLine, body] : program_) {
                 std::string rewritten = body;
-                const std::vector<Token> tokens = Lexer(body).scan();
+                std::vector<TokenSpan> spans;
+                const TokenList list = Lexer(body).scan(&spans);
+                const std::vector<Token>& tokens = list.items;
                 struct Replacement {
                     std::size_t offset;
                     std::size_t length;
@@ -3991,19 +4123,21 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                              tokens[i].kind != Kind::Restore)
                         continue;
                     if (target >= tokens.size() || tokens[target].kind != Kind::Number ||
-                        tokens[target].sourceLength == 0 || tokens[target].text.empty() ||
-                        !std::all_of(tokens[target].text.begin(), tokens[target].text.end(),
+                        spans[target].length == 0)
+                        continue;
+                    const std::string_view digits = std::string_view(body).substr(
+                        spans[target].start, spans[target].length);
+                    if (!std::all_of(digits.begin(), digits.end(),
                             [](unsigned char c) { return std::isdigit(c); }))
                         continue;
                     int referencedLine = 0;
-                    const auto parsed = std::from_chars(tokens[target].text.data(),
-                        tokens[target].text.data() + tokens[target].text.size(),
-                        referencedLine);
+                    const auto parsed = std::from_chars(digits.data(),
+                        digits.data() + digits.size(), referencedLine);
                     if (parsed.ec != std::errc{}) continue;
                     const auto mapped = mapping.find(referencedLine);
                     if (mapped != mapping.end())
-                        replacements.push_back({tokens[target].sourceStart,
-                            tokens[target].sourceLength, std::to_string(mapped->second)});
+                        replacements.push_back({spans[target].start,
+                            spans[target].length, std::to_string(mapped->second)});
                     i = target;
                 }
                 for (auto replacement = replacements.rbegin();
