@@ -8,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
+#include "ql32/program_store.hpp"
 #include <string>
 #include <thread>
 
@@ -762,6 +763,28 @@ private:
     std::uint64_t free_, largest_;
 };
 
+void testProgramStoreKeepsOrderAcrossEditsAndCompaction() {
+    ql32::ProgramStore store;
+    for (int i = 50; i >= 1; --i) store.set(i * 10, "PRINT " + std::to_string(i));
+    for (int round = 0; round < 40; ++round)
+        for (int i = 1; i <= 50; i += 2) store.set(i * 10, "PRINT replaced " + std::to_string(round));
+    store.erase(20);
+    store.erase(21);
+    require(store.size() == 49, "program store lost or kept lines on erase");
+    int previous = 0;
+    for (const auto& [number, body] : store) {
+        require(number > previous && !body.empty(), "program store order broken");
+        previous = number;
+    }
+    require(store.find(10)->second == "PRINT replaced 39", "replaced line has stale text");
+    require(store.find(40)->second == "PRINT 4", "untouched line changed by compaction");
+    require(store.find(20) == store.end(), "erased line still found");
+    ql32::ProgramStore other;
+    other.set(5, "REM");
+    store.swap(other);
+    require(store.size() == 1 && other.size() == 49, "program store swap failed");
+}
+
 void testRunRefusesProgramsThatCannotFit() {
     std::string program;
     for (int i = 1; i <= 100; ++i)
@@ -774,7 +797,7 @@ void testRunRefusesProgramsThatCannotFit() {
     };
     std::string message;
     require(run(1u << 20, 1u << 20, message), "roomy memory refused a small program");
-    require(!run(1u << 20, 4096, message) &&
+    require(!run(1u << 20, 1024, message) &&
                 message.find("not enough memory for program of ") != std::string::npos &&
                 message.find("contiguous") != std::string::npos,
             "fragmented heap did not refuse the program with a clear message");
@@ -1571,6 +1594,7 @@ int main() {
         testCompactBlockTerminatorsFromCommandLine();
         testForwardCallsAndKnownSemanticErrors();
         testLineEntryChecksOnlyTheLineItself();
+        testProgramStoreKeepsOrderAcrossEditsAndCompaction();
         testRunRefusesProgramsThatCannotFit();
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();

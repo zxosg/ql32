@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ql32/program_store.hpp"
 #include <iosfwd>
 #include <cstddef>
 #include <cstdint>
@@ -196,7 +197,7 @@ private:
     std::vector<runtime::ChannelId> executionChannels_;
     bool interactiveCommandExecution_ = false;
     bool persistentSessionResources_ = false;
-    std::map<int, std::string> program_;
+    ProgramStore program_;
     std::optional<int> lastEditedLine_;
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;
