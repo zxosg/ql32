@@ -900,6 +900,9 @@ bool SessionScheduler::tick() {
         }
         current.hasPendingSource = false;
         current.interactiveSubmission = false;
+        // The program text is only needed to compile; a long-running program
+        // must not keep a second copy of it on the heap.
+        current.releaseSource();
         if (result == ExecutionStatus::InteractivePending) {
             if (!current.interactive)
                 throw std::logic_error(

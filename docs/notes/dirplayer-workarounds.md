@@ -53,3 +53,18 @@ Format: wanted / limitation / did instead / suggested improvement.
 14. Number-to-string concatenation needs `STR$()`. Suggest implicit.
 15. No clock: "Time" counts `INKEY$(250)` timeouts, approximate. Suggest
     `TICKS()`/`TIMER`.
+
+## P5 memory fixes (stacked on the full dirplayer)
+
+- RUN admission now estimates `60 B x bytecode-producing tokens` (separators and
+  brackets excluded) instead of `56 B x all tokens`; the full 2787-token app
+  (~1255 instr) is no longer refused at idle.
+- The scheduler frees its program-source copy once the program is compiled.
+- The LH5 dictionary (YM files) is 16 x 512 B blocks instead of one 8 KiB block.
+- `bad_alloc` while opening a song reports `music: not enough memory (heap
+  fragmented)` (OutOfMemory) instead of "Invalid path" / "I/O error".
+- CYD (idle 144.8 KB free / 94.2 KB largest): app loaded 129.3 KB / 81.9 KB;
+  KNUCKLE.YM and z00m.vtx both play from the app with failedalloc=0
+  (min free 18-22 KB while playing; after quit 111 KB / 59.4 KB largest).
+- Cut features (scroll bar, Home/End, sort/filter toggles, playing marker) were
+  not restored in this change.

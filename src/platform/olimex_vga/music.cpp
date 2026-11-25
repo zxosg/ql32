@@ -319,6 +319,9 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                 music::openVtxStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
         } catch (const runtime::ServiceError&) {
             throw;
+        } catch (const std::bad_alloc&) {
+            throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfMemory,
+                                        "music: not enough memory (heap fragmented)");
         } catch (const std::exception& error) {
             throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
                                         std::string("music: ") + error.what());
@@ -338,6 +341,9 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                 music::openYmStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
         } catch (const runtime::ServiceError&) {
             throw;
+        } catch (const std::bad_alloc&) {
+            throw runtime::ServiceError(runtime::ServiceErrorCode::OutOfMemory,
+                                        "music: not enough memory (heap fragmented)");
         } catch (const std::exception& error) {
             throw runtime::ServiceError(runtime::ServiceErrorCode::InvalidPath,
                                         std::string("music: ") + error.what());

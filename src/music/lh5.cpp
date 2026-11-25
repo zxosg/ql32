@@ -205,7 +205,14 @@ bool decodeLh5Stream(const Lh5ByteReader& reader, std::size_t outputSize,
         ++produced;
         if (chunk.size() == 512) flush();
     };
-    std::vector<std::uint8_t> dictionary(DictionarySize, 0x20);
+    // 16 blocks of 512 B instead of one 8 KiB block: a fragmented heap often
+    // has no contiguous 8 KiB but still has many small free blocks.
+    constexpr unsigned DictBlock = 512;
+    std::vector<std::vector<std::uint8_t>> dictionaryBlocks(DictionarySize / DictBlock);
+    for (auto& block : dictionaryBlocks) block.assign(DictBlock, 0x20);
+    const auto dictionary = [&](unsigned index) -> std::uint8_t& {
+        return dictionaryBlocks[index / DictBlock][index % DictBlock];
+    };
     unsigned write = DictionarySize - MaxMatch;
     Huffman pt, ctree, position;
     while (produced < outputSize) {
@@ -229,7 +236,7 @@ bool decodeLh5Stream(const Lh5ByteReader& reader, std::size_t outputSize,
             if (code < 256) {
                 const auto byte = static_cast<std::uint8_t>(code);
                 emit(byte);
-                dictionary[write] = byte;
+                dictionary(write) = byte;
                 write = (write + 1) & (DictionarySize - 1);
                 continue;
             }
@@ -251,9 +258,9 @@ bool decodeLh5Stream(const Lh5ByteReader& reader, std::size_t outputSize,
             }
             for (unsigned i = 0; i < length && produced < outputSize; ++i) {
                 const unsigned source = (write - distance - 1) & (DictionarySize - 1);
-                const auto byte = dictionary[source];
+                const auto byte = dictionary(source);
                 emit(byte);
-                dictionary[write] = byte;
+                dictionary(write) = byte;
                 write = (write + 1) & (DictionarySize - 1);
             }
         }
