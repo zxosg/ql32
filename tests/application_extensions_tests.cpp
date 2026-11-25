@@ -122,6 +122,30 @@ PRINT value
     std::ostringstream polls;
     poller.execute("PRINT INKEY(0)\nPRINT INKEY$(0)\nTRAP x=INKEY(0.5)\nPRINT ERR\n",polls);
     require(polls.str()=="0\n\n5\n","keyboard poll/validation");
+    {
+        const std::pair<input::Key,const char*> named[]={{input::Key::Up,"UP"},{input::Key::Down,"DOWN"},
+            {input::Key::Left,"LEFT"},{input::Key::Right,"RIGHT"},{input::Key::Enter,"ENTER"},
+            {input::Key::Escape,"ESC"},{input::Key::Backspace,"BACKSPACE"},{input::Key::Tab,"TAB"},
+            {input::Key::Insert,"INS"},{input::Key::Delete,"DEL"},{input::Key::Home,"HOME"},
+            {input::Key::End,"END"},{input::Key::PageUp,"PGUP"},{input::Key::PageDown,"PGDN"}};
+        const auto read=[&](const input::KeyEvent& e){
+            Interpreter reader({}, {}, ui); std::ostringstream o;
+            auto st=reader.executeResumable("PRINT \"[\";INKEY$(-1);\"]\"\n",o,runtime::CancellationToken{});
+            require(st==ExecutionStatus::WaitingChannel,"INKEY$ did not wait");
+            router->focus(reader.graphicsSessionId()); router->publish(e);
+            st=reader.resumeSlice(o,1000);
+            require(st==ExecutionStatus::Completed,"INKEY$ did not complete");
+            return o.str();
+        };
+        for(const auto& [key,name]:named){
+            input::KeyEvent special; special.key=key;
+            require(read(special)==std::string("[")+name+"]\n","INKEY$ special key name");
+        }
+        input::KeyEvent fn; fn.key=input::Key::Function; fn.functionNumber=12;
+        require(read(fn)=="[F12]\n","INKEY$ function key name");
+        input::KeyEvent ch; ch.key=input::Key::Character; ch.character=' ';
+        require(read(ch)=="[ ]\n","INKEY$ printable key");
+    }
     Interpreter cancelled({}, {}, ui); router->focus(cancelled.graphicsSessionId());
     runtime::CancellationSource cancellation;
     status=cancelled.executeResumable("TRAP x=INKEY(-1)\nPRINT 99\n",polls,cancellation.token());

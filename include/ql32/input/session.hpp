@@ -35,8 +35,18 @@ inline std::int32_t keyCode(const KeyEvent& event) noexcept {
     default: return 0;
     }
 }
+// INKEY$ names for special keys; printable keys return their UTF-8 character.
 inline std::string keyText(std::int32_t key) {
-    if (key <= 0 || key >= specialKeyBase) return {};
+    if (key <= 0) return {};
+    if (key >= specialKeyBase) {
+        static constexpr const char* names[] = {
+            "ENTER", "ESC", "BACKSPACE", "TAB", "INS", "DEL", "HOME", "END",
+            "PGUP", "PGDN", "LEFT", "RIGHT", "UP", "DOWN"};
+        const auto index = key - specialKeyBase;
+        if (index < 14) return names[index];
+        if (index <= 25) return "F" + std::to_string(index - 13);
+        return {};
+    }
     std::string text;
     if (key < 0x80) text += static_cast<char>(key);
     else if (key < 0x800) {
