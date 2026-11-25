@@ -616,11 +616,11 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         execution_->interactiveSubmission = interactiveCommandExecution_;
         if (mayContainInclude(source)) {
             const std::string expanded = detail::expandIncludes(source, storage_.get());
-            execution_->code = detail::compileSource(expanded);
+            execution_->code = detail::compileSource(expanded, memory_.get());
         } else {
             // Compile ordinary programs directly from their source. Avoid
             // retaining an expanded duplicate while tokens and bytecode grow.
-            execution_->code = detail::compileSource(source);
+            execution_->code = detail::compileSource(source, memory_.get());
         }
         verifyBytecode(execution_->code);
         execution_->debuggerAttached = debuggerAttached_;

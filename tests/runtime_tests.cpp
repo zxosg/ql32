@@ -316,23 +316,20 @@ void testDeleteProgramLinesAtomically() {
                 listing.str().find("50 END FOR x") != std::string::npos,
             "DELETE line list did not remove the inner loop while retaining the outer loop");
 
-    bool invalidDeletionRejected = false;
-    try {
-        interpreter.executeInteractive("DELETE 10,30\n", output);
-    } catch (const std::runtime_error&) {
-        invalidDeletionRejected = true;
-    }
-    require(invalidDeletionRejected, "DELETE accepted a line list that breaks block structure");
-
-    std::ostringstream afterRejectedDeletion;
-    interpreter.executeInteractive("LIST\n", afterRejectedDeletion);
-    require(afterRejectedDeletion.str() == listing.str(),
-            "invalid DELETE line list changed the stored program");
-
     std::ostringstream runOutput;
     interpreter.executeInteractive("RUN\n", runOutput);
     require(runOutput.str() == "1\n2\n",
             "outer loop did not remain executable after deleting the inner loop");
+
+    // Cross-line block structure is checked when RUN compiles, not at DELETE.
+    interpreter.executeInteractive("DELETE 10,30\n", output);
+    bool brokenBlockRejectedAtRun = false;
+    try {
+        interpreter.executeInteractive("RUN\n", runOutput);
+    } catch (const std::runtime_error&) {
+        brokenBlockRejectedAtRun = true;
+    }
+    require(brokenBlockRejectedAtRun, "RUN accepted a program with a broken block structure");
 }
 
 void testStopContinueReturnsToPromptAndResumesNextStatement() {
@@ -706,25 +703,84 @@ void testForwardCallsAndKnownSemanticErrors() {
     require(output.str() == "36\n" && diagnostics.str().empty(),
             "valid forward function reference did not resolve at RUN");
 
+    // Cross-line semantics (here call arity) are checked at RUN, not at line entry.
     ql32::Interpreter semantic;
     std::ostringstream listing;
     semantic.executeInteractive(
         "10 DEF FN Square(n)\n"
         "20 RET n * n\n"
-        "30 END DEF\n", listing);
+        "30 END DEF\n"
+        "40 PRINT Square()\n", listing);
     bool badArityRejected = false;
     try {
-        semantic.executeInteractive("40 PRINT Square()\n", listing);
+        semantic.executeInteractive("RUN\n", listing);
     } catch (const std::runtime_error& error) {
         badArityRejected = std::string(error.what()).find("incorrect argument count") !=
                            std::string::npos;
     }
-    require(badArityRejected, "line entry accepted a known function arity mismatch");
-    listing.str({});
-    listing.clear();
-    semantic.executeInteractive("LIST\n", listing);
-    require(listing.str().find("40 PRINT") == std::string::npos,
-            "rejected semantic line was added to the stored program");
+    require(badArityRejected, "RUN accepted a known function arity mismatch");
+}
+
+void testLineEntryChecksOnlyTheLineItself() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    // Cross-line references, orphan terminators, and arm lines are accepted at
+    // entry; they are resolved when RUN compiles the whole program.
+    for (const char* line : {"10 GOTO 999\n", "20 END IF\n", "30 NEXT i\n", "40 RETURN 1\n",
+                             "50 = 1\n", "60 RESTORE 70\n", "70 PRINT Unknown(1, 2)\n"})
+        interpreter.executeInteractive(line, output);
+
+    bool lexical = false;
+    bool syntax = false;
+    try { interpreter.executeInteractive("80 PRINT \"open\n", output); }
+    catch (const std::runtime_error&) { lexical = true; }
+    try { interpreter.executeInteractive("90 PRINT (\n", output); }
+    catch (const std::runtime_error&) { syntax = true; }
+    require(lexical && syntax, "line entry accepted a lexically or syntactically bad line");
+
+    std::ostringstream listing;
+    interpreter.executeInteractive("LIST\n", listing);
+    require(listing.str().find("80 ") == std::string::npos &&
+                listing.str().find("90 ") == std::string::npos &&
+                listing.str().find("10 GOTO 999") != std::string::npos,
+            "rejected lines changed the stored program");
+
+    bool runRejected = false;
+    try { interpreter.executeInteractive("RUN\n", output); }
+    catch (const std::runtime_error&) { runRejected = true; }
+    require(runRejected, "RUN accepted a program with unresolved cross-line references");
+}
+
+class FixedMemory final : public ql32::runtime::MemoryService {
+public:
+    FixedMemory(std::uint64_t free, std::uint64_t largest) : free_(free), largest_(largest) {}
+    std::uint64_t freeBytes() const override { return free_; }
+    std::optional<ql32::runtime::HeapFragmentationInfo> fragmentationInfo() const override {
+        return ql32::runtime::HeapFragmentationInfo{largest_, 1, 1};
+    }
+private:
+    std::uint64_t free_, largest_;
+};
+
+void testRunRefusesProgramsThatCannotFit() {
+    std::string program;
+    for (int i = 1; i <= 100; ++i)
+        program += std::to_string(i * 10) + " v = v + " + std::to_string(i) + " : PRINT v\n";
+    auto run = [&](std::uint64_t free, std::uint64_t largest, std::string& message) {
+        ql32::Interpreter interpreter({}, {}, {}, {}, {}, std::make_shared<FixedMemory>(free, largest));
+        std::ostringstream output;
+        try { interpreter.execute(program, output); return true; }
+        catch (const std::runtime_error& error) { message = error.what(); return false; }
+    };
+    std::string message;
+    require(run(1u << 20, 1u << 20, message), "roomy memory refused a small program");
+    require(!run(1u << 20, 4096, message) &&
+                message.find("not enough memory for program of ") != std::string::npos &&
+                message.find("contiguous") != std::string::npos,
+            "fragmented heap did not refuse the program with a clear message");
+    require(!run(4096, 1u << 20, message) &&
+                message.find("not enough memory for program of ") != std::string::npos,
+            "low free memory did not refuse the program with a clear message");
 }
 
 void testProcedureFunctionCallSyntax() {
@@ -1514,6 +1570,8 @@ int main() {
         testKeywordAbbreviationCoverage();
         testCompactBlockTerminatorsFromCommandLine();
         testForwardCallsAndKnownSemanticErrors();
+        testLineEntryChecksOnlyTheLineItself();
+        testRunRefusesProgramsThatCannotFit();
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
         testConditionalRepeat();
