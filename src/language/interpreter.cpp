@@ -3561,7 +3561,7 @@ ExecutionStatus Interpreter::runFileJob(std::ostream& output) {
         return ExecutionStatus::Yielded;
     }
     const auto& plan = pendingFileJob_->plan();
-    if (plan.steps.size() > 1 || plan.recursive)
+    if (plan.count() > 1 || plan.recursive)
         writeTextToChannel(output, default_output_channel_, pendingFileJob_->summary() + "\n");
     clearFileJob();
     return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :

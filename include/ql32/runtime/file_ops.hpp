@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
@@ -51,7 +52,13 @@ struct Step {
 struct Plan {
     enum class Kind { Copy, Move, Delete, RemoveDirectory };
     Kind kind = Kind::Copy;
-    std::vector<Step> steps;
+    // A deque keeps allocations small for large wildcard transfers.
+    std::deque<Step> steps;
+    // Wildcard DELETE streams the directory instead of listing a step per file.
+    std::string streamDirectory, streamPattern;
+    std::size_t streamTotal = 0;
+    bool streaming() const noexcept { return streamTotal != 0; }
+    std::size_t count() const noexcept { return streaming() ? streamTotal : steps.size(); }
     std::string directory;      // RemoveDirectory target
     bool recursive = false;     // RemoveDirectory with FORCE
     bool needsConfirmation = false;
@@ -100,7 +107,7 @@ public:
     // job is then finished and nothing further is executed.
     bool run(std::chrono::milliseconds budget);
     std::size_t completed() const noexcept { return completed_; }
-    std::size_t total() const noexcept { return plan_.steps.size(); }
+    std::size_t total() const noexcept { return plan_.count(); }
     const Plan& plan() const noexcept { return plan_; }
     std::string summary() const;
     // Short running status such as "Deleting 37/120"; cheap and allocation-light.
@@ -109,6 +116,7 @@ public:
 private:
     struct Active;
     bool runStep(Step& step, std::chrono::steady_clock::time_point deadline);
+    bool runStreamingDelete(std::string& subject, std::chrono::steady_clock::time_point deadline);
     bool runRemoveTree(std::chrono::steady_clock::time_point deadline);
     void abandonActive() noexcept;
 

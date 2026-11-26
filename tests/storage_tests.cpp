@@ -6,10 +6,29 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <atomic>
+#include <cstdlib>
 #include <memory>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+
+namespace {
+std::atomic<bool> trackAllocations{false};
+std::atomic<std::size_t> largestAllocation{0};
+} // namespace
+
+void* operator new(std::size_t size) {
+    if (trackAllocations.load(std::memory_order_relaxed)) {
+        std::size_t seen = largestAllocation.load(std::memory_order_relaxed);
+        while (size > seen && !largestAllocation.compare_exchange_weak(seen, size)) {}
+    }
+    if (void* block = std::malloc(size ? size : 1)) return block;
+    throw std::bad_alloc();
+}
+void operator delete(void* block) noexcept { std::free(block); }
+void operator delete(void* block, std::size_t) noexcept { std::free(block); }
 
 namespace {
 
@@ -414,6 +433,56 @@ void testFileJobProgress() {
     std::filesystem::remove_all(root);
 }
 
+// Wildcard delete, copy and recursive removal over 1200 files must not need
+// any allocation that grows with the directory (the CYD heap is fragmented).
+void testLargeDirectoryMemory() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-fileops-large-" + std::to_string(unique));
+    std::filesystem::create_directories(root / "src");
+    std::filesystem::create_directories(root / "dst");
+    std::filesystem::create_directories(root / "tree");
+    try {
+        ql32::platform::linux_host::DirectoryStorage storage(root);
+        namespace fo = ql32::runtime::fileops;
+        constexpr int count = 1200;
+        for (int i = 0; i < count; ++i) {
+            const auto name = std::to_string(i);
+            storage.writeText("src/f" + name + ".t", "x");
+            storage.writeText("tree/t" + name, "x");
+        }
+        auto drain = [](fo::Job& job) { while (!job.run(std::chrono::milliseconds(20))) {} };
+        largestAllocation = 0;
+        trackAllocations = true;
+        {
+            fo::Job job(storage, fo::planTransfer(storage, "src/*.t", "dst/", true, false, false));
+            drain(job);
+        }
+        {
+            fo::Job job(storage, fo::planDelete(storage, "src/f*.t", true));
+            require(job.total() == count, "streaming delete total wrong");
+            drain(job);
+            require(job.completed() == count, "streaming delete count wrong");
+        }
+        {
+            fo::Job job(storage, fo::planRemoveDirectory(storage, "tree", "/", true));
+            drain(job);
+        }
+        trackAllocations = false;
+        require(largestAllocation.load() <= 4096, "large directory needed a big allocation");
+        require(!std::filesystem::exists(root / "tree"), "tree not removed");
+        require(std::distance(std::filesystem::directory_iterator(root / "dst"),
+                              std::filesystem::directory_iterator{}) == count, "copy incomplete");
+        require(std::distance(std::filesystem::directory_iterator(root / "src"),
+                              std::filesystem::directory_iterator{}) == 0, "delete incomplete");
+    } catch (...) {
+        trackAllocations = false;
+        std::filesystem::remove_all(root);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 int main() {
@@ -422,6 +491,7 @@ int main() {
         testInteractiveFileCommands();
         testCopyMoveDeleteRmdir();
         testFileJobProgress();
+        testLargeDirectoryMemory();
     } catch (const std::exception& error) {
         std::cerr << "storage test failed: " << error.what() << '\n';
         return 1;

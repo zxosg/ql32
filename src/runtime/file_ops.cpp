@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <deque>
 
 #include "ql32/runtime/path_glob.hpp"
 
@@ -29,19 +30,61 @@ std::string driveOf(const std::string& path) {
 
 bool isFile(const FileEntry& entry) { return !entry.isDirectory; }
 
-// Files in `directory` matching the wildcard `pattern`, as full paths.
-std::vector<std::string> expandWildcard(StorageService& storage, const std::string& directory,
-                                        const std::string& pattern) {
-    std::vector<std::string> result;
-    for (const auto& entry : storage.list(directory))
-        if (isFile(entry) && wildcardMatch(pattern, entry.name))
-            result.push_back(joinPath(directory, entry.name));
+// Visits the entries of `directory` through the bounded native cursor, holding
+// one entry at a time; storages without a cursor fall back to list(). The
+// visitor returns false to stop early.
+template <typename Visitor>
+void scanDirectory(StorageService& storage, const std::string& directory, Visitor visit) {
+    std::unique_ptr<DirectoryCursor> cursor;
+    try {
+        cursor = storage.openDirectory(directory);
+    } catch (const Error& error) {
+        if (error.code() != ErrorCode::UnsupportedOperation) {
+            const auto code = error.code() == ErrorCode::NotFound ? ServiceErrorCode::NotFound
+                : error.code() == ErrorCode::InvalidPath ? ServiceErrorCode::InvalidPath
+                : ServiceErrorCode::IoError;
+            throw ServiceError(code, error.what());
+        }
+    }
+    if (!cursor) {
+        for (const auto& entry : storage.list(directory))
+            if (!visit(entry.name, entry.isDirectory, static_cast<std::uint64_t>(entry.size))) return;
+        return;
+    }
+    DirectoryEntry entry;
+    for (;;) {
+        const auto result = cursor->next(entry);
+        if (result == DirectoryCursorResult::End) return;
+        if (result == DirectoryCursorResult::Pending) continue;
+        if (!visit(entry.name, entry.metadata.directory, entry.metadata.size)) return;
+    }
+}
+
+// Files in `directory` matching the wildcard `pattern`, as full paths. A
+// deque keeps every allocation small however many files match.
+std::deque<std::string> expandWildcard(StorageService& storage, const std::string& directory,
+                                       const std::string& pattern) {
+    std::deque<std::string> result;
+    scanDirectory(storage, directory, [&](const std::string& name, bool isDirectory, std::uint64_t) {
+        if (!isDirectory && wildcardMatch(pattern, name)) result.push_back(joinPath(directory, name));
+        return true;
+    });
     std::sort(result.begin(), result.end());
     return result;
 }
 
+std::size_t countWildcard(StorageService& storage, const std::string& directory,
+                          const std::string& pattern) {
+    std::size_t count = 0;
+    scanDirectory(storage, directory, [&](const std::string& name, bool isDirectory, std::uint64_t) {
+        if (!isDirectory && wildcardMatch(pattern, name)) ++count;
+        return true;
+    });
+    return count;
+}
+
 struct Sources {
-    std::vector<std::string> paths;
+    std::deque<std::string> paths;
     bool wildcard = false;
 };
 
@@ -167,20 +210,32 @@ std::optional<FileEntry> statPath(StorageService& storage, const std::string& pa
     std::string directory, leaf;
     splitPath(path, directory, leaf);
     if (leaf.empty()) return std::nullopt;
-    std::vector<FileEntry> entries;
+    std::optional<FileEntry> exact, folded;
     try {
-        entries = storage.list(directory);
+        scanDirectory(storage, directory, [&](const std::string& name, bool isDirectory,
+                                              std::uint64_t size) {
+            if (name == leaf) {
+                exact = FileEntry{name, static_cast<std::uintmax_t>(size), isDirectory};
+                return false;
+            }
+            if (!folded && sameName(name, leaf))
+                folded = FileEntry{name, static_cast<std::uintmax_t>(size), isDirectory};
+            return true;
+        });
     } catch (const ServiceError& error) {
         if (error.code() == ServiceErrorCode::NotFound) return std::nullopt;
         throw;
     }
-    for (const auto& entry : entries)
-        if (entry.name == leaf) return entry;
-    for (const auto& entry : entries)
-        if (sameName(entry.name, leaf)) return entry;
+    if (exact) return exact;
+    if (folded) return folded;
     // Flat filesystems (SPIFFS) have no directory entries; a prefix with files is a directory.
     try {
-        if (!storage.list(path).empty()) return FileEntry{leaf, 0, true};
+        bool any = false;
+        scanDirectory(storage, path, [&](const std::string&, bool, std::uint64_t) {
+            any = true;
+            return false;
+        });
+        if (any) return FileEntry{leaf, 0, true};
     } catch (const ServiceError& error) {
         if (error.code() != ServiceErrorCode::NotFound &&
             error.code() != ServiceErrorCode::InvalidPath) throw;
@@ -314,19 +369,31 @@ Plan planStream(std::shared_ptr<ByteSource> source, std::shared_ptr<ByteSink> si
 }
 
 Plan planDelete(StorageService& storage, const std::string& path, bool force) {
-    const Sources sources = resolveSources(storage, path, "DELETE");
     Plan plan;
     plan.kind = Plan::Kind::Delete;
+    std::string directory, leaf;
+    splitPath(path, directory, leaf);
+    if (hasWildcard(leaf) && !hasWildcard(directory)) {
+        // Wildcard deletes stream the directory in small batches instead of
+        // keeping a step per file.
+        plan.streamDirectory = directory;
+        plan.streamPattern = leaf;
+        plan.streamTotal = countWildcard(storage, directory, leaf);
+        if (plan.streamTotal == 0)
+            fail(ServiceErrorCode::NotFound, "no files match: " + path);
+        if (plan.streamTotal > 1 && !force) {
+            plan.needsConfirmation = true;
+            plan.confirmation = "Delete " + std::to_string(plan.streamTotal) +
+                                " files? (Y/N)";
+        }
+        return plan;
+    }
+    const Sources sources = resolveSources(storage, path, "DELETE");
     for (const auto& file : sources.paths) {
         Step step;
         step.kind = Step::Kind::Delete;
         step.source = file;
         plan.steps.push_back(std::move(step));
-    }
-    if (sources.wildcard && plan.steps.size() > 1 && !force) {
-        plan.needsConfirmation = true;
-        plan.confirmation = "Delete " + std::to_string(plan.steps.size()) +
-                            " files? (Y/N)";
     }
     return plan;
 }
@@ -403,7 +470,7 @@ std::string Job::progressText() const {
         return std::string(verb) + " " + plan_.directory + ": " +
                std::to_string(removedEntries_) + " file(s) deleted";
     return std::string(verb) + " " + std::to_string(completed_) + "/" +
-           std::to_string(plan_.steps.size());
+           std::to_string(plan_.count());
 }
 
 void Job::abandonActive() noexcept {
@@ -439,7 +506,7 @@ bool Job::run(std::chrono::milliseconds budget) {
                                         ? job.removedEntries_ : job.completed_,
                                     std::memory_order_relaxed);
             activityTotal.store(job.plan_.kind == Plan::Kind::RemoveDirectory
-                                    ? 0 : job.plan_.steps.size(),
+                                    ? 0 : job.plan_.count(),
                                 std::memory_order_relaxed);
         }
     } publish{*this};
@@ -452,20 +519,24 @@ bool Job::run(std::chrono::milliseconds budget) {
             }
             return runRemoveTree(deadline);
         }
-        while (completed_ < plan_.steps.size()) {
+        if (plan_.streaming()) {
+            subject = plan_.streamDirectory;
+            return runStreamingDelete(subject, deadline);
+        }
+        while (completed_ < plan_.count()) {
             Step& step = plan_.steps[completed_];
             subject = step.source.empty() ? step.destination : step.source;
             if (!runStep(step, deadline)) return false;
             active_.reset();
             ++completed_;
-            if (Clock::now() >= deadline && completed_ < plan_.steps.size()) return false;
+            if (Clock::now() >= deadline && completed_ < plan_.count()) return false;
         }
         return true;
     } catch (const ServiceError& error) {
         abandonActive();
-        const std::string progress = plan_.steps.empty() ? std::string{} :
+        const std::string progress = plan_.count() == 0 ? std::string{} :
             " after " + std::to_string(completed_) + " of " +
-            std::to_string(plan_.steps.size());
+            std::to_string(plan_.count());
         throw ServiceError(error.code(),
             (subject.empty() ? std::string{} : subject + ": ") + error.what() +
             (progress.empty() ? std::string{} : " (stopped" + progress + ")"));
@@ -542,41 +613,74 @@ bool Job::runStep(Step& step, Clock::time_point deadline) {
     return true;
 }
 
+// Removes matching files in batches of a few names, rescanning from the start
+// each time so no allocation grows with the directory and removal never
+// happens while a cursor is open.
+bool Job::runStreamingDelete(std::string& subject, Clock::time_point deadline) {
+    constexpr std::size_t batchSize = 16;
+    for (;;) {
+        std::vector<std::string> batch;
+        batch.reserve(batchSize);
+        scanDirectory(storage_, plan_.streamDirectory,
+                      [&](const std::string& name, bool isDirectory, std::uint64_t) {
+            if (!isDirectory && wildcardMatch(plan_.streamPattern, name))
+                batch.push_back(joinPath(plan_.streamDirectory, name));
+            return batch.size() < batchSize;
+        });
+        if (batch.empty()) return true;
+        for (const auto& file : batch) {
+            subject = file;
+            storage_.remove(file);
+            ++completed_;
+            if (Clock::now() >= deadline) return false;
+        }
+    }
+}
+
 bool Job::runRemoveTree(Clock::time_point deadline) {
+    constexpr std::size_t batchSize = 16;
     if (!treeStarted_) {
         treeStarted_ = true;
         directoryStack_.push_back(plan_.directory);
     }
     while (!directoryStack_.empty()) {
         const std::string directory = directoryStack_.back();
-        std::vector<FileEntry> entries;
+        std::vector<std::string> files;
+        files.reserve(batchSize);
+        std::string subdirectory;
         try {
-            entries = storage_.list(directory);
+            scanDirectory(storage_, directory,
+                          [&](const std::string& name, bool isDirectory, std::uint64_t) {
+                if (isDirectory) {
+                    subdirectory = joinPath(directory, name);
+                    return false;
+                }
+                files.push_back(joinPath(directory, name));
+                return files.size() < batchSize;
+            });
         } catch (const ServiceError& error) {
             // Flat filesystems drop an emptied directory automatically.
             if (error.code() != ServiceErrorCode::NotFound) throw;
         }
-        bool descended = false;
-        for (const auto& entry : entries) {
-            const std::string child = joinPath(directory, entry.name);
-            if (entry.isDirectory) {
-                directoryStack_.push_back(child);
-                descended = true;
-                break;
-            }
+        // Remove files first, then descend into a subdirectory found while scanning.
+        for (const auto& child : files) {
             storage_.remove(child);
             ++removedEntries_;
             // Bound each slice by time, not by directory size.
             if (Clock::now() >= deadline) return false;
         }
-        if (!descended) {
-            try {
-                storage_.removeDirectory(directory);
-            } catch (const ServiceError&) {
-                if (storage_.exists(directory)) throw;
-            }
-            directoryStack_.pop_back();
+        if (!files.empty() && files.size() == batchSize) continue;
+        if (!subdirectory.empty()) {
+            directoryStack_.push_back(subdirectory);
+            continue;
         }
+        if (!files.empty()) continue;
+        try {
+            storage_.removeDirectory(directory);
+        } catch (const ServiceError&) {
+            if (storage_.exists(directory)) throw;
+        }
+        directoryStack_.pop_back();
         if (Clock::now() >= deadline && !directoryStack_.empty()) return false;
     }
     return true;
