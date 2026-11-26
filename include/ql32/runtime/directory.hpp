@@ -15,8 +15,9 @@ struct DirectoryLimits {
     std::size_t maxChannels = 2;
     std::size_t batch = 16;
 };
-// Runtime-owned listing. A single allocation contains fixed metadata records
-// and packed filenames; a stream never materializes the directory in an array.
+// Runtime-owned listing. Sorted listings keep fixed metadata records and
+// packed filenames in small fixed-size pages (no large contiguous block, total
+// bounded by snapshotBytes); a stream never materializes the directory.
 class DirectoryStream {
 public:
     DirectoryStream(std::unique_ptr<DirectoryCursor> cursor, std::string pattern,
@@ -39,15 +40,18 @@ private:
     bool hasCurrent_ = false, hasNext_ = false, end_ = false, prepared_ = false;
     std::uint32_t options_;
     DirectoryLimits limits_;
-    std::unique_ptr<char[]> snapshot_;
-    Record* records_ = nullptr;
-    char* names_ = nullptr;
-    std::size_t allocationBytes_ = 0, namesUsed_ = 0;
+    static constexpr std::size_t RecordsPerPage = 8, NamePageBytes = 512, MaxPages = 64;
+    std::unique_ptr<Record[]> recordPages_[MaxPages];
+    std::unique_ptr<char[]> namePages_[MaxPages];
+    std::size_t recordPageCount_ = 0, namePageCount_ = 0, nameFill_ = NamePageBytes;
+    bool sorted_ = false;
+    std::size_t allocationBytes_ = 0;
     std::size_t count_ = 0, position_ = 0, buildHeap_ = 0, sortEnd_ = 0;
     bool collecting_ = true;
     bool matches(const DirectoryEntry&) const;
     bool less(const Record&, const Record&) const;
-    const char* name(const Record& record) const noexcept { return names_ + record.offset; }
+    Record& record(std::size_t index) noexcept { return recordPages_[index / RecordsPerPage][index % RecordsPerPage]; }
+    const char* name(const Record& record) const noexcept { return namePages_[record.offset / NamePageBytes].get() + record.offset % NamePageBytes; }
     void sift(std::size_t root, std::size_t end);
 };
 bool directoryWildcardMatch(std::string_view name, std::string_view pattern) noexcept;

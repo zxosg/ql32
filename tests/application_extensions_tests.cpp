@@ -15,8 +15,9 @@
 
 // Failure injection verifies that VM recovery itself does not allocate.
 static bool rejectAllocations = false;
+static std::size_t rejectAbove = static_cast<std::size_t>(-1);
 void* operator new(std::size_t size) {
-    if (rejectAllocations) throw std::bad_alloc();
+    if (rejectAllocations || size > rejectAbove) throw std::bad_alloc();
     if (auto* result = std::malloc(size ? size : 1)) return result;
     throw std::bad_alloc();
 }
@@ -176,6 +177,18 @@ PRINT value
     require(protocol && !router->poll(101),"debugger protocol leaked into application input");
     require(run("TRAP x=INKEY(-1)\nPRINT ERR\n")=="13\n","missing keyboard failed to trap");
 }
+class SmallCursor final : public runtime::DirectoryCursor {
+public:
+    explicit SmallCursor(unsigned count = 20) : count_(count) {}
+    runtime::DirectoryCursorResult next(runtime::DirectoryEntry& entry) override {
+        if (position_ == count_) return runtime::DirectoryCursorResult::End;
+        entry.name = "t" + std::to_string(100000 - position_++);
+        entry.metadata = {};
+        return runtime::DirectoryCursorResult::Entry;
+    }
+private:
+    unsigned position_ = 0, count_;
+};
 class GeneratedCursor final : public runtime::DirectoryCursor {
 public:
     explicit GeneratedCursor(bool fail = false) : fail_(fail) {}
@@ -202,6 +215,23 @@ public:
     void remove(const std::string&) override {}
 };
 void memoryBoundaries() {
+    {
+        // Fragmented heap: no block above 1 KiB. Sorted listings use small pages.
+        rejectAbove = 1024;
+        runtime::DirectoryLimits paged; paged.batch = 4;
+        runtime::DirectoryStream sorted(std::make_unique<SmallCursor>(150),"*",2,paged);
+        while(!sorted.prepare()) {}
+        while(!sorted.ready()) {}
+        require(sorted.snapshotBytes() != 0 && sorted.snapshotBytes() <= paged.snapshotBytes,"sorted snapshot exceeded budget");
+        require(sorted.nextName()=="t100000","paged sorted listing order");
+        // A 1000-file directory is refused by the fixed budget, never by allocation failure.
+        runtime::DirectoryStream huge(std::make_unique<SmallCursor>(1000),"*",2,paged);
+        bool budget = false;
+        try { while(!huge.prepare()) {} }
+        catch (const runtime::Error&) { budget = true; }
+        rejectAbove = static_cast<std::size_t>(-1);
+        require(budget && huge.snapshotBytes() <= paged.snapshotBytes,"large directory not bounded by snapshot budget");
+    }
     runtime::DirectoryLimits limits; limits.batch = 1;
     runtime::DirectoryStream stream(std::make_unique<GeneratedCursor>(),"*",0,limits);
     while(!stream.prepare()) {}

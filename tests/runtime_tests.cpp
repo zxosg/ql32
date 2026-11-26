@@ -806,6 +806,16 @@ void testRunRefusesProgramsThatCannotFit() {
             "low free memory did not refuse the program with a clear message");
 }
 
+void testAdmissionCountsBytecodeTokensNotBrackets() {
+    // ~2400 tokens but only ~600 bytecode-producing ones: must fit in 100 KB.
+    std::string program;
+    for (int i = 1; i <= 200; ++i) program += "a = ((((((((1))))))))\n";
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, std::make_shared<FixedMemory>(100000, 1u << 20));
+    std::ostringstream output;
+    interpreter.execute(program, output);
+    require(true, "bracket-heavy program admitted");
+}
+
 void testProcedureFunctionCallSyntax() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -1596,6 +1606,7 @@ int main() {
         testLineEntryChecksOnlyTheLineItself();
         testProgramStoreKeepsOrderAcrossEditsAndCompaction();
         testRunRefusesProgramsThatCannotFit();
+        testAdmissionCountsBytecodeTokensNotBrackets();
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
         testConditionalRepeat();

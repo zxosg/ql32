@@ -52,13 +52,8 @@ DirectoryStream::DirectoryStream(std::unique_ptr<DirectoryCursor> cursor, std::s
         throw Error(ErrorCode::InvalidArgument, "invalid directory limits");
     lookahead_.name.reserve(1023);
     if (!sort) return;
-    if (limits_.snapshotBytes < sizeof(Record) + 2) quota();
-    snapshot_ = std::make_unique<char[]>(limits_.snapshotBytes);
-    records_ = reinterpret_cast<Record*>(snapshot_.get());
-    names_ = snapshot_.get();
-    namesUsed_ = limits_.snapshotBytes;
-    allocationBytes_ = limits_.snapshotBytes;
-
+    if (limits_.snapshotBytes < sizeof(Record) * RecordsPerPage + NamePageBytes) quota();
+    sorted_ = true;
 }
 DirectoryStream::~DirectoryStream() = default;
 bool DirectoryStream::matches(const DirectoryEntry& entry) const {
@@ -69,7 +64,7 @@ bool DirectoryStream::matches(const DirectoryEntry& entry) const {
 }
 bool DirectoryStream::prepare() {
     if (prepared_) return true;
-    if (!records_) {
+    if (!sorted_) {
         prepared_ = true;
         if (ready()) return true;
         prepared_ = false; return false;
@@ -86,18 +81,31 @@ bool DirectoryStream::prepare() {
         }
         if (!matches(lookahead_)) continue;
         const auto nameBytes = lookahead_.name.size() + 1;
-        const auto recordBytes = (count_ + 1) * sizeof(Record);
-        if (count_ == limits_.maxEntries || nameBytes > namesUsed_ || recordBytes > namesUsed_ - nameBytes) quota();
-        namesUsed_ -= nameBytes;
-        new (&records_[count_]) Record{lookahead_.metadata, static_cast<std::uint16_t>(namesUsed_)};
-        std::memcpy(names_ + namesUsed_, lookahead_.name.c_str(), nameBytes);
+        if (count_ == limits_.maxEntries || nameBytes > NamePageBytes) quota();
+        constexpr auto recordPageBytes = sizeof(Record) * RecordsPerPage;
+        if (count_ == recordPageCount_ * RecordsPerPage) {
+            if (recordPageCount_ == MaxPages || allocationBytes_ + recordPageBytes > limits_.snapshotBytes) quota();
+            recordPages_[recordPageCount_].reset(new Record[RecordsPerPage]);
+            ++recordPageCount_;
+            allocationBytes_ += recordPageBytes;
+        }
+        if (nameFill_ + nameBytes > NamePageBytes) {
+            if (namePageCount_ == MaxPages || allocationBytes_ + NamePageBytes > limits_.snapshotBytes) quota();
+            namePages_[namePageCount_].reset(new char[NamePageBytes]);
+            ++namePageCount_; nameFill_ = 0;
+            allocationBytes_ += NamePageBytes;
+        }
+        const auto offset = (namePageCount_ - 1) * NamePageBytes + nameFill_;
+        std::memcpy(namePages_[namePageCount_ - 1].get() + nameFill_, lookahead_.name.c_str(), nameBytes);
+        nameFill_ += nameBytes;
+        record(count_) = Record{lookahead_.metadata, static_cast<std::uint16_t>(offset)};
         ++count_;
     }
     if (collecting_) return false;
     // Each sift has at most log2(256) comparisons; no recursive or O(n) scratch.
     for (std::size_t step = 0; step < limits_.batch; ++step) {
         if (buildHeap_) sift(--buildHeap_, sortEnd_);
-        else if (sortEnd_ > 1) { std::swap(records_[0], records_[--sortEnd_]); sift(0, sortEnd_); }
+        else if (sortEnd_ > 1) { std::swap(record(0), record(--sortEnd_)); sift(0, sortEnd_); }
         else { prepared_ = true; end_ = count_ == 0; return true; }
     }
     return false;
@@ -106,9 +114,9 @@ void DirectoryStream::sift(std::size_t root, std::size_t end) {
     for (;;) {
         auto child = root * 2 + 1;
         if (child >= end) return;
-        if (child + 1 < end && less(records_[child], records_[child + 1])) ++child;
-        if (!less(records_[root], records_[child])) return;
-        std::swap(records_[root], records_[child]); root = child;
+        if (child + 1 < end && less(record(child), record(child + 1))) ++child;
+        if (!less(record(root), record(child))) return;
+        std::swap(record(root), record(child)); root = child;
     }
 }
 bool DirectoryStream::less(const Record& a, const Record& b) const {
@@ -129,7 +137,7 @@ bool DirectoryStream::less(const Record& a, const Record& b) const {
 }
 bool DirectoryStream::ready() {
     if (!prepared_) throw std::logic_error("directory published before preparation");
-    if (records_) return true;
+    if (sorted_) return true;
     if (hasNext_ || end_) return true;
     for (std::size_t i = 0; i < limits_.batch; ++i) {
         const auto result = cursor_->next(lookahead_);
@@ -139,15 +147,15 @@ bool DirectoryStream::ready() {
     }
     return false;
 }
-bool DirectoryStream::atEnd() const noexcept { return records_ ? position_ == count_ : end_; }
+bool DirectoryStream::atEnd() const noexcept { return sorted_ ? position_ == count_ : end_; }
 std::string_view DirectoryStream::nextName() const {
     if (atEnd()) throw Error(ErrorCode::IoError, "end of directory");
-    if (records_) return name(records_[position_]);
+    if (sorted_) return name(const_cast<DirectoryStream*>(this)->record(position_));
     if (!hasNext_) throw std::logic_error("directory result is not ready");
     return lookahead_.name;
 }
 void DirectoryStream::commitRead() noexcept {
-    current_ = records_ ? records_[position_++].metadata : lookahead_.metadata;
+    current_ = sorted_ ? record(position_++).metadata : lookahead_.metadata;
     hasCurrent_ = true; hasNext_ = false;
 }
 double DirectoryStream::info(unsigned selector, bool single) const {
