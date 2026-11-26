@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <iostream>
 #include <map>
+#include <new>
 #include <sstream>
 #include <stdexcept>
 #include <optional>
@@ -825,11 +826,13 @@ public:
     std::map<std::string, std::string> files;
     std::string readOnlyPrefix;
     int writes = 0;
+    bool failWritesWithBadAlloc = false;
     std::string readText(const std::string& path) override { return files.at(path); }
     std::unique_ptr<ql32::runtime::StorageReadHandle> openRead(const std::string& path) override {
         return std::make_unique<ql32::runtime::MemoryStorageReadHandle>(files.at(path));
     }
     void writeText(const std::string& path, const std::string& contents) override {
+        if (failWritesWithBadAlloc) throw std::bad_alloc();
         if (!readOnlyPrefix.empty() && path.rfind(readOnlyPrefix, 0) == 0)
             throw ql32::runtime::ServiceError(
                 ql32::runtime::ServiceErrorCode::PermissionDenied, "write protected");
@@ -1054,6 +1057,17 @@ void testVtxStreamedCache() {
     try { openVtxStreamed(storage, "FFS:/ok.vtx", {"FFS:/"}); }
     catch (const ql32::runtime::ServiceError&) { rejected = true; }
     require(rejected, "unwritable cache roots did not report an error");
+
+    // Heap exhaustion while transcoding must not be reported as an I/O error.
+    storage.readOnlyPrefix.clear();
+    storage.failWritesWithBadAlloc = true;
+    bool outOfMemory = false;
+    try { openVtxStreamed(storage, "FFS:/ok.vtx", {"FFS:/"}); }
+    catch (const ql32::runtime::ServiceError& error) {
+        outOfMemory = error.code() == ql32::runtime::ServiceErrorCode::OutOfMemory;
+    }
+    require(outOfMemory, "bad_alloc during VTX transcode was not reported as OutOfMemory");
+    storage.failWritesWithBadAlloc = false;
 }
 
 void testSqtRejectsGarbage() {

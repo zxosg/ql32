@@ -76,6 +76,7 @@ struct MusicService::Impl {
     std::vector<std::string> vtxCacheRoots;
     int dacGpio;
     SemaphoreHandle_t mutex = nullptr;
+    static constexpr std::uint32_t IoStackBytes = 4096;
     TaskHandle_t worker = nullptr;
     TaskHandle_t ioWorker = nullptr;
     std::shared_ptr<music::AudioPrefetcher> prefetch; // guarded by `mutex`
@@ -125,12 +126,16 @@ struct MusicService::Impl {
             platform::esp32::diagnostics().musicTask.store(worker);
         }
         // Slow storage reads (VTX cache read-ahead) must not run in the audio task.
-        if (!ioWorker &&
-            xTaskCreatePinnedToCore(&Impl::ioTaskEntry, "ql32_music_io", 4096, this,
-                                    1, &ioWorker, tskNO_AFFINITY) != pdPASS)
-            ioWorker = nullptr;
-        else
-            platform::esp32::diagnostics().musicIoTask.store(ioWorker);
+        // The I/O task stack lives in .bss: a fragmented heap often has no
+        // contiguous 4 KiB left once a large BASIC app is loaded.
+        if (!ioWorker) {
+            static StaticTask_t ioTcb;
+            static StackType_t ioStack[IoStackBytes];
+            ioWorker = xTaskCreateStaticPinnedToCore(
+                &Impl::ioTaskEntry, "ql32_music_io", IoStackBytes, this, 1,
+                ioStack, &ioTcb, tskNO_AFFINITY);
+            if (ioWorker) platform::esp32::diagnostics().musicIoTask.store(ioWorker);
+        }
     }
 
     static void ioTaskEntry(void* context) {
