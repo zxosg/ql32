@@ -39,6 +39,9 @@ public:
     void pause(runtime::MusicSessionId session) override;
     void resume(runtime::MusicSessionId session) override;
     runtime::MusicPlaybackState state() const noexcept override;
+    std::uint64_t positionMs() const noexcept override;
+    std::uint64_t lengthMs() const noexcept override;
+    std::string title() const override;
     void stopSession(runtime::MusicSessionId session) noexcept override;
 
 private:

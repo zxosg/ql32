@@ -24,8 +24,8 @@ Format: wanted / limitation / did instead / suggested improvement.
 - `HEAP STATS` is REPL-only; while an app runs, serial keys go to the app.
 
 ## Language gaps and workarounds
-1. `INSTR` missing (spec text mentions it): looped over characters instead.
-2. `MIN`/`MAX` missing: explicit `IF`. Suggest adding.
+1. (Resolved: `INSTR(h$, n$[, start])`) `INSTR` missing (spec text mentions it): looped over characters instead.
+2. (Resolved: `MIN`, `MAX`, `CLAMP`) `MIN`/`MAX` missing: explicit `IF`. Suggest adding.
 3. Reserved words as names (`sel`, `mode`, `step`, `Select`, `Stop`, `Pause`,
    `Play`) give cryptic errors: renamed. Suggest listing them in the spec and
    a clearer error.
@@ -34,7 +34,7 @@ Format: wanted / limitation / did instead / suggested improvement.
 5. `INCLUDE "ql32.inc"` needs the file on FFS: and costs compile RAM: numeric
    literals for key codes and options. Suggest built-in named constants.
 6. (Resolved) `INKEY$` names now used.
-7. No playback state/volume/metadata readback, no end-of-song event:
+7. (Resolved: `MUSIC STATE()/POS()/LEN()/VOLUME()/TITLE$()`; `STATE()=0` marks song end) No playback state/volume/metadata readback, no end-of-song event:
    app tracks state itself, no auto-advance, title = file name. Suggest
    `MUSIC STATE()`, `VOLUME()`, `MUSIC POS()`/finished flag.
 8. Directory pattern allows one wildcard: extension filter done in BASIC.
@@ -48,10 +48,10 @@ Format: wanted / limitation / did instead / suggested improvement.
 12. CYD: `TASK "FFS:/x.bas"` fails (114 KB graphics canvas); serial `PRINT`
     goes to the screen, use `OPEN(2)`. Host: no audio, `MUSIC PLAY`/`VOLUME`
     raise "Service unavailable" (trapped).
-13. `SELect ON` is numeric only: key dispatch is a long IF chain (costs
+13. (Resolved: string `SELect ON` with `=`, `TO`, wildcards) `SELect ON` was numeric only: key dispatch is a long IF chain (costs
     tokens). Single-line `IF c THEN stmt` unsupported. Suggest string SELect.
 14. Number-to-string concatenation needs `STR$()`. Suggest implicit.
-15. No clock: "Time" counts `INKEY$(250)` timeouts, approximate. Suggest
+15. (Resolved: `TICKS()`/`TIMER()`) No clock: "Time" counts `INKEY$(250)` timeouts, approximate. Suggest
     `TICKS()`/`TIMER`.
 
 ## P5 memory fixes (stacked on the full dirplayer)

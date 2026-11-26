@@ -118,6 +118,9 @@ public:
         current = ql32::runtime::MusicPlaybackState::Playing;
     }
     ql32::runtime::MusicPlaybackState state() const noexcept override { return current; }
+    std::uint64_t positionMs() const noexcept override { return 1500; }
+    std::uint64_t lengthMs() const noexcept override { return 90000; }
+    std::string title() const override { return "Fake Song"; }
     void stopSession(ql32::runtime::MusicSessionId session) noexcept override {
         if (owner == session) { owner = 0; current = ql32::runtime::MusicPlaybackState::Stopped; }
     }
@@ -249,6 +252,31 @@ void testMusicBasicCommands() {
     require(music->toneRequested && music->owner == 0,
             "MUSIC TEST did not start the test tone or MUSIC STOP did not stop it");
 }
+void testMusicReadback() {
+    auto music = std::make_shared<FakeMusic>();
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 42, {}, {}, {}, {}, music);
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT MUSIC STATE()\n"
+        "MUSIC PLAY \"SDC:/t.vtx\"\n"
+        "PRINT MUSIC STATE()\n"
+        "MUSIC PAUSE\n"
+        "PRINT MUSIC STATE()\n"
+        "PRINT MUSIC POS()\nPRINT MUSIC LEN()\nPRINT MUSIC VOLUME()\n"
+        "PRINT MUSIC TITLE$()\n"
+        "MUSIC STOP\n"
+        "IF MUSIC STATE() = 0 THEN\nPRINT \"done\"\nEND IF\n", output);
+    require(output.str() == "0\n1\n2\n1500\n90000\n128\nFake Song\ndone\n",
+            "MUSIC readback functions returned unexpected values");
+    ql32::Interpreter bare;
+    bool unavailable = false;
+    try {
+        std::ostringstream ignored;
+        bare.execute("PRINT MUSIC STATE()\n", ignored);
+    } catch (const ql32::runtime::ServiceError&) { unavailable = true; }
+    require(unavailable, "MUSIC STATE() without a music service did not raise an error");
+}
+
 void testDacFormatAndTone() {
     using namespace ql32::music;
     require(pcmToDac16(0) == 0x8000, "silence must map to DAC mid-scale");
@@ -1181,6 +1209,7 @@ int main() {
         testAyUltrasonicTone();
         testAyEnvelopeRate();
         testMusicBasicCommands();
+        testMusicReadback();
         testDacFormatAndTone();
         testWaveforms();
         testMixer();

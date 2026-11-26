@@ -9,10 +9,12 @@ inline bool hasWildcard(const std::string& text) {
     return text.find_first_of("*?") != std::string::npos;
 }
 
-// Case-insensitive match supporting '*' (any run) and '?' (any one character).
-inline bool wildcardMatch(const std::string& pattern, const std::string& text) {
+// Match supporting '*' (any run) and '?' (any one byte); case-insensitive unless asked otherwise.
+inline bool wildcardMatch(const std::string& pattern, const std::string& text,
+                          bool caseSensitive = false) {
     std::size_t p = 0, t = 0, star = std::string::npos, mark = 0;
-    const auto same = [](char a, char b) {
+    const auto same = [caseSensitive](char a, char b) {
+        if (caseSensitive) return a == b;
         return std::toupper(static_cast<unsigned char>(a)) ==
                std::toupper(static_cast<unsigned char>(b));
     };

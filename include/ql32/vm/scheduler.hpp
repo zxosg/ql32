@@ -3,6 +3,7 @@
 #include "ql32/interpreter.hpp"
 #include "ql32/runtime/error.hpp"
 #include "ql32/runtime/display_mode.hpp"
+#include "ql32/runtime/clock.hpp"
 #include "ql32/runtime/music.hpp"
 #include "ql32/vm/smooth_weighted_round_robin.hpp"
 
@@ -60,6 +61,7 @@ struct Services {
     std::shared_ptr<runtime::DisplayModeService> displayModes;
     std::shared_ptr<runtime::SystemInfoService> systemInfo;
     std::shared_ptr<runtime::MusicService> music;
+    std::shared_ptr<runtime::ClockService> clock;
 };
 
 // Cooperative, single-threaded weighted scheduler. Each task owns one

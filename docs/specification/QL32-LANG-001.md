@@ -179,7 +179,7 @@ errors.
 
 M1's target operators are unary `+ - NOT`, binary `+ - * / DIV MOD ^`,
 numeric comparisons, string equality/inequality, `AND OR XOR`, parentheses,
-function calls, and array indexing. `&`, `INSTR`, approximate equality `==`,
+function calls, and array indexing. `&`, approximate equality `==`,
 bitwise operators, and chained comparisons are outside M1.
 
 The math functions `SIN(angle)` and `COS(angle)` accept finite numeric angles
@@ -487,6 +487,14 @@ loops remain outside this explicit M1 syntax.
 `END SELect`. Ranges are inclusive. QL/32 currently compares singleton values
 with exact binary64 equality, a QL/32-specific choice; historical
 SuperBASIC's floating-point match behavior has not been established here.
+`SELect ON` also accepts a string selector (QL/32-specific). Each arm then
+holds strings: `= "UP"`, `= "A" TO "F"`, or a list mixing both. Matching is
+byte-wise and case-sensitive with no implicit case folding (normalise with
+`UPPER$`/`LOWER$`); ranges compare in byte (UTF-8 code point) order. A single
+value containing `*` (any run) or `?` (any one byte) is a case-sensitive
+pattern; to match a literal `*` or `?` write it as a range (`= "*" TO "*"`).
+Arms are tried in order and the first match wins, so list exact values before
+broader patterns. A selector/arm type mismatch raises a runtime error.
 Only the block form is implemented; inline `SELect` is deferred. Optional
 loop identifiers and historical ROM-specific quirks are deferred where they
 do not fit this portable, explicit M1 contract.
@@ -559,6 +567,17 @@ folds ASCII letter case and compares non-ASCII UTF-8 bytes exactly. These
 functions are QL/32-specific adaptations of the SuperBASIC and OPL interfaces;
 their character-code semantics do not claim compatibility with historical
 8-bit character sets.
+`INSTR(haystack$, needle$[, start])` returns the one-based code-point
+position of the first case-sensitive match at or after code point `start`
+(default 1), or 0 if absent. `start` must be an integer >= 1 (otherwise a
+runtime error); a `start` beyond one past the end returns 0, and an empty
+needle returns `start` when `start` is within one past the end. `LOC` is the
+case-insensitive form. `MIN(a, b)` and `MAX(a, b)` return the smaller/larger
+number; `CLAMP(v, lo, hi)` limits `v` to `lo..hi` (`lo > hi` is a runtime
+error). `TICKS()` (alias `TIMER()`) returns monotonic milliseconds since boot
+from a 64-bit counter, so it never wraps at 2^32 ms (~49 days); a BASIC number
+is a binary64 double, exact for integers up to 2^53 ms (~285,000 years).
+Large round values print in shortest form (for example `5e+09`).
 `UPPER$(string$)` and `LOWER$(string$)` change ASCII letters and leave all
 other UTF-8 bytes unchanged. `STR$(number)` returns the same compact numeric
 format used by `PRINT`; it accepts finite numeric values only. These are
@@ -778,7 +797,14 @@ optional (default `"SQUARE"`): a case-insensitive string `"SQUARE"`, `"SINE"`,
 (falling), or a number `0..4` in that order. Negative, fractional, or
 out-of-range values raise a runtime error. `VOLUME level` sets the global output
 level for `BEEP` and `MUSIC` (integer `0..255`, default `128`; not per session,
-and not persistent across reboot). A tone from the session that owns the audio
+and not persistent across reboot). Playback readback (QL/32-specific)
+uses function syntax in expressions: `MUSIC STATE()` (0 stopped or finished,
+1 playing, 2 paused), `MUSIC POS()` and `MUSIC LEN()` (milliseconds; `LEN` is
+0 when the length is unknown, as for PT3, SQT and WAV), `MUSIC VOLUME()`
+(0..255) and `MUSIC TITLE$()` (song title from VTX/YM metadata, else empty).
+A program detects the end of a song by `MUSIC STATE() = 0`. Without a music
+service (Linux host) they raise the trappable "music service unavailable"
+error. A tone from the session that owns the audio
 output mixes with its `MUSIC`; another session gets `ResourceBusy`. Without an
 audio service (Linux host, boards lacking the `Audio` capability) both commands
 raise "audio service unavailable". These commands are QL/32-specific: the

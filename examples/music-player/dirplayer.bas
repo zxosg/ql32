@@ -2,6 +2,7 @@ REM QL/32 directory music player: directory channel, GCOPY scrolling, INKEY$.
 REM Up/Down/PgUp/PgDn/Home/End move, Enter plays or opens a folder,
 REM Backspace goes up, Space pause/resume, S stop, +/- or Left/Right volume,
 REM D drive, O toggles sorted/unsorted listing, Q or Esc quit.
+REM Songs auto-advance (MUSIC STATE() = 0); time comes from MUSIC POS()/LEN().
 REM See README.md and docs/notes/dirplayer-workarounds.md.
 DIM nm$(120)
 DIM root$(2)
@@ -34,8 +35,9 @@ REPeat main WHILE quit = 0
   k$ = INKEY$(250)
   IF k$ = "" THEN
     IF state = 1 THEN
-      ticks = ticks + 1
-      IF ticks MOD 4 = 0 THEN
+      IF MUSIC STATE() = 0 THEN
+        NextSong
+      ELSE
         DrawTime
       END IF
     END IF
@@ -102,7 +104,7 @@ DEFine PROCedure Redraw
   DrawStatus
 END DEFine Redraw
 
-DEFine PROCedure Clamp
+DEFine PROCedure FitView
   IF cur > total - 1 THEN
     cur = total - 1
   END IF
@@ -121,7 +123,7 @@ DEFine PROCedure Clamp
   IF cur >= top + rows THEN
     top = cur - rows + 1
   END IF
-END DEFine Clamp
+END DEFine FitView
 
 DEFine PROCedure ShowList
   LOCal i
@@ -163,13 +165,23 @@ DEFine PROCedure DrawRow(s)
   TEXT 2, y + 1, t$
 END DEFine DrawRow
 
+DEFine FuNction Mmss$(ms)
+  LOCal t
+  t = INT(ms / 1000)
+  RETurn STR$(INT(t / 60)) + ":" + RIGHT$("0" + STR$(t MOD 60), 2)
+END DEFine Mmss$
+
 DEFine PROCedure DrawTime
-  LOCal s
-  s = INT(ticks / 4)
+  LOCal t$, l
+  t$ = Mmss$(MUSIC POS())
+  l = MUSIC LEN()
+  IF l > 0 THEN
+    t$ = t$ + " / " + Mmss$(l)
+  END IF
   INK 0
   RECT 0, SY + 33, GW, 10, 1
   INK 7
-  TEXT 2, SY + 35, "Time ~" + STR$(INT(s / 60)) + ":" + RIGHT$("0" + STR$(s MOD 60), 2)
+  TEXT 2, SY + 35, "Time " + t$
 END DEFine DrawTime
 
 DEFine PROCedure DrawStatus
@@ -204,7 +216,7 @@ DEFine PROCedure MoveTo(n)
   old = cur
   cur = n
   d = top
-  Clamp
+  FitView
   IF top = d THEN
     DrawRow old - top
     DrawRow cur - top
@@ -258,58 +270,43 @@ DEFine PROCedure GoUp
 END DEFine GoUp
 
 DEFine PROCedure HandleKey(k$)
-  LOCal u$
-  u$ = UPPER$(k$)
   msg$ = hlp$
-  IF u$ = "UP" THEN
+  SELect ON UPPER$(k$)
+  = "UP"
     MoveTo cur - 1
-  END IF
-  IF u$ = "DOWN" THEN
+  = "DOWN"
     MoveTo cur + 1
-  END IF
-  IF u$ = "PGUP" THEN
+  = "PGUP"
     MoveTo cur - rows + 1
-  END IF
-  IF u$ = "PGDN" THEN
+  = "PGDN"
     MoveTo cur + rows - 1
-  END IF
-  IF u$ = "HOME" THEN
+  = "HOME"
     MoveTo 0
-  END IF
-  IF u$ = "END" THEN
+  = "END"
     MoveTo total - 1
-  END IF
-  IF u$ = "O" THEN
+  = "O"
     smode = 4 - smode
     LoadDir
     Redraw
-  END IF
-  IF u$ = "ENTER" THEN
+  = "ENTER"
     Enter
-  END IF
-  IF u$ = "BACKSPACE" THEN
+  = "BACKSPACE"
     GoUp
-  END IF
-  IF u$ = "+" OR u$ = "RIGHT" THEN
+  = "+", "RIGHT"
     SetVolume vol + 16
-  END IF
-  IF u$ = "-" OR u$ = "LEFT" THEN
+  = "-", "LEFT"
     SetVolume vol - 16
-  END IF
-  IF u$ = " " THEN
+  = " "
     TogglePause
-  END IF
-  IF u$ = "S" THEN
+  = "S"
     StopPlay
-  END IF
-  IF u$ = "D" THEN
+  = "D"
     path$ = root$(1 + (LEFT$(path$, 3) = "SDC"))
     LoadDir
     Redraw
-  END IF
-  IF u$ = "Q" OR u$ = "ESC" THEN
+  = "Q", "ESC"
     quit = 1
-  END IF
+  END SELect
 END DEFine HandleKey
 
 DEFine PROCedure SetVolume(v)
@@ -328,7 +325,7 @@ DEFine PROCedure PlayCur
   LOCal p$
   TRAP MUSIC STOP
   state = 0
-  ticks = 0
+  pidx = cur
   now$ = nm$(cur)
   p$ = path$ + now$
   play$ = p$
@@ -342,6 +339,10 @@ DEFine PROCedure PlayCur
   msg$ = hlp$
   IF ERR = 0 THEN
     state = 1
+    now$ = MUSIC TITLE$()
+    IF now$ = "" THEN
+      now$ = nm$(pidx)
+    END IF
     ShowList
   ELSE
     now$ = "-"
@@ -371,3 +372,20 @@ DEFine PROCedure StopPlay
   ShowList
   DrawStatus
 END DEFine StopPlay
+
+DEFine PROCedure NextSong
+  LOCal i
+  i = pidx + 1
+  IF path$ + nm$(pidx) <> play$ THEN
+    i = total
+  END IF
+  REPeat f WHILE i < total AND RIGHT$(nm$(i), 1) = "/"
+    i = i + 1
+  END REPeat f
+  IF i < total THEN
+    MoveTo i
+    PlayCur
+  ELSE
+    StopPlay
+  END IF
+END DEFine NextSong

@@ -491,6 +491,30 @@ runtime::MusicPlaybackState MusicService::state() const noexcept {
     return result;
 }
 
+std::uint64_t MusicService::positionMs() const noexcept {
+    impl_->lock();
+    const auto* song = impl_->mixer.source(music::Mixer::Music);
+    const std::uint64_t result = song ? song->positionMs() : 0;
+    impl_->unlock();
+    return result;
+}
+
+std::uint64_t MusicService::lengthMs() const noexcept {
+    impl_->lock();
+    const auto* song = impl_->mixer.source(music::Mixer::Music);
+    const std::uint64_t result = song ? song->lengthMs() : 0;
+    impl_->unlock();
+    return result;
+}
+
+std::string MusicService::title() const {
+    impl_->lock();
+    const auto* song = impl_->mixer.source(music::Mixer::Music);
+    std::string result = song ? song->title() : std::string{};
+    impl_->unlock();
+    return result;
+}
+
 void MusicService::stopSession(runtime::MusicSessionId session) noexcept {
     impl_->lock();
     if (impl_->owner == session) {

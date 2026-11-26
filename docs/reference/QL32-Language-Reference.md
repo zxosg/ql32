@@ -187,7 +187,7 @@ limits and board pin ownership.
 | `REPeat` | `REPeat name[: statements]` or `REPeat name ... END REPeat name` | Starts an indefinite named loop. | `REPeat again: PRINT "tick"` |
 | `END REPeat` | `END REPeat name` | Closes a block repeat loop and returns to its start. | `END REPeat again` |
 | `EXIT` | `EXIT name` | Leaves the named `FOR` or `REPeat` loop. | `IF done% THEN EXIT work` |
-| `SELect` | `SELect ON expression ... END SELect` | Starts a numeric multi-way selection block. | `SELect ON choice%`<br>`= 1: PRINT "one"`<br>`END SELect` |
+| `SELect` | `SELect ON expression ... END SELect` | Starts a multi-way selection block on a number or string. String arms (`= "UP"`, `= "A" TO "F"`, `= "F*"`) are case-sensitive; `*`/`?` make a single value a pattern. | `SELect ON key$`<br>`= "UP": PRINT "up"`<br>`END SELect` |
 | `ON` | `SELect ON expression` | Introduces the value tested by `SELect`. | `SELect ON mode%` |
 | `REMAINDER` | `= REMAINDER` | Selects the final `SELect` arm when no prior arm matches. | `= REMAINDER: PRINT "other"` |
 | `END SELECT` | `END SELECT` | Closes a `SELect ON` block. Singleton arms use `= value`; ranges use `= first TO last`. | `= 2 TO 4: PRINT "range"` |
@@ -346,6 +346,12 @@ These QL/32-specific operations use session-owned devices and buffers `[HARDWARE
 | `CODE` | `CODE(string$)` | Unicode code point of the first character, or zero for empty string. | `c% = CODE("A")` |
 | `ASC` | `ASC(string$)` | Alias for `CODE`. | `c% = ASC("A")` |
 | `CHR$` | `CHR$(code)` | String containing one Unicode code point. | `letter$ = CHR$(65)` |
+| `INSTR` | `INSTR(haystack$, needle$[, start])` | Case-sensitive one-based position of a substring at or after `start`, or zero when absent. | `p% = INSTR(path$, ".", 3)` |
+| `MIN` | `MIN(a, b)` | Smaller of two numbers. | `n = MIN(x, 10)` |
+| `MAX` | `MAX(a, b)` | Larger of two numbers. | `n = MAX(x, 0)` |
+| `CLAMP` | `CLAMP(value, low, high)` | Limits a number to the inclusive range. | `v = CLAMP(v, 0, 255)` |
+| `TICKS` | `TICKS()` / `TIMER()` | Monotonic milliseconds since boot (64-bit counter; exact to 2^53). | `t0 = TICKS()` |
+| `MUSIC` readback | `MUSIC STATE()`, `MUSIC POS()`, `MUSIC LEN()`, `MUSIC VOLUME()`, `MUSIC TITLE$()` | State (0 stopped or ended, 1 playing, 2 paused), position and length in ms (length 0 if unknown), volume 0..255, song title. Raise "music service unavailable" without audio. `[AUDIO]` | `IF MUSIC STATE() = 0 THEN next` |
 | `LOC` | `LOC(haystack$, needle$)` | One-based position of a substring, or zero when absent. | `p% = LOC(text$, "QL")` |
 | `UPPER$` | `UPPER$(string$)` | Converts ASCII letters to uppercase. | `answer$ = UPPER$(name$)` |
 | `LOWER$` | `LOWER$(string$)` | Converts ASCII letters to lowercase. | `key$ = LOWER$(name$)` |

@@ -19,6 +19,7 @@ public:
     bool playing() const noexcept { return playing_; }
     bool paused() const noexcept { return paused_; }
     std::size_t framePosition() const noexcept { return framePosition_; }
+    std::size_t frameCount() const noexcept { return song_.frameCount(); }
     const VtxMetadata& metadata() const noexcept { return song_.metadata(); }
     std::shared_ptr<AudioPrefetcher> prefetcher() const { return song_.prefetcher(); }
 

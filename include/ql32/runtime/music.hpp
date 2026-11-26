@@ -28,6 +28,10 @@ public:
     virtual void pause(MusicSessionId session) = 0;
     virtual void resume(MusicSessionId session) = 0;
     virtual MusicPlaybackState state() const noexcept = 0;
+    // Readback for the current song; 0 / empty when stopped or unknown.
+    virtual std::uint64_t positionMs() const noexcept { return 0; }
+    virtual std::uint64_t lengthMs() const noexcept { return 0; }
+    virtual std::string title() const { return {}; }
     virtual void stopSession(MusicSessionId session) noexcept = 0;
 };
 

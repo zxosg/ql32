@@ -1,6 +1,7 @@
 #include "ql32/interpreter.hpp"
 #include "../language/bytecode.hpp"
 #include "execution_state.hpp"
+#include "ql32/runtime/path_glob.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1992,6 +1993,76 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         cpuFrequency_->currentFrequencyMHz() : 0));
                     break;
                 }
+                if (instruction.name == "TICKS" || instruction.name == "TIMER") {
+                    const std::uint64_t ms = clock_ ? clock_->monotonicMilliseconds() :
+                        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()).count());
+                    pushValue(static_cast<double>(ms));
+                    break;
+                }
+                if (instruction.name == "MIN" || instruction.name == "MAX") {
+                    const auto* a = std::get_if<double>(&arguments[0]);
+                    const auto* b = std::get_if<double>(&arguments[1]);
+                    if (!a || !b) runtimeError(instruction, "numeric value required");
+                    pushValue(instruction.name == "MIN" ? std::min(*a, *b) : std::max(*a, *b));
+                    break;
+                }
+                if (instruction.name == "CLAMP") {
+                    const auto* v = std::get_if<double>(&arguments[0]);
+                    const auto* lo = std::get_if<double>(&arguments[1]);
+                    const auto* hi = std::get_if<double>(&arguments[2]);
+                    if (!v || !lo || !hi) runtimeError(instruction, "numeric value required");
+                    if (*lo > *hi) runtimeError(instruction, "CLAMP low bound exceeds high bound");
+                    pushValue(std::min(std::max(*v, *lo), *hi));
+                    break;
+                }
+                if (instruction.name == "INSTR") {
+                    const auto* haystack = std::get_if<std::string>(&arguments[0]);
+                    const auto* needle = std::get_if<std::string>(&arguments[1]);
+                    if (!haystack || !needle) runtimeError(instruction, "string value required for INSTR");
+                    double first = 1;
+                    if (arguments.size() == 3) {
+                        const auto* number = std::get_if<double>(&arguments[2]);
+                        if (!number) runtimeError(instruction, "numeric start required for INSTR");
+                        first = *number;
+                        if (!std::isfinite(first) || std::trunc(first) != first || first < 1.0)
+                            runtimeError(instruction, "INSTR start must be a positive integer");
+                    }
+                    std::size_t offset = 0;
+                    for (double seen = 1; seen < first && offset < haystack->size(); ++seen) {
+                        ++offset;
+                        while (offset < haystack->size() &&
+                               (static_cast<unsigned char>((*haystack)[offset]) & 0xc0) == 0x80)
+                            ++offset;
+                    }
+                    const std::size_t characters = utf8Length(*haystack);
+                    if (first > static_cast<double>(characters) + 1.0) {
+                        pushValue(0.0);
+                        break;
+                    }
+                    const std::size_t at = haystack->find(*needle, offset);
+                    std::size_t position = 0;
+                    if (at != std::string::npos) {
+                        position = 1;
+                        for (std::size_t i = 0; i < at; ++i)
+                            if ((static_cast<unsigned char>((*haystack)[i]) & 0xc0) != 0x80) ++position;
+                    }
+                    pushValue(static_cast<double>(position));
+                    break;
+                }
+                if (instruction.name.str().rfind("MUSIC.", 0) == 0) {
+                    if (!music_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "music service unavailable");
+                    const char kind = instruction.name.str()[6];
+                    if (instruction.name == "MUSIC.TITLE$") pushValue(music_->title());
+                    else if (instruction.name == "MUSIC.STATE") pushValue(static_cast<double>(
+                        static_cast<int>(music_->state())));
+                    else if (kind == 'P') pushValue(static_cast<double>(music_->positionMs()));
+                    else if (kind == 'L') pushValue(static_cast<double>(music_->lengthMs()));
+                    else pushValue(static_cast<double>(music_->volume()));
+                    break;
+                }
                 if (instruction.name == "GETCHANNEL") {
                     const auto integerArgument = [&](std::size_t index, double maximum,
                                                      const char* message) {
@@ -3527,8 +3598,12 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             break;
         }
         case Op::SelectBegin: {
-            const double value = numeric(pop(), instruction);
-            selectStates.push_back({value, false});
+            Value selected = pop();
+            if (auto* text = std::get_if<std::string>(&selected)) {
+                selectStates.push_back({0.0, false, true, std::move(*text)});
+            } else {
+                selectStates.push_back({numeric(selected, instruction), false});
+            }
             break;
         }
         case Op::SelectMatch: {
@@ -3536,12 +3611,26 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             bool matched = false;
             for (std::size_t i = instruction.extra().selectItems.size(); i-- > 0;) {
                 const SelectItemSpec& item = instruction.extra().selectItems[i];
-                double end = 0;
-                if (item.hasEnd) end = numeric(pop(), instruction);
-                const double start = numeric(pop(), instruction);
-                const double selected = selectStates.back().value;
-                const bool thisMatch = item.hasEnd ? (selected >= start && selected <= end)
-                                                   : (selected == start);
+                const SelectState& active = selectStates.back();
+                bool thisMatch = false;
+                if (active.isText) {
+                    Value endValue;
+                    if (item.hasEnd) endValue = pop();
+                    const Value startValue = pop();
+                    const auto* start = std::get_if<std::string>(&startValue);
+                    const auto* end = std::get_if<std::string>(&endValue);
+                    if (!start || (item.hasEnd && !end))
+                        runtimeError(instruction, "SELECT arm must be a string to match a string selector");
+                    thisMatch = item.hasEnd ? (active.text >= *start && active.text <= *end)
+                        : runtime::hasWildcard(*start) ? runtime::wildcardMatch(*start, active.text, true)
+                                                       : (active.text == *start);
+                } else {
+                    double end = 0;
+                    if (item.hasEnd) end = numeric(pop(), instruction);
+                    const double start = numeric(pop(), instruction);
+                    thisMatch = item.hasEnd ? (active.value >= start && active.value <= end)
+                                            : (active.value == start);
+                }
                 matched = matched || thisMatch;
             }
             if (matched) selectStates.back().matched = true;
