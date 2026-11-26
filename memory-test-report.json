@@ -1,8 +1,8 @@
 {
-  "schema": "ql32-memory-test-v1",
+  "schema": "ql32-memory-test-v2",
   "board_profile": "esp32_2432s028",
-  "firmware_revision": "de88fe5-dirty",
-  "started_at": "2026-11-04T23:18:26.262632+00:00",
+  "firmware_revision": "568398d-dirty",
+  "started_at": "2026-11-26T20:08:09.573138+00:00",
   "cycles": 5,
   "metrics": [
     "FREE(0): total",
@@ -17,174 +17,249 @@
           "repetition": 1,
           "task_id": 2,
           "before": {
-            "total": 158700,
-            "largest": 51188,
-            "blocks": 22
+            "total": 137184,
+            "largest": 94196,
+            "blocks": 25
           },
           "active_report": {
-            "total": 138048,
-            "largest": 51188,
-            "blocks": 20
+            "total": 130432,
+            "largest": 94196,
+            "blocks": 24
           },
           "released_report": null,
           "during": {
-            "total": 133816,
-            "largest": 51188,
-            "blocks": 19
+            "total": 127748,
+            "largest": 94196,
+            "blocks": 22
           },
-          "after": {
-            "total": 158288,
-            "largest": 51188,
+          "after_cancel": {
+            "total": 137120,
+            "largest": 94196,
+            "blocks": 25
+          },
+          "after_reap": {
+            "total": 137136,
+            "largest": 94196,
             "blocks": 24
           },
-          "active_total_drop": 20652,
+          "after": {
+            "total": 137140,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 16,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 6752,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -464,
+            "total": -164,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 2\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 2,
           "task_id": 3,
           "before": {
-            "total": 158284,
-            "largest": 51188,
+            "total": 137136,
+            "largest": 94196,
             "blocks": 24
           },
           "active_report": {
-            "total": 137752,
-            "largest": 51188,
-            "blocks": 20
+            "total": 130424,
+            "largest": 94196,
+            "blocks": 22
           },
           "released_report": null,
           "during": {
-            "total": 133516,
-            "largest": 51188,
-            "blocks": 19
+            "total": 127728,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 137120,
+            "largest": 94196,
+            "blocks": 25
+          },
+          "after_reap": {
+            "total": 137136,
+            "largest": 94196,
+            "blocks": 24
           },
           "after": {
-            "total": 158040,
-            "largest": 51188,
-            "blocks": 21
+            "total": 137140,
+            "largest": 94196,
+            "blocks": 23
           },
-          "active_total_drop": 20532,
+          "task_record_recovery_bytes": 16,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 6712,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -712,
+            "total": -164,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 3\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 3,
           "task_id": 4,
           "before": {
-            "total": 158040,
-            "largest": 51188,
-            "blocks": 21
+            "total": 137136,
+            "largest": 94196,
+            "blocks": 24
           },
           "active_report": {
-            "total": 137540,
-            "largest": 51188,
-            "blocks": 18
+            "total": 130424,
+            "largest": 94196,
+            "blocks": 22
           },
           "released_report": null,
           "during": {
-            "total": 133316,
-            "largest": 51188,
-            "blocks": 19
-          },
-          "after": {
-            "total": 157852,
-            "largest": 51188,
+            "total": 127728,
+            "largest": 94196,
             "blocks": 23
           },
-          "active_total_drop": 20500,
+          "after_cancel": {
+            "total": 137120,
+            "largest": 94196,
+            "blocks": 25
+          },
+          "after_reap": {
+            "total": 137136,
+            "largest": 94196,
+            "blocks": 24
+          },
+          "after": {
+            "total": 137140,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 16,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 6712,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -900,
+            "total": -164,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 4\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 4,
           "task_id": 5,
           "before": {
-            "total": 157848,
-            "largest": 51188,
-            "blocks": 23
+            "total": 137136,
+            "largest": 94196,
+            "blocks": 24
           },
           "active_report": {
-            "total": 137340,
-            "largest": 51188,
-            "blocks": 19
+            "total": 130424,
+            "largest": 94196,
+            "blocks": 22
           },
           "released_report": null,
           "during": {
-            "total": 133116,
-            "largest": 51188,
-            "blocks": 20
-          },
-          "after": {
-            "total": 157104,
-            "largest": 51188,
+            "total": 127728,
+            "largest": 94196,
             "blocks": 23
           },
-          "active_total_drop": 20508,
+          "after_cancel": {
+            "total": 137120,
+            "largest": 94196,
+            "blocks": 25
+          },
+          "after_reap": {
+            "total": 137136,
+            "largest": 94196,
+            "blocks": 24
+          },
+          "after": {
+            "total": 137140,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "task_record_recovery_bytes": 16,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 6712,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -1648,
+            "total": -164,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 5\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 5,
           "task_id": 6,
           "before": {
-            "total": 157100,
-            "largest": 51188,
-            "blocks": 23
+            "total": 137136,
+            "largest": 94196,
+            "blocks": 24
           },
           "active_report": {
-            "total": 136584,
-            "largest": 51188,
+            "total": 130424,
+            "largest": 94196,
             "blocks": 22
           },
           "released_report": null,
           "during": {
-            "total": 132360,
-            "largest": 51188,
+            "total": 127728,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 137120,
+            "largest": 94196,
+            "blocks": 25
+          },
+          "after_reap": {
+            "total": 137136,
+            "largest": 94196,
             "blocks": 24
           },
           "after": {
-            "total": 156892,
-            "largest": 51188,
-            "blocks": 27
+            "total": 137140,
+            "largest": 94196,
+            "blocks": 23
           },
-          "active_total_drop": 20516,
+          "task_record_recovery_bytes": 16,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 6712,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -1860,
+            "total": -164,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 6\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         }
       ],
-      "post_run_total_drift": -1396
+      "post_run_total_drift": 0
     },
     {
       "name": "channel",
@@ -193,194 +268,269 @@
           "repetition": 1,
           "task_id": 7,
           "before": {
-            "total": 156876,
-            "largest": 51188,
-            "blocks": 25
-          },
-          "active_report": {
-            "total": 145460,
-            "largest": 51188,
-            "blocks": 21
-          },
-          "released_report": {
-            "total": 149968,
-            "largest": 51188,
-            "blocks": 23
-          },
-          "during": {
-            "total": 145628,
-            "largest": 51188,
-            "blocks": 23
-          },
-          "after": {
-            "total": 157124,
-            "largest": 51188,
+            "total": 137132,
+            "largest": 94196,
             "blocks": 24
           },
-          "active_total_drop": 11416,
+          "active_report": {
+            "total": 132636,
+            "largest": 94196,
+            "blocks": 22
+          },
+          "released_report": {
+            "total": 133140,
+            "largest": 94196,
+            "blocks": 19
+          },
+          "during": {
+            "total": 130788,
+            "largest": 94196,
+            "blocks": 20
+          },
+          "after_cancel": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
+          },
+          "after": {
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 22
+          },
+          "task_record_recovery_bytes": 8,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4496,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -1628,
+            "total": -352,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 7\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 2,
           "task_id": 8,
           "before": {
-            "total": 157132,
-            "largest": 51188,
-            "blocks": 26
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
           "active_report": {
-            "total": 145752,
-            "largest": 51188,
-            "blocks": 26
+            "total": 132536,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 150260,
-            "largest": 51188,
-            "blocks": 26
+            "total": 133136,
+            "largest": 94196,
+            "blocks": 24
           },
           "during": {
-            "total": 145924,
-            "largest": 51188,
-            "blocks": 31
+            "total": 130780,
+            "largest": 94196,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
           "after": {
-            "total": 156928,
-            "largest": 51188,
-            "blocks": 28
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 22
           },
-          "active_total_drop": 11380,
+          "task_record_recovery_bytes": 8,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4428,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -1824,
+            "total": -352,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 8\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 3,
           "task_id": 9,
           "before": {
-            "total": 156916,
-            "largest": 51188,
-            "blocks": 28
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
           "active_report": {
-            "total": 149484,
-            "largest": 51188,
-            "blocks": 27
+            "total": 132536,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 150012,
-            "largest": 51188,
-            "blocks": 25
+            "total": 133136,
+            "largest": 94196,
+            "blocks": 24
           },
           "during": {
-            "total": 145668,
-            "largest": 51188,
-            "blocks": 25
+            "total": 130780,
+            "largest": 94196,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
           "after": {
-            "total": 156692,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 22
           },
-          "active_total_drop": 7432,
+          "task_record_recovery_bytes": 8,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4428,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -2060,
+            "total": -352,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 9\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 4,
           "task_id": 10,
           "before": {
-            "total": 156684,
-            "largest": 51188,
-            "blocks": 29
-          },
-          "active_report": {
-            "total": 145288,
-            "largest": 51188,
+            "total": 136964,
+            "largest": 94196,
             "blocks": 24
           },
-          "released_report": {
-            "total": 149784,
-            "largest": 51188,
+          "active_report": {
+            "total": 132536,
+            "largest": 94196,
             "blocks": 25
           },
+          "released_report": {
+            "total": 133136,
+            "largest": 94196,
+            "blocks": 24
+          },
           "during": {
-            "total": 145452,
-            "largest": 51188,
-            "blocks": 26
+            "total": 130780,
+            "largest": 94196,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
           "after": {
-            "total": 155956,
-            "largest": 51188,
-            "blocks": 28
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 22
           },
-          "active_total_drop": 11396,
+          "task_record_recovery_bytes": 8,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4428,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -2796,
+            "total": -352,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 10\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 5,
           "task_id": 11,
           "before": {
-            "total": 155952,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
           "active_report": {
-            "total": 144576,
-            "largest": 51188,
-            "blocks": 28
+            "total": 132536,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 149072,
-            "largest": 51188,
-            "blocks": 26
+            "total": 133136,
+            "largest": 94196,
+            "blocks": 24
           },
           "during": {
-            "total": 144740,
-            "largest": 51188,
-            "blocks": 27
+            "total": 130780,
+            "largest": 94196,
+            "blocks": 22
+          },
+          "after_cancel": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
           "after": {
-            "total": 155708,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 22
           },
-          "active_total_drop": 11376,
+          "task_record_recovery_bytes": 8,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4428,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -3044,
+            "total": -352,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 11\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         }
       ],
-      "post_run_total_drift": -1416
+      "post_run_total_drift": 0
     },
     {
       "name": "graphics",
@@ -389,194 +539,269 @@
           "repetition": 1,
           "task_id": 12,
           "before": {
-            "total": 155704,
-            "largest": 51188,
-            "blocks": 28
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "active_report": {
-            "total": 147472,
-            "largest": 51188,
-            "blocks": 28
+            "total": 122560,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 147576,
-            "largest": 51188,
-            "blocks": 30
+            "total": 132432,
+            "largest": 94196,
+            "blocks": 25
           },
           "during": {
-            "total": 143244,
-            "largest": 51188,
-            "blocks": 29
+            "total": 130072,
+            "largest": 94196,
+            "blocks": 26
+          },
+          "after_cancel": {
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "after": {
-            "total": 156032,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
-          "active_total_drop": 8232,
+          "task_record_recovery_bytes": 4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 14396,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -2720,
+            "total": -340,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 12\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 2,
           "task_id": 13,
           "before": {
-            "total": 156032,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "active_report": {
-            "total": 147764,
-            "largest": 51188,
-            "blocks": 26
+            "total": 122560,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 147872,
-            "largest": 51188,
-            "blocks": 27
+            "total": 132432,
+            "largest": 94196,
+            "blocks": 25
           },
           "during": {
-            "total": 143544,
-            "largest": 51188,
+            "total": 130072,
+            "largest": 94196,
             "blocks": 26
           },
-          "after": {
-            "total": 155812,
-            "largest": 51188,
-            "blocks": 27
+          "after_cancel": {
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 23
           },
-          "active_total_drop": 8268,
+          "after_reap": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
+          },
+          "task_record_recovery_bytes": 4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 14396,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -2940,
+            "total": -340,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 13\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 3,
           "task_id": 14,
           "before": {
-            "total": 155812,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "active_report": {
-            "total": 147548,
-            "largest": 51188,
+            "total": 122560,
+            "largest": 94196,
             "blocks": 25
           },
           "released_report": {
-            "total": 147664,
-            "largest": 51188,
-            "blocks": 27
+            "total": 132432,
+            "largest": 94196,
+            "blocks": 25
           },
           "during": {
-            "total": 143328,
-            "largest": 51188,
+            "total": 130072,
+            "largest": 94196,
             "blocks": 26
+          },
+          "after_cancel": {
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "after": {
-            "total": 155592,
-            "largest": 51188,
-            "blocks": 26
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
-          "active_total_drop": 8264,
+          "task_record_recovery_bytes": 4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 14396,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -3160,
+            "total": -340,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 14\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 4,
           "task_id": 15,
           "before": {
-            "total": 155592,
-            "largest": 51188,
-            "blocks": 26
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "active_report": {
-            "total": 147352,
-            "largest": 51188,
-            "blocks": 27
+            "total": 122560,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 147456,
-            "largest": 51188,
-            "blocks": 28
+            "total": 132432,
+            "largest": 94196,
+            "blocks": 25
           },
           "during": {
-            "total": 143136,
-            "largest": 51188,
-            "blocks": 28
+            "total": 130072,
+            "largest": 94196,
+            "blocks": 26
+          },
+          "after_cancel": {
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "after": {
-            "total": 155392,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
-          "active_total_drop": 8240,
+          "task_record_recovery_bytes": 4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 14396,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -3360,
+            "total": -340,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 15\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 5,
           "task_id": 16,
           "before": {
-            "total": 155392,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "active_report": {
-            "total": 147144,
-            "largest": 51188,
-            "blocks": 31
+            "total": 122560,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 147240,
-            "largest": 51188,
-            "blocks": 31
+            "total": 132432,
+            "largest": 94196,
+            "blocks": 25
           },
           "during": {
-            "total": 142904,
-            "largest": 51188,
-            "blocks": 30
+            "total": 130072,
+            "largest": 94196,
+            "blocks": 26
+          },
+          "after_cancel": {
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "after": {
-            "total": 154656,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
-          "active_total_drop": 8248,
+          "task_record_recovery_bytes": 4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 14396,
           "release_recovered": true,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -4096,
+            "total": -340,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 16\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         }
       ],
-      "post_run_total_drift": -1376
+      "post_run_total_drift": 0
     },
     {
       "name": "debugger",
@@ -585,174 +810,249 @@
           "repetition": 1,
           "task_id": 17,
           "before": {
-            "total": 154656,
-            "largest": 51188,
-            "blocks": 27
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "active_report": {
-            "total": 142396,
-            "largest": 51188,
+            "total": 132168,
+            "largest": 94196,
             "blocks": 24
           },
           "released_report": null,
           "during": {
-            "total": 138700,
-            "largest": 51188,
-            "blocks": 25
+            "total": 129664,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 136952,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_reap": {
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "after": {
-            "total": 154908,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 24
           },
-          "active_total_drop": 12260,
+          "task_record_recovery_bytes": 4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4788,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -3844,
+            "total": -340,
             "largest": 0
           },
-          "debugger_output": "DEBUG 17\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+          "debugger_output": "DEBUG 17\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> DEBUG CONTINUE\r\n> ",
+          "cleanup_output": "KILL 17\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 2,
           "task_id": 18,
           "before": {
-            "total": 154908,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136956,
+            "largest": 94196,
+            "blocks": 23
           },
           "active_report": {
-            "total": 142708,
-            "largest": 51188,
-            "blocks": 26
+            "total": 132168,
+            "largest": 94196,
+            "blocks": 24
           },
           "released_report": null,
           "during": {
-            "total": 138468,
-            "largest": 51188,
-            "blocks": 25
+            "total": 129652,
+            "largest": 94196,
+            "blocks": 28
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "after": {
-            "total": 154660,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 12200,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4788,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -4092,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": "DEBUG 18\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+          "debugger_output": "DEBUG 18\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> DEBUG CONTINUE\r\n> ",
+          "cleanup_output": "KILL 18\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 3,
           "task_id": 19,
           "before": {
-            "total": 154660,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 142464,
-            "largest": 51188,
+            "total": 132164,
+            "largest": 94196,
             "blocks": 26
           },
           "released_report": null,
           "during": {
-            "total": 138252,
-            "largest": 51188,
-            "blocks": 25
+            "total": 129656,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "after": {
-            "total": 153944,
-            "largest": 51188,
-            "blocks": 30
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 12196,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4796,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -4808,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": "DEBUG 19\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+          "debugger_output": "DEBUG 19\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> DEBUG CONTINUE\r\n> ",
+          "cleanup_output": "KILL 19\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 4,
           "task_id": 20,
           "before": {
-            "total": 153944,
-            "largest": 51188,
-            "blocks": 30
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 141700,
-            "largest": 51188,
-            "blocks": 25
+            "total": 132164,
+            "largest": 94196,
+            "blocks": 26
           },
           "released_report": null,
           "during": {
-            "total": 137984,
-            "largest": 51188,
-            "blocks": 28
+            "total": 129656,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "after": {
-            "total": 154244,
-            "largest": 51188,
-            "blocks": 31
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 12244,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4796,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -4508,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": "DEBUG 20\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+          "debugger_output": "DEBUG 20\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> DEBUG CONTINUE\r\n> ",
+          "cleanup_output": "KILL 20\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 5,
           "task_id": 21,
           "before": {
-            "total": 154240,
-            "largest": 51188,
-            "blocks": 31
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 142048,
-            "largest": 51188,
+            "total": 132164,
+            "largest": 94196,
             "blocks": 25
           },
           "released_report": null,
           "during": {
-            "total": 137820,
-            "largest": 51188,
-            "blocks": 26
+            "total": 129656,
+            "largest": 94196,
+            "blocks": 21
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "after": {
-            "total": 154016,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 12192,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 4796,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -4736,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": "DEBUG 21\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> CONTINUE\r\n> "
+          "debugger_output": "DEBUG 21\r\n> WATCH n\r\n> STATS\r\n> STEP\r\n> WHERE\r\n> DEBUG CONTINUE\r\n> ",
+          "cleanup_output": "KILL 21\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         }
       ],
-      "post_run_total_drift": -892
+      "post_run_total_drift": 8
     },
     {
       "name": "combined",
@@ -761,194 +1061,269 @@
           "repetition": 1,
           "task_id": 22,
           "before": {
-            "total": 154012,
-            "largest": 51188,
-            "blocks": 29
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 125092,
-            "largest": 51188,
-            "blocks": 24
+            "total": 116452,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 125724,
-            "largest": 51188,
-            "blocks": 24
-          },
-          "during": {
-            "total": 121476,
-            "largest": 51188,
+            "total": 126936,
+            "largest": 94196,
             "blocks": 26
           },
-          "after": {
-            "total": 153808,
-            "largest": 51188,
-            "blocks": 33
+          "during": {
+            "total": 124268,
+            "largest": 94196,
+            "blocks": 23
           },
-          "active_total_drop": 28920,
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after": {
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 20508,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -4944,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 22\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 2,
           "task_id": 23,
           "before": {
-            "total": 153792,
-            "largest": 51188,
-            "blocks": 32
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 120876,
-            "largest": 51188,
-            "blocks": 24
+            "total": 116452,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 125476,
-            "largest": 51188,
+            "total": 126936,
+            "largest": 94196,
             "blocks": 26
           },
           "during": {
-            "total": 121244,
-            "largest": 51188,
+            "total": 124268,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
             "blocks": 27
           },
           "after": {
-            "total": 153588,
-            "largest": 51188,
-            "blocks": 32
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 32916,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 20508,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -5164,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 23\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 3,
           "task_id": 24,
           "before": {
-            "total": 153580,
-            "largest": 51188,
-            "blocks": 32
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 120700,
-            "largest": 51188,
-            "blocks": 28
+            "total": 116452,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 125292,
-            "largest": 51188,
-            "blocks": 30
+            "total": 126936,
+            "largest": 94196,
+            "blocks": 26
           },
           "during": {
-            "total": 121060,
-            "largest": 51188,
-            "blocks": 31
+            "total": 124268,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "after": {
-            "total": 152868,
-            "largest": 51188,
-            "blocks": 36
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 32880,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 20508,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -5884,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 24\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 4,
           "task_id": 25,
           "before": {
-            "total": 152860,
-            "largest": 51188,
-            "blocks": 36
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 123892,
-            "largest": 51188,
-            "blocks": 31
+            "total": 116452,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 124528,
-            "largest": 51188,
-            "blocks": 31
+            "total": 126936,
+            "largest": 94196,
+            "blocks": 26
           },
           "during": {
-            "total": 120292,
-            "largest": 51188,
-            "blocks": 33
+            "total": 124268,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "after": {
-            "total": 152640,
-            "largest": 51188,
-            "blocks": 34
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 28968,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 20508,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -6112,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 25\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         },
         {
           "repetition": 5,
           "task_id": 26,
           "before": {
-            "total": 152632,
-            "largest": 51188,
-            "blocks": 34
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "active_report": {
-            "total": 119716,
-            "largest": 51188,
-            "blocks": 28
+            "total": 116452,
+            "largest": 94196,
+            "blocks": 25
           },
           "released_report": {
-            "total": 124308,
-            "largest": 51188,
-            "blocks": 28
+            "total": 126936,
+            "largest": 94196,
+            "blocks": 26
           },
           "during": {
-            "total": 120060,
-            "largest": 51188,
-            "blocks": 28
+            "total": 124268,
+            "largest": 94196,
+            "blocks": 23
+          },
+          "after_cancel": {
+            "total": 136964,
+            "largest": 94196,
+            "blocks": 27
+          },
+          "after_reap": {
+            "total": 136960,
+            "largest": 94196,
+            "blocks": 27
           },
           "after": {
-            "total": 152956,
-            "largest": 51188,
-            "blocks": 35
+            "total": 136972,
+            "largest": 94196,
+            "blocks": 27
           },
-          "active_total_drop": 32916,
+          "task_record_recovery_bytes": -4,
+          "cancelled_result_status": "REAPED",
+          "task_count_after_cancel": 1,
+          "task_count_after_reap": 1,
+          "active_total_drop": 20508,
           "release_recovered": null,
           "recovered_total": true,
           "recovered_largest_block": true,
           "idle_baseline_delta": {
-            "total": -5796,
+            "total": -332,
             "largest": 0
           },
-          "debugger_output": null
+          "debugger_output": null,
+          "cleanup_output": "KILL 26\r\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> TASKS #serial_probe\r\nSLICE 128 instructions\n1 SUPERVISOR P=4 RUNNABLE\n> PRINT #serial_probe,\"TASKCOUNT|\";GETTASK(0)\r\nTASKCOUNT|1\n> "
         }
       ],
-      "post_run_total_drift": -852
+      "post_run_total_drift": 0
     }
   ],
   "warnings": [],
@@ -956,52 +1331,52 @@
   "baseline": {
     "warmup": [
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       },
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       },
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       }
     ],
     "samples": [
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       },
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       },
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       },
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       },
       {
-        "total": 158752,
-        "largest": 51188,
-        "blocks": 21
+        "total": 137304,
+        "largest": 94196,
+        "blocks": 22
       }
     ],
     "median": {
-      "total": 158752,
-      "largest": 51188,
-      "blocks": 21
+      "total": 137304,
+      "largest": 94196,
+      "blocks": 22
     },
     "idle_spread_bytes": 0,
     "recovery_tolerance_bytes": 2048
@@ -1009,55 +1384,55 @@
   "restart_check": {
     "warmup": [
       {
-        "total": 158700,
-        "largest": 51188,
-        "blocks": 22
+        "total": 137248,
+        "largest": 94196,
+        "blocks": 24
       },
       {
-        "total": 158700,
-        "largest": 51188,
-        "blocks": 22
+        "total": 137248,
+        "largest": 94196,
+        "blocks": 24
       },
       {
-        "total": 158700,
-        "largest": 51188,
-        "blocks": 22
+        "total": 137248,
+        "largest": 94196,
+        "blocks": 24
       }
     ],
     "samples": [
       {
-        "total": 158696,
-        "largest": 51188,
-        "blocks": 23
+        "total": 137176,
+        "largest": 94196,
+        "blocks": 26
       },
       {
-        "total": 158696,
-        "largest": 51188,
-        "blocks": 23
+        "total": 137176,
+        "largest": 94196,
+        "blocks": 26
       },
       {
-        "total": 158696,
-        "largest": 51188,
-        "blocks": 23
+        "total": 137176,
+        "largest": 94196,
+        "blocks": 26
       },
       {
-        "total": 158696,
-        "largest": 51188,
-        "blocks": 23
+        "total": 137176,
+        "largest": 94196,
+        "blocks": 26
       },
       {
-        "total": 158696,
-        "largest": 51188,
-        "blocks": 23
+        "total": 137176,
+        "largest": 94196,
+        "blocks": 26
       }
     ],
     "median": {
-      "total": 158696,
-      "largest": 51188,
-      "blocks": 23
+      "total": 137176,
+      "largest": 94196,
+      "blocks": 26
     },
     "recovered_total": true,
     "recovered_largest_block": true
   },
-  "finished_at": "2026-11-04T23:18:53.694110+00:00"
+  "finished_at": "2026-11-26T20:08:41.055793+00:00"
 }

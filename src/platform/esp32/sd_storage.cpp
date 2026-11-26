@@ -7,6 +7,8 @@
 #include <limits>
 #include <utility>
 
+#include <sys/stat.h>
+
 namespace ql32::platform::esp32 {
 namespace {
 
@@ -346,6 +348,12 @@ runtime::StorageSpace SdStorage::space(const std::string&) {
 bool SdStorage::exists(const std::string& path) {
     const std::string resolved = resolve(path, false);
     ensureAvailable();
+    // stat() avoids Arduino's exists(), which opens a FILE* and allocates a 4 KiB stdio buffer.
+    if (!mountPoint_.empty()) {
+        struct stat info;
+        const std::string full = mountPoint_ + (resolved.empty() || resolved.front() != '/' ? "/" : "") + resolved;
+        return ::stat(full.c_str(), &info) == 0;
+    }
     return filesystem_.exists(resolved.c_str());
 }
 

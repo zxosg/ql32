@@ -91,3 +91,24 @@ Format: wanted / limitation / did instead / suggested improvement.
 - CYD, 300 files on FFS: the sorted open is refused by the 256-entry budget, the
   app falls back to unsorted; z00m.vtx plays; HEAP before/after unchanged
   (idle 140.2 KB / 94.2 KB, app loaded 124.8 / 81.9 KB, after quit 111.2 / 69.6 KB).
+
+## P8 (ALLOCFAIL 4096 call site)
+
+- Debug aid: build with `-DQL32_ALLOC_TRACE` (e.g. `PLATFORMIO_BUILD_FLAGS`) to print the
+  task name and a backtrace on every failed allocation; decode with `addr2line`.
+- The 4 KiB failure is Arduino's `VFSFileImpl` calling `setvbuf` (4096 B stdio buffer,
+  caps 0x1800, task loopTask) while opening a file during play start; at that moment
+  the largest 8-bit block is ~3.3 KB (36 KB free). Two sites were found: `exists()`
+  (fixed: `SdStorage::exists` now uses `stat()` on the mount point, no FILE*) and the
+  open of the VTX/YM cache in `openCache`/`openYmCache`. The latter is a handled
+  fallback (cache treated as a miss, song is re-transcoded and plays; late=0, no
+  audible effect). Removing it needs the stdio buffer to be allocated before the
+  play-start buffers (open cache first); a pool cannot be used because the buffer is
+  allocated inside newlib.
+- Admission: host test `testAdmissionTracksInstructionCountAcrossProgramShapes`
+  measures the refusal threshold for numeric/string/function/IF programs:
+  52-70 B per instruction (device peak is ~58 B), so the 60 B/operation estimate
+  is slightly generous for call-heavy code and ~10% optimistic for string-heavy code.
+- CYD sustained check (z00m and KNUCKLE, 3 cold boots, play/switch/up/down cycles):
+  late=0, maxGap ~11.6 ms, music stack high-water 1.8 KB free, iostack ~2.3 KB free,
+  heap recovers to 110.8 KB / 69.6 KB largest after quit.
