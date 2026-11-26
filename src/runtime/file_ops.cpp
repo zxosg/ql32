@@ -35,16 +35,17 @@ bool isFile(const FileEntry& entry) { return !entry.isDirectory; }
 // visitor returns false to stop early.
 template <typename Visitor>
 void scanDirectory(StorageService& storage, const std::string& directory, Visitor visit) {
+    const auto translate = [](const Error& error) {
+        const auto code = error.code() == ErrorCode::NotFound ? ServiceErrorCode::NotFound
+            : error.code() == ErrorCode::InvalidPath ? ServiceErrorCode::InvalidPath
+            : ServiceErrorCode::IoError;
+        return ServiceError(code, error.what());
+    };
     std::unique_ptr<DirectoryCursor> cursor;
     try {
         cursor = storage.openDirectory(directory);
     } catch (const Error& error) {
-        if (error.code() != ErrorCode::UnsupportedOperation) {
-            const auto code = error.code() == ErrorCode::NotFound ? ServiceErrorCode::NotFound
-                : error.code() == ErrorCode::InvalidPath ? ServiceErrorCode::InvalidPath
-                : ServiceErrorCode::IoError;
-            throw ServiceError(code, error.what());
-        }
+        if (error.code() != ErrorCode::UnsupportedOperation) throw translate(error);
     }
     if (!cursor) {
         for (const auto& entry : storage.list(directory))
@@ -52,11 +53,15 @@ void scanDirectory(StorageService& storage, const std::string& directory, Visito
         return;
     }
     DirectoryEntry entry;
-    for (;;) {
-        const auto result = cursor->next(entry);
-        if (result == DirectoryCursorResult::End) return;
-        if (result == DirectoryCursorResult::Pending) continue;
-        if (!visit(entry.name, entry.metadata.directory, entry.metadata.size)) return;
+    try {
+        for (;;) {
+            const auto result = cursor->next(entry);
+            if (result == DirectoryCursorResult::End) return;
+            if (result == DirectoryCursorResult::Pending) continue;
+            if (!visit(entry.name, entry.metadata.directory, entry.metadata.size)) return;
+        }
+    } catch (const Error& error) {
+        throw translate(error);
     }
 }
 
@@ -617,16 +622,21 @@ bool Job::runStep(Step& step, Clock::time_point deadline) {
 // each time so no allocation grows with the directory and removal never
 // happens while a cursor is open.
 bool Job::runStreamingDelete(std::string& subject, Clock::time_point deadline) {
-    constexpr std::size_t batchSize = 16;
+    constexpr std::size_t batchSize = 64;
     for (;;) {
         std::vector<std::string> batch;
         batch.reserve(batchSize);
-        scanDirectory(storage_, plan_.streamDirectory,
-                      [&](const std::string& name, bool isDirectory, std::uint64_t) {
-            if (!isDirectory && wildcardMatch(plan_.streamPattern, name))
-                batch.push_back(joinPath(plan_.streamDirectory, name));
-            return batch.size() < batchSize;
-        });
+        try {
+            scanDirectory(storage_, plan_.streamDirectory,
+                          [&](const std::string& name, bool isDirectory, std::uint64_t) {
+                if (!isDirectory && wildcardMatch(plan_.streamPattern, name))
+                    batch.push_back(joinPath(plan_.streamDirectory, name));
+                return batch.size() < batchSize;
+            });
+        } catch (const ServiceError& error) {
+            // Flat filesystems drop an emptied directory automatically.
+            if (error.code() != ServiceErrorCode::NotFound || completed_ == 0) throw;
+        }
         if (batch.empty()) return true;
         for (const auto& file : batch) {
             subject = file;
@@ -638,7 +648,7 @@ bool Job::runStreamingDelete(std::string& subject, Clock::time_point deadline) {
 }
 
 bool Job::runRemoveTree(Clock::time_point deadline) {
-    constexpr std::size_t batchSize = 16;
+    constexpr std::size_t batchSize = 64;
     if (!treeStarted_) {
         treeStarted_ = true;
         directoryStack_.push_back(plan_.directory);
