@@ -1,4 +1,5 @@
 #include "ql32/interpreter.hpp"
+#include "language/bytecode.hpp"
 #include "ql32/platform/linux/console_ui.hpp"
 #include "ql32/platform/esp32/serial_key_decoder.hpp"
 
@@ -806,6 +807,41 @@ void testRunRefusesProgramsThatCannotFit() {
             "low free memory did not refuse the program with a clear message");
 }
 
+void testAdmissionTracksInstructionCountAcrossProgramShapes() {
+    const std::string headerLine = "DEFINE FUNCTION F(a)\n RETURN a + 1\nEND DEFINE\n";
+    std::vector<std::string> shapes;
+    std::string numeric, strings, functions, mixed;
+    for (int i = 0; i < 150; ++i) {
+        numeric += "v = v + " + std::to_string(i) + " * 2\n";
+        strings += "s$ = \"item" + std::to_string(i) + "\" + \"x\" : PRINT s$\n";
+        functions += "v = F(v) + F(" + std::to_string(i) + ")\n";
+        mixed += "IF v > " + std::to_string(i) + " THEN\n PRINT \"a\"; v\n v = F(v)\nEND IF\n";
+    }
+    shapes = {numeric, strings, headerLine + functions, headerLine + mixed};
+    for (const auto& source : shapes) {
+        const std::size_t instructions = ql32::detail::compileSource(source).size();
+        auto admitted = [&](std::uint64_t free) {
+            ql32::Interpreter interpreter({}, {}, {}, {}, {}, std::make_shared<FixedMemory>(free, 1u << 20));
+            std::ostringstream output;
+            try { interpreter.execute("STOP\n" + source, output); }
+            catch (const std::runtime_error& error) {
+                return std::string(error.what()).find("not enough memory") == std::string::npos;
+            }
+            return true;
+        };
+        std::uint64_t low = 1024, high = 4u << 20;
+        while (low + 256 < high) {
+            const auto mid = (low + high) / 2;
+            (admitted(mid) ? high : low) = mid;
+        }
+        const double perInstruction = static_cast<double>(high) / static_cast<double>(instructions);
+        // Device-calibrated peak is ~58 B per instruction: neither false admission nor gross refusal.
+        std::cerr << "admission threshold " << high << " B for " << instructions
+                  << " instructions (" << perInstruction << " B each)\n";
+        require(perInstruction >= 50 && perInstruction <= 110, "admission estimate off from instruction count");
+    }
+}
+
 void testAdmissionCountsBytecodeTokensNotBrackets() {
     // ~2400 tokens but only ~600 bytecode-producing ones: must fit in 100 KB.
     std::string program;
@@ -1607,6 +1643,7 @@ int main() {
         testProgramStoreKeepsOrderAcrossEditsAndCompaction();
         testRunRefusesProgramsThatCannotFit();
         testAdmissionCountsBytecodeTokensNotBrackets();
+        testAdmissionTracksInstructionCountAcrossProgramShapes();
         testProcedureFunctionCallSyntax();
         testForRangesEvaluateOnceInSourceOrder();
         testConditionalRepeat();

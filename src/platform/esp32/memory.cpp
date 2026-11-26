@@ -3,6 +3,11 @@
 #include "ql32/platform/esp32/memory.hpp"
 
 #include <esp_heap_caps.h>
+#ifdef QL32_ALLOC_TRACE
+#include <esp_debug_helpers.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 
 namespace ql32::platform::esp32 {
 
@@ -34,6 +39,10 @@ void onFailedAlloc(std::size_t size, std::uint32_t caps, const char* function) {
                    function ? function : "?",
                    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+#ifdef QL32_ALLOC_TRACE
+    esp_rom_printf("ALLOCTASK|%s\n", pcTaskGetName(nullptr));
+    esp_backtrace_print(12);
+#endif
 }
 } // namespace
 
