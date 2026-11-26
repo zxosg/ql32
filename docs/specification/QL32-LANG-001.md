@@ -724,7 +724,11 @@ programs or sessions without a UI fail instead of prompting. Zero wildcard match
 error. Drive roots and the current directory are never removed. Copies stream in
 2048-byte slices through a temporary file, so the scheduler is never blocked; `MOVE`
 across drives is copy, size verification, then source removal. The first failure stops
-the command and reports how many items completed. Directories cannot be copied. `MKDIR` fails if the path exists or its parent is
+the command and reports how many items completed. Every slice is bounded by time (also
+while removing a large directory tree), and a job running longer than about 1.5 s prints a
+throttled progress line (`Deleting 37/120...`, `Removing dir: 37 file(s) deleted...`) on
+the output channel; ESC cancels it. The CYD debug bar shows ` IO done/total` while a file
+job runs. Wildcard expansion streams the directory through the bounded cursor, and wildcard `DELETE` and recursive `RMDIR` work in batches of 64 names, so no allocation grows with the number of files. Directories cannot be copied. `MKDIR` fails if the path exists or its parent is
 missing. On `FFS:` (SPIFFS, which has no directory entries) `MKDIR` succeeds without
 creating anything: a directory exists once a file with that prefix exists, so a repeated
 `MKDIR` there is not an error and an empty directory cannot be listed or removed.
