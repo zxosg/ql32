@@ -1,5 +1,6 @@
 #include "ql32/platform/linux/directory_storage.hpp"
 #include "ql32/interpreter.hpp"
+#include "ql32/runtime/file_ops.hpp"
 
 #include <chrono>
 #include <array>
@@ -379,6 +380,40 @@ void testCopyMoveDeleteRmdir() {
     std::filesystem::remove_all(root);
 }
 
+void testFileJobProgress() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root = std::filesystem::temp_directory_path() /
+        ("ql32-fileops-progress-" + std::to_string(unique));
+    std::filesystem::create_directories(root / "big");
+    try {
+        ql32::platform::linux_host::DirectoryStorage storage(root);
+        for (int i = 0; i < 20; ++i) storage.writeText("big/f" + std::to_string(i), "x");
+        namespace fo = ql32::runtime::fileops;
+        require(fo::activity().activeJobs == 0, "activity not idle");
+        {
+            fo::Job job(storage, fo::planRemoveDirectory(storage, "big", "/", true));
+            require(fo::activity().activeJobs == 1, "activity missed running job");
+            int slices = 0;
+            // A zero budget must bound every slice to one removal, not one directory.
+            while (!job.run(std::chrono::milliseconds(0))) {
+                require(++slices < 100, "tree removal did not finish");
+                require(job.progressText().rfind("Removing big", 0) == 0, "bad progress text");
+            }
+            require(slices >= 10, "tree removal slice is not time bounded");
+        }
+        require(fo::activity().activeJobs == 0, "activity not released");
+        for (int i = 0; i < 4; ++i) storage.writeText("d" + std::to_string(i), "x");
+        fo::Job job(storage, fo::planDelete(storage, "d*", true));
+        job.run(std::chrono::milliseconds(0));
+        require(job.progressText() == "Deleting 1/4", "bad delete progress text");
+        require(fo::activity().completed == 1 && fo::activity().total == 4, "bad activity counts");
+    } catch (...) {
+        std::filesystem::remove_all(root);
+        throw;
+    }
+    std::filesystem::remove_all(root);
+}
+
 } // namespace
 
 int main() {
@@ -386,6 +421,7 @@ int main() {
         testDirectoryStorage();
         testInteractiveFileCommands();
         testCopyMoveDeleteRmdir();
+        testFileJobProgress();
     } catch (const std::exception& error) {
         std::cerr << "storage test failed: " << error.what() << '\n';
         return 1;

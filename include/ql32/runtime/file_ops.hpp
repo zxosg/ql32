@@ -79,6 +79,15 @@ Plan planDelete(StorageService& storage, const std::string& path, bool force);
 Plan planRemoveDirectory(StorageService& storage, const std::string& path,
                          const std::string& currentDirectory, bool force);
 
+// Process-wide disk-activity snapshot for status displays such as the debug
+// bar. `total` is 0 when the running job cannot know it (recursive RMDIR).
+struct Activity {
+    unsigned activeJobs = 0;
+    std::size_t completed = 0;
+    std::size_t total = 0;
+};
+Activity activity() noexcept;
+
 class Job {
 public:
     Job(StorageService& storage, Plan plan, std::size_t chunkBytes = 2048);
@@ -94,6 +103,8 @@ public:
     std::size_t total() const noexcept { return plan_.steps.size(); }
     const Plan& plan() const noexcept { return plan_; }
     std::string summary() const;
+    // Short running status such as "Deleting 37/120"; cheap and allocation-light.
+    std::string progressText() const;
 
 private:
     struct Active;

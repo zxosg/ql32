@@ -368,11 +368,43 @@ struct Job::Active {
     std::vector<std::uint8_t> buffer;
 };
 
+namespace {
+std::atomic<unsigned> activeJobs{0};
+std::atomic<std::size_t> activityCompleted{0};
+std::atomic<std::size_t> activityTotal{0};
+}
+
+Activity activity() noexcept {
+    return {activeJobs.load(std::memory_order_relaxed),
+            activityCompleted.load(std::memory_order_relaxed),
+            activityTotal.load(std::memory_order_relaxed)};
+}
+
 Job::Job(StorageService& storage, Plan plan, std::size_t chunkBytes)
     : storage_(storage), plan_(std::move(plan)),
-      chunkBytes_(std::max<std::size_t>(chunkBytes, 64)) {}
+      chunkBytes_(std::max<std::size_t>(chunkBytes, 64)) {
+    activeJobs.fetch_add(1, std::memory_order_relaxed);
+}
 
-Job::~Job() { abandonActive(); }
+Job::~Job() {
+    abandonActive();
+    activeJobs.fetch_sub(1, std::memory_order_relaxed);
+}
+
+std::string Job::progressText() const {
+    const char* verb = "Working";
+    switch (plan_.kind) {
+    case Plan::Kind::Copy: verb = "Copying"; break;
+    case Plan::Kind::Move: verb = "Moving"; break;
+    case Plan::Kind::Delete: verb = "Deleting"; break;
+    case Plan::Kind::RemoveDirectory: verb = "Removing"; break;
+    }
+    if (plan_.kind == Plan::Kind::RemoveDirectory)
+        return std::string(verb) + " " + plan_.directory + ": " +
+               std::to_string(removedEntries_) + " file(s) deleted";
+    return std::string(verb) + " " + std::to_string(completed_) + "/" +
+           std::to_string(plan_.steps.size());
+}
 
 void Job::abandonActive() noexcept {
     if (!active_) return;
@@ -400,6 +432,17 @@ std::string Job::summary() const {
 bool Job::run(std::chrono::milliseconds budget) {
     const auto deadline = Clock::now() + budget;
     std::string subject;
+    struct Publish {
+        Job& job;
+        ~Publish() {
+            activityCompleted.store(job.plan_.kind == Plan::Kind::RemoveDirectory
+                                        ? job.removedEntries_ : job.completed_,
+                                    std::memory_order_relaxed);
+            activityTotal.store(job.plan_.kind == Plan::Kind::RemoveDirectory
+                                    ? 0 : job.plan_.steps.size(),
+                                std::memory_order_relaxed);
+        }
+    } publish{*this};
     try {
         if (plan_.kind == Plan::Kind::RemoveDirectory) {
             subject = plan_.directory;
@@ -523,6 +566,8 @@ bool Job::runRemoveTree(Clock::time_point deadline) {
             }
             storage_.remove(child);
             ++removedEntries_;
+            // Bound each slice by time, not by directory size.
+            if (Clock::now() >= deadline) return false;
         }
         if (!descended) {
             try {
