@@ -1,7 +1,7 @@
 REM QL/32 directory music player: directory channel, GCOPY scrolling, INKEY$.
 REM Up/Down/PgUp/PgDn/Home/End move, Enter plays or opens a folder,
 REM Backspace goes up, Space pause/resume, S stop, +/- or Left/Right volume,
-REM D drive, Q or Esc quit.
+REM D drive, O toggles sorted/unsorted listing, Q or Esc quit.
 REM See README.md and docs/notes/dirplayer-workarounds.md.
 DIM nm$(120)
 DIM root$(2)
@@ -11,6 +11,8 @@ root$(2) = "FFS:/"
 hlp$ = "Ent play Spc pause S stop +- vol D drive Q quit"
 now$ = "-"
 vol = 128
+smode = 3
+play$ = ""
 GW = GWIDTH()
 GH = GHEIGHT()
 LY = 14
@@ -57,8 +59,8 @@ DEFine PROCedure LoadDir
     total = 1
   END IF
   d = 0
-  TRAP d = OPEN(14, path$, "*", 3)
-  IF d = 0 THEN
+  TRAP d = OPEN(14, path$, "*", smode)
+  IF d = 0 AND smode = 3 THEN
     TRAP d = OPEN(14, path$, "*", 1)
   END IF
   IF d = 0 THEN
@@ -144,6 +146,11 @@ DEFine PROCedure DrawRow(s)
   END IF
   n$ = nm$(i)
   t$ = " " + n$
+  IF state > 0 THEN
+    IF path$ + n$ = play$ THEN
+      t$ = ">" + n$
+    END IF
+  END IF
   IF LEN(t$) > cols THEN
     t$ = LEFT$(t$, cols - 1) + "~"
   END IF
@@ -177,7 +184,20 @@ DEFine PROCedure DrawStatus
   DrawTime
   INK 5
   TEXT 2, SY + 45, LEFT$(msg$, cols)
+  DrawBar
 END DEFine DrawStatus
+
+DEFine PROCedure DrawBar
+  LOCal h, y
+  INK 0
+  RECT GW - 3, LY, 3, rows * 10, 1
+  IF total > rows THEN
+    h = INT(rows * rows * 10 / total)
+    y = INT(top * (rows * 10 - h) / (total - rows))
+    INK 2
+    RECT GW - 3, LY + y, 3, h, 1
+  END IF
+END DEFine DrawBar
 
 DEFine PROCedure MoveTo(n)
   LOCal old, d, s
@@ -253,6 +273,17 @@ DEFine PROCedure HandleKey(k$)
   IF u$ = "PGDN" THEN
     MoveTo cur + rows - 1
   END IF
+  IF u$ = "HOME" THEN
+    MoveTo 0
+  END IF
+  IF u$ = "END" THEN
+    MoveTo total - 1
+  END IF
+  IF u$ = "O" THEN
+    smode = 4 - smode
+    LoadDir
+    Redraw
+  END IF
   IF u$ = "ENTER" THEN
     Enter
   END IF
@@ -276,7 +307,7 @@ DEFine PROCedure HandleKey(k$)
     LoadDir
     Redraw
   END IF
-  IF u$ = "Q" THEN
+  IF u$ = "Q" OR u$ = "ESC" THEN
     quit = 1
   END IF
 END DEFine HandleKey
@@ -300,6 +331,7 @@ DEFine PROCedure PlayCur
   ticks = 0
   now$ = nm$(cur)
   p$ = path$ + now$
+  play$ = p$
   msg$ = "Loading " + now$ + " ..."
   DrawStatus
   IF UPPER$(RIGHT$(p$, 4)) = ".WAV" THEN
@@ -310,8 +342,10 @@ DEFine PROCedure PlayCur
   msg$ = hlp$
   IF ERR = 0 THEN
     state = 1
+    ShowList
   ELSE
     now$ = "-"
+    play$ = ""
     msg$ = "Play failed: " + ERR$(ERR)
   END IF
   DrawStatus
@@ -333,5 +367,7 @@ DEFine PROCedure StopPlay
   TRAP MUSIC STOP
   state = 0
   now$ = "-"
+  play$ = ""
+  ShowList
   DrawStatus
 END DEFine StopPlay

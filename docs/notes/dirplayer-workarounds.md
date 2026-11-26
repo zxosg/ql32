@@ -66,5 +66,17 @@ Format: wanted / limitation / did instead / suggested improvement.
 - CYD (idle 144.8 KB free / 94.2 KB largest): app loaded 129.3 KB / 81.9 KB;
   KNUCKLE.YM and z00m.vtx both play from the app with failedalloc=0
   (min free 18-22 KB while playing; after quit 111 KB / 59.4 KB largest).
-- Cut features (scroll bar, Home/End, sort/filter toggles, playing marker) were
-  not restored in this change.
+- Cut features were restored in P6.
+
+## P6 (sorted directory, restored features)
+
+- Sorted directory listings keep records (8 per page) and names (512 B pages) in
+  small pages instead of one 14 KiB block; the 14 KiB total budget and 256-entry
+  limit are unchanged. Larger directories are refused by the budget error (the
+  app then lists unsorted), never by an allocation failure. Host test: no
+  allocation above 1 KiB, 150 entries sorted, 1000 entries bounded.
+- `sourceKey` (VTX/YM cache key) hashes in 256 B chunks instead of a 4 KiB block.
+- dirplayer restored: Home/End, scroll bar, playing marker (`>`), O (toggle
+  sorted/unsorted), Esc quits.
+- Known: with the app loaded, the 4 KiB `ql32_music_io` task stack allocation can
+  fail (ALLOCFAIL 4096); playback continues without the I/O task (late=0).

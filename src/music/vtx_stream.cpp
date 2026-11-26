@@ -47,13 +47,24 @@ void readFully(runtime::StorageReadHandle& file, std::uint64_t offset,
 // Identifies the source so a changed song file invalidates its cache.
 std::uint32_t sourceKey(runtime::StorageReadHandle& file) {
     const std::uint64_t size = file.size();
-    std::vector<std::uint8_t> buffer(KeyHeadBytes);
+    // FNV is order-sequential, so hashing in small chunks gives the same key
+    // without needing one large contiguous buffer on a fragmented heap.
+    constexpr std::size_t Chunk = 256;
+    std::uint8_t buffer[Chunk];
+    const auto hashRange = [&](std::uint64_t offset, std::size_t length,
+                               std::uint32_t key, const char* what) {
+        for (std::size_t done = 0; done < length;) {
+            const auto count = std::min(Chunk, length - done);
+            readFully(file, offset + done, buffer, count, what);
+            key = fnv(key, buffer, count);
+            done += count;
+        }
+        return key;
+    };
     const auto head = static_cast<std::size_t>(std::min<std::uint64_t>(size, KeyHeadBytes));
-    readFully(file, 0, buffer.data(), head, "VTX header");
-    std::uint32_t key = fnv(2166136261u, buffer.data(), head);
+    std::uint32_t key = hashRange(0, head, 2166136261u, "VTX header");
     const auto tail = static_cast<std::size_t>(std::min<std::uint64_t>(size, KeyTailBytes));
-    readFully(file, size - tail, buffer.data(), tail, "VTX tail");
-    return fnv(key, buffer.data(), tail);
+    return hashRange(size - tail, tail, key, "VTX tail");
 }
 
 std::string cacheName(const std::string& root, const std::string& path) {
