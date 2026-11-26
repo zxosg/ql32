@@ -78,5 +78,16 @@ Format: wanted / limitation / did instead / suggested improvement.
 - `sourceKey` (VTX/YM cache key) hashes in 256 B chunks instead of a 4 KiB block.
 - dirplayer restored: Home/End, scroll bar, playing marker (`>`), O (toggle
   sorted/unsorted), Esc quits.
-- Known: with the app loaded, the 4 KiB `ql32_music_io` task stack allocation can
-  fail (ALLOCFAIL 4096); playback continues without the I/O task (late=0).
+
+## P7 (static I/O task stack, large directory)
+
+- `ql32_music_io` now uses a 4 KiB static stack (.bss), so it exists regardless of
+  heap fragmentation. The earlier "ALLOCFAIL 4096 = I/O task stack" attribution was
+  wrong: the ALLOCFAIL 4096-4218 lines seen while playing with the app loaded
+  come from a different, handled allocation (heap largest block is ~3 KB during
+  playback); playback and `O` toggling continue normally.
+- Host test: a storage `bad_alloc` while building the cache maps to
+  `ServiceError(OutOfMemory)`.
+- CYD, 300 files on FFS: the sorted open is refused by the 256-entry budget, the
+  app falls back to unsorted; z00m.vtx plays; HEAP before/after unchanged
+  (idle 140.2 KB / 94.2 KB, app loaded 124.8 / 81.9 KB, after quit 111.2 / 69.6 KB).
