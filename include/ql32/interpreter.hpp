@@ -2,6 +2,7 @@
 
 #include "ql32/program_store.hpp"
 #include <iosfwd>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -184,6 +185,7 @@ private:
     std::unique_ptr<runtime::fileops::Job> pendingFileJob_;
     std::optional<ui::RequestId> pendingFileConfirm_;
     std::ostream* fileJobOutput_ = nullptr;
+    std::chrono::steady_clock::time_point fileJobLastProgress_{};
     // Logical channels point directly at the endpoint handle they currently
     // represent. No channel-to-channel route chains are retained.
     std::unordered_map<runtime::ChannelId, runtime::ChannelId> channel_bindings_;

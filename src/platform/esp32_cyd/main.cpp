@@ -28,6 +28,7 @@
 #include "pins.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/vm/scheduler.hpp"
+#include "ql32/runtime/file_ops.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
 #include "ql32/platform/esp32/cpu_frequency.hpp"
@@ -234,13 +235,22 @@ void refreshDebugOverlay() {
     const auto freeK = freeBytes / 1024;
     const auto maxK = heap ? heap->largestFreeBlockBytes / 1024 : 0;
     const auto minK = boardMemory.minimumFreeBytes().value_or(0) / 1024;
-    char line[64]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu MIN:%lluK TASK:%u %s",
+    char io[24]{};
+    const auto disk = ql32::runtime::fileops::activity();
+    if (disk.activeJobs != 0) {
+        if (disk.total != 0)
+            std::snprintf(io, sizeof(io), " IO %u/%u",
+                          static_cast<unsigned>(disk.completed), static_cast<unsigned>(disk.total));
+        else
+            std::snprintf(io, sizeof(io), " IO %u", static_cast<unsigned>(disk.completed));
+    }
+    char line[96]{};
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu MIN:%lluK TASK:%u %s%s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
         static_cast<unsigned long long>(minK),
-        static_cast<unsigned>(activeTasks), clockText);
+        static_cast<unsigned>(activeTasks), clockText, io);
     graphics->setDebugOverlayText(line);
 }
 

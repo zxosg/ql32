@@ -3568,6 +3568,7 @@ ExecutionStatus Interpreter::startFileJob(runtime::fileops::Plan plan, std::ostr
         pendingFileConfirm_ = ui_->beginInput(session_id_, prompt, confirmInputOptions());
         return ExecutionStatus::Suspended;
     }
+    fileJobLastProgress_ = std::chrono::steady_clock::now();
     return runFileJob(output);
 }
 
@@ -3581,9 +3582,18 @@ ExecutionStatus Interpreter::runFileJob(std::ostream& output) {
         pendingInteractiveTail_.clear();
         throw;
     }
-    if (!done) return ExecutionStatus::Yielded;
+    if (!done) {
+        // Long jobs report on a throttled cadence so the shell never looks frozen.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - fileJobLastProgress_ >= std::chrono::milliseconds(1500)) {
+            fileJobLastProgress_ = now;
+            writeTextToChannel(output, default_output_channel_,
+                               pendingFileJob_->progressText() + "...\n");
+        }
+        return ExecutionStatus::Yielded;
+    }
     const auto& plan = pendingFileJob_->plan();
-    if (plan.steps.size() > 1 || plan.recursive)
+    if (plan.count() > 1 || plan.recursive)
         writeTextToChannel(output, default_output_channel_, pendingFileJob_->summary() + "\n");
     clearFileJob();
     return pendingInteractiveTail_.empty() ? ExecutionStatus::Completed :
@@ -3614,6 +3624,7 @@ ExecutionStatus Interpreter::resumeFileJob(std::ostream& output) {
                                                      ExecutionStatus::InteractivePending;
         }
     }
+    fileJobLastProgress_ = std::chrono::steady_clock::now();
     return runFileJob(output);
 }
 
