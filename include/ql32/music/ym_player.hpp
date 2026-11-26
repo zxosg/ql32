@@ -41,6 +41,20 @@ private:
     void startEffect(unsigned slot, const std::array<std::uint8_t, 16>& r) noexcept;
     void startDrum(unsigned voice, std::size_t number, std::uint32_t sampleHz) noexcept;
     void tickEffects() noexcept;
+    void loadTrackerFrame(std::size_t frame) noexcept;
+    std::int16_t mixTracker() noexcept;
+
+    // YMT1 sample-tracker voice (QL/32 mixer; follows the StSound YMT1 line semantics).
+    struct TrackerVoice {
+        bool running = false;
+        bool loop = false;
+        std::uint8_t volume = 0;
+        std::size_t drum = 0;
+        std::uint64_t pos = 0;     // 32.32 fixed point sample index
+        std::uint64_t step = 0;
+    };
+    std::array<TrackerVoice, 4> trackerVoices_{};
+    bool tracker_ = false;
 
     YmSong song_;
     Ay38912 ay_;

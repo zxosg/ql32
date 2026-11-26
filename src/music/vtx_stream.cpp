@@ -722,14 +722,15 @@ private:
         case Phase::Header:
             header_[have_++] = b;
             if (have_ == 4) startFormat();
-            else if (have_ == 34) parseHeader();
+            else if (have_ == 34 && !tracker_) parseHeader();
+            else if (have_ == 30 && tracker_) parseTrackerHeader();
             break;
         case Phase::Skip:
             if (--skip_ == 0) afterExtra();
             break;
         case Phase::DrumLength:
             lengthBytes_[lengthHave_++] = b;
-            if (lengthHave_ == 4) startDrum();
+            if (lengthHave_ == (tracker_ ? 2u : 4u)) startDrum();
             break;
         case Phase::DrumData:
             if (keep_) {
@@ -740,7 +741,10 @@ private:
             if (--drumLeft_ == 0) finishDrum();
             break;
         case Phase::Text:
-            if (b == 0 && ++terminators_ == 3) finishYm5();
+            if (b == 0 && ++terminators_ == 3) {
+                if (tracker_) afterTrackerText();
+                else finishYm5();
+            }
             break;
         case Phase::Payload:
             break;
@@ -751,8 +755,14 @@ private:
         auto& m = y_.metadata;
         m.format.assign(reinterpret_cast<const char*>(header_), 4);
         if (m.format == "YM5!" || m.format == "YM6!") return;
+        if (m.format == "YMT1") {
+            tracker_ = true;
+            return;
+        }
+        if (m.format == "YMT2")
+            throw std::runtime_error("unsupported YM variant (YMT2 trackers are not supported)");
         if (m.format != "YM2!" && m.format != "YM3!" && m.format != "YM3b")
-            throw std::runtime_error("unsupported YM variant (supported: YM2!, YM3!, YM3b, YM5!, YM6!)");
+            throw std::runtime_error("unsupported YM variant (supported: YM2!, YM3!, YM3b, YM5!, YM6!, YMT1)");
         const bool loopTail = m.format == "YM3b";
         const std::uint64_t payload = y_.unpacked - 4ull - (loopTail ? 4 : 0);
         if (y_.unpacked < (loopTail ? 8u : 4u) || payload == 0 || payload % 14 != 0)
@@ -765,6 +775,42 @@ private:
         m.frameRateHz = 50;
         phase_ = Phase::Payload;
         if (!loopTail) throw YmStop{};
+    }
+
+    // YMT1 is a sample tracker: lines of 4 bytes (note, volume, frequency) per voice, no AY chip.
+    void parseTrackerHeader() {
+        auto& m = y_.metadata;
+        if (std::string_view(reinterpret_cast<const char*>(header_ + 4), 8) != "LeOnArD!")
+            throw std::runtime_error("YM tracker header is invalid");
+        const unsigned voices = static_cast<unsigned>((header_[12] << 8) | header_[13]);
+        m.frameRateHz = static_cast<std::uint16_t>((header_[14] << 8) | header_[15]);
+        frames_ = beu32(header_ + 16);
+        m.loopFrame = beu32(header_ + 20);
+        drums_ = static_cast<unsigned>((header_[24] << 8) | header_[25]);
+        const std::uint32_t attributes = beu32(header_ + 26);
+        if (voices == 0 || voices > 4 || frames_ == 0 || m.frameRateHz == 0)
+            throw std::runtime_error("YM tracker header values are invalid");
+        m.trackerVoices = static_cast<std::uint8_t>(voices);
+        m.chipClockHz = 2000000;
+        y_.interleaved = (attributes & 1) == 0;
+        phase_ = Phase::Text;
+    }
+
+    void afterTrackerText() {
+        if (drums_) phase_ = Phase::DrumLength;
+        else finishTracker();
+    }
+
+    void finishTracker() {
+        y_.prefix = pos_;
+        y_.planes = static_cast<std::size_t>(y_.metadata.trackerVoices) * 4;
+        if (y_.prefix >= y_.unpacked)
+            throw std::runtime_error("YM register data is truncated");
+        const std::uint64_t usable = (y_.unpacked - y_.prefix) / y_.planes;
+        if (usable == 0 || (!y_.interleaved && usable < frames_))
+            throw std::runtime_error("YM register data is truncated");
+        y_.frames = static_cast<std::size_t>(std::min<std::uint64_t>(usable, frames_));
+        throw YmStop{};
     }
 
     void parseHeader() {
@@ -791,7 +837,8 @@ private:
 
     void startDrum() {
         lengthHave_ = 0;
-        drumLeft_ = beu32(lengthBytes_);
+        drumLeft_ = tracker_ ? static_cast<std::uint32_t>((lengthBytes_[0] << 8) | lengthBytes_[1])
+                                 : beu32(lengthBytes_);
         current_.clear();
         keep_ = drumTotal_ + drumLeft_ <= YmDrumSampleBudget;
         if (keep_) {
@@ -805,7 +852,9 @@ private:
     void finishDrum() {
         y_.drums.push_back(std::move(current_));
         current_ = {};
-        phase_ = ++drumIndex_ == drums_ ? Phase::Text : Phase::DrumLength;
+        if (++drumIndex_ < drums_) phase_ = Phase::DrumLength;
+        else if (tracker_) finishTracker();
+        else phase_ = Phase::Text;
     }
 
     void finishYm5() {
@@ -840,6 +889,7 @@ private:
     bool keep_ = false;
     bool signed_ = false;
     bool fourBit_ = false;
+    bool tracker_ = false;
     int terminators_ = 0;
     std::uint8_t tail_[4] = {};
 };
@@ -956,7 +1006,7 @@ public:
 private:
     char formatCode() const {
         const auto& f = y_.metadata.format;
-        return f == "YM3b" ? 'b' : f[2];
+        return f == "YM3b" ? 'b' : f == "YMT1" ? '1' : f[2];
     }
     runtime::StorageReadHandle& file_;
     const YmInput& y_;
@@ -986,7 +1036,9 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
             return nullptr;
         const std::size_t planes = header[6];
         const std::size_t frames = le32(header + 8);
-        if (frames == 0 || planes < 14 || planes > VtxPlaneFile::MaximumPlanes) return nullptr;
+        if (frames == 0 || planes < 12 || planes > VtxPlaneFile::MaximumPlanes) return nullptr;
+        if (header[7] != '1' && planes < 14) return nullptr;
+        if (header[7] == '1' && (planes % 4 != 0)) return nullptr;
         const bool windowMajor = (header[5] & 1) != 0;
         const auto layout = VtxPlaneFile::readLayout(*file, planes, windowMajor);
         std::uint64_t cursor = layout.drumStart;
@@ -1000,6 +1052,7 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
         case '2': m.format = "YM2!"; break;
         case '3': m.format = "YM3!"; break;
         case 'b': m.format = "YM3b"; break;
+        case '1': m.format = "YMT1"; m.trackerVoices = static_cast<std::uint8_t>(planes / 4); break;
         case '5': m.format = "YM5!"; break;
         case '6': m.format = "YM6!"; break;
         default: return nullptr;

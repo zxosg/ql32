@@ -903,6 +903,101 @@ void testYmInterleavedStreamed() {
     }
 }
 
+void testYmTracker() {
+    using namespace ql32::music;
+    // Synthetic YMT1: 1 voice, planar, one 4-sample drum, 3 lines (note 0 on, hold, silent).
+    auto tracker = [](unsigned voices, std::uint32_t frames, std::uint32_t attributes,
+                      std::size_t lineBytes) {
+        std::vector<std::uint8_t> b{'Y', 'M', 'T', '1'};
+        for (char c : std::string("LeOnArD!")) b.push_back(static_cast<std::uint8_t>(c));
+        auto w16 = [&](unsigned v) { b.push_back(v >> 8); b.push_back(v & 255); };
+        auto w32 = [&](std::uint32_t v) { w16(v >> 16); w16(v & 0xffff); };
+        w16(voices); w16(50); w32(frames); w32(0); w16(1); w32(attributes);
+        for (int i = 0; i < 3; ++i) b.push_back(0);
+        w16(4);
+        for (std::uint8_t v : {128, 255, 128, 0}) b.push_back(v);
+        for (std::size_t i = 0; i < lineBytes; ++i) b.push_back(0);
+        return b;
+    };
+    {
+        auto b = tracker(1, 3, 1, 0);
+        // planar: note[3], volume[3], freqHigh[3], freqLow[3]
+        for (std::uint8_t v : {0, 0xff, 0xff, 63, 63, 63, 0x80, 0x80, 0, 0, 0, 0}) b.push_back(v);
+        auto song = YmSong::parse(b);
+        require(song.metadata().format == "YMT1" && song.metadata().trackerVoices == 1 &&
+                song.frameCount() == 3 && song.drumCount() == 1 && song.drum(0).size() == 4,
+                "YMT1 header decode failed");
+        require(song.registers(0)[0] == 0 && song.registers(0)[1] == 63 &&
+                song.registers(1)[0] == 0xff && song.registers(2)[2] == 0,
+                "YMT1 planar lines decode failed");
+        YmSource source(std::move(song));
+        std::array<std::int16_t, 64> pcm{};
+        source.render(pcm.data(), pcm.size());
+        require(*std::max_element(pcm.begin(), pcm.end()) > 1000, "YMT1 produced no sound");
+    }
+    auto rejects = [](std::vector<std::uint8_t> bytes) {
+        try { YmSong::parse(std::move(bytes)); } catch (const std::runtime_error&) { return true; }
+        return false;
+    };
+    require(rejects(tracker(5, 3, 1, 12)), "YMT1 with 5 voices was accepted");
+    require(rejects(tracker(0, 3, 1, 12)), "YMT1 with no voices was accepted");
+    require(rejects(tracker(1, 3, 1, 8)), "truncated planar YMT1 was accepted");
+    require(rejects(tracker(1, 3, 1, 0)), "YMT1 without lines was accepted");
+    auto truncated = tracker(1, 3, 1, 12);
+    truncated.resize(40);
+    require(rejects(truncated), "YMT1 with truncated header text was accepted");
+
+    // Real LH5-packed YMT1 file (header level 0): host and streamed paths must agree.
+    const auto path = std::filesystem::path(QL32_EXAMPLES_DIR) / "music" / "ym" / "KNUCKLE.YM";
+    if (!std::filesystem::exists(path)) return;
+    const auto bytes = readFile(path);
+    auto reference = YmSong::parse(bytes);
+    require(reference.metadata().format == "YMT1" && reference.metadata().trackerVoices == 3 &&
+            reference.metadata().frameRateHz == 50 && reference.frameCount() == 54750 &&
+            reference.drumCount() == 25 &&
+            reference.metadata().title.rfind("KnuckleBusters", 0) == 0,
+            "KNUCKLE.YM header decode failed");
+    require(reference.registers(0)[0] == 0x00 || reference.registers(0)[0] == 0xff,
+            "KNUCKLE.YM first line is implausible");
+    YmSource knuckle(YmSong::parse(bytes));
+    std::array<std::int16_t, 4096> block{};
+    std::int16_t peak = 0;
+    for (int i = 0; i < 200; ++i) {
+        knuckle.render(block.data(), block.size());
+        for (auto v : block) peak = std::max<std::int16_t>(peak, static_cast<std::int16_t>(std::abs(v)));
+    }
+    require(peak > 500 && knuckle.playing(), "KNUCKLE.YM is silent");
+
+    const std::vector<std::string> roots = {"SDC:/", "FFS:/"};
+    MemoryStorage storage;
+    storage.files["FFS:/k.ym"] = std::string(bytes.begin(), bytes.end());
+    VtxStreamInfo info;
+    auto streamed = openYmStreamed(storage, "FFS:/k.ym", roots, &info);
+    require(streamed.metadata().format == "YMT1" && streamed.metadata().trackerVoices == 3 &&
+            streamed.frameCount() == reference.frameCount() &&
+            streamed.drumCount() == reference.drumCount(), "streamed KNUCKLE.YM metadata differs");
+    for (std::size_t i = 0; i < reference.drumCount(); ++i)
+        require(streamed.drum(i) == reference.drum(i), "streamed KNUCKLE.YM drum differs");
+    const auto pump = streamed.prefetcher();
+    for (std::size_t frame = 0; frame < reference.frameCount(); frame += 7) {
+        if (frame % 64 == 0) pump->run();
+        require(streamed.registers(frame) == reference.registers(frame),
+                "streamed KNUCKLE.YM lines differ");
+    }
+    require(!streamed.failed(), "streamed KNUCKLE.YM failed");
+
+    // Corrupt and truncated packed data must be rejected or decoded safely, never crash.
+    for (std::size_t cut : {8u, 24u, 40u, 200u, 5000u, 22000u}) {
+        auto cutBytes = bytes;
+        cutBytes.resize(std::min(cut, bytes.size()));
+        try { YmSong::parse(cutBytes); } catch (const std::runtime_error&) {}
+    }
+    for (std::size_t at : {40u, 60u, 120u, 3000u, 20000u}) {
+        auto bad = bytes;
+        bad[at] ^= 0xa5;
+        try { YmSong::parse(bad); } catch (const std::runtime_error&) {}
+    }
+}
 void testYmStreamedCache() {
     using namespace ql32::music;
     const std::vector<std::string> roots = {"SDC:/", "FFS:/"};
@@ -958,7 +1053,7 @@ void testYmStreamedCache() {
         }
         require(!song.failed(), "streamed YM random access failed");
         cacheBytes += storage.files[info.cachePath].size();
-        rawBytes += reference.frameCount() * (reference.hasEffects() ? 16 : 14);
+        rawBytes += reference.frameCount() * (reference.metadata().trackerVoices ? reference.metadata().trackerVoices * 4u : reference.hasEffects() ? 16u : 14u);
 
         const int writes = storage.writes;
         openYmStreamed(storage, "FFS:/song.ym", roots, &info);
@@ -1101,6 +1196,7 @@ int main() {
         testVtxLongAndRaggedStreams();
         testVtxStreamedCache();
         testYmStreamedCache();
+        testYmTracker();
         testYmInterleavedStreamed();
         testBeepAndVolumeCommands();
     } catch (const std::exception& error) {

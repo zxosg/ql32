@@ -18,6 +18,7 @@ YmPlayer::YmPlayer(YmSong song, std::uint32_t sampleRate)
     : song_(std::move(song)), sampleRate_(sampleRate ? sampleRate : DefaultSampleRate) {
     ym5_ = song_.metadata().format == "YM5!";
     ym2_ = song_.metadata().format == "YM2!";
+    tracker_ = song_.metadata().trackerVoices != 0;
     ay_.reset(song_.metadata().chipClockHz, sampleRate_);
     loadFrame(0);
 }
@@ -58,9 +59,58 @@ void YmPlayer::startDrum(unsigned voice, std::size_t number, std::uint32_t sampl
     v.drumStep = (static_cast<std::uint64_t>(sampleHz) << 32) / sampleRate_;
 }
 
+void YmPlayer::loadTrackerFrame(std::size_t frame) noexcept {
+    const auto r = song_.registers(frame);
+    if (song_.failed()) {
+        playing_ = false;
+        return;
+    }
+    frame_ = frame;
+    for (unsigned i = 0; i < song_.metadata().trackerVoices && i < trackerVoices_.size(); ++i) {
+        TrackerVoice& v = trackerVoices_[i];
+        const std::uint8_t note = r[i * 4];
+        const std::uint8_t volume = r[i * 4 + 1];
+        const std::uint32_t freq = static_cast<std::uint32_t>(r[i * 4 + 2] << 8) | r[i * 4 + 3];
+        if (freq == 0) {
+            v.running = false;
+            continue;
+        }
+        v.volume = volume & 63;
+        v.loop = (volume & 0x40) != 0;
+        v.step = (static_cast<std::uint64_t>(freq) << 32) / sampleRate_;
+        if (note != 0xff) {
+            v.running = note < song_.drumCount() && !song_.drum(note).empty();
+            v.drum = note;
+            v.pos = 0;
+        }
+    }
+}
+
+std::int16_t YmPlayer::mixTracker() noexcept {
+    const int voices = song_.metadata().trackerVoices;
+    int sum = 0;
+    for (int i = 0; i < voices && i < static_cast<int>(trackerVoices_.size()); ++i) {
+        TrackerVoice& v = trackerVoices_[i];
+        if (!v.running) continue;
+        const auto& data = song_.drum(v.drum);
+        sum += data[static_cast<std::size_t>(v.pos >> 32)] * v.volume / (32 * voices);
+        v.pos += v.step;
+        const std::uint64_t end = static_cast<std::uint64_t>(data.size()) << 32;
+        if (v.pos >= end) {
+            if (v.loop) v.pos %= end;
+            else v.running = false;
+        }
+    }
+    return static_cast<std::int16_t>(sum < -32768 ? -32768 : sum > 32767 ? 32767 : sum);
+}
+
 void YmPlayer::loadFrame(std::size_t frame) noexcept {
     if (frame >= song_.frameCount()) {
         playing_ = false;
+        return;
+    }
+    if (tracker_) {
+        loadTrackerFrame(frame);
         return;
     }
     auto r = song_.registers(frame);
@@ -156,8 +206,12 @@ void YmPlayer::render(std::int16_t* samples, std::size_t count) noexcept {
             samples[i] = 0;
             continue;
         }
-        if (song_.hasEffects() || ym2_) tickEffects();
-        samples[i] = ay_.renderSample();
+        if (tracker_) {
+            samples[i] = mixTracker();
+        } else {
+            if (song_.hasEffects() || ym2_) tickEffects();
+            samples[i] = ay_.renderSample();
+        }
         frameAccumulator_ += rate;
         if (frameAccumulator_ >= sampleRate_) {
             frameAccumulator_ -= sampleRate_;

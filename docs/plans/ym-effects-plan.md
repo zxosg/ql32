@@ -3,7 +3,7 @@
 Status: **approved by the user, stages 1-5 (stage 6 skipped).** Host work done (see "Progress"); hardware listening pending the board being free. QL/32-specific behavior unless a reference is cited.
 
 ## Current state (verified in code, `src/music/ym.cpp`, `ym_player.cpp`)
-- Parsed: YM2!, YM3!, YM3b (register dumps), YM5!, YM6! (with digi-drum samples). Rejected: YM4, MIX1, YMT1/YMT2.
+- Parsed: YM2!, YM3!, YM3b (register dumps), YM5!, YM6! (with digi-drum samples). YMT1 (sample tracker, 1-4 voices). Rejected: YM4, MIX1, YMT2.
 - Implemented in a first approximation: SID voice (square amplitude gate), digi-drums (nearest-sample, frame-start trigger), sinus-SID (16-step table), sync-buzzer (envelope restart on timer tick).
 - YM2 is played as a plain register dump: no Mad Max digi-drums.
 - Hardware-listened (OK by ear): ZYNAPS1 (YM2), buzz, BITOFF2, led1, rapido1. No effect-specific verdict on a SID/digi-drum file yet; the first-pass player was never compared with a reference.
