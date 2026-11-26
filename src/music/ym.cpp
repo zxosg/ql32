@@ -125,8 +125,48 @@ YmSong YmSong::parse(const std::uint8_t* bytes, std::size_t size) {
                                                   : bytes[off + f * regs + reg];
         song.frameCount_ = count;
         song.effects_ = regs == 16;
+    } else if (fmt == "YMT1") {
+        if (size < 30 || std::memcmp(bytes + 4, "LeOnArD!", 8) != 0)
+            throw std::runtime_error("YM tracker header is invalid");
+        const unsigned voices = be16(bytes + 12);
+        song.metadata_.frameRateHz = be16(bytes + 14);
+        const std::uint32_t frames = be32(bytes + 16);
+        song.metadata_.loopFrame = be32(bytes + 20);
+        const std::uint16_t drums = be16(bytes + 24);
+        const std::uint32_t attributes = be32(bytes + 26);
+        if (voices == 0 || voices > 4 || frames == 0 || song.metadata_.frameRateHz == 0)
+            throw std::runtime_error("YM tracker header values are invalid");
+        song.metadata_.trackerVoices = static_cast<std::uint8_t>(voices);
+        song.metadata_.chipClockHz = 2000000;
+        std::size_t off = 30;
+        song.metadata_.title = readString(bytes, size, off);
+        song.metadata_.author = readString(bytes, size, off);
+        song.metadata_.comment = readString(bytes, size, off);
+        for (unsigned i = 0; i < drums; ++i) {
+            if (off + 2 > size) throw std::runtime_error("YM digi-drum table is truncated");
+            const std::size_t length = be16(bytes + off);
+            off += 2;
+            if (length > size - off) throw std::runtime_error("YM digi-drum is truncated");
+            std::vector<std::int16_t> pcm(length);
+            for (std::size_t k = 0; k < length; ++k)
+                pcm[k] = static_cast<std::int16_t>((static_cast<int>(bytes[off + k]) - 128) * 128);
+            song.drums_.push_back(std::move(pcm));
+            off += length;
+        }
+        const std::size_t lineBytes = static_cast<std::size_t>(voices) * 4;
+        const std::size_t usable = (size - off) / lineBytes;
+        const bool planar = (attributes & 1) != 0;
+        if (usable == 0 || (planar && usable < frames))
+            throw std::runtime_error("YM register data is truncated");
+        const std::size_t count = usable < frames ? usable : frames;
+        song.data_.assign(count * 16, 0);
+        for (std::size_t f = 0; f < count; ++f)
+            for (std::size_t b = 0; b < lineBytes; ++b)
+                song.data_[f * 16 + b] = planar ? bytes[off + b * count + f]
+                                                : bytes[off + f * lineBytes + b];
+        song.frameCount_ = count;
     } else {
-        throw std::runtime_error("unsupported YM variant (supported: YM2!, YM3!, YM3b, YM5!, YM6!; trackers YMT1/YMT2 and MIX are not)");
+        throw std::runtime_error("unsupported YM variant (supported: YM2!, YM3!, YM3b, YM5!, YM6!, YMT1; YMT2 and MIX are not)");
     }
     if (song.metadata_.loopFrame >= song.frameCount_) song.metadata_.hasLoop = false;
     return song;

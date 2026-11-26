@@ -64,7 +64,8 @@ Format: wanted / limitation / did instead / suggested improvement.
 - `bad_alloc` while opening a song reports `music: not enough memory (heap
   fragmented)` (OutOfMemory) instead of "Invalid path" / "I/O error".
 - CYD (idle 144.8 KB free / 94.2 KB largest): app loaded 129.3 KB / 81.9 KB;
-  KNUCKLE.YM and z00m.vtx both play from the app with failedalloc=0
+  KNUCKLE.YM (correction: this was YMT1, which then failed with "unsupported YM
+  variant"; YMT1 support added later, device re-verification pending) and z00m.vtx both play from the app with failedalloc=0
   (min free 18-22 KB while playing; after quit 111 KB / 59.4 KB largest).
 - Cut features were restored in P6.
 

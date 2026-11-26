@@ -13,7 +13,7 @@ class AudioPrefetcher;
 class VtxPlaneFile;
 
 struct YmMetadata {
-    std::string format;   // "YM2!", "YM3!", "YM3b", "YM5!", "YM6!"
+    std::string format;   // "YM2!", "YM3!", "YM3b", "YM5!", "YM6!", "YMT1"
     std::string title;
     std::string author;
     std::string comment;
@@ -21,6 +21,7 @@ struct YmMetadata {
     std::uint16_t frameRateHz = 50;
     std::uint32_t loopFrame = 0;
     bool hasLoop = true;
+    std::uint8_t trackerVoices = 0;   // YMT1 only: sample voices (1-4); registers() holds 4 bytes each
 };
 
 // Atari ST / Amstrad YM register-dump songs (QL/32-specific player). Accepts

@@ -848,7 +848,16 @@ the shape taken from the voice volume nibble. YM2 follows the Mad Max convention
 any register 13 write means shape 10 with register 12 forced to 0, and register 10 bit 7
 selects a digi-drum on voice C at (MFP/4)/register 12. The Mad Max drum samples are NOT
 built in (licensing unclear), so those drums are muted unless a bank is supplied with
-`YmSong::setDrumBank`. Not supported: YMT1/YMT2 trackers and MIX.
+`YmSong::setDrumBank`.
+
+YMT1 (YM-Tracker 1, e.g. `KNUCKLE.YM`; LHA-packed or raw) is a sample tracker, not a
+register dump: 1-4 voices of 4-byte lines (note, volume, frequency) that retrigger
+8-bit digi-drums, played by a QL/32 sample mixer without the AY core. Line semantics
+follow the behavior of arnaud-carre/StSound (behavioral reference only, independent
+code): frequency 0 stops a voice, note 0xff keeps the running sample, volume bit 6 loops
+the sample, output is scaled by 1/(32 x voices). On boards the lines are transcoded into
+the plane cache like other YM files, so only the 8 KiB LH5 window and small plane
+windows are held in RAM. Not supported: YMT2 and MIX.
 The whole song is decoded into RAM (up to 1.5 MiB unpacked, so large songs need PSRAM).
 
 PT3 (QL/32-specific player of ProTracker 3 / Vortex Tracker II modules, version
@@ -1311,7 +1320,7 @@ MUSIC STATUS
 MUSIC STOP
 ```
 
-`MUSIC` is also in the shell command list. Not supported: YMT1/YMT2/MIX and PT3
+`MUSIC` is also in the shell command list. Not supported: YMT2/MIX and PT3
 TurboSound; no other formats are recognised.
 
 ### 11.2 Statements and keywords
