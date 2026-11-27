@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <new>
 #include <sstream>
 #include <stdexcept>
@@ -2631,6 +2632,70 @@ void testSystemInfoFunctionsUseInjectedPortableProfile() {
             "SYSINFO$/CAPABILITY did not expose the injected portable profile");
 }
 
+std::string readSplashSource() {
+    std::ifstream file(std::string(QL32_SOURCE_DIR) + "/examples/startup/startup.bas");
+    require(file.good(), "examples/startup/startup.bas is missing");
+    std::ostringstream text;
+    text << file.rdbuf();
+    return text.str();
+}
+
+void testStartupSplashIsCentredAtDefaultResolutions() {
+    const std::array<std::pair<std::uint32_t, std::uint32_t>, 6> sizes{{
+        {320, 216}, {320, 200}, {320, 240}, {400, 300}, {640, 400}, {640, 480}}};
+    for (const auto& size : sizes) {
+        ql32::runtime::SystemInfoProfile profile;
+        profile.values = {"0.1.0", "unknown", "test_board_platform", "d", "i", "s", "f"};
+        auto systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+            std::move(profile));
+        auto presenter = std::make_shared<CapturingPresenter>();
+        auto graphics = std::make_shared<WindowedService>(size.first, size.second, presenter);
+        struct Memory final : ql32::runtime::MemoryService {
+            std::uint64_t freeBytes() const override { return 123456; }
+        };
+        ql32::Interpreter interpreter({}, {}, {}, graphics, {}, std::make_shared<Memory>(),
+                                      {}, 0, {}, {}, {}, systemInfo);
+        std::ostringstream output;
+        interpreter.executeResumable(readSplashSource(), output);
+        const auto& frame = presenter->lastFrame;
+        require(frame.width == size.first && frame.height == size.second &&
+                    presenter->presentCount > 0, "splash did not present a frame");
+        // Each band of non-empty rows is one line of the splash.
+        std::vector<std::array<std::uint32_t, 4>> bands;
+        bool inBand = false;
+        for (std::uint32_t y = 0; y <= frame.height; ++y) {
+            std::uint32_t minX = frame.width, maxX = 0;
+            if (y < frame.height)
+                for (std::uint32_t x = 0; x < frame.width; ++x)
+                    if (frame.pixels[static_cast<std::size_t>(y) * frame.width + x]) {
+                        minX = std::min(minX, x);
+                        maxX = std::max(maxX, x);
+                    }
+            const bool ink = minX <= maxX;
+            if (ink && !inBand) bands.push_back({minX, maxX, y, y});
+            if (ink && inBand) {
+                bands.back()[0] = std::min(bands.back()[0], minX);
+                bands.back()[1] = std::max(bands.back()[1], maxX);
+                bands.back()[3] = y;
+            }
+            if (!ink && inBand) {}
+            inBand = ink;
+        }
+        require(bands.size() >= 4, "splash lost its title or text lines");
+        std::uint32_t top = bands.front()[2], bottom = bands.back()[3];
+        for (const auto& band : bands) {
+            const int centre = static_cast<int>(band[0] + band[1]) / 2;
+            require(std::abs(centre - static_cast<int>(frame.width / 2)) <= 6,
+                    "splash line is not horizontally centred");
+        }
+        require(std::abs(static_cast<int>(top + bottom) / 2 -
+                         static_cast<int>(frame.height / 2)) <= 12,
+                "splash block is not vertically centred");
+        require(bands.front()[0] > 0 && bands.back()[1] + 1 < frame.width &&
+                    bottom + 1 < frame.height, "splash text leaves the screen");
+    }
+}
+
 void testSystemInfoRejectsInvalidSelector() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -2748,6 +2813,7 @@ void testMenuEnableRejectsInvalidValuesAndUnknownItems() {
 } // namespace
 
 int main() {
+    testStartupSplashIsCentredAtDefaultResolutions();
     testDrawingCallsAndSessionOwnership();
     testFractionalDrawingGeometryFloorsToPixels();
     testFontSelectionChangesNativeTextCellSize();

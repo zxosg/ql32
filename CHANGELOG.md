@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- `examples/startup/startup.bas`: boot splash (large QL32 title; version, free memory and platform in the small font) that stays on screen after boot (held as a frozen image, ~40K, reclaimed automatically under memory pressure). Copy it to `FFS:/startup.bas` to run at boot.
+- `examples/startup/startup.bas`: boot splash (large QL32 title; version, free memory and platform in the small font) that stays on screen after boot (held as a frozen image, ~40K, reclaimed automatically under memory pressure). Copy it to `FFS:/startup.bas` to run at boot. One shared source: layout is computed at run time from window size and font metrics so it is centred on every default resolution (host-tested at six sizes; only the CYD is hardware-verified). See `examples/startup/README.md`.
 
 ### Fixed
 - Platform `SYSINFO$(0)` now reports `QL32_VERSION_STRING` instead of a hardcoded `0.1.0`.
