@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,47 @@ struct YmMetadata {
 // the raw file or one LHA (-lh5-/-lh0-, header level 0) member wrapping it.
 // YM5/YM6 special effects (SID voice, sinus SID, digi-drum, sync-buzzer) are
 // carried as frame register bits and are interpreted by YmPlayer.
+// Digi-drum samples held in small blocks: a drum can be 14 KB or more, and a
+// fragmented heap seldom has one contiguous block that large.
+class DrumSamples {
+public:
+    static constexpr std::size_t BlockSamples = 128;
+    DrumSamples() = default;
+    DrumSamples(const std::vector<std::int16_t>& samples) {
+        resize(samples.size());
+        for (std::size_t i = 0; i < samples.size(); ++i) (*this)[i] = samples[i];
+    }
+    void resize(std::size_t count) {
+        blocks_.clear();
+        for (std::size_t done = 0; done < count; done += BlockSamples)
+            blocks_.emplace_back(std::min(BlockSamples, count - done));
+        size_ = count;
+    }
+    void push_back(std::int16_t v) {
+        if (size_ % BlockSamples == 0) {
+            blocks_.emplace_back();
+            blocks_.back().reserve(BlockSamples);
+        }
+        blocks_.back().push_back(v);
+        ++size_;
+    }
+    void clear() { blocks_.clear(); size_ = 0; }
+    std::size_t size() const noexcept { return size_; }
+    bool empty() const noexcept { return size_ == 0; }
+    std::int16_t& operator[](std::size_t i) { return blocks_[i / BlockSamples][i % BlockSamples]; }
+    std::int16_t operator[](std::size_t i) const { return blocks_[i / BlockSamples][i % BlockSamples]; }
+    bool operator==(const DrumSamples& other) const {
+        if (size_ != other.size_) return false;
+        for (std::size_t i = 0; i < size_; ++i)
+            if ((*this)[i] != other[i]) return false;
+        return true;
+    }
+
+private:
+    std::vector<std::vector<std::int16_t>> blocks_;
+    std::size_t size_ = 0;
+};
+
 class YmSong {
 public:
     static constexpr std::size_t MaximumPackedBytes = 256 * 1024;
@@ -42,24 +84,26 @@ public:
     // 16 registers; registers 14/15 only carry effect data in YM5/YM6.
     std::array<std::uint8_t, 16> registers(std::size_t frame) const;
     std::size_t drumCount() const noexcept { return drums_.size(); }
-    const std::vector<std::int16_t>& drum(std::size_t index) const { return drums_.at(index); }
+    const DrumSamples& drum(std::size_t index) const { return drums_.at(index); }
     bool hasEffects() const noexcept { return effects_; }
     // External digi-drum bank (centred 16-bit samples), used by YM2 Mad Max files whose
     // drums are not stored in the file. No bank is built in; without one those drums are silent.
     // Song whose register frames are read from a transcoded cache (see openYmStreamed).
     static YmSong fromPlaneFile(YmMetadata metadata,
-                                std::vector<std::vector<std::int16_t>> drums,
+                                std::vector<DrumSamples> drums,
                                 std::shared_ptr<VtxPlaneFile> planes, std::size_t frameCount,
                                 bool effects);
     // True once a storage read failed; playback should stop.
     bool failed() const noexcept;
     std::shared_ptr<AudioPrefetcher> prefetcher() const;
-    void setDrumBank(std::vector<std::vector<std::int16_t>> drums) { drums_ = std::move(drums); }
+    void setDrumBank(const std::vector<std::vector<std::int16_t>>& drums) {
+        drums_.assign(drums.begin(), drums.end());
+    }
 
 private:
     YmMetadata metadata_;
     std::vector<std::uint8_t> data_;       // frame-major, 16 bytes per frame
-    std::vector<std::vector<std::int16_t>> drums_;   // centred 16-bit samples
+    std::vector<DrumSamples> drums_;   // centred 16-bit samples
     std::shared_ptr<VtxPlaneFile> planes_;
     std::size_t frameCount_ = 0;
     bool effects_ = false;

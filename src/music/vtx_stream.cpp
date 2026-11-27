@@ -652,7 +652,13 @@ VtxSong openVtxStreamed(runtime::StorageService& storage, const std::string& pat
 namespace ql32::music {
 namespace {
 constexpr std::uint8_t YmCacheVersion = 2;
+// Digi-drum samples are 2 bytes each; small boards keep fewer so playback never
+// competes with the running program for heap (larger drums play silently).
+#if defined(ESP_PLATFORM)
+constexpr std::size_t YmDrumSampleBudget = 4096;
+#else
 constexpr std::size_t YmDrumSampleBudget = 12288;
+#endif
 
 std::uint32_t beu32(const std::uint8_t* p) {
     return (static_cast<std::uint32_t>(p[0]) << 24) | (static_cast<std::uint32_t>(p[1]) << 16) |
@@ -669,7 +675,7 @@ struct YmInput {
     std::uint32_t unpacked = 0;   // bytes the member unpacks to
 
     YmMetadata metadata;
-    std::vector<std::vector<std::int16_t>> drums;
+    std::vector<DrumSamples> drums;
     std::size_t frames = 0;
     std::size_t planes = 14;
     bool interleaved = false;
@@ -842,7 +848,6 @@ private:
         current_.clear();
         keep_ = drumTotal_ + drumLeft_ <= YmDrumSampleBudget;
         if (keep_) {
-            current_.reserve(drumLeft_);
             drumTotal_ += drumLeft_;
         }
         if (drumLeft_ == 0) finishDrum();
@@ -851,7 +856,7 @@ private:
 
     void finishDrum() {
         y_.drums.push_back(std::move(current_));
-        current_ = {};
+        current_ = DrumSamples{};
         if (++drumIndex_ < drums_) phase_ = Phase::DrumLength;
         else if (tracker_) finishTracker();
         else phase_ = Phase::Text;
@@ -884,7 +889,7 @@ private:
     std::uint8_t lengthBytes_[4] = {};
     std::size_t lengthHave_ = 0;
     std::uint32_t drumLeft_ = 0;
-    std::vector<std::int16_t> current_;
+    DrumSamples current_;
     std::size_t drumTotal_ = 0;
     bool keep_ = false;
     bool signed_ = false;
@@ -1016,7 +1021,7 @@ private:
 
 struct YmCacheContents {
     YmMetadata metadata;
-    std::vector<std::vector<std::int16_t>> drums;
+    std::vector<DrumSamples> drums;
     std::size_t frames = 0;
     bool effects = false;
 };
@@ -1071,12 +1076,16 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
             const std::size_t count = le32(length);
             samples += count;
             if (samples > YmDrumSampleBudget || cursor + count * 2ull > size) return nullptr;
-            std::vector<std::uint8_t> raw(count * 2);
-            if (count) readFully(*file, cursor, raw.data(), raw.size(), "YM cache drum");
-            cursor += raw.size();
-            std::vector<std::int16_t> pcm(count);
-            for (std::size_t i = 0; i < count; ++i)
-                pcm[i] = static_cast<std::int16_t>(le16(raw.data() + i * 2));
+            DrumSamples pcm;
+            pcm.resize(count);
+            std::uint8_t piece[256];
+            for (std::size_t done = 0; done < count; done += sizeof piece / 2) {
+                const std::size_t n = std::min<std::size_t>(sizeof piece / 2, count - done);
+                readFully(*file, cursor, piece, n * 2, "YM cache drum");
+                cursor += n * 2;
+                for (std::size_t i = 0; i < n; ++i)
+                    pcm[done + i] = static_cast<std::int16_t>(le16(piece + i * 2));
+            }
             contents.drums.push_back(std::move(pcm));
         }
         if (cursor != size) return nullptr;

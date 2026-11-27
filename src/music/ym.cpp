@@ -172,7 +172,7 @@ YmSong YmSong::parse(const std::uint8_t* bytes, std::size_t size) {
     return song;
 }
 
-YmSong YmSong::fromPlaneFile(YmMetadata metadata, std::vector<std::vector<std::int16_t>> drums,
+YmSong YmSong::fromPlaneFile(YmMetadata metadata, std::vector<DrumSamples> drums,
                              std::shared_ptr<VtxPlaneFile> planes, std::size_t frameCount,
                              bool effects) {
     YmSong song;
