@@ -2121,6 +2121,8 @@ void setup() {
         &boardMemory, [](ql32::runtime::MemoryService*) {});
     services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
         &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
+    services.clock = std::shared_ptr<ql32::runtime::ClockService>(
+        &boardClock, [](ql32::runtime::ClockService*) {});
     services.displayModes = std::shared_ptr<ql32::runtime::DisplayModeService>(
         &displayModes, [](ql32::runtime::DisplayModeService*) {});
     uiPresenter = std::make_unique<ql32::ui::GraphicPresenter>(uiService, graphics);

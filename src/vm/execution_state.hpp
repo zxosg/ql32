@@ -54,7 +54,7 @@ struct RuntimeArray {
         else numbers[offset] = std::get<double>(value);
     }
 };
-struct SelectState { double value = 0; bool matched = false; };
+struct SelectState { double value = 0; bool matched = false; bool isText = false; std::string text; };
 struct DialogBuilder {
     std::string title;
     ui::DialogOptions options;

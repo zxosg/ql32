@@ -23,6 +23,7 @@
 #include "ql32/runtime/memory.hpp"
 #include "ql32/runtime/system_control.hpp"
 #include "ql32/runtime/system_info.hpp"
+#include "ql32/runtime/clock.hpp"
 #include "ql32/runtime/cpu_frequency.hpp"
 #include "ql32/runtime/display_mode.hpp"
 #include "ql32/runtime/music.hpp"
@@ -61,7 +62,8 @@ public:
                          std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency = {},
                          std::shared_ptr<runtime::DisplayModeService> displayModes = {},
                          std::shared_ptr<runtime::SystemInfoService> systemInfo = {},
-                         std::shared_ptr<runtime::MusicService> music = {});
+                         std::shared_ptr<runtime::MusicService> music = {},
+                         std::shared_ptr<runtime::ClockService> clock = {});
     ~Interpreter();
     Interpreter(const Interpreter&) = delete;
     Interpreter& operator=(const Interpreter&) = delete;
@@ -215,6 +217,7 @@ private:
     std::shared_ptr<runtime::DisplayModeService> displayModes_;
     std::shared_ptr<runtime::SystemInfoService> systemInfo_;
     std::shared_ptr<runtime::MusicService> music_;
+    std::shared_ptr<runtime::ClockService> clock_;
     std::shared_ptr<runtime::TaskControlService> taskControl_;
     std::shared_ptr<runtime::SystemControlService> systemControl_;
     runtime::SessionId session_id_ = 0;

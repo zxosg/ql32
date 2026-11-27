@@ -23,6 +23,7 @@ public:
     void render(std::int16_t* samples, std::size_t count) noexcept;
     bool playing() const noexcept { return playing_; }
     std::size_t framePosition() const noexcept { return frame_; }
+    std::size_t frameCount() const noexcept { return song_.frameCount(); }
     const YmMetadata& metadata() const noexcept { return song_.metadata(); }
     std::shared_ptr<AudioPrefetcher> prefetcher() const { return song_.prefetcher(); }
 
@@ -81,8 +82,18 @@ public:
     }
     bool playing() const noexcept override { return player_.playing(); }
     std::shared_ptr<AudioPrefetcher> prefetcher() const override { return player_.prefetcher(); }
+    std::uint32_t positionMs() const noexcept override {
+        return static_cast<std::uint32_t>(player_.framePosition() * 1000ULL / hz());
+    }
+    std::uint32_t lengthMs() const noexcept override {
+        return static_cast<std::uint32_t>(player_.frameCount() * 1000ULL / hz());
+    }
+    std::string title() const override { return player_.metadata().title; }
 
 private:
+    std::uint32_t hz() const noexcept {
+        return player_.metadata().frameRateHz ? player_.metadata().frameRateHz : 50;
+    }
     YmPlayer player_;
 };
 

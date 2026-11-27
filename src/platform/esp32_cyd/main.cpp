@@ -809,6 +809,8 @@ void setup() {
         ->setMemoryService(services.memory);
     services.cpuFrequency = std::shared_ptr<ql32::runtime::CpuFrequencyService>(
         &boardCpuFrequency, [](ql32::runtime::CpuFrequencyService*) {});
+    services.clock = std::shared_ptr<ql32::runtime::ClockService>(
+        &boardClock, [](ql32::runtime::ClockService*) {});
     graphics->setConsoleLayer([](std::uint32_t y, std::uint32_t x,
                                  std::vector<ql32::graphics::ColorIndex>& row) {
         if (tftConsole) tftConsole->composePaletteRegionRow(y, x, row);

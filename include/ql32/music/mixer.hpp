@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace ql32::music {
 
@@ -26,6 +27,10 @@ public:
     virtual void render(std::int16_t* samples, std::size_t count) noexcept = 0;
     virtual bool playing() const noexcept = 0;
     virtual std::shared_ptr<AudioPrefetcher> prefetcher() const { return nullptr; }
+    // Playback readback in milliseconds; a length of 0 means unknown.
+    virtual std::uint32_t positionMs() const noexcept { return 0; }
+    virtual std::uint32_t lengthMs() const noexcept { return 0; }
+    virtual std::string title() const { return {}; }
 };
 
 class ToneSource final : public AudioSource {
@@ -63,6 +68,9 @@ public:
     }
     bool active(std::size_t slot) const noexcept {
         return slot < SlotCount && slots_[slot] && slots_[slot]->playing();
+    }
+    const AudioSource* source(std::size_t slot) const noexcept {
+        return slot < SlotCount ? slots_[slot].get() : nullptr;
     }
     bool anyActive() const noexcept {
         for (std::size_t i = 0; i < SlotCount; ++i)

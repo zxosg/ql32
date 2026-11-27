@@ -1616,10 +1616,118 @@ void testPrintLinesAreChargedToSliceBudget() {
             "PRINT lines were not charged to the slice budget");
 }
 
+
+class FakeClock final : public ql32::runtime::ClockService {
+public:
+    std::optional<std::int64_t> unixTimeSeconds() const override { return std::nullopt; }
+    std::uint64_t monotonicMilliseconds() const override { return now; }
+    std::uint64_t now = 0;
+};
+
+std::string runBasic(ql32::Interpreter& interpreter, const std::string& source) {
+    std::ostringstream out;
+    interpreter.execute(source, out);
+    return out.str();
+}
+
+bool runFails(ql32::Interpreter& interpreter, const std::string& source) {
+    try {
+        std::ostringstream out;
+        interpreter.execute(source, out);
+    } catch (const ql32::runtime::Error&) {
+        return true;
+    }
+    return false;
+}
+
+void testLanguageAdditionsBatch1() {
+    {
+        ql32::Interpreter interpreter;
+        require(runBasic(interpreter, "ticks=3\nmin=4\nPRINT ticks+min\n") == "7\n",
+                "TICKS/MIN stay usable as variables without parentheses");
+    }
+    auto clock = std::make_shared<FakeClock>();
+    ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {}, {}, {}, clock);
+    require(runBasic(interpreter,
+        "PRINT INSTR(\"Hello world\",\"o\")\n"
+        "PRINT INSTR(\"Hello world\",\"o\",6)\n"
+        "PRINT INSTR(\"Hello\",\"L\")\n"
+        "PRINT INSTR(\"abc\",\"\")\n"
+        "PRINT INSTR(\"abc\",\"\",3)\n"
+        "PRINT INSTR(\"abc\",\"\",4)\n"
+        "PRINT INSTR(\"abc\",\"\",5)\n"
+        "PRINT INSTR(\"abc\",\"c\",9)\n"
+        "PRINT INSTR(\"\",\"a\")\n"
+        "PRINT INSTR(\"caf\xc3\xa9\xf0\x9f\x99\x82x\",\"x\")\n"
+        "PRINT INSTR(\"abcabc\",\"bc\",3)\n") ==
+        "5\n8\n0\n1\n3\n4\n0\n0\n0\n6\n5\n", "INSTR returned an unexpected result");
+    for (const char* bad : {"PRINT INSTR(\"a\",\"a\",0)\n", "PRINT INSTR(\"a\",\"a\",1.5)\n",
+                            "PRINT INSTR(1,\"a\")\n", "PRINT INSTR(\"a\")\n"})
+        require(runFails(interpreter, bad), "INSTR accepted invalid arguments");
+
+    require(runBasic(interpreter,
+        "PRINT MIN(3,5)\nPRINT MAX(3,5)\nPRINT MIN(-2.5,1)\nPRINT MAX(-2.5,-3)\nPRINT MIN(4,4)\n"
+        "PRINT CLAMP(10,0,5)\nPRINT CLAMP(-1,0,5)\nPRINT CLAMP(3,0,5)\nPRINT CLAMP(2,2,2)\n") ==
+        "3\n5\n-2.5\n-2.5\n4\n5\n0\n3\n2\n", "MIN/MAX/CLAMP returned an unexpected result");
+    require(runFails(interpreter, "PRINT CLAMP(1,5,0)\n"), "CLAMP accepted lo > hi");
+    require(runFails(interpreter, "PRINT MIN(\"a\",1)\n"), "MIN accepted a string");
+
+    clock->now = 1234;
+    require(runBasic(interpreter, "PRINT TICKS()\nPRINT TIMER()\n") == "1234\n1234\n",
+            "TICKS/TIMER did not read the monotonic clock");
+    clock->now = 5000000123ULL;
+    require(runBasic(interpreter, "a=TICKS()\nPRINT a>4294967295\nPRINT a\n") == "1\n5000000123\n",
+            "TICKS wrapped at 32 bits");
+    ql32::Interpreter hostClock;
+    require(runBasic(hostClock, "a=TICKS()\nb=TICKS()\nPRINT b>=a\nPRINT a>0\n") == "1\n1\n",
+            "default TICKS is not monotonic");
+
+    const auto pick = [&](const std::string& key) {
+        return runBasic(interpreter,
+            "k$=\"" + key + "\"\n"
+            "SELECT ON k$\n"
+            "= \"UP\"\nPRINT \"up\"\n"
+            "= \"A\" TO \"F\", \"x\"\nPRINT \"range\"\n"
+            "= REMAINDER\nPRINT \"other\"\n"
+            "END SELECT\n");
+    };
+    require(pick("UP") == "up\n" && pick("up") == "other\n", "string SELECT is not case sensitive");
+    require(pick("A") == "range\n" && pick("C") == "range\n" && pick("F") == "range\n" &&
+            pick("x") == "range\n" && pick("G") == "other\n" && pick("a") == "other\n" &&
+            pick("") == "other\n", "string SELECT range or remainder mismatch");
+    require(runBasic(interpreter, "k$=\"Z\"\nSELECT ON k$\n= \"A\"\nPRINT \"a\"\nEND SELECT\nPRINT \"end\"\n") ==
+            "end\n", "string SELECT without a match ran an arm");
+    const auto glob = [&](const std::string& key) {
+        return runBasic(interpreter,
+            "k$=\"" + key + "\"\n"
+            "SELECT ON k$\n"
+            "= \"F10\"\nPRINT \"exact\"\n"
+            "= \"F*\"\nPRINT \"f-any\"\n"
+            "= \"?x\", \"a?c\"\nPRINT \"q\"\n"
+            "= \"*\" TO \"*\"\nPRINT \"star\"\n"
+            "= REMAINDER\nPRINT \"other\"\n"
+            "END SELECT\n");
+    };
+    require(glob("F10") == "exact\n" && glob("F1") == "f-any\n" && glob("F") == "f-any\n" &&
+            glob("f1") == "other\n", "string SELECT wildcard ordering or case sensitivity mismatch");
+    require(glob("ax") == "q\n" && glob("abc") == "q\n" && glob("Abc") == "other\n" && glob("aBc") == "q\n" &&
+            glob("x") == "other\n", "string SELECT '?' wildcard mismatch");
+    require(glob("*") == "star\n", "literal * could not be matched with a TO range");
+    require(runBasic(interpreter, "k$=UPPER$(\"up\")\nSELECT ON k$\n= \"UP\"\nPRINT \"norm\"\nEND SELECT\n") ==
+            "norm\n", "UPPER$ normalisation before SELECT failed");
+    require(runBasic(interpreter, "SELECT ON 2\n= 1 TO 3\nPRINT \"num\"\nEND SELECT\n") == "num\n",
+            "numeric SELECT regressed");
+    require(runFails(interpreter, "SELECT ON \"a\"\n= 1\nPRINT 1\nEND SELECT\n"),
+            "string SELECT accepted a numeric arm");
+    require(runFails(interpreter, "SELECT ON 1\n= \"a\"\nPRINT 1\nEND SELECT\n"),
+            "numeric SELECT accepted a string arm");
+}
+
 } // namespace
 
 int main() {
     try {
+        testLanguageAdditionsBatch1();
         testPrintLinesAreChargedToSliceBudget();
         testInterpreterSessions();
         testDiagnosticsUseBasicLineNumbers();

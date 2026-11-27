@@ -232,7 +232,8 @@ constexpr std::string_view builtinFunctions[] = {
     "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
     "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$", "GX", "GY",
     "LOADFONT", "GETFONT", "LOADIMAGE", "SYSINFO$", "CAPABILITY",
-    "RND", "RGB", "MODE", "CPUFREQ"
+    "RND", "RGB", "MODE", "CPUFREQ", "INSTR", "MIN", "MAX", "CLAMP", "TICKS", "TIMER",
+    "MUSIC.STATE", "MUSIC.POS", "MUSIC.LEN", "MUSIC.VOLUME", "MUSIC.TITLE$"
 };
 
 constexpr std::string_view shellHelpCommands[] = {
@@ -431,6 +432,11 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
         instruction.name == "INT") return {1, true};
     if (instruction.name == "RND") return {0, true};
     if (instruction.name == "CPUFREQ") return {0, true};
+    if (instruction.name == "INSTR") return {2, true};
+    if (instruction.name == "MIN" || instruction.name == "MAX") return {2, true};
+    if (instruction.name == "CLAMP") return {3, true};
+    if (instruction.name == "TICKS" || instruction.name == "TIMER" ||
+        instruction.name.str().rfind("MUSIC.", 0) == 0) return {0, true};
     if (instruction.name == "RANDOMIZE") return {1, false};
     if (instruction.name == "FREE") return {0, true};
     if (instruction.name == "GETCHANNEL") return {1, true};
@@ -785,7 +791,10 @@ private:
             return Token(Kind::Identifier, keep(upper), line_, column);
         if (isBuiltinCommandName(upper))
             return Token(Kind::BuiltinCommand, keep(upper), line_, column);
-        if (isBuiltinFunctionName(upper))
+        if (isBuiltinFunctionName(upper) &&
+            (peek() == '(' ||
+             (upper != "TICKS" && upper != "TIMER" && upper != "MIN" && upper != "MAX" &&
+              upper != "CLAMP" && upper != "INSTR")))
             return Token(Kind::BuiltinFunction, keep(upper), line_, column);
         const Keyword* matched = nullptr;
         for (const Keyword& keyword : keywords) {
@@ -1356,6 +1365,9 @@ private:
                 } else if (instruction.name == "BUSY") {
                     if (passedArguments > 2)
                         error(instruction, "BUSY expects text and an optional position, or OFF");
+                } else if (instruction.name == "INSTR") {
+                    if (passedArguments < 2 || passedArguments > 3)
+                        error(instruction, "INSTR expects a string, a substring, and optional start");
                 } else if (instruction.name == "MID$") {
                     if (passedArguments < 2 || passedArguments > 3)
                         error(instruction, "MID$ expects a string, start, and optional length");
@@ -2911,6 +2923,24 @@ private:
             }
             error(marker, "expected channel handle after '#'");
         }
+        if (check(Kind::BuiltinCommand) && peek().text == "MUSIC") {
+            const Token t = advance();
+            const Token part = peek();
+            const std::string action = uppercaseAscii(part.text);
+            if (!(check(Kind::Identifier) || check(Kind::BuiltinCommand) ||
+                  check(Kind::BuiltinFunction)) ||
+                (action != "STATE" && action != "POS" && action != "LEN" &&
+                 action != "VOLUME" && action != "TITLE$"))
+                error(part, "expected MUSIC STATE, POS, LEN, VOLUME, or TITLE$ in an expression");
+            advance();
+            if (!match(Kind::LeftParen) || !match(Kind::RightParen))
+                error(peek(), "MUSIC readback functions take empty parentheses");
+            Instruction call{Op::Call, 0.0, "MUSIC." + action, t.line, t.column()};
+            call.expectsValue = true;
+            call.mutableExtra().ownerDefinition = currentDefinitionName_;
+            code_.push_back(std::move(call));
+            return;
+        }
         if (match(Kind::BuiltinFunction)) {
             const Token t = previous();
             if (!check(Kind::LeftParen)) {
@@ -3188,7 +3218,8 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
                          std::shared_ptr<runtime::CpuFrequencyService> cpuFrequency,
                          std::shared_ptr<runtime::DisplayModeService> displayModes,
                          std::shared_ptr<runtime::SystemInfoService> systemInfo,
-                         std::shared_ptr<runtime::MusicService> music)
+                         std::shared_ptr<runtime::MusicService> music,
+                         std::shared_ptr<runtime::ClockService> clock)
     : uiSession_(std::make_unique<detail::UISessionState>()),
     storage_(std::move(storage)), fontRegistry_(storage_), bitmapRegistry_(storage_),
     channels_(std::move(channels)), ui_(std::move(ui)),
@@ -3198,6 +3229,7 @@ Interpreter::Interpreter(std::shared_ptr<runtime::StorageService> storage,
       displayModes_(std::move(displayModes)),
       systemInfo_(systemInfo ? std::move(systemInfo) : runtime::makeHostSystemInfoService()),
       music_(std::move(music)),
+      clock_(std::move(clock)),
       taskControl_(std::move(taskControl)),
       systemControl_(std::move(systemControl)),
       session_id_(nextInterpreterSessionId.fetch_add(1, std::memory_order_relaxed)),

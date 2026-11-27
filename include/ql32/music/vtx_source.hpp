@@ -14,8 +14,18 @@ public:
     }
     bool playing() const noexcept override { return player_.playing(); }
     std::shared_ptr<AudioPrefetcher> prefetcher() const override { return player_.prefetcher(); }
+    std::uint32_t positionMs() const noexcept override {
+        return static_cast<std::uint32_t>(player_.framePosition() * 1000ULL / hz());
+    }
+    std::uint32_t lengthMs() const noexcept override {
+        return static_cast<std::uint32_t>(player_.frameCount() * 1000ULL / hz());
+    }
+    std::string title() const override { return player_.metadata().title; }
 
 private:
+    std::uint32_t hz() const noexcept {
+        return player_.metadata().playerHz ? player_.metadata().playerHz : 50;
+    }
     VtxPlayer player_;
 };
 
