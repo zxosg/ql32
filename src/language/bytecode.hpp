@@ -127,6 +127,7 @@ public:
         return *this;
     }
     bool empty() const noexcept { return !values_ || values_->empty(); }
+    const void* identity() const noexcept { return values_.get(); }
     std::size_t size() const noexcept { return values_ ? values_->size() : 0; }
     const_iterator begin() const { return values_ ? values_->begin() : emptyVector().begin(); }
     const_iterator end() const { return values_ ? values_->end() : emptyVector().end(); }
@@ -513,6 +514,21 @@ struct InstructionSequence : std::deque<Instruction> {
     // Replaces the instruction deque with the compact encoding.
     void makeCompact();
     bool isCompact() const noexcept { return compact.get() != nullptr; }
+};
+
+// Optional platform hooks bracketing a compilation. A platform can serve the compiler's
+// small allocations from one releasable region so they do not fragment the heap.
+struct CompileArenaHooks {
+    void (*begin)() = nullptr;
+    void (*end)() = nullptr;
+};
+void setCompileArenaHooks(CompileArenaHooks hooks);
+class CompileArenaScope {
+public:
+    CompileArenaScope();
+    ~CompileArenaScope();
+    CompileArenaScope(const CompileArenaScope&) = delete;
+    CompileArenaScope& operator=(const CompileArenaScope&) = delete;
 };
 
 // When `memory` is given, a program whose token list cannot fit the free heap

@@ -480,11 +480,63 @@ void InstructionSequence::appendInstructions(const InstructionSequence& other) {
     for (const Instruction& instruction : other) appendInstruction(instruction);
 }
 
+void CompactProgram::rehome(const std::shared_ptr<TextPool>& pool) {
+    TextPoolScope scope(pool);
+    for (SharedText& name : names_) name = std::string(name.str());
+    // Calls to one procedure share their name lists; keep sharing them.
+    std::unordered_map<const void*, SharedNames> moved;
+    auto move = [&](SharedNames& names) {
+        if (names.empty()) return;
+        auto found = moved.find(names.identity());
+        if (found == moved.end()) {
+            SharedNames fresh;
+            fresh = SharedNames::Vector(names.begin(), names.end());
+            found = moved.emplace(names.identity(), std::move(fresh)).first;
+        }
+        names = found->second;
+    };
+    for (InstructionExtras& extras : extras_) {
+        extras.ownerDefinition = std::string(extras.ownerDefinition.str());
+        move(extras.parameters);
+        move(extras.localNames);
+    }
+    pool_ = pool;
+}
+
+namespace {
+CompileArenaHooks gArenaHooks;
+}
+
+void setCompileArenaHooks(CompileArenaHooks hooks) { gArenaHooks = hooks; }
+CompileArenaScope::CompileArenaScope() { if (gArenaHooks.begin) gArenaHooks.begin(); }
+CompileArenaScope::~CompileArenaScope() { if (gArenaHooks.end) gArenaHooks.end(); }
+
 void InstructionSequence::makeCompact() {
     compact.make().program = CompactProgram::encode(*this);
 #ifndef QL32_COMPACT_DUALRUN
-    clear();
-    shrink_to_fit();
+    // A deque always owns one block, so replace it rather than shrink it.
+    static_cast<std::deque<Instruction>&>(*this) = std::deque<Instruction>();
+    // Everything the compiler allocated that stays alive is copied into fresh storage so
+    // the compile-time arena (if any) holds only garbage and can be released whole.
+    auto pool = std::make_shared<TextPool>();
+    compact.get()->program.rehome(pool);
+    {
+        auto copy = functions;
+        functions = std::move(copy);
+    }
+    {
+        auto copy = arrays;
+        arrays = std::move(copy);
+    }
+    {
+        auto copy = constants;
+        constants = std::move(copy);
+    }
+    {
+        auto copy = dataItems;
+        dataItems = std::move(copy);
+    }
+    textPool = pool;
 #endif
 }
 

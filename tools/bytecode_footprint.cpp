@@ -8,7 +8,9 @@
 
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <set>
+#include <string>
 #include <sstream>
 
 using namespace ql32::detail;
@@ -17,11 +19,19 @@ using namespace ql32::detail;
 namespace {
 std::size_t gLive = 0, gPeak = 0;
 constexpr std::size_t Header = 16;
+// Allocation trace: size of each live allocation by sequence number (0 = freed).
+constexpr std::size_t TraceMax = 4u << 20;
+std::uint32_t* gTrace = nullptr;
+std::size_t gSeq = 0;
 } // namespace
 void* operator new(std::size_t size) {
     void* raw = std::malloc(size + Header);
     if (!raw) throw std::bad_alloc();
+    if (!gTrace) gTrace = static_cast<std::uint32_t*>(std::calloc(TraceMax, 4));
+    const std::size_t seq = gSeq++ % TraceMax;
     *static_cast<std::size_t*>(raw) = size;
+    static_cast<std::size_t*>(raw)[1] = seq;
+    if (gTrace) gTrace[seq] = static_cast<std::uint32_t>(size);
     gLive += size;
     if (gLive > gPeak) gPeak = gLive;
     return static_cast<char*>(raw) + Header;
@@ -30,6 +40,7 @@ void operator delete(void* p) noexcept {
     if (!p) return;
     void* raw = static_cast<char*>(p) - Header;
     gLive -= *static_cast<std::size_t*>(raw);
+    if (gTrace) gTrace[static_cast<std::size_t*>(raw)[1]] = 0;
     std::free(raw);
 }
 void operator delete(void* p, std::size_t) noexcept { operator delete(p); }
@@ -41,6 +52,8 @@ std::size_t heapOf(const std::string& s) { return s.capacity() > 15 ? s.capacity
 } // namespace
 
 int main(int argc, char** argv) {
+    const bool liveDump = argc > 1 && std::string(argv[1]) == "--live";
+    if (liveDump) { ++argv; --argc; }
     std::cout << "file,instructions,record_bytes,out_of_line_bytes,total_bytes,"
                  "name_refs,distinct_names,push_values,distinct_push_values,"
                  "functions,arrays,constants,data_items,heap_retained,heap_peak,"
@@ -63,6 +76,23 @@ int main(int argc, char** argv) {
             code = compileSource(source);
         } catch (const std::exception&) {
             continue;
+        }
+        const std::size_t seqStart = gSeq;
+        if (liveDump) {
+            // Retained allocations after the compile, in allocation order, then after makeCompact.
+            auto dump = [&](const char* label, std::size_t from) {
+                std::map<std::size_t, std::pair<std::size_t, std::size_t>> hist;
+                for (std::size_t s = from; s < gSeq; ++s)
+                    if (gTrace[s]) { auto& h = hist[gTrace[s]]; ++h.first; h.second += gTrace[s]; }
+                std::cerr << label << ": size count bytes\n";
+                for (auto& [sz, h] : hist) if (h.second >= 256) std::cerr << "  " << sz << ' ' << h.first << ' ' << h.second << '\n';
+            };
+            dump("live after compile", 0);
+            std::cerr << "retained before makeCompact " << gLive - liveBefore << "\n";
+            code.makeCompact();
+            std::cerr << "retained after makeCompact " << gLive - liveBefore << "\n";
+            dump("live after makeCompact", 0);
+            std::cerr << "seqStart " << seqStart << " seqEnd " << gSeq << '\n';
         }
         const std::size_t retained = gLive - liveBefore;
         const std::size_t peak = gPeak - liveBefore;

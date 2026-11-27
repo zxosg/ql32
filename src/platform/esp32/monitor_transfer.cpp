@@ -3,6 +3,7 @@
 #include "ql32/runtime/ymodem.hpp"
 
 #include "ql32/platform/esp32/diagnostics.hpp"
+#include "ql32/platform/esp32/small_alloc.hpp"
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -62,6 +63,11 @@ bool handleMonitorTransferCommand(std::string_view input,
 #if defined(QL32_HEAP_DIAGNOSTICS)
         const std::string arg = separator == std::string::npos ? std::string() :
             uppercase(trim(line.substr(separator + 1)));
+        if (arg == "ARENA") {
+            ql32::platform::esp32::smallAllocDump([](const char* line) { Serial.println(line); });
+            Serial.println("ARENA|END");
+            return true;
+        }
         if (arg == "FREEMAP") {
             // Diagnostic: claim the largest free block repeatedly to list the free blocks
             // (address, size), then release them.
@@ -79,6 +85,16 @@ bool handleMonitorTransferCommand(std::string_view input,
                 char row[64];
                 std::snprintf(row, sizeof(row), "FREEMAP|%p|%u", p, static_cast<unsigned>(big));
                 serial.println(row);
+                // First bytes of whatever follows the block, to identify the neighbour.
+                const auto end = reinterpret_cast<std::uintptr_t>(p) + big;
+                if (end + 48 < 0x40000000u) {
+                    char dump[160];
+                    int len = std::snprintf(dump, sizeof(dump), "FREEMAPN|%p|", p);
+                    const auto* bytes = reinterpret_cast<const unsigned char*>(end);
+                    for (int i = 0; i < 40 && len < static_cast<int>(sizeof(dump)) - 3; ++i)
+                        len += std::snprintf(dump + len, sizeof(dump) - len, "%02x", bytes[i]);
+                    serial.println(dump);
+                }
             }
             while (n) heap_caps_free(held[--n]);
             serial.println("FREEMAP|END");
@@ -92,11 +108,12 @@ bool handleMonitorTransferCommand(std::string_view input,
                 return h ? static_cast<unsigned>(uxTaskGetStackHighWaterMark(
                                static_cast<TaskHandle_t>(h))) : 0u;
             };
-            char buf[280];
+            const auto small = ql32::platform::esp32::smallAllocStats();
+            char buf[360];
             std::snprintf(buf, sizeof(buf),
                 "HEAPSTATS|free=%u|largest=%u|min=%u|loopstack=%u|musicstack=%u|"
                 "musiciostack=%u|failedalloc=%u|lastfail=%u|musicblocks=%u|musiclate=%u|"
-                "musicwriteerr=%u|musicmaxgap=%u",
+                "musicwriteerr=%u|musicmaxgap=%u|smallregion=%u|smallused=%u|smallpeak=%u|smallfallback=%u|smallleft=%u|smallrel=%u",
                 static_cast<unsigned>(info.total_free_bytes),
                 static_cast<unsigned>(info.largest_free_block),
                 static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT)),
@@ -107,7 +124,10 @@ bool handleMonitorTransferCommand(std::string_view input,
                 static_cast<unsigned>(d.musicBlocks.load()),
                 static_cast<unsigned>(d.musicLateBlocks.load()),
                 static_cast<unsigned>(d.musicWriteErrors.load()),
-                static_cast<unsigned>(d.musicMaxGapUs.load()));
+                static_cast<unsigned>(d.musicMaxGapUs.load()),
+                static_cast<unsigned>(small.regionBytes), static_cast<unsigned>(small.usedBytes),
+                static_cast<unsigned>(small.peakBytes), static_cast<unsigned>(small.fallbacks),
+                static_cast<unsigned>(small.leftover), static_cast<unsigned>(small.releases));
             serial.println(buf);
             return true;
         }

@@ -363,3 +363,17 @@ Full-screen dirplayer on the CYD after Phase 2: RUN start 122.4K free / 43.0K la
 - The streaming lexer already exists (TokenWindow), so the token vector is not a retained cost.
 - Tried, no gain (reverted): re-homing names/extras/pool into fresh allocations after encode (43.0K); steering placement into the largest block during `makeCompact` (43.0K, free -2.5K); realloc of the compact holder (+1.7K free, 47K largest).
 - Conclusion: the live pieces are created during compile, interleaved with transients, so fixing at `makeCompact` is too late. Needed next: either a compile-time arena (monotonic allocator for transients, freed wholesale) or allocating the retained program structures (functions map, names, pool, VM state) from a reserved region before compile; plus a ProgramStore spill/segmentation (about 16K) for the free-heap gap of about 2.6K.
+
+## 12. Compile-time arena experiments (negative/partial results)
+
+Full-screen dirplayer, CYD, free/largest KB at RUN start (baseline main: 122.4 / 43.0):
+
+| Experiment | Free | Largest | Verdict |
+|---|---:|---:|---|
+| Pooled 512 B deque blocks from 4 KB slabs | 116 | 43 | worse free, no largest gain; dropped |
+| Permanent 64 KB small-object region | 99.8 | 43 | worse; dropped |
+| Releasable 48 KB compile arena + rehome of retained data | 115.1 | 49.1 | largest +6K, free -7K; gate not met |
+
+Arena build: after canvas 84.5/49.1, playing 63.1/49.1, exit 130.9/63.5 (failedalloc=0, late=0, smallused=0 after RUN start).
+Remaining free gap is the ~16K ProgramStore plus rehome duplication; closing it needs the ProgramStore spill or segmentation.
+Not merged: kept on branch jan-pal-compile-arena as an experiment (QL32_SMALL_ALLOC_BYTES, off by default elsewhere).

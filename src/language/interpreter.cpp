@@ -3884,6 +3884,8 @@ detail::InstructionSequence detail::compileSource(const std::string& source,
                 "program of " + std::to_string(tokenCount) + " tokens", estimate, 2048))
             throw std::runtime_error(*failure + "; shorten the program");
     }
+    // After admission: the arena reservation must not count against the check above.
+    CompileArenaScope arena;
     Compiler compiler(source, std::move(declared));
     return compiler.compile();
 }

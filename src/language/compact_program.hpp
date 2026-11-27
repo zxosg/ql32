@@ -76,6 +76,9 @@ public:
     Instruction decode(std::size_t index) const;
     void decodeInto(std::size_t index, Instruction& out, ReadHint& hint) const;
     CompactStats stats() const;
+    // Moves every long-lived allocation (names, extras lists) out of storage owned by
+    // the compiler into fresh allocations, with all text interned in `pool`.
+    void rehome(const std::shared_ptr<TextPool>& pool);
 
 private:
     struct Checkpoint {

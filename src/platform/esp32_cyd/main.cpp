@@ -28,6 +28,8 @@
 #include "pins.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/vm/scheduler.hpp"
+#include "ql32/platform/esp32/small_alloc.hpp"
+#include "../../language/bytecode.hpp"
 #include "ql32/runtime/file_ops.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
@@ -813,6 +815,11 @@ void setup() {
     boardMemory.setReclaimer([] {
         if (graphics) graphics->releaseFrozenImages();
     });
+    {
+        ql32::detail::CompileArenaHooks hooks;
+        ql32::platform::esp32::smallAllocHooks(&hooks.begin, &hooks.end);
+        ql32::detail::setCompileArenaHooks(hooks);
+    }
     ql32::platform::esp32::installFailedAllocLogger();
     std::static_pointer_cast<ql32::platform::olimex_vga::MusicService>(services.music)
         ->setMemoryService(services.memory);
