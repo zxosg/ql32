@@ -2035,7 +2035,7 @@ void setup() {
     ql32::vm::Services services;
     {
         ql32::runtime::SystemInfoProfile profile;
-        profile.values = {"0.1.0", "unknown",
+        profile.values = {QL32_VERSION_STRING, "unknown",
 #if defined(QL32_BOARD_OLIMEX_ESP32_SBC_FABGL)
                           "olimex_esp32_sbc_fabgl_rev_b",
 #else
