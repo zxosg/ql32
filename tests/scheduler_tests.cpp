@@ -40,7 +40,12 @@ public:
         files.erase(path);
     }
     void remove(const std::string& path) override { files.erase(path); }
+    std::unique_ptr<ql32::runtime::StorageReadHandle> openRead(const std::string& path) override {
+        if (!allowOpenRead) return StorageService::openRead(path);
+        return std::make_unique<ql32::runtime::MemoryStorageReadHandle>(files.at(path));
+    }
 
+    bool allowOpenRead = true;
     std::unordered_map<std::string, std::string> files;
 };
 
@@ -1707,6 +1712,46 @@ void testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt() {
     }
 }
 
+void testRunSpillsProgramAndRestoresOnDemand() {
+    for (const bool canVerify : {true, false}) {
+        auto memory = std::make_shared<FakeMemory>();
+        ql32::runtime::AdmissionPolicy policy;
+        policy.programSpillPath = "FFS:.q32-run";
+        memory->setAdmissionPolicy(policy);
+        auto storage = std::make_shared<ProgramStorage>();
+        storage->allowOpenRead = canVerify;
+        ql32::vm::Services services;
+        services.memory = memory;
+        services.storage = storage;
+        ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+        std::ostringstream output;
+        const auto repl = scheduler.launchInteractive(output);
+        require(scheduler.submit(repl, "10 PRINT \"A\"\n20 PAUSE 50\n30 PRINT \"B\"\n"), "lines rejected");
+        require(scheduler.tick(), "lines did not run");
+        require(scheduler.submit(repl, "RUN\n"), "RUN rejected");
+        bool sawSpill = false;
+        for (int tick = 0; tick < 2000; ++tick) {
+            if (tick > 10) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            sawSpill = sawSpill || storage->files.count("FFS:.q32-run") != 0;
+            const auto info = scheduler.task(repl);
+            if (tick > 1 && info && info->status == ql32::vm::TaskStatus::WaitingInput) break;
+            scheduler.tick();
+        }
+        require(sawSpill == canVerify, "spill did not follow verification capability");
+        output.str("");
+        require(scheduler.submit(repl, "LIST\n"), "LIST rejected");
+        for (int tick = 0; tick < 20; ++tick) scheduler.tick();
+        require(output.str().find("20 PAUSE 50") != std::string::npos,
+                "program was not restored for LIST");
+        require(storage->files.count("FFS:.q32-run") == 0, "recovery file not removed after restore");
+        require(scheduler.submit(repl, "25 PRINT 1\nSAVE \"x\"\n"), "edit rejected");
+        for (int tick = 0; tick < 20; ++tick) scheduler.tick();
+        require(storage->files["x"].find("25 PRINT 1\n") != std::string::npos &&
+                    storage->files["x"].find("30 PRINT \"B\"") != std::string::npos,
+                "restored program lost lines");
+    }
+}
+
 void testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow() {
     auto memory = std::make_shared<FakeMemory>();
     ql32::runtime::AdmissionPolicy policy;
@@ -1867,6 +1912,7 @@ int main() {
     testWorkerCanvasIsLazyAndTileSizedInIsolatedMode();
     testBasicTaskViewCommandIsSupervisorOnly();
     testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt();
+    testRunSpillsProgramAndRestoresOnDemand();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();

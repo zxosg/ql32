@@ -363,3 +363,19 @@ Full-screen dirplayer on the CYD after Phase 2: RUN start 122.4K free / 43.0K la
 - The streaming lexer already exists (TokenWindow), so the token vector is not a retained cost.
 - Tried, no gain (reverted): re-homing names/extras/pool into fresh allocations after encode (43.0K); steering placement into the largest block during `makeCompact` (43.0K, free -2.5K); realloc of the compact holder (+1.7K free, 47K largest).
 - Conclusion: the live pieces are created during compile, interleaved with transients, so fixing at `makeCompact` is too late. Needed next: either a compile-time arena (monotonic allocator for transients, freed wholesale) or allocating the retained program structures (functions map, names, pool, VM state) from a reserved region before compile; plus a ProgramStore spill/segmentation (about 16K) for the free-heap gap of about 2.6K.
+
+## 13. ProgramStore spill during RUN
+
+`RUN` writes the editable program to `FFS:.q32-run` (atomic, streamed, FNV hash + size, verified by streaming read-back) right after compile, then frees the RAM copy. Any later edit/LIST/SAVE/RUN restores it (hash checked); NEW/LOAD discard it; if any step fails the RAM copy is kept. Enabled by `AdmissionPolicy::programSpillPath` (CYD only). The file is removed on restore and on interpreter destruction. Spill/restore latency depends on the storage backend (FFS/SPIFFS here).
+
+Full-screen dirplayer, CYD, free/largest KB (main at same time / with spill):
+
+| Phase | main | spill |
+|---|---:|---:|
+| RUN start | 120.0 / 43.0 | 136.0 / 43.0 |
+| after canvas | 89.4 / 16.4 | 105.4 / 18.4 |
+| ready | 94.6 / 16.4 | 110.6 / 20.5 |
+| playing | 68.0 / 4.1 | 83.9 / 18.4 |
+| exit (after canvas hook) | 107.2 / 25.6 | 123.2 / 43.0 |
+
+Free gate (>=125K at RUN start) met; largest gate (>=60K) not met: the largest block at RUN start is still 43K (pinned small allocations, see sections 11-12). The arena (section 12) gives ~49K at a cost of ~7K free, so spill + arena would reach ~129K / 49K, still short of 60K.

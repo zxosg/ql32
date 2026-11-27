@@ -888,6 +888,7 @@ bool SessionScheduler::tick() {
 
     try {
         ExecutionStatus result;
+        const bool wasStarted = current.started;
         if (current.started) {
             result = current.interpreter->resumeSlice(*current.output,
                                                       instructionBudget_);
@@ -900,6 +901,10 @@ bool SessionScheduler::tick() {
         }
         current.hasPendingSource = false;
         current.interactiveSubmission = false;
+        if (!wasStarted && current.programExecutionActive && current.interpreter &&
+            result != ExecutionStatus::Completed && result != ExecutionStatus::ProgramStopped &&
+            result != ExecutionStatus::RunPending && result != ExecutionStatus::InteractivePending)
+            current.interpreter->spillProgramForRun();
         // The program text is only needed to compile; a long-running program
         // must not keep a second copy of it on the heap.
         current.releaseSource();

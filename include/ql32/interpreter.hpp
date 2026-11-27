@@ -117,6 +117,10 @@ public:
     bool debugRemoveWatch(const std::string& expression);
     runtime::SessionId graphicsSessionId() const noexcept { return session_id_; }
     std::string takePendingRunSource() noexcept;
+    // Parks the editable program in a verified recovery file while a program
+    // runs; it is restored on the next edit/LIST/SAVE/RUN. Keeps the RAM copy
+    // when the policy is off or any step fails. Returns true when spilled.
+    bool spillProgramForRun();
     std::string takePendingInteractiveTail() noexcept;
     std::optional<InteractiveLineEdit> takePendingLineEdit() noexcept;
     std::optional<InteractiveLineEdit> navigateProgramEdit(int currentLine,
@@ -202,6 +206,15 @@ private:
     bool interactiveCommandExecution_ = false;
     bool persistentSessionResources_ = false;
     ProgramStore program_;
+    struct ProgramSpill {
+        std::string path;
+        std::uint64_t bytes = 0;
+        std::uint64_t hash = 0;
+    };
+    std::optional<ProgramSpill> programSpill_;
+    bool spillProgramAfterCompile_ = false;
+    ProgramStore& program();
+    void discardProgramSpill() noexcept;
     std::optional<int> lastEditedLine_;
     std::unique_ptr<detail::UISessionState> uiSession_;
     std::shared_ptr<runtime::StorageService> storage_;
