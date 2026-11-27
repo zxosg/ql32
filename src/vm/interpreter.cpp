@@ -653,6 +653,7 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         execution_->code.makeCompact();
 #endif
         preparingProgram = false;
+        if (std::exchange(spillProgramAfterCompile_, false)) spillProgramForRun();
         if (execution_->code.cpuFrequencyMHz != 0 && cpuFrequency_ &&
             !cpuFrequency_->setFrequencyMHz(execution_->code.cpuFrequencyMHz))
             throw runtime::Error(runtime::ErrorCode::ServiceUnavailable,

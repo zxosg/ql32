@@ -4688,6 +4688,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             std::string programSource = joinProgramLines(program());
             if (taskControl_ && !programSource.empty()) {
                 pendingRunSource_ = std::move(programSource);
+                spillProgramAfterCompile_ = true;
                 pendingInteractiveTail_.assign(std::istreambuf_iterator<char>(input),
                                                std::istreambuf_iterator<char>());
                 return ExecutionStatus::RunPending;

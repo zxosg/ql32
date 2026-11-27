@@ -212,6 +212,7 @@ private:
         std::uint64_t hash = 0;
     };
     std::optional<ProgramSpill> programSpill_;
+    bool spillProgramAfterCompile_ = false;
     ProgramStore& program();
     void discardProgramSpill() noexcept;
     std::optional<int> lastEditedLine_;
