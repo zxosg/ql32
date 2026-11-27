@@ -198,3 +198,9 @@ CYD, dirplayer, `FREE()` (free, largest) by phase, before -> after:
 - Song loads while audio runs now also require a 4 KiB contiguous block (`musicPlayContiguousBytes`).
 - Host soak: repeated switching between two YM songs (cache miss then hits) and rebuild on a stale-key cache.
 - Hardware gate (golden 16/16, CYD soak) is still pending for this change.
+
+## Update: full-screen layout and digi-drums restored
+
+After the program spill (PR #57) the player runs full screen again (320x240 canvas, 14-row list, no shrunk
+`TRAP WINDOW`). The ESP YM drum budget is 8192 samples, so KNUCKLE.YM plays with its digi-drums.
+CYD, debug bar on: playing KNUCKLE free 53K / min 44K, LyraII1 free 70K / min 43K, late=0, failedalloc=0.

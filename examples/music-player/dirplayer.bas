@@ -15,9 +15,8 @@ vol = 128
 smode = 3
 play$ = ""
 GW = 320
-GH = 160
+GH = 240
 SH = 240
-REM A 320x160 window keeps the 4-bit canvas at 25.6K instead of 38.4K.
 TRAP WINDOW #1, 0, 0, GW, GH
 LY = 14
 SY = GH - 64
@@ -56,7 +55,7 @@ REPeat main WHILE quit = 0
   END IF
 END REPeat main
 TRAP MUSIC STOP
-REM Release the 25.6K canvas first so the console window can be re-created.
+REM Release the 38.4K canvas first so the console window can be re-created.
 TRAP WINDOW #1, 0, 0, 8, 8
 TRAP WINDOW #0, 0, SH - 64, GW, 64
 CLS
