@@ -407,3 +407,9 @@ Measured costs come from sections 9-13; "est." is an estimate.
 | 9 | Drum cache block size, task stacks, debug bar | < 1-2K each | none | low-medium | not paying for themselves |
 
 Recommendation: do #3 then #5 as one measured step (host differential tests already cover the compact encoding); stop there unless a new requirement appears. Only #3 and #5 are not yet implemented, so no code change for them in this step.
+
+## 15. Step: text pool index release and exact sizing (measured)
+
+The compile-time `unordered_set` text pool became a deque store plus a lookup index. `makeCompact()` frees the index (EVAL rebuilds it on demand), and the compact names/index vectors are shrunk to size.
+
+Device, full-screen dirplayer, RUN start (free / largest): 135.5K / 40.9K before, **140.1K / 34.8K** after (+4.6K free, -6.1K largest; deterministic over repeated runs). A `vector<unique_ptr<string>>` store gave 137.6K / 32.8K, so the deque was kept. KNUCKLE and LyraII1 play with late=0; golden 16/16; host, sanitized, compact and dual-run ctest 92/92. The 60K largest gate is still not met; the largest block moves with allocation layout, and during playback it is dominated by other allocations (3.6K).

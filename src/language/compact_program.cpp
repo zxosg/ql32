@@ -224,6 +224,8 @@ CompactProgram CompactProgram::encode(const InstructionSequence& source) {
     program.pool_ = source.textPool;
     std::unordered_map<const void*, std::size_t> nameIds;
     for (const Instruction& instruction : source) program.appendRecord(instruction, &nameIds);
+    program.names_.shrink_to_fit();
+    program.index_.shrink_to_fit();
     return program;
 }
 
@@ -483,6 +485,7 @@ void InstructionSequence::appendInstructions(const InstructionSequence& other) {
 
 void InstructionSequence::makeCompact() {
     compact.make().program = CompactProgram::encode(*this);
+    if (textPool) textPool->freeze();
 #ifndef QL32_COMPACT_DUALRUN
     clear();
     shrink_to_fit();
