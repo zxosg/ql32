@@ -485,3 +485,22 @@ Where the memory is (section 16): retained program state is about 31K (compact c
 | 4 | Handles + safe-point compaction (2+3) | few K | few K | high | high |
 
 None of the items reaches the 60K gate on the CYD: the missing ~19K of contiguity comes from the pinned small allocations of boot services and compile-transient holes, which no task-local scheme can move. What would reach it is reducing compile-time transients (token store streaming, already tried as an arena: +6K largest for -7K free) or loading the program before the long-lived services allocate (boot order). Recommendation: keep the current design, do the measurements above (they are cheap, host-only except item 4), apply PSRAM routing on PSRAM boards, and do not start handles/compaction without evidence from the poisoning experiment.
+
+## 19. Section 18 cheap experiments: results (no layout change kept)
+
+Full-screen dirplayer on the CYD, same-session baseline (main): RUN start 139.4K free / 38.9K largest, canvas 96.0K / 11.3K, ready 101.1K / 11.3K, KNUCKLE playing 75.0K / 11.3K, exit 75.0K, then 127.0K / 38.9K after the canvas is released. The 60K largest gate is not met and none of the experiments below moved it the right way.
+
+Findings with the heap tracker (`esp32_2432s028_track`, now aware of the relocation slab):
+- After relocation the middle of the heap holds about 100K free in roughly 15 holes of 2-14K, separated by about 14 pinned clusters. Their owners are compile residue that `relocate()` does not copy: the TextPool deque blocks (6 x 504 B plus pooled strings), the functions/arrays/constants hash nodes (64 B each, one pin per node), CompactState, the emptied instruction deque shell and shared_ptr control blocks, about 6K in total. The Interpreter/VM objects sit in the low cluster and do not split the middle.
+- The slab (about 15K) is carved from the first hole that fits; the holes are 13.8K and 12.8K, so its size relative to them decides whether the tail block survives.
+
+Experiments (RUN start free / largest):
+
+| Experiment | Result | Verdict |
+|---|---|---|
+| Relocate twice, so the second copy lands in the merged hole | 139.4K / 23.5K | worse. It also exposed a latent bug: the moved-from program is destroyed after the old slab is released, so its deletes reach free() on slab pointers (heap corruption). Rejected |
+| Copy functions/arrays/constants/dataItems into the slab (with the compact holder declared first so it outlives them) | 140.0K / 21.5K | worse: the larger slab no longer fits the 13.8K hole and takes the tail. Rejected |
+
+Neither is kept. The largest-block gap is set by where the slab and the long-lived residue land relative to the 13.8K/12.8K holes, not by a missing relocation step. Untried: a chunked slab of regions up to 6K (each fits a small hole and never touches the tail) and relocating the TextPool with a SharedText pointer remap, which touches every holder (names, extras, function metadata). The remap would merge the 4-6 pins left in the middle, roughly +10-20K largest at best (an estimate), still short of 60K without also changing the canvas lifetime (section 11). The handle-based refactor (section 18 items 2-3) is not justified by these results.
+
+Tracker change kept: HEAP LIVEMAP now honours the bump slab (slab pointers are neither tracked nor freed), so post-relocation layouts can be inspected.
