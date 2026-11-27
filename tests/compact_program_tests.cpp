@@ -142,6 +142,57 @@ void testCorpus(const std::filesystem::path& root) {
 
 } // namespace
 
+// CompactState::at() returns references into an 8-slot ring: the newest eight
+// distinct instructions must stay valid, and wrapping must keep decoding exactly.
+void testRingOfEightKeepsRecentInstructionsValid() {
+    const auto code = compileSource(
+        "DEFine PROCedure p(a, b$)\nPRINT a; b$\nEND DEFine\nFOR i = 1 TO 20\np i, \"s\"\nEND FOR i\nx$ = \"abc\"\ny = 1.5 * 3\np 2, x$\nPRINT y + 7\n");
+    require(code.size() > 24, "ring test program too small");
+    CompactState state;
+    state.program = CompactProgram::encode(code);
+    std::string why;
+    std::vector<const Instruction*> held;
+    for (std::size_t i = 0; i < 8; ++i) held.push_back(&state.at(i));
+    for (std::size_t i = 0; i < 8; ++i)
+        require(instructionsEqual(*held[i], code[i], &why), "ring slot " + std::to_string(i) + " corrupted: " + why);
+    for (std::size_t round = 0; round < 3; ++round)
+        for (std::size_t i = 0; i < code.size(); ++i) {
+            const Instruction& now = state.at(i);
+            require(instructionsEqual(now, code[i], &why), "ring wrap decode " + std::to_string(i) + ": " + why);
+            if (i >= 7) {
+                // The previous seven accesses must still be intact (borrowed extras included).
+                for (std::size_t back = 1; back < 8; ++back)
+                    require(instructionsEqual(state.at(i - back), code[i - back], &why),
+                            "ring lost recent slot " + std::to_string(i - back) + ": " + why);
+                require(instructionsEqual(state.at(i), code[i], &why), "ring re-read " + why);
+            }
+        }
+    // Random-order access after wrapping, then invalidate and re-read.
+    for (std::size_t i = code.size(); i-- > 0;)
+        require(instructionsEqual(state.at(i), code[i], &why), "reverse decode " + std::to_string(i) + ": " + why);
+    state.invalidate();
+    for (std::size_t i = 0; i < code.size(); i += 3)
+        require(instructionsEqual(state.at(i), code[i], &why), "post-invalidate decode: " + why);
+}
+
+// Extras (names, argument lists) of instructions dropped by truncate must not leak into
+// instructions appended afterwards (runtime EVAL rollback).
+void testTruncateThenAppendKeepsExtrasConsistent() {
+    const auto code = compileSource("DEFine PROCedure p(a, b$)\nPRINT a; b$\nEND DEFine\np 1, \"x\"\n");
+    CompactProgram program = CompactProgram::encode(code);
+    const std::size_t keep = code.size() / 2;
+    std::string why;
+    for (int round = 0; round < 5; ++round) {
+        program.truncate(keep);
+        require(program.size() == keep, "truncate size");
+        for (std::size_t i = keep; i < code.size(); ++i) program.append(code[i]);
+        require(program.size() == code.size(), "append size");
+        for (std::size_t i = 0; i < code.size(); ++i)
+            require(instructionsEqual(program.decode(i), code[i], &why),
+                    "round " + std::to_string(round) + " decode " + std::to_string(i) + ": " + why);
+    }
+}
+
 int main(int argc, char** argv) {
     testLiteralsSurviveExactly();
     testRoundTripAcrossIndexStridesAndSegments();
@@ -149,6 +200,8 @@ int main(int argc, char** argv) {
     testExtrasAndControlFlowRoundTrip();
     testDecodeEqualityDetectsDifferences();
     testTruncateAndAppendMatchRebuild();
+    testRingOfEightKeepsRecentInstructionsValid();
+    testTruncateThenAppendKeepsExtrasConsistent();
     if (argc > 1) testCorpus(argv[1]);
     std::cout << "compact program tests passed\n";
 }

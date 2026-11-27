@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: default
+            flags: ""
+          - name: compact
+            flags: "-DQL32_COMPACT_CODE=ON"
+          - name: dualrun
+            flags: "-DQL32_COMPACT_CODE=ON -DQL32_COMPACT_DUALRUN=ON"
+          - name: sanitized
+            flags: "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined,float-cast-overflow"
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build ${{ matrix.flags }}
+      - run: cmake --build build -j4
+      - run: ctest --test-dir build -j4 --output-on-failure
+
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: [esp32_2432s028_spiffs, esp32_2432s028, olimex_esp32_sbc_fabgl, olimex_esp32_sbc_fabgl_psram, olimex_esp32_sbc_retro, lilygo_vga32, ql32_tenstar_esp32s3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install platformio
+      - run: pio run -e ${{ matrix.env }}

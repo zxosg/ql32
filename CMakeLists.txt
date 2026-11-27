@@ -137,6 +137,7 @@ if(QL32_BUILD_TESTS)
   add_cli_conformance_test(cli_abbreviations 0)
   add_cli_conformance_test(cli_array_by_reference 0)
   add_cli_conformance_test(cli_select_edges 0)
+  add_cli_conformance_test(cli_eval_trap_rollback 0)
   add_test(
     NAME ql32_golden_corpus
     COMMAND ${CMAKE_COMMAND}

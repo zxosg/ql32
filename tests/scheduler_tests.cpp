@@ -28,6 +28,9 @@ public:
         return found->second;
     }
     void writeText(const std::string& path, const std::string& contents) override {
+        if (failWrites && path.rfind("FFS:.q32-run", 0) == 0)
+            throw ql32::runtime::ServiceError(ql32::runtime::ServiceErrorCode::Unavailable,
+                                              "test write failure");
         files[path] = contents;
     }
     std::vector<ql32::runtime::FileEntry> list(const std::string&) override {
@@ -46,6 +49,7 @@ public:
     }
 
     bool allowOpenRead = true;
+    bool failWrites = false;
     std::unordered_map<std::string, std::string> files;
 };
 
@@ -1795,6 +1799,55 @@ void testSpillRecoveryFilesSurviveResetsAndFaults() {
             "damaged recovery file was deleted");
 }
 
+void testSpillWriteFailureKeepsProgramInRam() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.programSpillPath = "FFS:.q32-run";
+    memory->setAdmissionPolicy(policy);
+    auto storage = std::make_shared<ProgramStorage>();
+    storage->failWrites = true;
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.storage = storage;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    ql32::vm::TaskId repl = 0;
+    runSpillProgram(scheduler, output, repl);
+    require(countRecoveryFiles(*storage) == 0, "failed spill left recovery files");
+    require(output.str().find("B") != std::string::npos, "RUN did not finish after spill failure");
+    output.str("");
+    require(scheduler.submit(repl, "LIST\n"), "LIST rejected");
+    for (int tick = 0; tick < 20; ++tick) scheduler.tick();
+    require(output.str().find("20 PAUSE 50") != std::string::npos,
+            "program lost after a failed spill");
+}
+
+void testSpillMissingFileIsReportedNotSilentlyEmptied() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.programSpillPath = "FFS:.q32-run";
+    memory->setAdmissionPolicy(policy);
+    auto storage = std::make_shared<ProgramStorage>();
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.storage = storage;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    ql32::vm::TaskId repl = 0;
+    runSpillProgram(scheduler, output, repl);
+    require(countRecoveryFiles(*storage) != 0, "program did not spill");
+    for (auto it = storage->files.begin(); it != storage->files.end();)
+        it = it->first.rfind("FFS:.q32-run", 0) == 0 && it->first.find(".meta") == std::string::npos
+                 ? storage->files.erase(it)
+                 : std::next(it);
+    output.str("");
+    require(scheduler.submit(repl, "LIST\n"), "LIST rejected");
+    for (int tick = 0; tick < 20; ++tick) scheduler.tick();
+    const auto info = scheduler.task(repl);
+    require(!output.str().empty() || (info && !info->error.empty()), "missing recovery file not reported");
+    require(output.str().find("20 PAUSE 50") == std::string::npos, "phantom listing from a missing file");
+}
+
 void testRunSpillsProgramAndRestoresOnDemand() {
     for (const bool canVerify : {true, false}) {
         auto memory = std::make_shared<FakeMemory>();
@@ -1997,6 +2050,8 @@ int main() {
     testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt();
     testRunSpillsProgramAndRestoresOnDemand();
     testSpillRecoveryFilesSurviveResetsAndFaults();
+    testSpillWriteFailureKeepsProgramInRam();
+    testSpillMissingFileIsReportedNotSilentlyEmptied();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();

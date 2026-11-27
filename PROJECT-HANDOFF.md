@@ -7,6 +7,16 @@ record; refresh this handoff after meaningful implementation or
 hardware-acceptance changes. Last refreshed 2026-11-22 (documentation audit:
 [report](docs/test-results/documentation-audit-2026-11-22.md)).
 
+## Status update (2026-11-27)
+
+The memory programme (compact bytecode, segmented program store, program spill,
+relocation slab, drum budget fallback, WiFi/`NETTIME$` test) is complete and
+documented in `docs/plans/compact-bytecode-plan.md`; the 60K largest-block gate
+was not met and optimisation is closed. Compact bytecode is enabled on all ESP
+envs (hardware-verified only on the CYD). Release work is tracked in
+`docs/plans/release-checklist.md`; `CHANGELOG.md` has the v0.1.0 notes. Older
+sections below predate this and may be stale.
+
 ## Project and architecture
 
 QL/32 is a portable, native BASIC computer inspired by SMSQ/E SuperBASIC and

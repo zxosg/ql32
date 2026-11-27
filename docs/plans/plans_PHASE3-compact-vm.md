@@ -1,5 +1,7 @@
 # QL/32 Phase 3 – Compact VM Redesign (Implementation Plan)
 
+Status: **historical / superseded** by `compact-bytecode-plan.md` (the shipped design is the byte-oriented compact encoding, not this 16-byte redesign).
+
 Audience: implementing agents. Work starts from `codex/newvm` at `b2e0b3b`;
 create the `pre-compact-vm` tag at that baseline before implementation. Line
 references below were checked against the older `de88fe5` commit and may have
