@@ -651,10 +651,11 @@ void setup() {
                           static_cast<unsigned>(largestBlock),
                           static_cast<unsigned>(liveWindows));
         });
+    constexpr std::int32_t cydConsoleHeight = 24; // 3 text rows; keep equal to text_console.cpp
     graphics->setDefaultWindowBounds(0, {
-        0, std::max<std::int32_t>(0, static_cast<std::int32_t>(display.height()) - 64),
+        0, std::max<std::int32_t>(0, static_cast<std::int32_t>(display.height()) - cydConsoleHeight),
         static_cast<std::uint32_t>(display.width()),
-        static_cast<std::uint32_t>(std::min<std::int32_t>(64, display.height()))});
+        static_cast<std::uint32_t>(std::min<std::int32_t>(cydConsoleHeight, display.height()))});
     graphics->setConsoleBoundsCallback([](ql32::graphics::Rect bounds) {
         if (tftConsole) tftConsole->setBounds(bounds);
     });

@@ -15,8 +15,8 @@ void testPrintOutputAndWrapping() {
     std::ostream output(&console);
     output << "HELLO\nWORLD";
     require(display.calls.front().name == "fill_rect" &&
-                display.calls.front().values[1] == 176 &&
-                display.calls.front().values[3] == 64,
+                display.calls.front().values[1] == 216 &&
+                display.calls.front().values[3] == 24,
             "console did not initialize the bottom display strip");
     std::string renderedCharacters;
     for (const auto& call : display.calls) {
@@ -35,14 +35,14 @@ void testScrollingAndClear() {
     for (const auto& call : display.calls) {
         if (call.name != "fill_rect") continue;
         ++regionClears;
-        require(call.values.size() == 5 && call.values[1] >= 176 &&
+        require(call.values.size() == 5 && call.values[1] >= 216 &&
                     call.values[1] + call.values[3] <= 240,
                 "scrolling console repainted outside its text strip");
     }
-    require(regionClears == 4,
+    require(regionClears == 9,
             "scrolling console repainted an opaque rectangle over graphics");
     console.clear();
-    require(display.calls.back().name == "fill_rect" && regionClears + 1 == 5,
+    require(display.calls.back().name == "fill_rect" && regionClears + 1 == 10,
             "clearing console did not clear its display region");
 }
 
@@ -56,7 +56,7 @@ void testReconfigureAfterRotation() {
     bool usedPortraitConsoleOrigin = false;
     for (const auto& call : display.calls) {
         if (call.name == "cursor" && call.values.size() == 2 &&
-            call.values[0] == 0 && call.values[1] == 256)
+            call.values[0] == 0 && call.values[1] == 296)
             usedPortraitConsoleOrigin = true;
     }
     require(usedPortraitConsoleOrigin,

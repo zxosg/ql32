@@ -57,7 +57,7 @@ END REPeat main
 TRAP MUSIC STOP
 REM Release the 38.4K canvas first so the console window can be re-created.
 TRAP WINDOW #1, 0, 0, 8, 8
-TRAP WINDOW #0, 0, SH - 64, GW, 64
+TRAP WINDOW #0, 0, SH - 24, GW, 24
 CLS
 
 DEFine PROCedure LoadDir

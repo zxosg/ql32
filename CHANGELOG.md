@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- CYD: the default console strip is now 3 text rows (24 px) instead of 8 (64 px), leaving more of the screen to graphics windows. Use `WINDOW`/console bounds at runtime to change it.
+
 ## v0.1.0 - 2026-11-27
 
 First release. The CYD (ESP32-2432S028) is the supported and hardware-tested target. Olimex, LILYGO VGA32 and Tenstar ESP32-S3 builds are experimental: build-verified in CI only, not yet tested on hardware.
