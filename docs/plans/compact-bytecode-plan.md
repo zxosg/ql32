@@ -447,3 +447,41 @@ unaffected, but at dirplayer RUN start the largest block drops by about 26.6K
 transients later use. Time sync at boot therefore does not fully recover and
 is not compatible with the full-screen dirplayer gates; sync late (after the
 program has loaded) or accept the 8-row layout if it is needed.
+
+## 18. Evaluation: flat per-task blob, per-task pools/handles, safe-point compaction, PSRAM
+
+Analysis only; no code. Inputs: sections 10-17 measurements and the current code (`compact_program.{hpp,cpp}`, `bump_region.cpp`, `vm/execution_state.hpp`). The full-screen dirplayer benchmark is 140.9K free / 40.9K largest at RUN start, 76.6K / 11.2K while KNUCKLE plays, 152K / 43K after exit. Gate: largest >= 60K at RUN start.
+
+Where the memory is (section 16): retained program state is about 31K (compact code segments 9.2K, pool/extras 6K, index 1.8K, Interpreter/VM objects). The largest block is limited by about 50 holes of 0.5-11K left by compile transients plus pinned small pieces, and later by the 43K canvas. It is a contiguity problem, not a bytes problem. No allocation-safety contract document exists in this repo (grep for it finds none), so items 2 and 3 are judged against the code: the VM holds raw references into `std::string`, `std::vector<double>`/`std::vector<std::string>` array storage, `unordered_map` nodes and `callFrames` elements across expression evaluation, and native services receive `std::string_view` into them (`channel.hpp` write/directory APIs).
+
+### 1. One flat blob per task
+- Already done in substance: #55 stores code as byte-encoded 512 B segments, #62 `CompactState::relocate()` copies names, extras, code and index into one `BumpScope` slab and frees the scattered originals; #57 spills the ProgramStore text.
+- Remaining: replace the 512 B segment table with a single block and use 32-bit offsets instead of the names vector/`unordered_map` lookups. Expected payoff: free +1-3K (segment vector and per-block headers, about 18 x 8 B plus the index of pointers), largest +0 (the slab is already one block, and it sits in the pinned region, not in the tail). Segments exist precisely so no allocation is large; a single 20-30K block needs a 20-30K contiguous hole at compile time, which is the failing resource. Keep segments at compile and relocate into a blob afterwards (what #62 does).
+- Cost: medium (offset-based names/DATA/function metadata touch the compiler and `instructionAt()` decode). Risk: low-medium, covered by dual-run and compact-only ctest. Not worth it for memory alone; worth it only as a prerequisite for relocation of a whole task (e.g. moving the blob when a task ends).
+- Cheap experiment: log the slab size and the sum of segment/vector overhead in `HEAP STATS`; expect <= 3K.
+
+### 2. Per-task arena or size-class pools with handles
+- Payoff: potentially the largest of the four, because it targets the runtime holes. Strings, arrays and frames are currently std containers on the global heap. Per-task pools would return all runtime memory on task end as one block, and handle tables allow compaction. But for the benchmark the dominant runtime blockers are the canvas and music allocations (worker stack 6K, VFS buffers, LH5 tables, drum blocks), none of which are task data, so expected largest-block payoff at RUN start is about 0 (nothing runtime exists yet) and during playback a few K at most. After exit it already recovers to 152K / 43K.
+- Cost: high. `StackEntry` holds `std::string` by value; `RuntimeArray`, `RuntimeFrame::locals` (`unordered_map<string, Value>`), `arrayAliases`, `selectStates` and dialog/menu builders all use std allocators. A handle layer means replacing every one of them, or a per-task `std::pmr` resource (cheaper: `std::pmr::string/vector/unordered_map` over a task arena with no compaction; payoff is only whole-task release, with internal fragmentation inside the arena).
+- Risk: high for handles (every raw pointer/view across a native call becomes a use-after-move). Moderate for pmr (types change but pointers stay stable).
+- Cheap experiment: run dirplayer on the host with a counting `pmr::monotonic_buffer_resource` per session and report peak bytes and number of allocations per category; also `HEAP LIVEMAP` during playback to see how many pinned task-data blocks exist (section 16 found about 20 small pinned pieces at ready, mostly services, not task data).
+
+### 3. Compact at a safe point
+- Only meaningful on top of item 2 with handles. Compaction needs a point where no native code or VM frame holds raw pointers. The VM suspends only between instructions (scheduler slices), but native services keep `string_view`s only within a call, so slice boundaries are a plausible safe point; the blockers are the std containers above, whose elements are pointer-stable today by design and would stop being so. It also cannot move blocks owned by other tasks, FreeRTOS stacks, FabGL/LVGL or the canvas, which are the pinned neighbours that cut the largest block.
+- Payoff: only what the task pool itself can coalesce, a few K. Cost high, risk high (single missed pointer corrupts silently; needs ASan-style host fuzzing of every holder). Do not do before measuring item 2.
+- Cheap experiment: host-only, a debug build that poisons and relocates every task-owned block at each slice boundary and runs the 92 tests; the number of failures is the real count of raw-pointer holders.
+
+### 4. PSRAM for large blobs
+- The CYD has no PSRAM, so nothing applies there, and the benchmark is the CYD. On PSRAM boards (Olimex WROVER, TENSTAR TS-ESP32-S3 with 2 MB QSPI PSRAM, `BOARD_HAS_PSRAM`) it works with `heap_caps_malloc(MALLOC_CAP_SPIRAM)` or routing large `operator new` there. Payoff there: program blobs, canvas pixels (43K), music buffers and large arrays leave internal RAM, so internal largest stays near idle (about 110K). Caveats: PSRAM is slower (code decode on every instruction would add latency and cache misses against the 5% speed budget; keep the hot ring and index internal, put text, DATA, extras and arrays in PSRAM); DMA, ISR and flash-write paths and task stacks need internal RAM; Olimex VGA already uses PSRAM for framebuffers and internal DMA RAM for descriptors.
+- Worth it on PSRAM boards for canvas and arrays (cheap: an allocator flag at the canvas/array allocation site and a `MALLOC_CAP_INTERNAL` fallback) but it fixes a problem those boards do not have today. Do it only if a PSRAM board hits memory failures.
+- Cheap experiment: on the TENSTAR build route only the canvas and `RuntimeArray` buffers to PSRAM and compare `HEAP STATS` free/largest and dirplayer frame time.
+
+### Ranking and gate estimate
+| Rank | Item | Largest-block payoff at RUN start | Free payoff | Cost | Risk |
+|---|---|---|---|---|---|
+| 1 | Per-task pmr arena (cheap form of 2, no compaction) | ~0 at start, a few K during play | +1-3K | medium | low-medium |
+| 2 | Flat blob after relocate (1) | 0 | +1-3K | medium | low-medium |
+| 3 | PSRAM for canvas/arrays (4, PSRAM boards only) | internal largest ~110K there | +50K+ | low | low |
+| 4 | Handles + safe-point compaction (2+3) | few K | few K | high | high |
+
+None of the items reaches the 60K gate on the CYD: the missing ~19K of contiguity comes from the pinned small allocations of boot services and compile-transient holes, which no task-local scheme can move. What would reach it is reducing compile-time transients (token store streaming, already tried as an arena: +6K largest for -7K free) or loading the program before the long-lived services allocate (boot order). Recommendation: keep the current design, do the measurements above (they are cheap, host-only except item 4), apply PSRAM routing on PSRAM boards, and do not start handles/compaction without evidence from the poisoning experiment.
