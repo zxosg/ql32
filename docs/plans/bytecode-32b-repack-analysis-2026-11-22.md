@@ -1,5 +1,7 @@
 # Analysis: can `Instruction` reach 32 B? (2026-11-22)
 
+Status: **closed**: rejected as insufficient; see `compact-bytecode-plan.md`.
+
 Analysis only; no source change. Baseline: `fb57269` on origin/main, `Instruction`
 = 40 B on x86-64, about 32 B on ESP32 (32-bit pointers; layout estimate, no 32-bit
 toolchain on the host to confirm). History: 256 -> 104 -> 48 -> 40 B host.

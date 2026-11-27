@@ -22,6 +22,23 @@ targets.
 - `boards/` — board-specific build profiles and pin/resource definitions.
 - `tests/` — host-side language, VM, and integration tests.
 
+## Boards and release status (v0.1.0)
+
+| Board | PlatformIO env | Status |
+| --- | --- | --- |
+| ESP32-2432S028 "CYD" (internal SPIFFS as `FFS:`) | `esp32_2432s028_spiffs` | **Supported**, hardware-tested; also program spill to flash |
+| ESP32-2432S028, SD only | `esp32_2432s028` | Builds; not routinely hardware-tested |
+| Olimex ESP32-SBC-FabGL | `olimex_esp32_sbc_fabgl` (+ `_psram`, `olimex_esp32_sbc_retro`) | **Experimental**: builds, needs hardware smoke test |
+| LILYGO FabGL VGA32 | `lilygo_vga32` | **Experimental**: builds, needs hardware smoke test |
+| TENSTAR TS-ESP32-S3 | `ql32_tenstar_esp32s3` | **Experimental**: builds, needs hardware smoke test |
+
+The compact bytecode store (`QL32_COMPACT_CODE`) is enabled on every ESP
+environment; the host build keeps it optional (`-DQL32_COMPACT_CODE=ON`, plus
+`-DQL32_COMPACT_DUALRUN=ON` to cross-check every instruction). Program spill to
+flash is CYD-only. See [docs/plans/release-checklist.md](docs/plans/release-checklist.md)
+and [CHANGELOG.md](CHANGELOG.md). Known limit: the full-screen CYD music player
+runs with about 11 KB largest free block while playing; WiFi/NTP pins about 16 KB.
+
 ## Implemented software
 
 The host CLI includes expressions, structured blocks, procedures, functions,

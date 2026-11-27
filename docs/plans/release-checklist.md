@@ -1,6 +1,18 @@
 # QL/32 release-readiness checklist
 
-Status: analysis, no code changes. Memory optimisation work is closed
+Update (release prep): decisions applied by default and reversible. Compact
+bytecode is now enabled on all ESP envs (build-verified only off the CYD; flash
+delta about +4.4 KB, static RAM unchanged); spill stays CYD-only (only
+`esp32_cyd/main.cpp` sets `programSpillPath`); debug bar is off by default;
+`esp32s3_tft` placeholder env removed; CYD supported, Olimex/LilyGO/Tenstar
+experimental until smoke-tested; version 0.1.0 with no tag. Added tests, CI
+(`.github/workflows/ci.yml`), `CHANGELOG.md`, `docs/release-packaging.md`.
+Sections below are the original analysis; items 1-2 and 5-7 of the no-hardware
+list are done. Spill restore already streams in 256 B reads and the CYD
+startup already reports leftover recovery files; spill latency/flash wear still
+need the CYD.
+
+Status (original): analysis, no code changes. Memory optimisation work is closed
 (see `compact-bytecode-plan.md`, sections 1-19). The 60K largest-block gate was
 not met; the full-screen dirplayer on the CYD starts with about 139-141K free
 and 39-41K largest, and plays with drums at about 75K / 11K.

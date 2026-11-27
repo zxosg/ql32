@@ -1,6 +1,6 @@
 # Compact bytecode plan
 
-Status: plan only; nothing here is implemented. Date: 2026-11-27, baseline `main` at 36159bc plus #49.
+Status: **implemented and closed** (sections 1-19 record the plan, measurements and results; the 60K largest-block gate was not met, see sections 13-19). Originally written 2026-11-27 against `main` at 36159bc plus #49; the text below keeps the original plan wording.
 
 Goal: shrink the retained compiled program (today ~55-60 KB for the 1162-instruction
 `dirplayer.bas` on the CYD) so that the CYD (ESP32, no PSRAM, ~180 KB free at idle)

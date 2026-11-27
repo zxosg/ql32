@@ -1,5 +1,7 @@
 # QL/32 Phase 3 – Step B4 (Compact Bytecode) Test Plan and Acceptance Criteria
 
+Status: **historical / superseded** by `compact-bytecode-plan.md`.
+
 Scope: verify that replacing `detail::Instruction` / `std::deque` with compact 16-byte
 records + side tables + line table (plan section 3.4) changes no BASIC-visible behaviour
 and delivers the measured memory benefit. Applies to branch `codex/compact-vm` after B3.
