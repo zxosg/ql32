@@ -14,14 +14,17 @@ now$ = "-"
 vol = 128
 smode = 3
 play$ = ""
-GW = GWIDTH()
-GH = GHEIGHT()
+GW = 320
+GH = 160
+SH = 240
+REM A 320x160 window keeps the 4-bit canvas at 25.6K instead of 38.4K.
+TRAP WINDOW #1, 0, 0, GW, GH
 LY = 14
 SY = GH - 64
 rows = INT((SY - LY) / 10)
 cols = INT((GW - 8) / 6)
 TRAP VOLUME vol
-TRAP WINDOW #0, 0, GH - 8, GW, 8
+TRAP WINDOW #0, 0, SH - 8, GW, 8
 PAPER 0
 INK 7
 CLS
@@ -53,7 +56,7 @@ REPeat main WHILE quit = 0
   END IF
 END REPeat main
 TRAP MUSIC STOP
-TRAP WINDOW #0, 0, GH - 64, GW, 64
+TRAP WINDOW #0, 0, SH - 64, GW, 64
 CLS
 
 DEFine PROCedure LoadDir

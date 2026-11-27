@@ -151,3 +151,26 @@ Measured on the CYD (no PSRAM), dirplayer.bas (1144 instructions):
   saved on the device at program start, ~3K on host).
 - Real fix needs a bounded pre-reserved music arena or smaller retained code
   (Call extras side table, 24 B instructions), or a smaller dirplayer canvas.
+
+## P11: foreground playback (smaller canvas, chunked drums)
+
+Root cause of the foreground playback OOM: the default channel #1 canvas is
+full-screen (38.4 KB) and, with the retained program (~83 KB), left ~44 KB free
+but only a 4–7 KB largest block, below the 8 KB contiguous music-start admission.
+
+Changes:
+- `dirplayer.bas` opens `TRAP WINDOW #1, 0, 0, 320, 160` before any output, so the
+  canvas is 25.6 KB. The list shows 8 rows (was 14); the status block is unchanged.
+  Idle debug bar: FREE 64K / MAX 20K (was 44K / 7K).
+- YM digi-drums are stored in 128-sample blocks (`DrumSamples`) instead of one
+  vector, and the device keeps at most 4096 drum samples (larger drums, e.g.
+  KNUCKLE.YM's 6810-sample drum, play silently); no 13 KB contiguous allocations.
+
+Measured on the CYD (debug bar ON, dirplayer in the foreground): KNUCKLE.YM,
+z00m.vtx and LyraII1.vtx play with late=0 and no ALLOCFAIL during playback;
+playing heap about FREE 38K / MAX 8K; auto-advance on POS wrap (c12→c14→c17),
+the `>` playing marker and MUSIC readback (title, time/length) work. The only
+failed allocation left is the 10 KB console-window restore when the app exits.
+
+Still open: a compact (OPL-style) bytecode would cut the ~83 KB retained program
+to roughly a third and is the next lever if more features are restored.
