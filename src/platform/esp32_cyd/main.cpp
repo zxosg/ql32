@@ -807,8 +807,12 @@ void setup() {
     admission.displayModeGuard = true;
     // A full-screen canvas is 38400 bytes in one block; leave room for the music service.
     admission.canvasGuard = true;
+    admission.freezeWindowsAfterRun = true;
     admission.canvasHeadroomBytes = 8 * 1024;
     boardMemory.setAdmissionPolicy(admission);
+    boardMemory.setReclaimer([] {
+        if (graphics) graphics->releaseFrozenImages();
+    });
     ql32::platform::esp32::installFailedAllocLogger();
     std::static_pointer_cast<ql32::platform::olimex_vga::MusicService>(services.music)
         ->setMemoryService(services.memory);

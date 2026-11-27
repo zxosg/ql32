@@ -173,6 +173,9 @@ public:
     void setCanvasAdmission(CanvasAdmission admission) {
         canvasAdmission_ = std::move(admission);
     }
+    // Frees the retained last frames of finished sessions without repainting; a
+    // write-only display keeps showing them. Returns the canvas bytes released.
+    std::size_t releaseFrozenImages();
     void setCanvasMemoryProbe(std::function<std::size_t()> probe) {
         manager_.setCanvasMemoryProbe(std::move(probe));
     }

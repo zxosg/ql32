@@ -3873,6 +3873,9 @@ detail::InstructionSequence detail::compileSource(const std::string& source,
     std::size_t operations = 0;
     const std::size_t tokenCount = lexer.countTokens(&declared, &operations);
     if (memory) {
+        // The compile peak is the largest transient; a finished task's retained
+        // last frame is rebuilt on demand, so release it first.
+        memory->reclaim();
         // Tokens are streamed per line; bytecode and tables dominate the peak.
         // Calibrated on the CYD: ~58 B of peak heap per instruction, and
         // bytecode-producing tokens track instruction count better than all tokens.
