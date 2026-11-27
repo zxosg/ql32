@@ -31,7 +31,7 @@ Format: wanted / limitation / did instead / suggested improvement.
    a clearer error.
 4. `TEXT (expr), y, t$` rejected (command args without parentheses): compute
    into a variable first.
-5. `INCLUDE "ql32.inc"` needs the file on FFS: and costs compile RAM: numeric
+5. (Resolved for key constants: `KKey*` built in) `INCLUDE "ql32.inc"` needs the file on FFS: and costs compile RAM: numeric
    literals for key codes and options. Suggest built-in named constants.
 6. (Resolved) `INKEY$` names now used.
 7. (Resolved: `MUSIC STATE()/POS()/LEN()/VOLUME()/TITLE$()`; `STATE()=0` marks song end) No playback state/volume/metadata readback, no end-of-song event:
@@ -49,7 +49,7 @@ Format: wanted / limitation / did instead / suggested improvement.
     goes to the screen, use `OPEN(2)`. Host: no audio, `MUSIC PLAY`/`VOLUME`
     raise "Service unavailable" (trapped).
 13. (Resolved: string `SELect ON` with `=`, `TO`, wildcards) `SELect ON` was numeric only: key dispatch is a long IF chain (costs
-    tokens). Single-line `IF c THEN stmt` unsupported. Suggest string SELect.
+    tokens). (Resolved: single-line `IF c THEN stmt [ELSE stmt]`.) Suggest string SELect.
 14. Number-to-string concatenation needs `STR$()`. Suggest implicit.
 15. (Resolved: `TICKS()`/`TIMER()`) No clock: "Time" counts `INKEY$(250)` timeouts, approximate. Suggest
     `TICKS()`/`TIMER`.

@@ -394,6 +394,34 @@ bool isBuiltinFunctionName(std::string_view name) {
            std::end(builtinFunctions);
 }
 
+// Built-in key constants (same names and values as ql32.inc); resolved without INCLUDE.
+bool builtinKeyConstant(std::string_view name, double& value) {
+    const auto same = [name](std::string_view known) {
+        if (name.size() != known.size()) return false;
+        for (std::size_t i = 0; i < name.size(); ++i)
+            if (std::toupper(static_cast<unsigned char>(name[i])) !=
+                std::toupper(static_cast<unsigned char>(known[i])))
+                return false;
+        return true;
+    };
+    static constexpr std::string_view special[] = {
+        "KKeyEnter", "KKeyEscape", "KKeyBackspace", "KKeyTab", "KKeyInsert", "KKeyDelete",
+        "KKeyHome", "KKeyEnd", "KKeyPageUp", "KKeyPageDown", "KKeyLeft", "KKeyRight",
+        "KKeyUp", "KKeyDown", "KKeyF1", "KKeyF2", "KKeyF3", "KKeyF4", "KKeyF5", "KKeyF6",
+        "KKeyF7", "KKeyF8", "KKeyF9", "KKeyF10", "KKeyF11", "KKeyF12"};
+    if (same("KKeySpace")) {
+        value = 32;
+        return true;
+    }
+    for (std::size_t i = 0; i < std::size(special); ++i) {
+        if (same(special[i])) {
+            value = 1114112.0 + static_cast<double>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool isBuiltinName(const std::string& name) {
     return isBuiltinCommandName(name) || isBuiltinFunctionName(name);
 }
@@ -1588,12 +1616,36 @@ private:
             error(peek(), "expected end of line after block IF");
         while (match(Kind::Newline) || match(Kind::Colon)) {}
     }
+    // Single-line IF body: statements to the end of the line or ELSE.
+    void inlineStatements() {
+        while (!check(Kind::Newline) && !check(Kind::End) && !check(Kind::Else)) {
+            if (match(Kind::Colon)) continue;
+            statement(false);
+            if (!check(Kind::End) && !check(Kind::Newline) && !check(Kind::Colon) &&
+                !check(Kind::Else))
+                error(peek(), "expected end of statement");
+        }
+    }
     void blockIf() {
         const Token keyword = advance();
         expression();
         if (!match(Kind::Then)) error(peek(), "expected THEN");
         const std::size_t branch = code_.size();
         emit(Op::JumpIfFalse, keyword);
+        if (!check(Kind::Newline) && !check(Kind::Colon) && !check(Kind::End)) {
+            inlineStatements();
+            if (match(Kind::Else)) {
+                const Token elseToken = previous();
+                const std::size_t skipElse = code_.size();
+                emit(Op::Jump, elseToken);
+                code_[branch].target = code_.size();
+                inlineStatements();
+                code_[skipElse].target = code_.size();
+            } else {
+                code_[branch].target = code_.size();
+            }
+            return;
+        }
         requireLineBreak();
         block();
         if (match(Kind::Else)) {
@@ -2959,6 +3011,11 @@ private:
             const auto constant = constants_.find(t.text);
             if (constant != constants_.end()) {
                 emit(Op::Push, t, constant->second);
+                return;
+            }
+            double keyValue = 0.0;
+            if (builtinKeyConstant(std::string_view(t.text), keyValue)) {
+                emit(Op::Push, t, keyValue);
                 return;
             }
             if (declaredFunctions_.find(t.text) != declaredFunctions_.end() &&

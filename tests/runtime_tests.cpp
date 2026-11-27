@@ -1640,6 +1640,21 @@ bool runFails(ql32::Interpreter& interpreter, const std::string& source) {
     return false;
 }
 
+void testLanguageAdditionsBatch2() {
+    ql32::Interpreter interpreter;
+    require(runBasic(interpreter,
+        "x=3\nIF x=3 THEN PRINT \"y\"\n"
+        "IF x=4 THEN PRINT \"n\" ELSE PRINT \"e\"\n"
+        "IF x=3 THEN PRINT \"a\": PRINT \"b\" ELSE PRINT \"no\"\n"
+        "IF x=9 THEN PRINT \"z\"\nPRINT \"end\"\n"
+        "IF x=3 THEN IF x=4 THEN PRINT \"i\" ELSE PRINT \"ie\"\n"
+        "IF x=3 THEN\nPRINT \"blk\"\nELSE\nPRINT \"no\"\nEND IF\n") ==
+        "y\ne\na\nb\nend\nie\nblk\n", "single-line IF behaved unexpectedly");
+    require(runBasic(interpreter,
+        "PRINT KKeySpace\nPRINT KKeyEnter\nPRINT KKeyUp\nPRINT KKeyF12\n") ==
+        "32\n1114112\n1114124\n1114137\n", "built-in key constants have wrong values");
+}
+
 void testLanguageAdditionsBatch1() {
     {
         ql32::Interpreter interpreter;
@@ -1727,6 +1742,7 @@ void testLanguageAdditionsBatch1() {
 
 int main() {
     try {
+        testLanguageAdditionsBatch2();
         testLanguageAdditionsBatch1();
         testPrintLinesAreChargedToSliceBudget();
         testInterpreterSessions();
