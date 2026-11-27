@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(ql32 VERSION 0.1.0 LANGUAGES CXX)
+file(STRINGS include/ql32/version.hpp QL32_VERSION_LINE REGEX "QL32_VERSION_STRING")
+string(REGEX MATCH "\"([0-9.]+)\"" _ "${QL32_VERSION_LINE}")
+set(QL32_VERSION_FROM_HEADER "${CMAKE_MATCH_1}")
+project(ql32 VERSION ${QL32_VERSION_FROM_HEADER} LANGUAGES CXX)
 
 option(QL32_BUILD_TESTS "Build QL/32 host tests" ON)
 option(QL32_COMPACT_CODE "VM executes from the compact program encoding" OFF)

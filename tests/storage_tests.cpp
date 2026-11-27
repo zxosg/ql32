@@ -19,8 +19,15 @@ std::atomic<bool> trackAllocations{false};
 std::atomic<std::size_t> largestAllocation{0};
 } // namespace
 
+#ifdef __GLIBC__
+#include <execinfo.h>
+#include <unistd.h>
+#endif
 void* operator new(std::size_t size) {
     if (trackAllocations.load(std::memory_order_relaxed)) {
+#ifdef __GLIBC__
+        if (size > 4096) { void* f[24]; int n = backtrace(f, 24); dprintf(2, "BIGALLOC %zu\n", size); backtrace_symbols_fd(f, n, 2); }
+#endif
         std::size_t seen = largestAllocation.load(std::memory_order_relaxed);
         while (size > seen && !largestAllocation.compare_exchange_weak(seen, size)) {}
     }
