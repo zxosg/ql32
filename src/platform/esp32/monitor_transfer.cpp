@@ -62,6 +62,28 @@ bool handleMonitorTransferCommand(std::string_view input,
 #if defined(QL32_HEAP_DIAGNOSTICS)
         const std::string arg = separator == std::string::npos ? std::string() :
             uppercase(trim(line.substr(separator + 1)));
+        if (arg == "FREEMAP") {
+            // Diagnostic: claim the largest free block repeatedly to list the free blocks
+            // (address, size), then release them.
+            static void* held[600];
+            static std::size_t heldSize[600];
+            std::size_t n = 0;
+            serial.println("FREEMAP|BEGIN");
+            while (n < 600) {
+                const std::size_t big = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+                if (big < 512) break;
+                void* p = heap_caps_malloc(big, MALLOC_CAP_8BIT);
+                if (!p) break;
+                heldSize[n] = big;
+                held[n++] = p;
+                char row[64];
+                std::snprintf(row, sizeof(row), "FREEMAP|%p|%u", p, static_cast<unsigned>(big));
+                serial.println(row);
+            }
+            while (n) heap_caps_free(held[--n]);
+            serial.println("FREEMAP|END");
+            return true;
+        }
         if (arg == "STATS") {
             multi_heap_info_t info{};
             heap_caps_get_info(&info, MALLOC_CAP_8BIT);

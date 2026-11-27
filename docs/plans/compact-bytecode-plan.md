@@ -354,3 +354,12 @@ Full-screen dirplayer on the CYD (free / largest block, KB):
 Free memory improves by about 26 KB; late=0, failedalloc=0 during playback. The free gate is
 missed by 2.6 KB and the largest-block gate by 17 KB: the remaining blocker is contiguity
 (pinned small allocations and the compile-time token vector), not total bytes.
+
+## 11. Closing the largest-block gap: findings (no code merged)
+
+Full-screen dirplayer on the CYD after Phase 2: RUN start 122.4K free / 43.0K largest (gate 125K / 60K).
+
+- `HEAP FREEMAP` (new diagnostic, `QL32_HEAP_DIAGNOSTICS`) walks the free list at a STOP. The old 110K idle block is shattered into about 13 holes (9.7K, 7.7K, 5.1K, ...). They are separated by only about 12K of live pieces (gaps of 570-1730 B), so the largest block is the 43K tail, not 110K.
+- The streaming lexer already exists (TokenWindow), so the token vector is not a retained cost.
+- Tried, no gain (reverted): re-homing names/extras/pool into fresh allocations after encode (43.0K); steering placement into the largest block during `makeCompact` (43.0K, free -2.5K); realloc of the compact holder (+1.7K free, 47K largest).
+- Conclusion: the live pieces are created during compile, interleaved with transients, so fixing at `makeCompact` is too late. Needed next: either a compile-time arena (monotonic allocator for transients, freed wholesale) or allocating the retained program structures (functions map, names, pool, VM state) from a reserved region before compile; plus a ProgramStore spill/segmentation (about 16K) for the free-heap gap of about 2.6K.
