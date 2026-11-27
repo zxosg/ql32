@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- `examples/startup/startup.bas`: boot splash (large QL32 title; version, free memory and platform in the small font) that releases its graphics canvas afterwards (heap back to ~174K free / 110K largest). Copy it to `FFS:/startup.bas` to run at boot.
+- `examples/startup/startup.bas`: boot splash (large QL32 title; version, free memory and platform in the small font) that stays on screen after boot (held as a frozen image, ~40K, reclaimed automatically under memory pressure). Copy it to `FFS:/startup.bas` to run at boot.
 
 ### Fixed
 - Platform `SYSINFO$(0)` now reports `QL32_VERSION_STRING` instead of a hardcoded `0.1.0`.

@@ -28,7 +28,5 @@ x = (w - LEN(p$) * 6) / 2
 TEXT x, y0 + 68, p$
 GUPDATE 1
 GUPDATE
-PAUSE 250
-REM Release the graphics canvas (about 36K); this clears the splash from the display.
-REM Type NEW at the prompt to also drop this program's source (about 3K).
-WINDOW #1, 0, 0, 8, 8
+REM The finished window stays on screen as a frozen image and is reclaimed
+REM automatically when memory is needed. Type NEW to drop this program's source.
