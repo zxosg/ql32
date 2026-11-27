@@ -45,7 +45,7 @@ void testRoundTripAcrossIndexStridesAndSegments() {
     require(code.size() > 4 * 1024, "program too small to span several segments");
     requireRoundTrip(code, "long program");
     const auto stats = CompactProgram::encode(code).stats();
-    require(stats.segments > 2, "expected multiple 1 KB segments");
+    require(stats.segments > 2, "expected multiple 512 B segments");
 }
 
 void testSixteenBitFieldLimitsRoundTrip() {
@@ -76,6 +76,30 @@ void testDecodeEqualityDetectsDifferences() {
     bool threw = false;
     try { program.decode(code.size()); } catch (const std::out_of_range&) { threw = true; }
     require(threw, "decode past end must throw");
+}
+
+void testTruncateAndAppendMatchRebuild() {
+    const auto code = compileSource(
+        "DEFine PROCedure p(a, b$)\nLOCal i\nFOR i = 1 TO 3\nPRINT a; b$\nEND FOR i\nEND DEFine\n"
+        "x = 1.5\ny$ = \"hello\"\np 1, y$\np 2, \"z\"\nPRINT x + 100000000000\n");
+    require(code.size() > 20, "program too small");
+    for (std::size_t keep = 0; keep <= code.size(); ++keep) {
+        auto program = CompactProgram::encode(code);
+        program.truncate(keep);
+        require(program.size() == keep, "truncate size");
+        for (std::size_t i = keep; i < code.size(); ++i) program.append(code[i]);
+        std::string why;
+        for (std::size_t i = 0; i < code.size(); ++i)
+            require(instructionsEqual(code[i], program.decode(i), &why),
+                    "truncate at " + std::to_string(keep) + ", instruction " + std::to_string(i) + ": " + why);
+    }
+    // Sequential reads (continuation) must equal random-access reads, wrapping the ring.
+    InstructionSequence mutated = code;
+    mutated.makeCompact();
+    for (std::size_t i = 0; i < code.size(); ++i)
+        require(instructionsEqual(code[i], mutated.instructionAt(i), nullptr), "sequential decode");
+    for (std::size_t i = code.size(); i-- > 0;)
+        require(instructionsEqual(code[i], mutated.instructionAt(i), nullptr), "reverse decode");
 }
 
 void testCorpus(const std::filesystem::path& root) {
@@ -116,6 +140,7 @@ int main(int argc, char** argv) {
     testSixteenBitFieldLimitsRoundTrip();
     testExtrasAndControlFlowRoundTrip();
     testDecodeEqualityDetectsDifferences();
+    testTruncateAndAppendMatchRebuild();
     if (argc > 1) testCorpus(argv[1]);
     std::cout << "compact program tests passed\n";
 }

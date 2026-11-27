@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(ql32 VERSION 0.1.0 LANGUAGES CXX)
 
 option(QL32_BUILD_TESTS "Build QL/32 host tests" ON)
+option(QL32_COMPACT_CODE "VM executes from the compact program encoding" OFF)
 option(QL32_COMPACT_DUALRUN "VM checks every executed instruction against its compact encoding (host debug)" OFF)
 option(QL32_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
@@ -61,6 +62,9 @@ target_link_libraries(ql32_host_adapters PUBLIC ql32_portable)
 
 # Host applications and integration tests use the portable runtime plus its
 # host service adapters. Embedded builds link ql32_portable with board adapters.
+if(QL32_COMPACT_CODE)
+  target_compile_definitions(ql32_portable PUBLIC QL32_COMPACT_CODE=1)
+endif()
 if(QL32_COMPACT_DUALRUN)
   target_compile_definitions(ql32_portable PUBLIC QL32_COMPACT_DUALRUN=1)
 endif()

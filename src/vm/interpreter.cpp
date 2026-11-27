@@ -68,6 +68,14 @@ bool mayContainInclude(std::string_view source) {
     return false;
 }
 
+bool hasNumberedStatements(const detail::InstructionSequence& code) {
+    for (std::size_t i = 0, n = code.instructionCount(); i < n; ++i) {
+        const Instruction& instruction = code.instructionAt(i);
+        if (instruction.statementStart && instruction.basicLine != 0) return true;
+    }
+    return false;
+}
+
 void verifyBytecode(const detail::InstructionSequence& code) {
     const auto invalid = [](const Instruction& instruction, const char* reason) {
         throw std::runtime_error("line " + std::to_string(instruction.line) +
@@ -630,13 +638,10 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
         execution_->debugPaused = debugPauseRequested_;
         execution_->diagnosticsEnabled = diagnosticsEnabled_;
         execution_->traceEnabled = traceEnabled_;
-        const bool numbered = std::any_of(execution_->code.begin(), execution_->code.end(),
-            [](const Instruction& instruction) {
-                return instruction.statementStart && instruction.basicLine != 0;
-            });
+        const bool numbered = hasNumberedStatements(execution_->code);
         for (const auto& [line, enabled] : pendingBreakpoints_) {
-            for (std::size_t address = 0; address < execution_->code.size(); ++address) {
-                const Instruction& instruction = execution_->code[address];
+            for (std::size_t address = 0; address < execution_->code.instructionCount(); ++address) {
+                const Instruction& instruction = execution_->code.instructionAt(address);
                 if (!instruction.statementStart ||
                     (numbered ? instruction.basicLine != line : instruction.line != line)) continue;
                 if (enabled) execution_->breakpoints.insert(address);
@@ -644,6 +649,9 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
                 break;
             }
         }
+#if defined(QL32_COMPACT_CODE) || defined(QL32_COMPACT_DUALRUN)
+        execution_->code.makeCompact();
+#endif
         preparingProgram = false;
         if (execution_->code.cpuFrequencyMHz != 0 && cpuFrequency_ &&
             !cpuFrequency_->setFrequencyMHz(execution_->code.cpuFrequencyMHz))
@@ -793,8 +801,8 @@ ExecutionStatus Interpreter::runExecution(std::ostream& output,
             if (it->second.callDepth > saved.callDepth) it = state.forStates.erase(it);
             else ++it;
         }
-        if (state.code.size() > saved.codeSize)
-            state.code.erase(state.code.begin() + saved.codeSize, state.code.end());
+        if (state.code.instructionCount() > saved.codeSize)
+            state.code.truncateInstructions(saved.codeSize);
         if (state.pendingUiRequest && ui_) ui_->cancel(*state.pendingUiRequest);
         state.pendingUiRequest.reset();
         state.pendingChannelRead.reset();
@@ -842,7 +850,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
         state.pauseUntil.reset();
     }
     const bool singlePrecision = code.numericPrecision == detail::NumericPrecision::Single;
-    const Instruction* activeInstruction = pc == 0 ? nullptr : &code[pc - 1];
+    const Instruction* activeInstruction = pc == 0 ? nullptr : &code.instructionAt(pc - 1);
     auto quantizeNumeric = [&](double value, const Instruction* at = nullptr) {
         if (!singlePrecision) return value;
         const float rounded = static_cast<float>(value);
@@ -1127,7 +1135,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 throw runtime::Error(runtime::ErrorCode::TaskCancelled, "input cancelled");
             storeInputValue(state.pendingInputVariable,
                             std::get<std::string>(result->fields.front()),
-                            code.at(state.pc == 0 ? 0 : state.pc - 1));
+                            code.instructionAt(state.pc == 0 ? 0 : state.pc - 1));
             state.pendingInputVariable.clear();
         }
         state.pendingUiRequest.reset();
@@ -1135,11 +1143,11 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
     }
     constexpr std::size_t PrintLineBudgetCost = 48;
     std::size_t instructionsExecuted = 0;
-    while (pc < code.size()) {
+    while (pc < code.instructionCount()) {
         if (stop.stopRequested()) throw std::runtime_error("execution cancelled");
         if (instructionBudget != 0 && instructionsExecuted >= instructionBudget)
             return ExecutionStatus::Yielded;
-        const Instruction& nextInstruction = code[pc];
+        const Instruction& nextInstruction = code.instructionAt(pc);
         if (state.debuggerAttached && nextInstruction.statementStart) {
             if (state.skipBreakpointAddress == pc) {
                 state.skipBreakpointAddress = static_cast<std::size_t>(-1);
@@ -1155,10 +1163,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 return ExecutionStatus::DebugPaused;
             }
         }
-#ifdef QL32_COMPACT_DUALRUN
-        detail::compactDualRunCheck(code, pc);
-#endif
-        const auto& instruction = code[pc++];
+        const auto& instruction = code.instructionAt(pc++);
         activeInstruction = &instruction;
         ++instructionsExecuted;
         ++state.sliceInstructions;
@@ -1179,7 +1184,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
             if (state.traps->count == state.traps->records.size())
                 throw runtime::Error(runtime::ErrorCode::TaskLimit, "TRAP nesting limit reached");
             state.traps->records[state.traps->count++] = {
-                stack.size(), callFrames.size(), selectStates.size(), code.size(), instruction.target,
+                stack.size(), callFrames.size(), selectStates.size(), code.instructionCount(), instruction.target,
                 state.printChannel, state.printChannelColumn};
             errorCode_ = runtime::ErrorCode::None;
             hasTrappedDetail_ = false;
@@ -1572,11 +1577,11 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     } catch (const runtime::Error& error) {
                         runtimeError(instruction, error.what());
                     }
-                    const std::size_t start = code.size();
-                    code.insert(code.end(), expression.begin(), expression.end());
+                    const std::size_t start = code.instructionCount();
+                    code.appendInstructions(expression);
                     Instruction finish{Op::Return, 0.0, {}, instruction.line, instruction.column};
                     finish.expectsValue = true;
-                    code.push_back(std::move(finish));
+                    code.appendInstruction(std::move(finish));
                     RuntimeFrame frame;
             frame.selectBase = selectStates.size();
                     frame.returnAddress = pc;
@@ -3485,12 +3490,11 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 state.traps->records[state.traps->count - 1].callDepth >= callFrames.size()) --state.traps->count;
             callFrames.pop_back();
             if (dynamicEvaluation && !dataRead)
-                code.erase(code.begin() + static_cast<std::ptrdiff_t>(dynamicCodeStart),
-                           code.end());
+                code.truncateInstructions(dynamicCodeStart);
             if (dataRead) {
-                if (readInstructionIndex >= code.size())
+                if (readInstructionIndex >= code.instructionCount())
                     runtimeError(instruction, "READ continuation is invalid");
-                storeDataReadValue(code[readInstructionIndex], readTarget, readRank,
+                storeDataReadValue(code.instructionAt(readInstructionIndex), readTarget, readRank,
                                    readIndices, std::move(result));
             } else if (returnsValue) {
                 pushValue(std::move(result));
@@ -4047,7 +4051,7 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 indices[i] = numeric(pop(), instruction);
 
             const detail::DataItem& item = code.dataItems[state.dataPointer++];
-            if (item.address >= code.size())
+            if (item.address >= code.instructionCount())
                 runtimeError(instruction, "DATA expression address is invalid");
             RuntimeFrame frame;
             frame.selectBase = selectStates.size();
@@ -4385,13 +4389,10 @@ bool Interpreter::debugSetBreakpoint(int line, bool enabled) {
         if (enabled) debugPauseRequested_ = false;
         return true;
     }
-    const bool numbered = std::any_of(execution_->code.begin(), execution_->code.end(),
-        [](const Instruction& instruction) {
-            return instruction.statementStart && instruction.basicLine != 0;
-        });
+    const bool numbered = hasNumberedStatements(execution_->code);
     bool matched = false;
-    for (std::size_t address = 0; address < execution_->code.size(); ++address) {
-        const Instruction& instruction = execution_->code[address];
+    for (std::size_t address = 0; address < execution_->code.instructionCount(); ++address) {
+        const Instruction& instruction = execution_->code.instructionAt(address);
         if (!instruction.statementStart ||
             (numbered ? instruction.basicLine != line : instruction.line != line)) continue;
         matched = true;
@@ -4472,17 +4473,17 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
     result.ifFalse = state.ifFalse;
     result.trace = state.trace;
     if (memory_) result.freeMemory = memory_->freeBytes();
-    const std::size_t address = std::min(state.pc, state.code.size());
+    const std::size_t address = std::min(state.pc, state.code.instructionCount());
     result.location.instruction = address;
     if (!state.callFrames.empty())
         result.location.procedure = state.callFrames.back().name;
-    if (address < state.code.size()) {
-        const detail::Instruction& at = state.code[address];
+    if (address < state.code.instructionCount()) {
+        const detail::Instruction& at = state.code.instructionAt(address);
         result.location.sourceLine = at.line;
         result.location.column = at.column;
         result.location.basicLine = at.basicLine;
-    } else if (address != 0 && address <= state.code.size()) {
-        const detail::Instruction& at = state.code[address - 1];
+    } else if (address != 0 && address <= state.code.instructionCount()) {
+        const detail::Instruction& at = state.code.instructionAt(address - 1);
         result.location.sourceLine = at.line;
         result.location.column = at.column;
         result.location.basicLine = at.basicLine;
@@ -4497,7 +4498,7 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
             if (array != state.arrays.end())
                 view.arrays.emplace_back(localName, array->second.lengths);
         }
-        if (frame.returnAddress > 0 && frame.returnAddress <= state.code.size()) {
+        if (frame.returnAddress > 0 && frame.returnAddress <= state.code.instructionCount()) {
             view.returnLocation.instruction = frame.callInstruction;
             view.returnLocation.sourceLine = frame.callSourceLine;
             view.returnLocation.column = frame.callSourceColumn;
@@ -4520,8 +4521,8 @@ std::optional<runtime::DebugSnapshot> Interpreter::debugInspect() const {
         result.watches.push_back(std::move(watch));
     }
     for (std::size_t address : state.breakpoints) {
-        if (address >= state.code.size()) continue;
-        const auto& at = state.code[address];
+        if (address >= state.code.instructionCount()) continue;
+        const auto& at = state.code.instructionAt(address);
         runtime::DebugBreakpointInfo breakpoint;
         breakpoint.requestedLine = at.basicLine != 0 ? at.basicLine : at.line;
         breakpoint.location = runtime::DebugLocation{address, at.line, at.column,
@@ -4541,8 +4542,8 @@ std::vector<runtime::DebugBreakpointInfo> Interpreter::debugBreakpoints() const 
     }
     result.reserve(execution_->breakpoints.size());
     for (std::size_t address : execution_->breakpoints) {
-        if (address >= execution_->code.size()) continue;
-        const auto& at = execution_->code[address];
+        if (address >= execution_->code.instructionCount()) continue;
+        const auto& at = execution_->code.instructionAt(address);
         result.push_back({at.basicLine != 0 ? at.basicLine : at.line, true,
                           runtime::DebugLocation{address, at.line, at.column,
                                                 at.basicLine, {}}});
