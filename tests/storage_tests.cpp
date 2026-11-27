@@ -44,6 +44,12 @@ public:
     }
 };
 
+struct CountingBuffer final : std::streambuf {
+    std::size_t size = 0;
+    int overflow(int c) override { ++size; return c; }
+    std::streamsize xsputn(const char*, std::streamsize n) override { size += static_cast<std::size_t>(n); return n; }
+};
+
 void testDirectoryStorage() {
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
@@ -450,6 +456,23 @@ void testLargeDirectoryMemory() {
             const auto name = std::to_string(i);
             storage.writeText("src/f" + name + ".t", "x");
             storage.writeText("tree/t" + name, "x");
+        }
+        {
+            // DIR and CAT stream the directory: the largest allocation is the
+            // listing text itself, never a vector of every entry.
+            auto shared = std::make_shared<ql32::platform::linux_host::DirectoryStorage>(root);
+            ql32::Interpreter interpreter(shared);
+            for (const char* command : {"DIR \"src\"\n", "CAT \"src\"\n", "CAT \"src/f1*\"\n"}) {
+                CountingBuffer counter;
+                std::ostream listing(&counter);
+                largestAllocation = 0;
+                trackAllocations = true;
+                interpreter.executeInteractive(command, listing);
+                trackAllocations = false;
+                require(counter.size > 1000, "listing too short");
+                require(largestAllocation.load() <= counter.size + 4096,
+                        "DIR/CAT needed an allocation larger than its listing");
+            }
         }
         auto drain = [](fo::Job& job) { while (!job.run(std::chrono::milliseconds(20))) {} };
         largestAllocation = 0;
