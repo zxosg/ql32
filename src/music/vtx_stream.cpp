@@ -655,7 +655,7 @@ constexpr std::uint8_t YmCacheVersion = 2;
 // Digi-drum samples are 2 bytes each; small boards keep fewer so playback never
 // competes with the running program for heap (larger drums play silently).
 #if defined(ESP_PLATFORM)
-constexpr std::size_t YmDrumSampleBudget = 4096;
+constexpr std::size_t YmDrumSampleBudget = 8192;
 #else
 constexpr std::size_t YmDrumSampleBudget = 12288;
 #endif
