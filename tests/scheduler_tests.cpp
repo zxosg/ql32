@@ -1678,6 +1678,35 @@ void testSupervisorCanListAndChangeDisplayMode() {
             "MODE did not retain the requested display option");
 }
 
+void testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt() {
+    for (const bool freeze : {false, true}) {
+        auto memory = std::make_shared<FakeMemory>();
+        ql32::runtime::AdmissionPolicy policy;
+        policy.freezeWindowsAfterRun = freeze;
+        memory->setAdmissionPolicy(policy);
+        auto graphics = std::make_shared<ql32::graphics::WindowedService>(32, 16, nullptr);
+        memory->setReclaimer([graphics] { graphics->releaseFrozenImages(); });
+        ql32::vm::Services services;
+        services.memory = memory;
+        services.graphics = graphics;
+        ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+        std::ostringstream output;
+        const auto repl = scheduler.launchInteractive(output);
+        require(scheduler.submit(repl, "10 WINDOW 0,0,8,8\n20 CLS\n"), "program lines rejected");
+        require(scheduler.tick(), "program lines did not run");
+        require(scheduler.submit(repl, "RUN\n"), "RUN rejected");
+        for (int tick = 0; tick < 20; ++tick) {
+            const auto info = scheduler.task(repl);
+            if (tick > 1 && info && info->status == ql32::vm::TaskStatus::WaitingInput) break;
+            scheduler.tick();
+        }
+        require(graphics->windowManager().size() == 1, "finished RUN lost its image");
+        memory->reclaim();
+        require(graphics->windowManager().size() == (freeze ? 0u : 1u),
+                "frozen image reclaim does not follow the freeze policy");
+    }
+}
+
 void testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow() {
     auto memory = std::make_shared<FakeMemory>();
     ql32::runtime::AdmissionPolicy policy;
@@ -1837,6 +1866,7 @@ int main() {
     testSupervisorTaskViewportUsesTaskToSessionMapping();
     testWorkerCanvasIsLazyAndTileSizedInIsolatedMode();
     testBasicTaskViewCommandIsSupervisorOnly();
+    testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();

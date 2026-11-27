@@ -1582,6 +1582,27 @@ void testNewWindowCommandReclaimsFrozenCanvasStorage() {
             "new WINDOW command did not receive the reclaimed canvas budget");
 }
 
+void testReclaimerReleasesFrozenImagesWhenAdmissionFails() {
+    using namespace ql32::graphics;
+    struct Memory final : ql32::runtime::MemoryService {
+        std::uint64_t freeBytes() const override { return free; }
+        std::uint64_t free = 100;
+    } memory;
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(24, 8, presenter);
+    graphics.pixel(61, {1, 1});
+    graphics.pixel(62, {2, 2});
+    graphics.closeSession(61);
+    require(graphics.windowManager().size() == 2, "setup did not freeze a canvas");
+    memory.setReclaimer([&] {
+        if (graphics.releaseFrozenImages() != 0) memory.free = 1000;
+    });
+    require(!memory.admissionFailure("test", 500), "admission failed despite reclaimable image");
+    require(graphics.windowManager().size() == 1, "frozen canvas was not released");
+    require(memory.admissionFailure("test", 5000).has_value(), "unsatisfiable request admitted");
+    require(graphics.releaseFrozenImages() == 0, "nothing frozen should release no bytes");
+}
+
 void testDiscardSessionReleasesActiveAndFrozenWindowsByOwner() {
     using namespace ql32::graphics;
     auto presenter = std::make_shared<CapturingPresenter>();
@@ -2780,6 +2801,7 @@ int main() {
     testArenaCanvasResizeReusesAllocationAtEveryDepth();
     testCanvasGrowthWithoutRoomFreesOldBufferFirst();
     testWindowedServiceRefusesCanvasBeforeAllocating();
+    testReclaimerReleasesFrozenImagesWhenAdmissionFails();
     testFailedCanvasResizePreservesAllWindows();
     testEveryPrintableAsciiCharacterHasAGlyph();
     testTextCellsFillCharacterGapsWithPaper();

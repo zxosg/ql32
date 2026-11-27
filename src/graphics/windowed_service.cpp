@@ -81,6 +81,21 @@ void WindowedService::discardFrozenWindows() {
     presentRegion(dirty);
 }
 
+std::size_t WindowedService::releaseFrozenImages() {
+    if (frozenWindows_.empty()) return 0;
+    std::size_t bytes = 0;
+    std::vector<SessionId> owners;
+    for (const auto id : frozenWindows_) {
+        bytes += manager_.canvas(id).storageBytes();
+        owners.push_back(manager_.windowState(id).owner);
+        manager_.close(id);
+    }
+    std::vector<WindowId>().swap(frozenWindows_);
+    for (const auto owner : owners) manager_.releaseTaskViewportIfUnused(owner);
+    discardPresentationBuffer();
+    return bytes;
+}
+
 WindowId WindowedService::ensureWindow(SessionId session, ChannelId channel) {
     if (session == 0) throw std::invalid_argument("graphics session must be valid");
     const SurfaceKey key{session, channel};

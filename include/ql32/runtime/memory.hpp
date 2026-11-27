@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <new>
 #include <optional>
@@ -26,6 +27,7 @@ struct AdmissionPolicy {
     std::uint64_t musicPlayTotalBytes = 0;    // loading a song once audio is running
     std::uint64_t musicPlayContiguousBytes = 0;
     bool displayModeGuard = false;            // refuse MODE growth that cannot fit
+    bool freezeWindowsAfterRun = false;       // finished RUN leaves a reclaimable last frame, not live canvases
     bool canvasGuard = false;                 // refuse a new canvas that cannot fit
     std::uint64_t canvasHeadroomBytes = 0;    // free bytes that must remain after a canvas
 };
@@ -47,21 +49,21 @@ public:
     std::optional<std::string> admissionFailure(std::string_view what,
                                                 std::uint64_t totalBytes,
                                                 std::uint64_t contiguousBytes = 0) const {
-        if (totalBytes == 0 && contiguousBytes == 0) return std::nullopt;
-        const std::uint64_t free = freeBytes();
-        const auto info = fragmentationInfo();
-        const bool freeShort = totalBytes != 0 && free < totalBytes;
-        const bool blockShort = contiguousBytes != 0 && info &&
-                                info->largestFreeBlockBytes < contiguousBytes;
-        if (!freeShort && !blockShort) return std::nullopt;
-        std::string message = "not enough memory for " + std::string(what) + ": need " +
-            std::to_string(totalBytes) + " bytes free";
-        if (contiguousBytes != 0)
-            message += " (" + std::to_string(contiguousBytes) + " contiguous)";
-        message += ", have " + std::to_string(free) + " free";
-        if (info) message += ", " + std::to_string(info->largestFreeBlockBytes) + " largest";
-        return message;
+        auto failure = checkAdmission(what, totalBytes, contiguousBytes);
+        // Frozen last-frame canvases are dead weight once memory is short.
+        if (failure && reclaim()) failure = checkAdmission(what, totalBytes, contiguousBytes);
+        return failure;
     }
+
+    // Optional hook that frees caches the platform can rebuild (for example the
+    // retained image of a finished task). Returns nothing; callers re-measure.
+    void setReclaimer(std::function<void()> reclaimer) { reclaimer_ = std::move(reclaimer); }
+    bool reclaim() const {
+        if (!reclaimer_) return false;
+        reclaimer_();
+        return true;
+    }
+
     // Canvases are 4 bits per pixel and old and new buffers coexist during a resize,
     // so growing the display needs (newArea - oldArea) / 2 bytes more.
     std::optional<std::string> displayModeFailure(std::uint64_t oldWidth, std::uint64_t oldHeight,
@@ -126,6 +128,25 @@ public:
     }
 
 private:
+    std::optional<std::string> checkAdmission(std::string_view what, std::uint64_t totalBytes,
+                                              std::uint64_t contiguousBytes) const {
+        if (totalBytes == 0 && contiguousBytes == 0) return std::nullopt;
+        const std::uint64_t free = freeBytes();
+        const auto info = fragmentationInfo();
+        const bool freeShort = totalBytes != 0 && free < totalBytes;
+        const bool blockShort = contiguousBytes != 0 && info &&
+                                info->largestFreeBlockBytes < contiguousBytes;
+        if (!freeShort && !blockShort) return std::nullopt;
+        std::string message = "not enough memory for " + std::string(what) + ": need " +
+            std::to_string(totalBytes) + " bytes free";
+        if (contiguousBytes != 0)
+            message += " (" + std::to_string(contiguousBytes) + " contiguous)";
+        message += ", have " + std::to_string(free) + " free";
+        if (info) message += ", " + std::to_string(info->largestFreeBlockBytes) + " largest";
+        return message;
+    }
+
+    std::function<void()> reclaimer_;
     std::unique_ptr<std::byte[]> emergencyReserve_;
     std::size_t emergencyReserveBytes_ = 0;
     AdmissionPolicy admissionPolicy_;

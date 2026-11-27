@@ -959,6 +959,7 @@ bool SessionScheduler::tick() {
             return true;
         }
         if (result == ExecutionStatus::Completed) {
+            const bool finishedProgram = current.programExecutionActive;
             resetGraphicsUpdateState();
             current.started = false;
             removeFromSchedule(current);
@@ -975,6 +976,11 @@ bool SessionScheduler::tick() {
                     // available until explicitly closed or the session ends.
                     current.status = TaskStatus::WaitingInput;
                     current.releaseSource();
+                    // A memory-constrained board keeps the finished program's
+                    // image only as a frozen, reclaimable frame.
+                    if (finishedProgram && current.interpreter && services_.memory &&
+                        services_.memory->admissionPolicy().freezeWindowsAfterRun)
+                        current.interpreter->releaseGraphicsResources();
                 }
             } else {
                 if (services_.music) services_.music->stopSession(current.id);
