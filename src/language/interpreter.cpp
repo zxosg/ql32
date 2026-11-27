@@ -297,14 +297,15 @@ std::string commandHelpListing() {
 
 // CAT listing: directories first, then files; each group sorted
 // case-insensitively with the exact name as a deterministic tie-break.
-std::string catListing(std::vector<runtime::FileEntry> entries,
+std::string catListing(std::deque<runtime::FileEntry> entries,
                        const runtime::StorageSpace& space) {
     const auto lower = [](const std::string& value) {
         std::string result = value;
         for (char& c : result) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return result;
     };
-    std::stable_sort(entries.begin(), entries.end(), [&](const auto& left, const auto& right) {
+    // Names are unique, so the order is total and no stable-sort buffer is needed.
+    std::sort(entries.begin(), entries.end(), [&](const auto& left, const auto& right) {
         if (left.isDirectory != right.isDirectory) return left.isDirectory;
         const std::string a = lower(left.name), b = lower(right.name);
         return a != b ? a < b : left.name < right.name;
@@ -323,6 +324,7 @@ std::string catListing(std::vector<runtime::FileEntry> entries,
         return std::string(width > value.size() ? width - value.size() : 0, ' ') + value;
     };
     std::string listing;
+    listing.reserve(entries.size() * (nameWidth + sizeWidth + 2) + 256);
     for (const auto& entry : entries) {
         std::string name = entry.name + (entry.isDirectory ? "/" : "");
         name.resize(nameWidth, ' ');
@@ -4033,7 +4035,15 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (info.width != 0) columns = std::max<std::size_t>(1, info.width / 6);
             if (info.height != 0) rows = std::max<std::size_t>(1, info.height / 8);
         }
-        const std::string wrapped = wrapListingText(listing, columns);
+        // Avoid a second copy of a large listing when no line needs wrapping.
+        bool needsWrap = false;
+        for (std::size_t start = 0; start < listing.size() && !needsWrap;) {
+            auto end = listing.find('\n', start);
+            if (end == std::string::npos) end = listing.size();
+            needsWrap = end - start > columns;
+            start = end + 1;
+        }
+        std::string wrapped = needsWrap ? wrapListingText(listing, columns) : listing;
         const std::size_t totalRows = static_cast<std::size_t>(
             std::count(wrapped.begin(), wrapped.end(), '\n')) +
             (!wrapped.empty() && wrapped.back() != '\n' ? 1 : 0);
@@ -4045,7 +4055,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
 
         // Mirrors receive the whole listing once; only the display is paged.
         mirrorText(output, endpoint, listing);
-        pendingPagerText_ = wrapped;
+        pendingPagerText_ = std::move(wrapped);
         pendingPagerOffset_ = 0;
         pendingPagerPageRows_ = pageRows;
         pendingPagerChannel_ = channel;
@@ -4889,15 +4899,40 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             } else {
                 path = current_directory_;
             }
-            auto entries = storage_->list(path);
-            if (!pattern.empty())
-                entries.erase(std::remove_if(entries.begin(), entries.end(),
-                    [&](const auto& entry) { return !wildcardMatch(pattern, entry.name); }),
-                    entries.end());
+            // Stream the directory through the bounded cursor; a std::vector of
+            // every entry needs one large contiguous block on a fragmented heap.
+            std::deque<runtime::FileEntry> entries;
+            const auto accept = [&](const std::string& name, bool isDirectory,
+                                    std::uintmax_t size) {
+                if (pattern.empty() || wildcardMatch(pattern, name))
+                    entries.push_back(runtime::FileEntry{name, size, isDirectory});
+            };
+            std::unique_ptr<runtime::DirectoryCursor> cursor;
+            try {
+                cursor = storage_->openDirectory(path);
+            } catch (const runtime::Error& error) {
+                if (error.code() != runtime::ErrorCode::UnsupportedOperation) throw;
+            }
+            if (cursor) {
+                runtime::DirectoryEntry item;
+                for (;;) {
+                    const auto result = cursor->next(item);
+                    if (result == runtime::DirectoryCursorResult::End) break;
+                    if (result == runtime::DirectoryCursorResult::Pending) continue;
+                    accept(item.name, item.metadata.directory,
+                           static_cast<std::uintmax_t>(item.metadata.size));
+                }
+            } else {
+                for (const auto& item : storage_->list(path))
+                    accept(item.name, item.isDirectory, item.size);
+            }
             std::string listing;
             if (catalog) {
                 listing = catListing(std::move(entries), storage_->space(path));
             } else {
+                std::size_t bytes = 0;
+                for (const auto& entry : entries) bytes += entry.name.size() + 2;
+                listing.reserve(bytes);
                 for (const auto& entry : entries)
                     listing += entry.name + (entry.isDirectory ? "/" : "") + "\n";
             }
