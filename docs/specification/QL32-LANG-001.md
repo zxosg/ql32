@@ -449,7 +449,11 @@ form. Without `INCLUDE`, the key constants `KKeySpace`, `KKeyEnter`,
 `KKeyEscape`, `KKeyBackspace`, `KKeyTab`, `KKeyInsert`, `KKeyDelete`,
 `KKeyHome`, `KKeyEnd`, `KKeyPageUp`, `KKeyPageDown`, `KKeyLeft`, `KKeyRight`,
 `KKeyUp`, `KKeyDown` and `KKeyF1`..`KKeyF12` are built in with the values in
-`ql32.inc`; a declared `CONST` of the same name takes precedence (QL/32-specific).
+`ql32.inc`; a declared `CONST` of the same name takes precedence (QL/32-specific). These names are reserved: using one as a
+variable, array, parameter, local, FOR/READ/INPUT target or definition name is a
+compile error ("name is a reserved built-in key constant"), never a silent
+shadow. `TICKS`, `TIMER`, `MIN`, `MAX`, `CLAMP` and `INSTR` are functions only
+when followed by `(`; without it they remain ordinary variable names.
 
 Block `IF`, `FOR`, `REPeat`, `EXIT`, and `SELect ON` use SuperBASIC
 spellings. The M1 `FOR` target preserves the useful SuperBASIC range model:

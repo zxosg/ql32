@@ -175,7 +175,7 @@ limits and board pin ownership.
 | --- | --- | --- | --- |
 | `PRINT` | `PRINT [#channel,] [expression {separator expression} [separator]]` | Writes values to the selected output. `;` joins directly, `!` spaces, `,` advances to an 8-column tab, and `\` emits a line feed. A trailing `;` suppresses the final line feed. | `PRINT "x="; x` |
 | `AT` | `AT [#channel,] row, column` | Positions text output using one-based row and column coordinates. | `AT 1, 1` |
-| `IF` | `IF condition THEN statement` or `IF condition THEN ... [ELSE ...] END IF` | Conditional inline (`THEN` statements `[ELSE` statements`]` on one line) or block execution. Key constants `KKeyUp`, `KKeyEnter`, `KKeyF1`..`KKeyF12` etc. are built in (no `INCLUDE`). Block form may use nested `IF` after `ELSE`. | `IF score% > 0 THEN PRINT score%` |
+| `IF` | `IF condition THEN statement` or `IF condition THEN ... [ELSE ...] END IF` | Conditional inline (`THEN` statements `[ELSE` statements`]` on one line) or block execution. Key constants `KKeyUp`, `KKeyEnter`, `KKeyF1`..`KKeyF12` etc. are built in (no `INCLUDE`) and reserved: they cannot be variable, parameter, local or array names. Block form may use nested `IF` after `ELSE`. | `IF score% > 0 THEN PRINT score%` |
 | `THEN` | `IF condition THEN statement` | Separates an `IF` condition from its branch. | `IF ready% THEN PRINT "Go"` |
 | `ELSE` | `... ELSE statement` or block `ELSE` | Runs when the preceding condition is false. `ELSE IF` is a nested `IF`, closed by its own `END IF`. | `IF n% = 0 THEN PRINT "zero" ELSE PRINT "other"` |
 | `END IF` | `END IF` | Closes a block `IF`. | `IF ok% THEN`<br>`  PRINT "yes"`<br>`END IF` |

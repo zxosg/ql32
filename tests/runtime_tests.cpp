@@ -1640,6 +1640,24 @@ bool runFails(ql32::Interpreter& interpreter, const std::string& source) {
     return false;
 }
 
+void testKeyConstantNamesReserved() {
+    const char* programs[] = {
+        "KKeyUp=7\n", "kkeyup=7\n", "DIM KKeyUp(3)\n", "FOR KKeyUp=1 TO 2\nNEXT KKeyUp\n",
+        "LOCAL KKeyUp\n", "DEFine PROCedure p(KKeyUp)\nEND DEFine\n",
+        "DEFine PROCedure p\nLOCal KKeyUp\nEND DEFine\n", "DEFine PROCedure KKeyUp\nEND DEFine\n",
+        "READ KKeyUp\nDATA 1\n", "INPUT KKeyUp\n"};
+    for (const char* program : programs) {
+        ql32::Interpreter interpreter;
+        require(runFails(interpreter, program), "built-in key constant name accepted as variable");
+    }
+    ql32::Interpreter interpreter;
+    require(runBasic(interpreter, "CONST KKeyUp = 1114124\nPRINT KKeyUp\n") == "1114124\n",
+            "ql32.inc style CONST of a key constant must keep working");
+    require(runBasic(interpreter,
+        "DEFine FuNction f(min, max, clamp)\nLOCal ticks, instr\nticks=min+max\ninstr=clamp\nRETurn ticks+instr\nEND DEFine\n"
+        "timer=1\nPRINT f(1,2,3)+timer\n") == "7\n", "batch 1 names must remain usable as variables");
+}
+
 void testLanguageAdditionsBatch2() {
     ql32::Interpreter interpreter;
     require(runBasic(interpreter,
@@ -1743,6 +1761,7 @@ void testLanguageAdditionsBatch1() {
 int main() {
     try {
         testLanguageAdditionsBatch2();
+        testKeyConstantNamesReserved();
         testLanguageAdditionsBatch1();
         testPrintLinesAreChargedToSliceBudget();
         testInterpreterSessions();

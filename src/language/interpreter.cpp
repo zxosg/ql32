@@ -1778,10 +1778,17 @@ private:
         }
         code_.push_back(std::move(instruction));
     }
+    void rejectKeyConstantName(const Token& name) {
+        double ignored = 0.0;
+        if (builtinKeyConstant(std::string_view(name.text), ignored) &&
+            constants_.find(name.text) == constants_.end())
+            error(name, "name is a reserved built-in key constant");
+    }
     void blockDim() {
         const Token keyword = advance();
         if (!check(Kind::Identifier)) error(peek(), "expected array name after DIM");
         const Token name = advance();
+        rejectKeyConstantName(name);
         if (constants_.find(name.text) != constants_.end())
             error(name, "cannot dimension a constant");
         if (arrays_.find(name.text) != arrays_.end()) error(name, "array is already dimensioned");
@@ -1903,6 +1910,7 @@ private:
                 do {
                     if (!check(Kind::Identifier)) error(peek(), "expected parameter name");
                     const Token parameter = advance();
+                    rejectKeyConstantName(parameter);
                     if (constants_.find(parameter.text) != constants_.end())
                         error(parameter, "parameter name conflicts with a constant");
                     if (std::find(parameters.begin(), parameters.end(), parameter.text) != parameters.end())
@@ -1913,6 +1921,7 @@ private:
             if (!match(Kind::RightParen)) error(peek(), "expected ')' after parameters");
         }
 
+        rejectKeyConstantName(name);
         if (definitions_.find(name.text) != definitions_.end() || isBuiltinName(name.text) ||
             constants_.find(name.text) != constants_.end())
             error(name, "duplicate or reserved definition name");
@@ -1949,6 +1958,7 @@ private:
             do {
                 if (!check(Kind::Identifier)) error(peek(), "expected local variable name");
                 const Token local = advance();
+                rejectKeyConstantName(local);
                 if (constants_.find(local.text) != constants_.end())
                     error(local, "local name conflicts with a constant");
                 if (std::find(parameters.begin(), parameters.end(), local.text) != parameters.end() ||
@@ -1983,6 +1993,7 @@ private:
         const Token keyword = advance();
         if (!check(Kind::Identifier)) error(peek(), "expected numeric FOR variable");
         const Token variable = advance();
+        rejectKeyConstantName(variable);
         if (constants_.find(variable.text) != constants_.end())
             error(variable, "cannot use a constant as a FOR variable");
         if (!variable.text.empty() && variable.text.back() == '$')
@@ -2292,6 +2303,7 @@ private:
                 if (!check(Kind::Identifier))
                     error(peek(), "READ target must be a variable or array element");
                 const Token target = advance();
+                rejectKeyConstantName(target);
                 if (constants_.find(target.text) != constants_.end() ||
                     isBuiltinName(target.text) || definitions_.find(target.text) != definitions_.end())
                     error(target, "READ target is not assignable");
@@ -2612,6 +2624,7 @@ private:
                     if (!check(Kind::Identifier))
                         error(peek(), "expected INPUT destination variable");
                     const Token target = advance();
+                    rejectKeyConstantName(target);
                     input.mutableExtra().inputVariables.push_back(target.text);
                 } while (match(Kind::Comma));
                 input.name = input.extra().inputVariables[0];
@@ -2825,6 +2838,7 @@ private:
         if (check(Kind::Identifier) && tokens_.has(current_ + 1) &&
             tokens_[current_ + 1].kind == Kind::Equal) {
             const Token name = advance();
+            rejectKeyConstantName(name);
             if (constants_.find(name.text) != constants_.end())
                 error(name, "cannot assign to a constant");
             advance();
