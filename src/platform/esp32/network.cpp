@@ -1,6 +1,10 @@
 #include "ql32/platform/esp32/network.hpp"
 
 #include <WiFi.h>
+#if defined(ARDUINO)
+#include <esp_sntp.h>
+#endif
+#include <time.h>
 
 namespace ql32::platform::esp32 {
 
@@ -13,8 +17,34 @@ void WifiNetworkService::connectWifi(const std::string& ssid,
 
 void WifiNetworkService::disconnectWifi() {
     connectionRequested_ = false;
+#if defined(ARDUINO)
+    if (sntpStarted_) esp_sntp_stop();
+#endif
+    sntpStarted_ = false;
     // Power the radio down so the driver's heap is returned to BASIC programs.
     WiFi.disconnect(true, true);
+}
+
+std::string WifiNetworkService::networkTime() {
+    if (!sntpStarted_) {
+        if (!connectionRequested_ || WiFi.status() != WL_CONNECTED) return {};
+#if defined(ARDUINO)
+        configTime(0, 0, "pool.ntp.org", "time.google.com");
+#endif
+        sntpStarted_ = true;
+        return {};
+    }
+#if defined(ARDUINO)
+    if (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED) return {};
+#else
+    return {};
+#endif
+    time_t now = time(nullptr);
+    struct tm tmv;
+    gmtime_r(&now, &tmv);
+    char buf[24];
+    strftime(buf, sizeof buf, "%Y-%m-%d %H:%M:%S", &tmv);
+    return buf;
 }
 
 runtime::WifiStatus WifiNetworkService::wifiStatus() const {

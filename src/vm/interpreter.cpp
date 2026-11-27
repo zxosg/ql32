@@ -2246,6 +2246,13 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     network_->disconnectWifi();
                     break;
                 }
+                if (instruction.name == "NETTIME$") {
+                    if (!network_)
+                        throw runtime::ServiceError(runtime::ServiceErrorCode::Unavailable,
+                                                    "network service unavailable");
+                    pushValue(network_->networkTime());
+                    break;
+                }
                 if (instruction.name == "NETSTAT$" || instruction.name == "NETADDR$" ||
                     instruction.name == "NETSIGNAL") {
                     if (!network_)

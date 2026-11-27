@@ -10,9 +10,11 @@ public:
                      const std::string& password) override;
     void disconnectWifi() override;
     runtime::WifiStatus wifiStatus() const override;
+    std::string networkTime() override;
 
 private:
     bool connectionRequested_ = false;
+    bool sntpStarted_ = false;
 };
 
 } // namespace ql32::platform::esp32

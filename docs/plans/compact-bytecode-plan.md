@@ -421,3 +421,29 @@ Diagnostic: `esp32_2432s028_track` env adds `HEAP LIVEMAP` (live operator-new bl
 Change: after compile and the ProgramStore spill, `CompactState::relocate()` measures the compact program (names, extras, code, index), copies it under a `BumpScope` into one slab (global operator new serves from the slab on the VM task; deleting slab pointers is a no-op, the slab is freed with the program) and frees the scattered originals so the holes coalesce. The operator-new hook is compiled only on ARDUINO targets (host tests replace operator new themselves) and uses plain globals plus the FreeRTOS task handle, because TLS and `pthread_self` are not available early / on raw tasks.
 
 Device, full-screen dirplayer (free / largest KB): RUN start 140.1 / 34.8 (main with #61) -> **140.9 / 40.9**; ready 102.7 / 12.8; playing KNUCKLE 76.6 / 11.2 (was 71 / 3.6 in section 14); after exit 152 / 43. KNUCKLE and LyraII1: late=0. Golden 16/16, host/sanitized/compact/dual-run ctest 92/92, 4 pio builds. The 60K largest gate is still not met.
+
+## 17. WiFi/SNTP at startup: memory impact (CYD, full-screen dirplayer)
+
+`NETTIME$()` (UTC "YYYY-MM-DD HH:MM:SS", starts SNTP on first call while
+connected, stopped by `DISNET`) was added to measure a connect, sync,
+disconnect sequence at the start of `startup.bas` (SSID not recorded here).
+
+| Point | free | largest |
+|---|---|---|
+| idle, before connect | 170.6K | 110.6K |
+| connected | 121.2K | 110.6K |
+| time synced | 120.7K | 110.6K |
+| after `DISNET` | 154.5K | 110.6K |
+| idle after startup finished | 159.0K | 110.6K |
+| dirplayer RUN start, with sync | 122.9K | 12.3K |
+| dirplayer RUN start, control (no network) | 139.4K | 38.9K |
+
+Findings: the driver heap (about 50K) is returned on disconnect, but about
+16.5K of free heap stays retained as small pinned blocks (LwIP/netif/event
+infrastructure). Adding an explicit `WiFi.mode(WIFI_OFF)` after
+`WiFi.disconnect(true, true)` changed nothing. The idle largest block is
+unaffected, but at dirplayer RUN start the largest block drops by about 26.6K
+(38.9K to 12.3K) because the retained pieces land in the region the compile
+transients later use. Time sync at boot therefore does not fully recover and
+is not compatible with the full-screen dirplayer gates; sync late (after the
+program has loaded) or accept the 8-row layout if it is needed.
