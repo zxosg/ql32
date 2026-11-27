@@ -3800,70 +3800,100 @@ private:
 bool Interpreter::spillProgramForRun() {
     QL32_SPILL_T0();
     if (programSpill_ || program_.empty() || !storage_ || !memory_) return false;
-    const std::string& base = memory_->admissionPolicy().programSpillPath;
-    if (base.empty()) return false;
-    std::string path;
-    bool created = false;
+    const auto& policy = memory_->admissionPolicy();
+    // The preferred volume (SD card) is only used when it is present, has room and accepts the write;
+    // every failure falls back to the always-available base volume.
+    std::vector<std::pair<std::string, bool>> volumes;
+    if (!policy.programSpillPreferredPath.empty()) volumes.emplace_back(policy.programSpillPreferredPath, true);
+    if (!policy.programSpillPath.empty() && policy.programSpillPath != policy.programSpillPreferredPath)
+        volumes.emplace_back(policy.programSpillPath, false);
+    if (volumes.empty()) return false;
+    const auto slotName = [this](const std::string& base, int attempt) {
+        std::string candidate = base + "-" + std::to_string(session_id_);
+        if (attempt) candidate += "." + std::to_string(attempt);
+        return candidate;
+    };
+    const auto hashFile = [this](const std::string& file) {
+        auto reader = storage_->openRead(file);
+        SpillHasher result;
+        std::uint8_t buffer[256];
+        std::uint64_t offset = 0;
+        for (;;) {
+            const std::size_t got = reader->readAt(offset, buffer, sizeof(buffer));
+            if (got == 0) break;
+            result.update(buffer, got);
+            offset += got;
+        }
+        return result;
+    };
     try {
         ProgramListingSource source(program_);
         SpillHasher expected;
         source.writeTo(expected);
-        if (expected.count < memory_->admissionPolicy().programSpillMinBytes) return false;
-        const auto hashFile = [this](const std::string& file) {
-            auto reader = storage_->openRead(file);
-            SpillHasher result;
-            std::uint8_t buffer[256];
-            std::uint64_t offset = 0;
-            for (;;) {
-                const std::size_t got = reader->readAt(offset, buffer, sizeof(buffer));
-                if (got == 0) break;
-                result.update(buffer, got);
-                offset += got;
-            }
-            return result;
-        };
+        if (expected.count < policy.programSpillMinBytes) return false;
         // Existing files are never overwritten: after a reset the previous run's recovery files
-        // still belong to the user. A leftover holding exactly this program is adopted instead.
-        for (int attempt = 0; attempt < 16 && path.empty(); ++attempt) {
-            std::string candidate = base + "-" + std::to_string(session_id_);
-            if (attempt) candidate += "." + std::to_string(attempt);
-            const bool haveFile = storage_->exists(candidate);
-            const bool haveMeta = storage_->exists(candidate + ".meta");
-            // A sidecar without a recovery file protects no user data and is simply replaced.
-            if (!haveFile) {
-                path = std::move(candidate);
-                created = true;
-            } else if (haveFile && haveMeta) {
-                const SpillHasher found = hashFile(candidate);
-                if (found.count == expected.count && found.hash == expected.hash)
-                    path = std::move(candidate);
+        // still belong to the user. A leftover holding exactly this program, on either volume, is adopted.
+        for (const auto& volume : volumes) {
+            for (int attempt = 0; attempt < 16; ++attempt) {
+                try {
+                    const std::string candidate = slotName(volume.first, attempt);
+                    // Slots fill in order, and every probe of a missing SPIFFS file costs ~200 ms.
+                    if (!storage_->exists(candidate)) break;
+                    if (!storage_->exists(candidate + ".meta")) continue;
+                    const SpillHasher found = hashFile(candidate);
+                    if (found.count != expected.count || found.hash != expected.hash) continue;
+                    programSpill_ = ProgramSpill{candidate, expected.count, expected.hash};
+                    program_.clear();
+                    QL32_SPILL_LOG("adopt", expected.count);
+                    return true;
+                } catch (...) {
+                    break;  // volume unavailable
+                }
             }
         }
-        if (path.empty()) { QL32_SPILL_LOG("nopath", 0); return false; }
-        if (created) {
-            storage_->writeTextStreamAtomic(path, source);
-            // Verify by streaming the file back before the RAM copy is dropped.
-            const SpillHasher actual = hashFile(path);
-            if (actual.count != expected.count || actual.hash != expected.hash)
-                throw std::runtime_error("program spill verification failed");
-            // The recovery file is plain numbered BASIC (LOAD-able); the sidecar records what it should be.
-            storage_->writeText(path + ".meta", "Q32RECOVER1 session=" + std::to_string(session_id_) +
-                                                    " bytes=" + std::to_string(expected.count) +
-                                                    " fnv=" + std::to_string(expected.hash) + "\n");
+        for (const auto& volume : volumes) {
+            std::string path;
+            try {
+                // A card's free-space query walks the FAT (about 2 s on a 3 GB card), so the preferred
+                // volume is not asked: a full card fails the write below and falls back like any other failure.
+                if (!volume.second) {
+                    const auto space = storage_->space(volume.first);
+                    if (space.known) {
+                        const std::uint64_t usable = space.free > space.reserve ? space.free - space.reserve : 0;
+                        if (usable < expected.count + 4096) continue;
+                    }
+                }
+                // A sidecar without a recovery file protects no user data and is simply replaced.
+                for (int attempt = 0; attempt < 16 && path.empty(); ++attempt) {
+                    const std::string candidate = slotName(volume.first, attempt);
+                    if (!storage_->exists(candidate)) path = candidate;
+                }
+                if (path.empty()) continue;
+                storage_->writeTextStreamAtomic(path, source);
+                // Verify by streaming the file back before the RAM copy is dropped.
+                const SpillHasher actual = hashFile(path);
+                if (actual.count != expected.count || actual.hash != expected.hash)
+                    throw std::runtime_error("program spill verification failed");
+                // The recovery file is plain numbered BASIC (LOAD-able); the sidecar records what it should be.
+                storage_->writeText(path + ".meta", "Q32RECOVER1 session=" + std::to_string(session_id_) +
+                                                        " bytes=" + std::to_string(expected.count) +
+                                                        " fnv=" + std::to_string(expected.hash) + "\n");
+                programSpill_ = ProgramSpill{path, expected.count, expected.hash};
+                program_.clear();
+                QL32_SPILL_LOG(volume.second ? "write+verify preferred" : "write+verify", expected.count);
+                return true;
+            } catch (...) {
+                QL32_SPILL_LOG("volume failed", 0);
+                if (!path.empty()) {
+                    // The names were unused before this call, so both files are ours to drop.
+                    try { if (storage_->exists(path)) storage_->remove(path); } catch (...) {}
+                    try { if (storage_->exists(path + ".meta")) storage_->remove(path + ".meta"); } catch (...) {}
+                }
+            }
         }
-        programSpill_ = ProgramSpill{path, expected.count, expected.hash};
-        program_.clear();
-        QL32_SPILL_LOG(created ? "write+verify" : "adopt", expected.count);
-        return true;
     } catch (...) {
-        QL32_SPILL_LOG("exception", 0);
-        if (created) {
-            // The names were unused before this call, so both files are ours to drop.
-            try { if (storage_->exists(path)) storage_->remove(path); } catch (...) {}
-            try { if (storage_->exists(path + ".meta")) storage_->remove(path + ".meta"); } catch (...) {}
-        }
-        return false;
     }
+    return false;
 }
 
 void Interpreter::discardProgramSpill() noexcept {

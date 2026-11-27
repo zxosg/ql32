@@ -28,3 +28,9 @@ One RUN that spills performs: 1 temporary-file create + rename (listing), 1 side
 3. **Option:** `-DQL32_PROGRAM_SPILL_PATH=\"SDC:.q32-run\"` spills to the SD card: ~4-5x faster RUN start (0.4-0.5 s) and restore, and no SPIFFS wear. Default stays `FFS:` because it needs no card.
 
 Remaining cost for programs >= 4 KB on FFS: 2-2.4 s added to RUN start. It is the price of the memory headroom that lets dirplayer-size programs run at all.
+
+## Update: per-RUN volume choice (SDC: preferred, FFS: fallback)
+
+`AdmissionPolicy::programSpillPreferredPath` (CYD: `SDC:.q32-run`) is tried first; any failure (no card, write-protected, full, verify error) cleans up and falls back to `programSpillPath` (`FFS:.q32-run`). Adoption scans both volumes; the boot message lists recovery files on both. A card removed before restore is reported as a missing recovery file (the file stays on the card; reinsert and `LOAD "SDC:.q32-run-N"`).
+
+Measured on the CYD (3 GB card), dirplayer.bas (8.7 KB), RUN-start delay: **0.59 s with card** (was 2.4 s on FFS:), restore 78 ms. Two pitfalls found while measuring, both avoided: `SD.usedBytes()` walks the FAT and costs about 1.95 s, so the card's free space is not queried (a full card fails the write and falls back); and each probe of a missing SPIFFS slot costs ~200 ms, so the adoption scan stops at the first missing slot. Not tested on hardware: physically removing or write-protecting the card (covered by host fakes).

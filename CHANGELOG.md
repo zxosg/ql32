@@ -17,6 +17,8 @@ First release candidate.
 - `programSpillMinBytes`: programs under 4 KB are not spilled on the CYD (spill adds 1.5-2.4 s to RUN on FFS:); see `docs/test-results/CYD-spill-latency-2026-11-24.md`.
 - CI workflow: host ctest matrix and PlatformIO builds.
 
+- Program spill chooses its volume per RUN: `SDC:` when a card is present and accepts the write (~0.6 s for dirplayer, restore ~80 ms), otherwise `FFS:` (~2.4 s). Identical leftovers are adopted on either volume and the boot message lists recovery files on both. Override with `-DQL32_PROGRAM_SPILL_PREFERRED_PATH=\"\"` (FFS only).
+
 ### Fixed
 - Orphan `.q32-run-*.meta` sidecars no longer exhaust the recovery-file slots and silently disable the spill.
 

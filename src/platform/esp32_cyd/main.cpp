@@ -709,6 +709,13 @@ void setup() {
                 Serial.printf("Recovery file kept: LOAD \"FFS:%s\" restores the program; delete it when done\n",
                               name);
         }
+        try {
+            for (const auto& entry : sdcStorage.list("/"))
+                if (entry.name.rfind(".q32-run-", 0) == 0 && entry.name.find(".meta") == std::string::npos)
+                    Serial.printf("Recovery file kept: LOAD \"SDC:%s\" restores the program; delete it when done\n",
+                                  entry.name.c_str());
+        } catch (...) {
+        }
     }
 #endif
 
@@ -831,6 +838,10 @@ void setup() {
 #if !defined(QL32_PROGRAM_SPILL_PATH)
 #define QL32_PROGRAM_SPILL_PATH "FFS:.q32-run"
 #endif
+#if !defined(QL32_PROGRAM_SPILL_PREFERRED_PATH)
+#define QL32_PROGRAM_SPILL_PREFERRED_PATH "SDC:.q32-run"
+#endif
+    admission.programSpillPreferredPath = QL32_PROGRAM_SPILL_PREFERRED_PATH;
     admission.programSpillPath = QL32_PROGRAM_SPILL_PATH;
     admission.programSpillMinBytes = QL32_PROGRAM_SPILL_MIN_BYTES;
     admission.canvasHeadroomBytes = 8 * 1024;
