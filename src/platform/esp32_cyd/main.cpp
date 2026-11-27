@@ -808,6 +808,7 @@ void setup() {
     // A full-screen canvas is 38400 bytes in one block; leave room for the music service.
     admission.canvasGuard = true;
     admission.freezeWindowsAfterRun = true;
+    admission.programSpillPath = "FFS:.q32-run";
     admission.canvasHeadroomBytes = 8 * 1024;
     boardMemory.setAdmissionPolicy(admission);
     boardMemory.setReclaimer([] {

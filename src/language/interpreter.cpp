@@ -3372,14 +3372,14 @@ std::optional<InteractiveLineEdit> Interpreter::takePendingLineEdit() noexcept {
 std::optional<InteractiveLineEdit> Interpreter::navigateProgramEdit(
     int currentLine, int direction) {
     if (direction != -1 && direction != 1) return std::nullopt;
-    auto found = program_.find(currentLine);
-    if (found == program_.end()) return std::nullopt;
+    auto found = program().find(currentLine);
+    if (found == program().end()) return std::nullopt;
     if (direction < 0) {
-        if (found == program_.begin()) return std::nullopt;
+        if (found == program().begin()) return std::nullopt;
         --found;
     } else {
         ++found;
-        if (found == program_.end()) return std::nullopt;
+        if (found == program().end()) return std::nullopt;
     }
     lastEditedLine_ = found->first;
     return InteractiveLineEdit{
@@ -3744,7 +3744,107 @@ void Interpreter::discardGraphicsResources() noexcept {
     }
 }
 
+namespace {
+class SpillHasher final : public runtime::TextStreamSink {
+public:
+    void write(std::string_view chunk) override { update(chunk.data(), chunk.size()); }
+    void update(const void* data, std::size_t size) {
+        const auto* bytes = static_cast<const unsigned char*>(data);
+        for (std::size_t i = 0; i < size; ++i) {
+            hash = (hash ^ bytes[i]) * 1099511628211ull;
+            ++count;
+        }
+    }
+    std::uint64_t hash = 1469598103934665603ull;
+    std::uint64_t count = 0;
+};
+
+class ProgramListingSource final : public runtime::TextStreamSource {
+public:
+    explicit ProgramListingSource(const ProgramStore& program) : program_(program) {}
+    void writeTo(runtime::TextStreamSink& sink) const override {
+        char number[24];
+        for (const auto& [line, body] : program_) {
+            const auto converted = std::to_chars(number, number + sizeof(number), line);
+            sink.write(std::string_view(number, static_cast<std::size_t>(converted.ptr - number)));
+            if (!body.empty()) {
+                sink.write(" ");
+                sink.write(body);
+            }
+            sink.write("\n");
+        }
+    }
+
+private:
+    const ProgramStore& program_;
+};
+} // namespace
+
+bool Interpreter::spillProgramForRun() {
+    if (programSpill_ || program_.empty() || !storage_ || !memory_) return false;
+    const std::string& path = memory_->admissionPolicy().programSpillPath;
+    if (path.empty()) return false;
+    try {
+        ProgramListingSource source(program_);
+        SpillHasher expected;
+        source.writeTo(expected);
+        storage_->writeTextStreamAtomic(path, source);
+        // Verify by streaming the file back before the RAM copy is dropped.
+        auto reader = storage_->openRead(path);
+        SpillHasher actual;
+        std::uint8_t buffer[256];
+        std::uint64_t offset = 0;
+        for (;;) {
+            const std::size_t got = reader->readAt(offset, buffer, sizeof(buffer));
+            if (got == 0) break;
+            actual.update(buffer, got);
+            offset += got;
+        }
+        if (actual.count != expected.count || actual.hash != expected.hash)
+            throw std::runtime_error("program spill verification failed");
+        programSpill_ = ProgramSpill{path, expected.count, expected.hash};
+        program_.clear();
+        return true;
+    } catch (...) {
+        try { if (storage_->exists(path)) storage_->remove(path); } catch (...) {}
+        return false;
+    }
+}
+
+void Interpreter::discardProgramSpill() noexcept {
+    if (!programSpill_) return;
+    try { storage_->remove(programSpill_->path); } catch (...) {}
+    programSpill_.reset();
+}
+
+ProgramStore& Interpreter::program() {
+    if (!programSpill_) return program_;
+    std::string contents = storage_->readText(programSpill_->path);
+    SpillHasher check;
+    check.update(contents.data(), contents.size());
+    if (check.count != programSpill_->bytes || check.hash != programSpill_->hash)
+        throw std::runtime_error("program recovery file " + programSpill_->path +
+                                 " is damaged; it was not removed");
+    ProgramStore restored;
+    for (std::size_t cursor = 0; cursor < contents.size();) {
+        const std::size_t end = std::min(contents.find('\n', cursor), contents.size());
+        const std::string_view line(contents.data() + cursor, end - cursor);
+        cursor = end + 1;
+        int number = 0;
+        const auto parsed = std::from_chars(line.data(), line.data() + line.size(), number);
+        if (parsed.ec != std::errc{}) continue;
+        std::string_view body(parsed.ptr, static_cast<std::size_t>(line.data() + line.size() - parsed.ptr));
+        if (!body.empty() && body.front() == ' ') body.remove_prefix(1);
+        restored.set(number, body);
+    }
+    contents = std::string();
+    program_.swap(restored);
+    discardProgramSpill();
+    return program_;
+}
+
 Interpreter::~Interpreter() {
+    discardProgramSpill();
     if (ui_) ui_->cancelSession(session_id_);
     if (channels_) channels_->closeSession(session_id_);
     if (graphics_) graphics_->closeSession(session_id_);
@@ -4259,10 +4359,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             std::string body = canonicalizeKeywords(
                 expandCompactEnd(trim(line.substr(numberEnd))));
             if (body.empty()) {
-                program_.erase(number);
+                program().erase(number);
             } else {
                 validateProgramLine(number, body);
-                program_.set(number, body);
+                program().set(number, body);
             }
             stoppedExecution_.reset();
             continue;
@@ -4275,10 +4375,10 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             const std::string argument = trim(normalizedLine.substr(4));
             int lineNumber = 0;
             if (argument.empty()) {
-                if (lastEditedLine_ && program_.find(*lastEditedLine_) != program_.end())
+                if (lastEditedLine_ && program().find(*lastEditedLine_) != program().end())
                     lineNumber = *lastEditedLine_;
-                else if (!program_.empty())
-                    lineNumber = program_.begin()->first;
+                else if (!program().empty())
+                    lineNumber = program().begin()->first;
                 else
                     throw std::runtime_error("EDIT requires a stored program line");
             } else {
@@ -4289,8 +4389,8 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                     lineNumber < 1 || lineNumber > 32767)
                     throw std::runtime_error("EDIT requires a line number in 1..32767");
             }
-            const auto line = program_.find(lineNumber);
-            if (line == program_.end())
+            const auto line = program().find(lineNumber);
+            if (line == program().end())
                 throw std::runtime_error("EDIT line not found: " +
                                          std::to_string(lineNumber));
             lastEditedLine_ = lineNumber;
@@ -4327,12 +4427,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
 
             std::map<int, int> mapping;
             int next = first;
-            for (const auto& [oldLine, unusedBody] : program_) {
+            for (const auto& [oldLine, unusedBody] : program()) {
                 (void)unusedBody;
                 if (next > 32767)
                     throw std::runtime_error("RENUMBER would exceed line 32767");
                 mapping.emplace(oldLine, next);
-                if (mapping.size() < program_.size()) {
+                if (mapping.size() < program().size()) {
                     if (step > 32767 - next)
                         throw std::runtime_error("RENUMBER would exceed line 32767");
                     next += step;
@@ -4340,7 +4440,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             }
 
             ProgramStore candidate;
-            for (const auto& [oldLine, body] : program_) {
+            for (const auto& [oldLine, body] : program()) {
                 std::string rewritten(body);
                 std::vector<TokenSpan> spans;
                 const TokenList list = Lexer(body).scan(&spans);
@@ -4383,7 +4483,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                                       replacement->text);
                 candidate.set(mapping.at(oldLine), rewritten);
             }
-            program_.swap(candidate);
+            program().swap(candidate);
             if (lastEditedLine_) {
                 const auto mapped = mapping.find(*lastEditedLine_);
                 if (mapped == mapping.end()) lastEditedLine_.reset();
@@ -4457,7 +4557,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                     listing = variableListing(definitionKind == "GLOBALS");
                 } else {
                     const char* kindName = function ? "FUNCTION" : "PROCEDURE";
-                    const auto definitions = scanProgramDefinitions(program_);
+                    const auto definitions = scanProgramDefinitions(program());
                     if (definitionName.empty()) {
                         for (const auto& definition : definitions)
                             if (definition.function == function)
@@ -4478,7 +4578,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                                 (other ? std::string(" is a ") + (function ? "procedure" : "function") :
                                          std::string(" not found")));
                         }
-                        for (const auto& [number, body] : program_) {
+                        for (const auto& [number, body] : program()) {
                             if (number < match->firstLine || number > match->lastLine) continue;
                             listing += std::to_string(number) + (body.empty() ? std::string() : " " + std::string(body)) + "\n";
                         }
@@ -4557,7 +4657,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             if (rangeKind == RangeKind::Between && rangeStart > rangeEnd)
                 throw std::runtime_error("LIST range start must not exceed end");
             std::string listing;
-            for (const auto& [number, body] : program_) {
+            for (const auto& [number, body] : program()) {
                 if ((rangeKind == RangeKind::Exact && number != rangeStart) ||
                     (rangeKind == RangeKind::From && number < rangeStart) ||
                     (rangeKind == RangeKind::Through && number > rangeEnd) ||
@@ -4579,12 +4679,13 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             output.flush();
             systemControl_->reboot();
         } else if (word == "NEW") {
+            discardProgramSpill();
             program_.clear();
             lastEditedLine_.reset();
             clear();
         } else if (word == "RUN") {
             clear();
-            std::string programSource = joinProgramLines(program_);
+            std::string programSource = joinProgramLines(program());
             if (taskControl_ && !programSource.empty()) {
                 pendingRunSource_ = std::move(programSource);
                 pendingInteractiveTail_.assign(std::istreambuf_iterator<char>(input),
@@ -4639,6 +4740,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 else candidate.set(number, body);
             }
             std::string().swap(contents);
+            discardProgramSpill();
             program_.swap(candidate);
             stoppedExecution_.reset();
             lastEditedLine_.reset();
@@ -4674,7 +4776,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
 
             private:
                 const ProgramStore& program_;
-            } source(program_);
+            } source(program());
             runtime::EmergencyReserveLease reserve(memory_.get());
             storage_->writeTextStreamAtomic(path, source);
         } else if (word == "DELETE" || word.rfind("DELETE ", 0) == 0) {
@@ -4712,11 +4814,11 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 lineNumbers.erase(std::unique(lineNumbers.begin(), lineNumbers.end()),
                                   lineNumbers.end());
                 for (const int number : lineNumbers) {
-                    if (program_.find(number) == program_.end())
+                    if (program().find(number) == program().end())
                         throw std::runtime_error("DELETE line not found: " +
                                                  std::to_string(number));
                 }
-                for (const int number : lineNumbers) program_.erase(number);
+                for (const int number : lineNumbers) program().erase(number);
                 stoppedExecution_.reset();
             } else {
                 if (!storage_)
