@@ -29,6 +29,12 @@ public:
         return found->second;
     }
     void writeText(const std::string& path, const std::string& contents) override {
+        requireVolume(path);
+        if (path.rfind("SDC:", 0) == 0 && contents.size() > sdcFree)
+            throw ql32::runtime::ServiceError(ql32::runtime::ServiceErrorCode::Unavailable, "card full");
+        if (sdcWriteProtected && path.rfind("SDC:", 0) == 0)
+            throw ql32::runtime::ServiceError(ql32::runtime::ServiceErrorCode::Unavailable,
+                                              "write protected");
         if (failWrites && path.rfind("FFS:.q32-run", 0) == 0)
             throw ql32::runtime::ServiceError(ql32::runtime::ServiceErrorCode::Unavailable,
                                               "test write failure");
@@ -37,7 +43,21 @@ public:
     std::vector<ql32::runtime::FileEntry> list(const std::string&) override {
         return {};
     }
-    bool exists(const std::string& path) override { return files.count(path) != 0; }
+    bool exists(const std::string& path) override {
+        requireVolume(path);
+        return files.count(path) != 0;
+    }
+    ql32::runtime::StorageSpace space(const std::string& path) override {
+        requireVolume(path);
+        ql32::runtime::StorageSpace result;
+        result.known = true;
+        result.free = path.rfind("SDC:", 0) == 0 ? sdcFree : (1u << 20);
+        return result;
+    }
+    void requireVolume(const std::string& path) const {
+        if (!sdcPresent && path.rfind("SDC:", 0) == 0)
+            throw ql32::runtime::ServiceError(ql32::runtime::ServiceErrorCode::Unavailable, "no card");
+    }
     std::uintmax_t size(const std::string& path) override { return files.at(path).size(); }
     void rename(const std::string& path, const std::string& newPath) override {
         files[newPath] = std::move(files.at(path));
@@ -45,12 +65,16 @@ public:
     }
     void remove(const std::string& path) override { files.erase(path); }
     std::unique_ptr<ql32::runtime::StorageReadHandle> openRead(const std::string& path) override {
+        requireVolume(path);
         if (!allowOpenRead) return StorageService::openRead(path);
         return std::make_unique<ql32::runtime::MemoryStorageReadHandle>(files.at(path));
     }
 
     bool allowOpenRead = true;
     bool failWrites = false;
+    bool sdcPresent = true;
+    bool sdcWriteProtected = false;
+    std::uint64_t sdcFree = 1u << 30;
     std::unordered_map<std::string, std::string> files;
 };
 
@@ -1875,6 +1899,116 @@ void testSpillSkipsProgramsBelowMinimumSize() {
     require(countRecoveryFiles(*storage) == 0, "small program was spilled despite programSpillMinBytes");
 }
 
+std::size_t countFilesWithPrefix(const ProgramStorage& storage, const std::string& prefix) {
+    std::size_t count = 0;
+    for (const auto& file : storage.files)
+        if (file.first.rfind(prefix, 0) == 0 && file.first.find(".meta") == std::string::npos) ++count;
+    return count;
+}
+
+// Spills on a scheduler whose policy prefers SDC: and falls back to FFS:.
+void runPreferredSpill(const std::shared_ptr<ProgramStorage>& storage, std::size_t* sdc, std::size_t* ffs) {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.programSpillPreferredPath = "SDC:.q32-run";
+    policy.programSpillPath = "FFS:.q32-run";
+    memory->setAdmissionPolicy(policy);
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.storage = storage;
+    std::unordered_map<std::string, std::string> survivors;
+    {
+        ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+        std::ostringstream output;
+        ql32::vm::TaskId repl = 0;
+        runSpillProgram(scheduler, output, repl);
+        survivors = storage->files;
+    }
+    // A reset never runs destructors: model it by restoring what the spill left behind.
+    storage->files = std::move(survivors);
+    *sdc = countFilesWithPrefix(*storage, "SDC:.q32-run");
+    *ffs = countFilesWithPrefix(*storage, "FFS:.q32-run");
+}
+
+// Session ids count up across schedulers in one process; a real reset restarts them, so move the
+// leftovers to the id the next scheduler will receive.
+void renameLeftoversToNextSession(ProgramStorage& storage) {
+    std::unordered_map<std::string, std::string> moved;
+    for (auto& file : storage.files) {
+        const auto dash = file.first.find("-", file.first.find(".q32-run") + 8);
+        const auto end = file.first.find('.', dash);
+        const int id = std::stoi(file.first.substr(dash + 1, end == std::string::npos ? end : end - dash - 1));
+        moved[file.first.substr(0, dash + 1) + std::to_string(id + 1) +
+              (end == std::string::npos ? std::string() : file.first.substr(end))] = file.second;
+    }
+    storage.files = std::move(moved);
+}
+
+void testSpillPrefersSdcAndFallsBackToFfs() {
+    std::size_t sdc = 0, ffs = 0;
+    auto storage = std::make_shared<ProgramStorage>();
+    runPreferredSpill(storage, &sdc, &ffs);
+    require(sdc == 1 && ffs == 0, "present SD card was not preferred");
+
+    storage = std::make_shared<ProgramStorage>();
+    storage->sdcPresent = false;
+    runPreferredSpill(storage, &sdc, &ffs);
+    require(sdc == 0 && ffs == 1, "missing SD card did not fall back to FFS");
+
+    storage = std::make_shared<ProgramStorage>();
+    storage->sdcFree = 4;
+    runPreferredSpill(storage, &sdc, &ffs);
+    require(sdc == 0 && ffs == 1, "full SD card did not fall back to FFS");
+
+    storage = std::make_shared<ProgramStorage>();
+    storage->sdcWriteProtected = true;
+    runPreferredSpill(storage, &sdc, &ffs);
+    require(sdc == 0 && ffs == 1 && countFilesWithPrefix(*storage, "SDC:") == 0,
+            "write-protected SD card did not fall back cleanly");
+}
+
+void testSpillAdoptsLeftoverOnEitherVolumeAndSurvivesCardRemoval() {
+    std::size_t sdc = 0, ffs = 0;
+    auto storage = std::make_shared<ProgramStorage>();
+    runPreferredSpill(storage, &sdc, &ffs);
+    require(sdc == 1, "setup spill missing");
+    // A reset leaves the SDC leftover; the same program run again must adopt it, not create a second one.
+    renameLeftoversToNextSession(*storage);
+    runPreferredSpill(storage, &sdc, &ffs);
+    require(sdc == 1 && ffs == 0, "identical SDC leftover was not adopted");
+    // With the card gone the FFS copy is created; the SDC leftover is untouched.
+    storage->sdcPresent = false;
+    runPreferredSpill(storage, &sdc, &ffs);
+    storage->sdcPresent = true;
+    require(ffs == 1 && sdc == 1, "fallback after card removal failed");
+}
+
+void testSpillRestoreReportsRemovedCard() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.programSpillPreferredPath = "SDC:.q32-run";
+    policy.programSpillPath = "FFS:.q32-run";
+    memory->setAdmissionPolicy(policy);
+    auto storage = std::make_shared<ProgramStorage>();
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.storage = storage;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    ql32::vm::TaskId repl = 0;
+    runSpillProgram(scheduler, output, repl);
+    require(countFilesWithPrefix(*storage, "SDC:.q32-run") == 1, "setup spill missing");
+    storage->sdcPresent = false;
+    output.str("");
+    require(scheduler.submit(repl, "LIST\n"), "LIST rejected");
+    for (int tick = 0; tick < 20; ++tick) scheduler.tick();
+    const auto info = scheduler.task(repl);
+    require(output.str().find("20 PAUSE 50") == std::string::npos, "phantom listing without the card");
+    require(!output.str().empty() || (info && !info->error.empty()), "removed card not reported");
+    storage->sdcPresent = true;
+    require(countFilesWithPrefix(*storage, "SDC:.q32-run") == 1, "recovery file lost after card removal");
+}
+
 void testSpillIgnoresOrphanSidecars() {
     auto memory = std::make_shared<FakeMemory>();
     ql32::runtime::AdmissionPolicy policy;
@@ -2102,6 +2236,9 @@ int main() {
     testSpillWriteFailureKeepsProgramInRam();
     testSpillMissingFileIsReportedNotSilentlyEmptied();
     testSpillIgnoresOrphanSidecars();
+    testSpillPrefersSdcAndFallsBackToFfs();
+    testSpillAdoptsLeftoverOnEitherVolumeAndSurvivesCardRemoval();
+    testSpillRestoreReportsRemovedCard();
     testSpillSkipsProgramsBelowMinimumSize();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
