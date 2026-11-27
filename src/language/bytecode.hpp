@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -191,9 +192,20 @@ class TextPool {
 public:
     const std::string* intern(const std::string& value) {
         std::lock_guard<std::mutex> lock(mutex_);
-        return &*strings_.insert(value).first;
+        if (frozen_) rebuildIndex();
+        const auto found = index_.find(std::string_view(value));
+        if (found != index_.end()) return &store_[found->second];
+        store_.push_back(value);
+        index_.emplace(std::string_view(store_.back()), store_.size() - 1);
+        return &store_.back();
     }
-    std::size_t count() const { return strings_.size(); }
+    std::size_t count() const { return store_.size(); }
+    // Drops the lookup index once compilation is done; a later intern() (EVAL) rebuilds it.
+    void freeze() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        index_ = {};
+        frozen_ = true;
+    }
 
     // Pool that receives text assigned on this thread (set while compiling).
     static TextPool*& active() {
@@ -207,8 +219,15 @@ public:
     }
 
 private:
+    void rebuildIndex() {
+        index_.reserve(store_.size());
+        for (std::size_t i = 0; i < store_.size(); ++i) index_.emplace(std::string_view(store_[i]), i);
+        frozen_ = false;
+    }
     std::mutex mutex_;
-    std::unordered_set<std::string> strings_;
+    std::deque<std::string> store_;  // stable addresses; SharedText points into it
+    std::unordered_map<std::string_view, std::size_t> index_;
+    bool frozen_ = false;
 };
 
 class TextPoolScope {

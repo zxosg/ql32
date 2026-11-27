@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
                  "name_refs,distinct_names,push_values,distinct_push_values,"
                  "functions,arrays,constants,data_items,heap_retained,heap_peak,"
                  "compact_code,compact_positions,compact_index,compact_names,compact_extras,"
-                 "compact_bytes_per_instr\n";
+                 "compact_bytes_per_instr,compact_heap\n";
     for (int i = 1; i < argc; ++i) {
         std::ifstream in(argv[i], std::ios::binary);
         std::stringstream text;
@@ -66,7 +66,10 @@ int main(int argc, char** argv) {
         }
         const std::size_t retained = gLive - liveBefore;
         const std::size_t peak = gPeak - liveBefore;
-        const auto compact = CompactProgram::encode(code).stats();
+        const std::size_t beforeCompact = gLive;
+        auto compactProgram = CompactProgram::encode(code);
+        const std::size_t compactRetained = gLive - beforeCompact;
+        const auto compact = compactProgram.stats();
         std::size_t outOfLine = 0, nameRefs = 0, pushValues = 0;
         std::set<std::string> names, pushes;
         std::set<const void*> counted;
@@ -105,7 +108,8 @@ int main(int argc, char** argv) {
                   << code.dataItems.size() << ',' << retained << ',' << peak << ',' << compact.codeBytes << ','
                   << compact.positionBytes << ',' << compact.indexBytes << ',' << compact.nameTableEntries
                   << ',' << compact.extrasRecords << ','
-                  << (code.empty() ? 0.0 : double(compact.codeBytes + compact.positionBytes + compact.indexBytes) / code.size()) << '\n';
+                  << (code.empty() ? 0.0 : double(compact.codeBytes + compact.positionBytes + compact.indexBytes) / code.size()) << ','
+                  << compactRetained << '\n';
     }
     std::cerr << "sizeof(Instruction)=" << sizeof(Instruction) << " sizeof(Value)="
               << sizeof(ql32::Value) << '\n';
