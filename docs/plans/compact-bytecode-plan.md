@@ -1,0 +1,250 @@
+# Compact bytecode plan
+
+Status: plan only; nothing here is implemented. Date: 2026-11-27, baseline `main` at 36159bc plus #49.
+
+Goal: shrink the retained compiled program (today ~55-60 KB for the 1162-instruction
+`dirplayer.bas` on the CYD) so that the CYD (ESP32, no PSRAM, ~180 KB free at idle)
+keeps enough free heap and a large enough contiguous block for the player UI,
+canvas and audio. The language semantics do not change. See also
+`docs/plans/bytecode-32b-repack-analysis-2026-11-22.md` (field repack, rejected as
+insufficient) and `docs/notes/dirplayer-workarounds.md` (P10-P13).
+
+## 1. Measured baseline
+
+### 1.1 Layout
+
+| Item | Host (LP64) | ESP32 (ILP32) |
+| --- | ---: | ---: |
+| `sizeof(Instruction)` | 40 B | 32 B (layout estimate, matches P12 on-device report) |
+| `sizeof(Token)` | 24 B | n/a (tokens are freed after compile) |
+| Instruction store | `std::deque`, 512 B nodes (12 per node host, 16 per node ESP32) | same, node slack up to one record |
+| `InstructionExtras` | allocated only for instructions that need runtime data (`forItems`, `parameters`, `localNames`, `inputVariables`, `targetVariable`, `selectItems`) since P12 | same |
+| Names / string literals | `SharedText` pointers into a pooled text pool (deduplicated) | same |
+
+### 1.2 Host measurement (instrumented allocator, `new`/`delete` counted)
+
+Harness: scratch program linking `interpreter.cpp`, counting every allocation
+around `Lexer::scan` and `Compiler::compile`; "retained" is live bytes after the
+compiler and its tokens are destroyed and the compiled code is kept, minus the
+source text. Includes a small fixed overhead (about 4-5 KB: text pool tables,
+static maps), which dominates the small programs.
+
+| Program | Source B | Tokens | Instructions | Extras with runtime data | Text-pool strings | Retained (host) | B / instruction (host) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `music-player/dirplayer.bas` | 7861 | 2202 | 1162 | 60 | 144 | 66.7 KB | 57.4 |
+| `attractor.bas` | 1213 | 249 | 114 | 2 | 30 | 10.4 KB | 90.9 (fixed overhead) |
+| `embedded_ui.bas` | 983 | 201 | 122 | 0 | 49 | 11.1 KB | 90.8 (fixed overhead) |
+
+Peak during compile for dirplayer (host): about 108 KB live, i.e. 7861 B source +
+2202 tokens (~53 KB as 24 B tokens in deque blocks) + growing code. On the ESP32
+tokens are larger (~112 B/token measured earlier with `std::string` text), which is
+why compile peak, not retained size, caused the original ALLOCFAIL (P1-P3, now
+chunked/flat). Distinct opcodes used by dirplayer: 38 of 65.
+
+Breakdown of dirplayer retained size on the host: instruction store ~46.5 KB
+(1162 x 40 B) + deque slack, remainder ~20 KB = text pool (144 strings plus
+shared-pointer control blocks), 60 extras records with vectors of names, function
+tables, fixed overhead. Of the 1162 instructions 598 carry a `name`.
+
+### 1.3 CYD figures (from the recorded on-device runs, not re-measured today)
+
+| Point (dirplayer, CYD) | Free | Largest block |
+| --- | ---: | ---: |
+| Idle prompt | 180.7K | 110.6K |
+| After LOAD (source retained) | 164.7K | 110.6K |
+| RUN start (after P12) | 96.7K | 47.1K |
+| After 25.6 KB canvas (160-line window) | 66.2K | 22.5K |
+| Playing z00m (after P12) | 44.6K | 8.2K |
+| Playing (P13 soak, whole-run min) | min free 27.7K | |
+
+The RUN step costs ~68 KB (164.7K -> 96.7K) which, with 1162 x 32 B = 37 KB of
+instructions, means ~30 KB is pool, extras, deque slack, VM state, symbols and
+compile-time fragmentation that never returns. Per instruction that is about 58 B
+retained on the device, matching the host figure. **Phase 0 must re-measure the
+per-instruction cost on the CYD** (instrumented via HEAP STATS or a debug-only
+`MEMSTATS` dump) for dirplayer and two other programs before any phase starts; the
+table above is the baseline to compare against.
+
+## 2. Target encoding
+
+Inspired by Psion OPL QCode (byte opcodes, variable-length operands, constants
+referenced by index, procedure-at-a-time translation), but keeping QL/32's
+instruction-index addressing so that EVAL append/erase and TRAP rollback keep their
+current semantics.
+
+### 2.1 Code stream
+
+- One `std::vector`-free **segmented byte buffer** (fixed 1 KB segments, linked by
+  an index array; no allocation above 1 KB, so there is no large contiguous
+  requirement). Segments never move, so decoded pointers stay valid.
+- Instruction = 1 byte opcode + operands:
+  - **Operands are variable length (LEB128-style, 1-3 bytes).**
+  - Names, string literals, parameter lists, local names, FOR item specs and
+    SELECT items live in a **side table** (`ProgramTables`), referenced by a
+    1-2 byte index. The pooled text and `SharedNames` already exist and map
+    almost directly.
+  - Jump targets stay **instruction indices**; a small **index table** (one
+    4-byte byte offset per 8 instructions, plus a decode of at most 7 opcodes)
+    turns an index into a code position. A jump is thus O(8) decode steps
+    rather than O(1); hot loops cache the resolved position in the decoded
+    cursor (see risk in section 5).
+- **Source position** (line, column, basicLine; 6 B today) moves to a separate
+  **position table**, delta-encoded per statement (1-3 B per instruction on
+  average, ~2 B typical), because positions are only needed for diagnostics,
+  the debugger and error reporting, never for execution. Unusually long lines
+  keep full 16-bit values (no truncation: the 16-bit overflow check stays).
+- Flags (`builtin`, `expectsValue`, `channelArgument`, slice flags, `sourceJump`,
+  `statementStart`, ...) become opcode variants or one flags byte only where
+  needed; most instructions have none.
+
+### 2.2 Expected size per instruction
+
+| Part | Today (ESP32) | Target |
+| --- | ---: | ---: |
+| Opcode + operands (code stream) | 32 B (fixed record) | 3-6 B average (1 B opcode, 1-2 B names/literal ids, 1-3 B jump/arg count) |
+| Positions | included | ~2 B delta table |
+| Names / literals / extras | pool + extras, ~16-20 B amortised | same pool, ~10-14 B amortised (shared pointers become 16-bit indices; extras records become packed tables) |
+| Index table (jump lookup) | none | 0.5 B |
+| Deque slack | up to 16 B per node | < 0.5 B (1 KB segments) |
+| **Total** | **~58 B** | **~16-22 B** |
+
+Realistic saving for dirplayer (1162 instructions): 58 B -> 18-22 B gives about
+**22-26 KB retained instead of 67 KB on the CYD; saving 35-45 KB**, with a wide
+uncertainty (the pool and extras share is the least certain; a conservative
+estimate is 28-30 KB saved, i.e. retained ~38 KB). Largest contiguous request
+becomes 1 KB (the segment), removing the dependence on holes.
+
+### 2.3 What would that buy dirplayer (CYD estimates)
+
+| Scenario | Needed | Expected availability after compaction |
+| --- | --- | --- |
+| 14-row layout (full-screen 38.4 KB canvas instead of 25.6 KB, +12.8 KB) | +12.8 KB free and a 38.4 KB contiguous block (the canvas itself) | RUN start free ~125-135K; largest block ~60-70K (was 47K) after code moves into 1 KB segments; the canvas then fits with ~25K free left. |
+| KNUCKLE digi-drums (6810 samples, 13.6 KB in 128-sample blocks; budget is 4096 today) | +5.4 KB free, no contiguous block (128-sample blocks) | Raising the ESP32 drum budget to 8192 samples becomes affordable. |
+| Playback admission (32 KB total, 8 KB contiguous) | | Idle-in-app free ~65-75K and largest > 20K, so the admission passes with margin. |
+
+These are estimates; they are gates, not promises: a phase passes only if the
+measured numbers meet the gates in section 4.
+
+## 3. Phases
+
+Each phase is independently shippable and revertable (separate PR, feature gated
+by a compile-time option until Phase 3).
+
+### Phase 0: measurement and differential-test harness (no behaviour change)
+
+- Promote the scratch harness into `tools/` (host-only): per-program table of
+  instructions, extras, pool, retained bytes, compile peak, largest block, with
+  the instrumented allocator. Add a debug `MEMSTATS`/HEAPSTATS field (retained
+  program bytes) for the device.
+- Re-measure the CYD for dirplayer and two other programs (idle, after LOAD, RUN
+  start, after canvas, playing) and record the baseline in this file.
+- Differential harness: run each `examples/*.bas` and the ~90 test programs on
+  the current VM, record output and error `line:column` for each runtime
+  error, store as golden data. Later phases compare against it.
+- Exit gate: harness merged; baseline numbers recorded; no VM change.
+
+### Phase 1: encoder/decoder plus dual-run mode
+
+- Add `CompactProgram` (segmented byte stream, side tables, position table, jump
+  index) and an `encode(const std::deque<Instruction>&)` plus
+  `decode(index) -> Instruction` that must round-trip every field.
+- Dual-run mode (host-only debug flag): the VM keeps executing the old form and
+  after every instruction decodes the compact form at the same index and asserts
+  equality (op, operands, flags, line, column, targets). Property test: random and
+  corpus programs, including the 16-bit limits.
+- Exit gate: round-trip equality over all example programs and all test
+  programs; host + sanitized ctest; no device behaviour change (feature off on
+  device builds).
+
+### Phase 2: VM executes from compact code
+
+- Replace instruction fetch by a cursor over `CompactProgram`; the VM decodes the
+  next instruction into a small register-held struct. Frames keep an
+  instruction index as the resume point (index-based, so EVAL append/erase
+  and TRAP rollback keep working).
+- EVAL/immediate-mode append and erase operate on the segmented stream
+  (truncate to index N; erase of the tail only, as today).
+- Debugger, breakpoints, error positions read the position table.
+- Both forms still exist; a build flag selects the executor. Differential
+  harness from Phase 0 runs both.
+- Exit gate: differential output and error positions identical; golden 16/16;
+  execution speed on the CYD within the budget in section 5.
+
+### Phase 3: remove the old form
+
+- Drop `Instruction` as a stored form (keep it as the decoder's transient view),
+  delete the deque store, `ExtrasPtr` and the compile-time-only metadata paths
+  that are replaced by tables.
+- Compiler emits straight into the segmented stream (no intermediate
+  `std::deque<Instruction>`), which also lowers compile peak.
+- Exit gate: memory targets of section 4 achieved on the CYD.
+
+### Phase 4: tuning
+
+- Opcode variants for common patterns (e.g. push small integer, load/store local
+  by slot, compare-and-jump), a peephole pass only if profiling shows decode
+  cost; tune segment size (512 B - 2 KB), index-table stride (4-16), position
+  table encoding.
+- Optional: per-procedure lazy compile only if Phase 3 is insufficient (separate
+  decision, not part of this plan).
+- Exit gate: speed back within 5% of the Phase 0 baseline on the CYD, or
+  documented and accepted.
+
+## 4. Gates per phase
+
+Every phase must pass, on the exact merged SHA:
+
+1. Host `ctest` (91 tests today) and sanitized `ctest` (ASan/UBSan).
+2. The 3 pio builds (`esp32_2432s028_spiffs`, `olimex_esp32_sbc_fabgl`,
+   `ql32_tenstar_esp32s3`).
+3. Golden device regression 16/16 (`tools/ql32-golden-device.py`).
+4. Hardware gate on the CYD with `DEBUGBAR ON`, no `FORMAT`: dirplayer foreground
+   run, play KNUCKLE.YM, z00m.vtx, LyraII1.vtx, switching songs, big directory,
+   with `late=0`, `failedalloc=0`, and the heap numbers below.
+
+Per-phase memory gates (dirplayer, CYD, FREE / largest at RUN start; baseline
+96.7K / 47.1K):
+
+| Phase | Gate |
+| --- | --- |
+| 0 | Baseline recorded for 3 programs; no regression |
+| 1 | No device change (feature off); host round-trip passes |
+| 2 | Both forms present: no memory gate; speed gate only |
+| 3 | RUN start >= 125K free, largest >= 60K; compile peak not above baseline |
+| 4 | Same plus speed within 5%; stretch: 14-row layout runs, then KNUCKLE drum budget 8192 |
+
+Phase 3 passing is the condition for restoring the 14-row layout and the larger
+drum budget (separate PRs).
+
+## 5. Risks and required tests
+
+| Risk | Mitigation / required tests |
+| --- | --- |
+| EVAL append/erase of immediate code | tests for append then erase of the tail, repeated, with live frames and jump targets; verify no segment leak under the sanitized build |
+| TRAP rollback | tests that roll back into code before and after the trapped region; instruction indices must not shift |
+| Instruction-index jump targets | the jump index table must round-trip every target; property test jumping to every index of every corpus program |
+| Debugger / error line and column | differential comparison of every runtime error `line N, column M`, breakpoints, current location, remote debug JSON `line` and `column` |
+| 16-bit field overflow (`Narrow<uint16_t>`) | keep the "program exceeds a bytecode field limit" error; add boundary tests at 65535 lines, 65535 columns, 65535 names, side table index overflow (2-byte index limit must raise the same error, not wrap) |
+| Compile-time peak heap | measure with the Phase 0 harness; require peak <= baseline at every phase (the compiler must not hold both forms at once in Phase 3) |
+| Execution speed on the CYD | benchmark `attractor-benchmark*.bas` and loop-heavy programs before and after on the device; decode must stay under about 5% overhead; the cached cursor and the 8-instruction jump window bound it |
+| Fragmentation | no allocation above 1 KB in the code store; verify the largest block at RUN start (gate above) |
+| Concurrency (cooperative workers sharing a program) | the code store is immutable once running except through EVAL on the foreground session; test two tasks executing the same procedure |
+| Semantic drift | the differential harness is the primary guard; any mismatch blocks the phase |
+| Schedule risk | each phase is revertable; the dual-run mode allows shipping Phase 1 with no device effect |
+
+## 6. Pros and cons of the approach
+
+Pros: biggest remaining lever (35-45 KB, the only one that also removes the
+contiguous-block dependence), compile-peak reduction in Phase 3, no language
+change, incremental and revertable phases, positions table lowers per-instruction
+cost for a feature used rarely.
+
+Cons: touches the VM hot loop (speed risk on a 240 MHz core), decode cost for
+jumps, a significant test burden (differential harness), temporary complexity
+while both forms coexist, and the saving range is uncertain until Phase 0 measures
+the CYD per-instruction cost.
+
+## 7. Out of scope
+
+Language changes, a new instruction set visible to users, lazy per-procedure
+compile (re-evaluate after Phase 3), moving code to flash, PSRAM boards.
