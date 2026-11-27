@@ -5,6 +5,7 @@
 // deque with this form; the VM reads it through instructionAt(), which decodes
 // into a small ring of Instruction slots.
 #include "bytecode.hpp"
+#include "bump_region.hpp"
 
 #include <array>
 #include <deque>
@@ -109,7 +110,14 @@ public:
 
     const Instruction& at(std::size_t index);
     void invalidate();
+    // Copies the program into one contiguous slab and frees the scattered
+    // originals so the heap holes around them coalesce. Returns slab bytes (0 = not done).
+    std::size_t relocate();
 
+private:
+    std::shared_ptr<BumpRegion> region_;  // declared before `program`: outlives it
+
+public:
     CompactProgram program;
 
 private:

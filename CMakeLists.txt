@@ -28,6 +28,7 @@ add_library(ql32_portable
   src/music/sqt.cpp
   src/language/interpreter.cpp
   src/language/compact_program.cpp
+  src/language/bump_region.cpp
   src/graphics/bitmap.cpp
   src/graphics/font.cpp
   src/graphics/window_manager.cpp
