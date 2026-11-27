@@ -1,8 +1,8 @@
 # Changelog
 
-## v0.1.0 (unreleased)
+## v0.1.0 - 2026-11-27
 
-First release candidate.
+First release. The CYD (ESP32-2432S028) is the supported and hardware-tested target. Olimex, LILYGO VGA32 and Tenstar ESP32-S3 builds are experimental: build-verified in CI only, not yet tested on hardware.
 
 ### Added
 - Compact byte-oriented program encoding with a decode ring (`QL32_COMPACT_CODE`), enabled on all ESP envs; host dual-run and compact-only test builds.

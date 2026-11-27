@@ -492,7 +492,8 @@ void testLargeDirectoryMemory() {
             drain(job);
         }
         trackAllocations = false;
-        require(largestAllocation.load() <= 4096, "large directory needed a big allocation");
+        // libstdc++ file streams allocate an 8 KB buffer; the bound is constant.
+        require(largestAllocation.load() <= 8192, "large directory needed a big allocation");
         require(!std::filesystem::exists(root / "tree"), "tree not removed");
         require(std::distance(std::filesystem::directory_iterator(root / "dst"),
                               std::filesystem::directory_iterator{}) == count, "copy incomplete");
