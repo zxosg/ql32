@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- `examples/startup/startup.bas`: boot splash (large QL32 title; version, free memory and platform in the small font) that releases its graphics canvas afterwards (heap back to ~174K free / 110K largest). Copy it to `FFS:/startup.bas` to run at boot.
+
+### Fixed
+- Platform `SYSINFO$(0)` now reports `QL32_VERSION_STRING` instead of a hardcoded `0.1.0`.
+
 ### Changed
 - CYD: the default console strip is now 3 text rows (24 px) instead of 8 (64 px), leaving more of the screen to graphics windows. Use `WINDOW`/console bounds at runtime to change it.
 

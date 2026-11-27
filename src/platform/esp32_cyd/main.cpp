@@ -753,7 +753,7 @@ void setup() {
     ql32::vm::Services services;
     {
         ql32::runtime::SystemInfoProfile profile;
-        profile.values = {"0.1.0", "unknown", "esp32_2432s028_yellow_tft",
+        profile.values = {QL32_VERSION_STRING, "unknown", "esp32_2432s028_yellow_tft",
                           "ili9341-tft 320x240 rgb565", "serial,touch", "sd",
                           "tft,touch,network,wifi"};
 #if defined(QL32_CYD_USE_SPIFFS)

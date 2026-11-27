@@ -567,7 +567,7 @@ void setup() {
     ql32::vm::Services services;
     {
         ql32::runtime::SystemInfoProfile profile;
-        profile.values = {"0.1.0", "unknown", "tenstar_ts_esp32s3_st7789",
+        profile.values = {QL32_VERSION_STRING, "unknown", "tenstar_ts_esp32s3_st7789",
                           "st7789-tft 240x135 rgb565", "serial", "ffs",
                           "tft,psram,network,wifi"};
         profile.capabilities = {{"display", true}, {"input", true},
