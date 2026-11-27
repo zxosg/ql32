@@ -806,7 +806,9 @@ uses function syntax in expressions: `MUSIC STATE()` (0 stopped or finished,
 1 playing, 2 paused), `MUSIC POS()` and `MUSIC LEN()` (milliseconds; `LEN` is
 0 when the length is unknown, as for PT3, SQT and WAV), `MUSIC VOLUME()`
 (0..255) and `MUSIC TITLE$()` (song title from VTX/YM metadata, else empty).
-A program detects the end of a song by `MUSIC STATE() = 0`. Without a music
+A program detects the end of a song by `MUSIC STATE() = 0`; a song with a
+loop point repeats indefinitely, so its `STATE()` stays 1 and `POS()` falls
+back at each repeat. Without a music
 service (Linux host) they raise the trappable "music service unavailable"
 error. A tone from the session that owns the audio
 output mixes with its `MUSIC`; another session gets `ResourceBusy`. Without an

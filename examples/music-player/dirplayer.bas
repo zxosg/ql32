@@ -2,7 +2,7 @@ REM QL/32 directory music player: directory channel, GCOPY scrolling, INKEY$.
 REM Up/Down/PgUp/PgDn/Home/End move, Enter plays or opens a folder,
 REM Backspace goes up, Space pause/resume, S stop, +/- or Left/Right volume,
 REM D drive, O toggles sorted/unsorted listing, Q or Esc quit.
-REM Songs auto-advance (MUSIC STATE() = 0); time comes from MUSIC POS()/LEN().
+REM Songs auto-advance at the end or when a loop repeats; time comes from MUSIC POS()/LEN().
 REM See README.md and docs/notes/dirplayer-workarounds.md.
 DIM nm$(120)
 DIM root$(2)
@@ -35,9 +35,11 @@ REPeat main WHILE quit = 0
   k$ = INKEY$(250)
   IF k$ = "" THEN
     IF state = 1 THEN
-      IF MUSIC STATE() = 0 THEN
+      pos = MUSIC POS()
+      IF MUSIC STATE() = 0 OR pos < lastpos THEN
         NextSong
       ELSE
+        lastpos = pos
         DrawTime
       END IF
     END IF
@@ -325,6 +327,7 @@ DEFine PROCedure PlayCur
   LOCal p$
   TRAP MUSIC STOP
   state = 0
+  lastpos = 0
   pidx = cur
   now$ = nm$(cur)
   p$ = path$ + now$
