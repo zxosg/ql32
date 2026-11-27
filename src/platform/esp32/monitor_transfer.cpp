@@ -14,6 +14,44 @@
 #include <stdexcept>
 #include <string>
 
+
+#if defined(QL32_HEAP_TRACK)
+// Diagnostic: records live operator-new blocks <= 2 KB with their caller PC.
+#include <new>
+#include <cstdlib>
+namespace {
+struct TrackEntry { void* p; std::uint32_t size; std::uint32_t pc; };
+constexpr std::size_t TrackSlots = 1024;
+TrackEntry gTrack[TrackSlots];
+portMUX_TYPE gTrackMux = portMUX_INITIALIZER_UNLOCKED;
+void trackAdd(void* p, std::size_t n, void* pc) {
+    if (!p || n > 2048) return;
+    portENTER_CRITICAL(&gTrackMux);
+    std::size_t h = (reinterpret_cast<std::uintptr_t>(p) >> 3) % TrackSlots;
+    for (std::size_t i = 0; i < TrackSlots; ++i, h = (h + 1) % TrackSlots)
+        if (!gTrack[h].p || gTrack[h].p == reinterpret_cast<void*>(1)) { gTrack[h] = {p, static_cast<std::uint32_t>(n), reinterpret_cast<std::uint32_t>(pc)}; break; }
+    portEXIT_CRITICAL(&gTrackMux);
+}
+void trackDel(void* p) {
+    if (!p) return;
+    portENTER_CRITICAL(&gTrackMux);
+    std::size_t h = (reinterpret_cast<std::uintptr_t>(p) >> 3) % TrackSlots;
+    for (std::size_t i = 0; i < TrackSlots; ++i, h = (h + 1) % TrackSlots) {
+        if (gTrack[h].p == p) { gTrack[h].p = reinterpret_cast<void*>(1); break; }
+        if (!gTrack[h].p) break;
+    }
+    portEXIT_CRITICAL(&gTrackMux);
+}
+}
+void* operator new(std::size_t n) { void* p = std::malloc(n ? n : 1); if (!p) throw std::bad_alloc(); trackAdd(p, n, __builtin_return_address(0)); return p; }
+void* operator new[](std::size_t n) { void* p = std::malloc(n ? n : 1); if (!p) throw std::bad_alloc(); trackAdd(p, n, __builtin_return_address(0)); return p; }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept { void* p = std::malloc(n ? n : 1); trackAdd(p, n, __builtin_return_address(0)); return p; }
+void operator delete(void* p) noexcept { trackDel(p); std::free(p); }
+void operator delete[](void* p) noexcept { trackDel(p); std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { trackDel(p); std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { trackDel(p); std::free(p); }
+#endif
+
 namespace ql32::platform::esp32 {
 namespace {
 
@@ -62,6 +100,19 @@ bool handleMonitorTransferCommand(std::string_view input,
 #if defined(QL32_HEAP_DIAGNOSTICS)
         const std::string arg = separator == std::string::npos ? std::string() :
             uppercase(trim(line.substr(separator + 1)));
+#if defined(QL32_HEAP_TRACK)
+        if (arg == "LIVEMAP") {
+            serial.println("LIVEMAP|BEGIN");
+            for (const auto& e : gTrack) {
+                if (!e.p || e.p == reinterpret_cast<void*>(1)) continue;
+                char row[64];
+                std::snprintf(row, sizeof(row), "LIVEMAP|%p|%u|%08x", e.p, static_cast<unsigned>(e.size), static_cast<unsigned>(e.pc));
+                serial.println(row);
+            }
+            serial.println("LIVEMAP|END");
+            return true;
+        }
+#endif
         if (arg == "FREEMAP") {
             // Diagnostic: claim the largest free block repeatedly to list the free blocks
             // (address, size), then release them.

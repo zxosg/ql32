@@ -100,6 +100,14 @@ void testTruncateAndAppendMatchRebuild() {
         require(instructionsEqual(code[i], mutated.instructionAt(i), nullptr), "sequential decode");
     for (std::size_t i = code.size(); i-- > 0;)
         require(instructionsEqual(code[i], mutated.instructionAt(i), nullptr), "reverse decode");
+    // Relocating into a slab keeps the program intact, including appends and truncation afterwards.
+    mutated.compact.get()->relocate();
+    for (std::size_t i = 0; i < code.size(); ++i)
+        require(instructionsEqual(code[i], mutated.instructionAt(i), nullptr), "decode after relocate");
+    mutated.truncateInstructions(code.size() / 2);
+    for (std::size_t i = code.size() / 2; i < code.size(); ++i) mutated.appendInstruction(code[i]);
+    for (std::size_t i = 0; i < code.size(); ++i)
+        require(instructionsEqual(code[i], mutated.instructionAt(i), nullptr), "decode after relocate+edit");
 }
 
 void testCorpus(const std::filesystem::path& root) {

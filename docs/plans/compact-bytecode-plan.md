@@ -413,3 +413,11 @@ Recommendation: do #3 then #5 as one measured step (host differential tests alre
 The compile-time `unordered_set` text pool became a deque store plus a lookup index. `makeCompact()` frees the index (EVAL rebuilds it on demand), and the compact names/index vectors are shrunk to size.
 
 Device, full-screen dirplayer, RUN start (free / largest): 135.5K / 40.9K before, **140.1K / 34.8K** after (+4.6K free, -6.1K largest; deterministic over repeated runs). A `vector<unique_ptr<string>>` store gave 137.6K / 32.8K, so the deque was kept. KNUCKLE and LyraII1 play with late=0; golden 16/16; host, sanitized, compact and dual-run ctest 92/92. The 60K largest gate is still not met; the largest block moves with allocation layout, and during playback it is dominated by other allocations (3.6K).
+
+## 16. Heap fragmentation: owners and slab relocation
+
+Diagnostic: `esp32_2432s028_track` env adds `HEAP LIVEMAP` (live operator-new blocks up to 2 KB with caller PCs; resolve with addr2line). With `HEAP FREEMAP` at a STOP after compile, full-screen dirplayer showed only ~31K retained in ~200 small blocks (18 compact-code segments of 512 B = 9.2K, pool/extras deque blocks ~6K, index 1.8K, Interpreter/VM objects), scattered among ~50 freed compile-transient holes of 0.5-11K (about 70K in total, largest 11K). Largest block was the 30-41K tail: a contiguity problem, not a bytes problem.
+
+Change: after compile and the ProgramStore spill, `CompactState::relocate()` measures the compact program (names, extras, code, index), copies it under a `BumpScope` into one slab (global operator new serves from the slab on the VM task; deleting slab pointers is a no-op, the slab is freed with the program) and frees the scattered originals so the holes coalesce. The operator-new hook is compiled only on ARDUINO targets (host tests replace operator new themselves) and uses plain globals plus the FreeRTOS task handle, because TLS and `pthread_self` are not available early / on raw tasks.
+
+Device, full-screen dirplayer (free / largest KB): RUN start 140.1 / 34.8 (main with #61) -> **140.9 / 40.9**; ready 102.7 / 12.8; playing KNUCKLE 76.6 / 11.2 (was 71 / 3.6 in section 14); after exit 152 / 43. KNUCKLE and LyraII1: late=0. Golden 16/16, host/sanitized/compact/dual-run ctest 92/92, 4 pio builds. The 60K largest gate is still not met.

@@ -654,6 +654,9 @@ ExecutionStatus Interpreter::executeSlice(const std::string& source, std::ostrea
 #endif
         preparingProgram = false;
         if (std::exchange(spillProgramAfterCompile_, false)) spillProgramForRun();
+#if defined(QL32_COMPACT_CODE) && !defined(QL32_COMPACT_DUALRUN) && !defined(QL32_NO_RELOCATE)
+        if (auto* compact = execution_->code.compact.get()) compact->relocate();
+#endif
         if (execution_->code.cpuFrequencyMHz != 0 && cpuFrequency_ &&
             !cpuFrequency_->setFrequencyMHz(execution_->code.cpuFrequencyMHz))
             throw runtime::Error(runtime::ErrorCode::ServiceUnavailable,

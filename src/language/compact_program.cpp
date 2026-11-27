@@ -132,6 +132,7 @@ SegmentedBytes::SegmentedBytes(const SegmentedBytes& other) { *this = other; }
 SegmentedBytes& SegmentedBytes::operator=(const SegmentedBytes& other) {
     if (this == &other) return *this;
     segments_.clear();
+    segments_.reserve(other.segments_.size());
     for (const auto& segment : other.segments_) segments_.push_back(std::make_unique<Segment>(*segment));
     size_ = other.size_;
     return *this;
@@ -477,6 +478,24 @@ void InstructionSequence::appendInstruction(Instruction instruction) {
 #endif
     }
     push_back(std::move(instruction));
+}
+
+std::size_t CompactState::relocate() {
+    BumpRegion measure(0);
+    {
+        BumpScope scope(measure);
+        CompactProgram probe(program);
+    }
+    auto region = std::make_shared<BumpRegion>(measure.used());
+    if (!region->valid()) return 0;
+    CompactProgram fresh = [&] {
+        BumpScope scope(*region);
+        return CompactProgram(program);
+    }();
+    program = std::move(fresh);
+    region_ = std::move(region);
+    invalidate();
+    return region_->used();
 }
 
 void InstructionSequence::appendInstructions(const InstructionSequence& other) {
