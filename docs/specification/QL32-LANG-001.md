@@ -441,6 +441,16 @@ The first `END IF` closes the nested condition and the second closes the
 outer condition. The parser and pretty-printer shall preserve that nesting.
 This matches the structure documented by the [SuperBASIC IF reference](https://superbasic-manual.readthedocs.io/en/latest/I/if.html).
 
+Single-line `IF condition THEN statement [: statement ...] [ELSE statement
+[: statement ...]]` is accepted when a statement follows `THEN` on the same
+line; the body runs to the end of the line, needs no `END IF`, and an `ELSE`
+binds to the nearest `IF`. A newline or colon after `THEN` starts the block
+form. Without `INCLUDE`, the key constants `KKeySpace`, `KKeyEnter`,
+`KKeyEscape`, `KKeyBackspace`, `KKeyTab`, `KKeyInsert`, `KKeyDelete`,
+`KKeyHome`, `KKeyEnd`, `KKeyPageUp`, `KKeyPageDown`, `KKeyLeft`, `KKeyRight`,
+`KKeyUp`, `KKeyDown` and `KKeyF1`..`KKeyF12` are built in with the values in
+`ql32.inc`; a declared `CONST` of the same name takes precedence (QL/32-specific).
+
 Block `IF`, `FOR`, `REPeat`, `EXIT`, and `SELect ON` use SuperBASIC
 spellings. The M1 `FOR` target preserves the useful SuperBASIC range model:
 
