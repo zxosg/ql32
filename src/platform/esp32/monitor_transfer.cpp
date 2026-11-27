@@ -70,17 +70,22 @@ bool handleMonitorTransferCommand(std::string_view input,
                 return h ? static_cast<unsigned>(uxTaskGetStackHighWaterMark(
                                static_cast<TaskHandle_t>(h))) : 0u;
             };
-            char buf[200];
+            char buf[280];
             std::snprintf(buf, sizeof(buf),
                 "HEAPSTATS|free=%u|largest=%u|min=%u|loopstack=%u|musicstack=%u|"
-                "musiciostack=%u|failedalloc=%u|lastfail=%u",
+                "musiciostack=%u|failedalloc=%u|lastfail=%u|musicblocks=%u|musiclate=%u|"
+                "musicwriteerr=%u|musicmaxgap=%u",
                 static_cast<unsigned>(info.total_free_bytes),
                 static_cast<unsigned>(info.largest_free_block),
                 static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT)),
                 static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
                 stack(d.musicTask.load()), stack(d.musicIoTask.load()),
                 static_cast<unsigned>(d.failedAllocations.load()),
-                static_cast<unsigned>(d.lastFailedAllocBytes.load()));
+                static_cast<unsigned>(d.lastFailedAllocBytes.load()),
+                static_cast<unsigned>(d.musicBlocks.load()),
+                static_cast<unsigned>(d.musicLateBlocks.load()),
+                static_cast<unsigned>(d.musicWriteErrors.load()),
+                static_cast<unsigned>(d.musicMaxGapUs.load()));
             serial.println(buf);
             return true;
         }

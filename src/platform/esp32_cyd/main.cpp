@@ -244,13 +244,17 @@ void refreshDebugOverlay() {
         else
             std::snprintf(io, sizeof(io), " IO %u", static_cast<unsigned>(disk.completed));
     }
-    char line[96]{};
-    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu MIN:%lluK TASK:%u %s%s",
+    char late[24]{};
+    const auto& music = ql32::platform::esp32::diagnostics();
+    const auto lateBlocks = music.musicLateBlocks.load() + music.musicWriteErrors.load();
+    if (lateBlocks != 0) std::snprintf(late, sizeof(late), " LATE:%u", static_cast<unsigned>(lateBlocks));
+    char line[120]{};
+    std::snprintf(line, sizeof(line), "FREE:%lluK MAX:%lluK BLK:%llu MIN:%lluK TASK:%u %s%s%s",
         static_cast<unsigned long long>(freeK),
         static_cast<unsigned long long>(maxK),
         static_cast<unsigned long long>(heap ? heap->allocatedBlockCount : 0),
         static_cast<unsigned long long>(minK),
-        static_cast<unsigned>(activeTasks), clockText, io);
+        static_cast<unsigned>(activeTasks), clockText, io, late);
     graphics->setDebugOverlayText(line);
 }
 
@@ -799,6 +803,7 @@ void setup() {
     admission.musicStartTotalBytes = 32 * 1024;
     admission.musicStartContiguousBytes = 8 * 1024;
     admission.musicPlayTotalBytes = 14 * 1024;
+    admission.musicPlayContiguousBytes = 4 * 1024;
     admission.displayModeGuard = true;
     // A full-screen canvas is 38400 bytes in one block; leave room for the music service.
     admission.canvasGuard = true;

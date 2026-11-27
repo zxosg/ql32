@@ -24,6 +24,7 @@ struct AdmissionPolicy {
     std::uint64_t musicStartTotalBytes = 0;   // first audio start (task stacks + driver)
     std::uint64_t musicStartContiguousBytes = 0;
     std::uint64_t musicPlayTotalBytes = 0;    // loading a song once audio is running
+    std::uint64_t musicPlayContiguousBytes = 0;
     bool displayModeGuard = false;            // refuse MODE growth that cannot fit
     bool canvasGuard = false;                 // refuse a new canvas that cannot fit
     std::uint64_t canvasHeadroomBytes = 0;    // free bytes that must remain after a canvas
