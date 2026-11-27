@@ -296,37 +296,61 @@ struct InstructionExtras {
     }
 };
 
+// Owns a compile-time extras record, or borrows one that lives in a compact
+// program's table (decoded instructions never copy their extras). The low bit
+// of the pointer marks a borrowed record.
 class ExtrasPtr {
 public:
     ExtrasPtr() = default;
-    ExtrasPtr(const ExtrasPtr& other) {
-        if (other.value_) value_ = std::make_unique<InstructionExtras>(*other.value_);
-    }
+    ExtrasPtr(const ExtrasPtr& other) { copyFrom(other); }
     ExtrasPtr& operator=(const ExtrasPtr& other) {
-        if (this == &other) return *this;
-        if (other.value_) value_ = std::make_unique<InstructionExtras>(*other.value_);
-        else value_.reset();
+        if (this != &other) { release(); copyFrom(other); }
         return *this;
     }
-    ExtrasPtr(ExtrasPtr&&) noexcept = default;
-    ExtrasPtr& operator=(ExtrasPtr&&) noexcept = default;
+    ExtrasPtr(ExtrasPtr&& other) noexcept : bits_(other.bits_) { other.bits_ = 0; }
+    ExtrasPtr& operator=(ExtrasPtr&& other) noexcept {
+        if (this != &other) { release(); bits_ = other.bits_; other.bits_ = 0; }
+        return *this;
+    }
+    ~ExtrasPtr() { release(); }
     const InstructionExtras& get() const {
         static const InstructionExtras none;
-        return value_ ? *value_ : none;
+        const InstructionExtras* value = pointer();
+        return value ? *value : none;
     }
     InstructionExtras& mutate() {
-        if (!value_) value_ = std::make_unique<InstructionExtras>();
-        return *value_;
+        if (bits_ == 0) bits_ = reinterpret_cast<std::uintptr_t>(new InstructionExtras());
+        else if (bits_ & 1u) bits_ = reinterpret_cast<std::uintptr_t>(new InstructionExtras(*pointer()));
+        return *pointer();
     }
+    // Points at a record owned elsewhere; it must outlive this instruction.
+    void borrow(const InstructionExtras* record) {
+        release();
+        bits_ = record ? (reinterpret_cast<std::uintptr_t>(record) | 1u) : 0;
+    }
+    void clear() { release(); }
+    bool present() const noexcept { return bits_ != 0; }
     // Frees the record once nothing the VM reads remains in it.
     void dropCompileOnly() {
-        if (!value_) return;
-        value_->dropCompileOnly();
-        if (!value_->hasRuntimeData()) value_.reset();
+        if (bits_ == 0 || (bits_ & 1u)) return;
+        InstructionExtras* value = pointer();
+        value->dropCompileOnly();
+        if (!value->hasRuntimeData()) release();
     }
 
 private:
-    std::unique_ptr<InstructionExtras> value_;
+    InstructionExtras* pointer() const {
+        return reinterpret_cast<InstructionExtras*>(bits_ & ~std::uintptr_t{1});
+    }
+    void release() {
+        if (bits_ != 0 && !(bits_ & 1u)) delete pointer();
+        bits_ = 0;
+    }
+    void copyFrom(const ExtrasPtr& other) {
+        if (other.bits_ & 1u) bits_ = other.bits_;
+        else bits_ = other.bits_ ? reinterpret_cast<std::uintptr_t>(new InstructionExtras(*other.pointer())) : 0;
+    }
+    std::uintptr_t bits_ = 0;
 };
 
 // Narrow stored integer that rejects values it cannot hold instead of wrapping.
@@ -447,6 +471,25 @@ struct DataItem {
     int basicLine = 0;
 };
 
+// Out-of-line holder for the compact runtime form (see compact_program.hpp);
+// deep-copies so InstructionSequence stays a value type.
+class CompactState;
+class CompactHolder {
+public:
+    CompactHolder();
+    CompactHolder(const CompactHolder& other);
+    CompactHolder& operator=(const CompactHolder& other);
+    CompactHolder(CompactHolder&&) noexcept;
+    CompactHolder& operator=(CompactHolder&&) noexcept;
+    ~CompactHolder();
+    CompactState* get() const noexcept { return state_.get(); }
+    void reset() noexcept;
+    CompactState& make();
+
+private:
+    std::unique_ptr<CompactState> state_;
+};
+
 // Chunked instruction storage keeps bytecode growth from requiring one large
 // contiguous allocation on memory-constrained targets.
 struct InstructionSequence : std::deque<Instruction> {
@@ -457,6 +500,19 @@ struct InstructionSequence : std::deque<Instruction> {
     std::unordered_map<std::string, Value> constants;
     std::vector<DataItem> dataItems;
     std::shared_ptr<TextPool> textPool = std::make_shared<TextPool>();
+    CompactHolder compact;
+
+    // Runtime access. Once makeCompact() ran, the deque is empty (unless the
+    // dual-run debug mode keeps it) and these read the compact program; the
+    // reference stays valid for the next few lookups only.
+    std::size_t instructionCount() const;
+    const Instruction& instructionAt(std::size_t index) const;
+    void truncateInstructions(std::size_t count);
+    void appendInstruction(Instruction instruction);
+    void appendInstructions(const InstructionSequence& other);
+    // Replaces the instruction deque with the compact encoding.
+    void makeCompact();
+    bool isCompact() const noexcept { return compact.get() != nullptr; }
 };
 
 // When `memory` is given, a program whose token list cannot fit the free heap
