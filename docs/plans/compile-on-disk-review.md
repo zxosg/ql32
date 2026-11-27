@@ -17,7 +17,7 @@ larger change that this review does not recommend yet.
 | `LOAD "p"` | `src/language/interpreter.cpp` (LOAD branch, ~4339) | `storage_->readText(path)` reads the **whole file into one `std::string`**; lines are canonicalised into a candidate `ProgramStore` (one text buffer + 12 B index per line), then `contents` is freed and `program_.swap(candidate)`. Peak = file + candidate = **about 2x file size**, with a contiguous block of file size. Unnumbered files get automatic numbers 10, 20, ... (max 3276 lines). |
 | Edit (`10 PRINT`, `EDIT`, `DELETE`) | `validateProgramLine` | Per-line lexical/statement check only; no whole-program compile. Source lives only in `program_` (RAM). |
 | `SAVE` | LOAD/SAVE branch | Streams `program_` to the file (`writeTextStreamAtomic`). **RUN does not save first**; the file on disk can be stale or absent. |
-| `RUN` | `Interpreter` RUN branch (~4584) | `joinProgramLines(program_)` builds a **second full copy** of the source (line numbers re-added, `reserve(listingBytes)`). In the interactive scheduler this string is moved into the task (`takePendingRunSource`) and **stays alive for the whole run** (`Task::releaseSource()` runs only when the program ends). The VM does not read it after compile (to be confirmed in Phase B0). |
+| `RUN` | `Interpreter` RUN branch (~4584) | `joinProgramLines(program_)` builds a **second full copy** of the source (line numbers re-added, `reserve(listingBytes)`). In the interactive scheduler this string is moved into the task (`takePendingRunSource`) and is freed right after the first slice (`scheduler.cpp`, `current.releaseSource()` after `executeSlice`), so it exists only during compile. *(Corrected after review: an earlier draft said it lived for the whole run.)* |
 | Compile | `detail::compileSource` (`src/language/interpreter.cpp` ~3869) | Pass 1: `Lexer::countTokens` streams tokens through a counter (finds `DEFine FuNction` names and the count of bytecode-producing tokens). Admission check: `operations * 60 B` plus a 2 KiB block against `MemoryService`. Pass 2: `Compiler(source, declared)` streams the lexer line by line (`tokens_(source)`, a window; tokens are `string_view`s into the source, no per-token heap text). Resolution passes (source jumps, DATA/RESTORE, calls) run over the compiled instructions, then compile-only metadata is dropped (P12). |
 | `INCLUDE` | `mayContainInclude` (`src/vm/interpreter.cpp` ~56, 619); `expandIncludesRecursive` | A textual pre-pass: if the word `INCLUDE` appears anywhere, the whole program is **expanded into a new string** (`expanded`), each included file read with `readText`, up to 16 nesting levels, a cycle check, `INCLUDE` allowed only in the header, expanded size capped at **64 KiB** ("expanded source exceeds 64 KiB"). Positions in diagnostics are lines of the expanded text. The expanded string lives only during compile (local to `executeSlice`'s `if`). |
 | After compile | `verifyBytecode`, VM | Code lives in `std::deque<Instruction>` plus text pool, extras, functions, arrays, constants. |
@@ -30,7 +30,7 @@ larger change that this review does not recommend yet.
 | LOAD (peak) | file string S + candidate ~S | needs a contiguous S block |
 | RUN, before compile | `program_` + joined copy (+ expanded copy with INCLUDE, up to 64 KiB, + each include file transiently) | up to 3S |
 | Compile (peak) | same as above + growing code (~58 B/instruction retained, more transiently) | admission refuses when `60 B x operations` exceeds free heap |
-| Running | `program_` + task copy (2S) + code | the task copy is dead weight |
+| Running | `program_` (S) + code | the task copy is already released after the first slice |
 
 dirplayer: S = 7.9 KB, 1162 instructions; the dead copy costs 8 KB, small next to the
 ~67 KB code. At 3000 lines (S about 100 KB at ~35 B/line) the copies dominate.
@@ -132,8 +132,7 @@ distinct program texts.
 3. Stream `INCLUDE` expansion into the lexer (a line source that walks the include tree)
    and raise the 64 KiB cap to the program-size admission instead.
 
-Saving: dirplayer ~8 KB during RUN and 8 KB at compile peak; for a 100 KB program
-about 100-200 KB of peak and 100 KB while running. Risk low-medium (lexer source
+Saving: **compile peak only**: dirplayer ~9.7 KB of a measured 113.8 KB peak; for a 100 KB program about 100-200 KB of peak. Nothing while running (see `runtime-footprint-measurements.md`). Risk low-medium (lexer source
 abstraction; every test already compiles from text). No on-device format risk.
 
 ### Step B: `.q32b` cache hit path (needs the compact bytecode, Phases 1-3 of the plan)
@@ -175,10 +174,10 @@ a spec note (QL/32-specific).
 
 ## 6. Recommendation and phase order
 
-1. **A1 (first, small):** drop `joinProgramLines` and the task source copy by compiling
-   from `ProgramStore` lines (streaming line source). Gate: host + sanitized ctest, 3
-   pio builds, golden 16/16, CYD dirplayer RUN start FREE >= +8 KB versus the current
-   96.7K, no change in output or error positions.
+1. **A1 (small, compile peak only):** drop `joinProgramLines` by compiling from
+   `ProgramStore` lines (streaming line source). Gate: host + sanitized ctest, 3 pio
+   builds, golden 16/16, CYD compile-peak minimum free improves by about the listing size
+   (dirplayer ~9.7 KB), no change in output or error positions. No running-footprint gain.
 2. **A2:** stream `LOAD` (no `readText`); gate: LOAD of a 100 KB file succeeds on the
    CYD and leaves idle free memory unchanged.
 3. **A3:** stream `INCLUDE`; raise the 64 KiB cap to the admission check; add nested
