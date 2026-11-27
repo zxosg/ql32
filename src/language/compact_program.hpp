@@ -15,10 +15,10 @@
 
 namespace ql32::detail {
 
-// Fixed 1 KB segments: no allocation larger than one segment, segments never move.
+// Fixed 512 B segments: no allocation larger than one segment, segments never move.
 class SegmentedBytes {
 public:
-    static constexpr std::size_t SegmentSize = 1024;
+    static constexpr std::size_t SegmentSize = 512;
     SegmentedBytes() = default;
     SegmentedBytes(const SegmentedBytes& other);
     SegmentedBytes& operator=(const SegmentedBytes& other);

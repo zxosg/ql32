@@ -45,7 +45,7 @@ void testRoundTripAcrossIndexStridesAndSegments() {
     require(code.size() > 4 * 1024, "program too small to span several segments");
     requireRoundTrip(code, "long program");
     const auto stats = CompactProgram::encode(code).stats();
-    require(stats.segments > 2, "expected multiple 1 KB segments");
+    require(stats.segments > 2, "expected multiple 512 B segments");
 }
 
 void testSixteenBitFieldLimitsRoundTrip() {

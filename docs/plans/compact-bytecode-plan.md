@@ -320,3 +320,37 @@ Phase 2 needs the decoder cheap enough for the VM hot path (the O(8) seek per ju
 errors; the real cost is decoding every instruction into an `Instruction`). Before Phase 2:
 pack names/extras tables (shared name list instead of `SharedText` copies; extras as packed
 records), and measure decode cost per instruction on the CYD.
+
+## 10. Phase 2 results: VM executes from compact code
+
+`InstructionSequence::makeCompact()` (called after compile, before the first slice) replaces
+the instruction deque with the compact stream. The VM reads only through
+`instructionCount()`, `instructionAt()`, `truncateInstructions()` and `appendInstruction(s)`
+(EVAL append/erase, TRAP rollback, debugger and error locations all use them). Decoded
+instructions live in an 8-slot ring so `activeInstruction` stays valid; sequential reads
+continue from a cursor, random reads seek from the nearest 8-instruction checkpoint.
+Extras records are borrowed from the side table (tagged `ExtrasPtr`), names are shared.
+Segments are 512 B (4 KB and 1 KB were measured; 4 KB was worse for the largest block).
+
+Switches: `QL32_COMPACT_CODE` (CMake option; enabled for the CYD pio env) and
+`QL32_COMPACT_DUALRUN` (host debug: keeps the deque and compares every decoded instruction).
+Phase 3 (dropping the deque) is already in effect when `QL32_COMPACT_CODE` is on without
+dual-run. The compiler still builds into a deque, and the other pio envs still use the old form.
+
+Gates: ctest 92/92 in normal, compact-only, dual-run and sanitized builds; golden 16/16 on
+the CYD; unit test for truncate-at-every-point plus append and sequential/reverse decode.
+
+Speed (CYD, 20000-iteration loop with a function call): 14110 -> 14145 ticks (+0.25 %, budget 5 %).
+
+Full-screen dirplayer on the CYD (free / largest block, KB):
+
+| Point | Phase 1 (old VM) | Phase 2 | Gate |
+|---|---:|---:|---:|
+| RUN start | 96.0 / 47.1 | 122.4 / 43.0 | 125 / 60 |
+| After canvas | 65.5 / 18.4 | 91.8 / 18.4 | |
+| Playing (z00m) | 44.0 / 4.6 | 70.3 / 8.2 | |
+| After exit | 138.9 / 55.3 | 138.9 / 61.4 | |
+
+Free memory improves by about 26 KB; late=0, failedalloc=0 during playback. The free gate is
+missed by 2.6 KB and the largest-block gate by 17 KB: the remaining blocker is contiguity
+(pinned small allocations and the compile-time token vector), not total bytes.
