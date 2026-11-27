@@ -1333,6 +1333,9 @@ private:
         code_.push_back(std::move(instruction));
     }
     void resolveCalls(bool tolerateUnresolvedCalls) {
+        std::unordered_map<std::string,
+            std::pair<std::shared_ptr<const std::vector<std::string>>,
+                      std::shared_ptr<const std::vector<std::string>>>> sharedNames;
         for (Instruction& instruction : code_) {
             if (instruction.op != Op::Call) continue;
             if (isBuiltinName(instruction.name)) {
@@ -1493,8 +1496,16 @@ private:
             if (instruction.argCount() != definition.parameters.size())
                 error(instruction, "incorrect argument count");
             instruction.target = definition.address;
-            instruction.mutableExtra().parameters = definition.parameters;
-            instruction.mutableExtra().localNames = definition.locals;
+            auto& shared = sharedNames[instruction.name.str()];
+            if (!shared.first) {
+                shared.first = std::make_shared<const std::vector<std::string>>(definition.parameters);
+                shared.second = std::make_shared<const std::vector<std::string>>(definition.locals);
+            }
+            // Calls to one procedure share a single copy of its name lists.
+            if (!definition.parameters.empty())
+                instruction.mutableExtra().parameters = detail::SharedNames(shared.first);
+            if (!definition.locals.empty())
+                instruction.mutableExtra().localNames = detail::SharedNames(shared.second);
             for (const ArrayArgumentCandidate& argument : instruction.extra().arrayArgumentCandidates) {
                 const auto array = arrays_.find(argument.name);
                 if (array == arrays_.end()) continue;
