@@ -1,5 +1,6 @@
 #include "ql32/interpreter.hpp"
 #include "../language/bytecode.hpp"
+#include "../language/compact_program.hpp"
 #include "execution_state.hpp"
 #include "ql32/runtime/path_glob.hpp"
 
@@ -1154,6 +1155,9 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                 return ExecutionStatus::DebugPaused;
             }
         }
+#ifdef QL32_COMPACT_DUALRUN
+        detail::compactDualRunCheck(code, pc);
+#endif
         const auto& instruction = code[pc++];
         activeInstruction = &instruction;
         ++instructionsExecuted;

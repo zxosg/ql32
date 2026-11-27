@@ -1,6 +1,10 @@
 // Host-only measurement of compiled bytecode footprint per BASIC program.
 // Usage: ql32_bytecode_footprint file.bas...   (CSV on stdout)
 #include "language/bytecode.hpp"
+#include "language/compact_program.hpp"
+
+#include <cstdlib>
+#include <new>
 
 #include <fstream>
 #include <iostream>
@@ -8,6 +12,27 @@
 #include <sstream>
 
 using namespace ql32::detail;
+
+// Instrumented allocator: live and peak bytes of every operator new.
+namespace {
+std::size_t gLive = 0, gPeak = 0;
+constexpr std::size_t Header = 16;
+} // namespace
+void* operator new(std::size_t size) {
+    void* raw = std::malloc(size + Header);
+    if (!raw) throw std::bad_alloc();
+    *static_cast<std::size_t*>(raw) = size;
+    gLive += size;
+    if (gLive > gPeak) gPeak = gLive;
+    return static_cast<char*>(raw) + Header;
+}
+void operator delete(void* p) noexcept {
+    if (!p) return;
+    void* raw = static_cast<char*>(p) - Header;
+    gLive -= *static_cast<std::size_t*>(raw);
+    std::free(raw);
+}
+void operator delete(void* p, std::size_t) noexcept { operator delete(p); }
 
 namespace {
 
@@ -18,17 +43,30 @@ std::size_t heapOf(const std::string& s) { return s.capacity() > 15 ? s.capacity
 int main(int argc, char** argv) {
     std::cout << "file,instructions,record_bytes,out_of_line_bytes,total_bytes,"
                  "name_refs,distinct_names,push_values,distinct_push_values,"
-                 "functions,arrays,constants,data_items\n";
+                 "functions,arrays,constants,data_items,heap_retained,heap_peak,"
+                 "compact_code,compact_positions,compact_index,compact_names,compact_extras,"
+                 "compact_bytes_per_instr\n";
     for (int i = 1; i < argc; ++i) {
         std::ifstream in(argv[i], std::ios::binary);
         std::stringstream text;
         text << in.rdbuf();
-        InstructionSequence code;
+        std::string source;
         try {
-            code = compileSource(expandIncludes(text.str(), nullptr));
+            source = expandIncludes(text.str(), nullptr);
         } catch (const std::exception&) {
             continue;
         }
+        InstructionSequence code;
+        const std::size_t liveBefore = gLive;
+        gPeak = gLive;
+        try {
+            code = compileSource(source);
+        } catch (const std::exception&) {
+            continue;
+        }
+        const std::size_t retained = gLive - liveBefore;
+        const std::size_t peak = gPeak - liveBefore;
+        const auto compact = CompactProgram::encode(code).stats();
         std::size_t outOfLine = 0, nameRefs = 0, pushValues = 0;
         std::set<std::string> names, pushes;
         std::set<const void*> counted;
@@ -64,7 +102,10 @@ int main(int argc, char** argv) {
                   << record + outOfLine << ',' << nameRefs << ',' << names.size() << ','
                   << pushValues << ',' << pushes.size() << ',' << code.functions.size() << ','
                   << code.arrays.size() << ',' << code.constants.size() << ','
-                  << code.dataItems.size() << '\n';
+                  << code.dataItems.size() << ',' << retained << ',' << peak << ',' << compact.codeBytes << ','
+                  << compact.positionBytes << ',' << compact.indexBytes << ',' << compact.nameTableEntries
+                  << ',' << compact.extrasRecords << ','
+                  << (code.empty() ? 0.0 : double(compact.codeBytes + compact.positionBytes + compact.indexBytes) / code.size()) << '\n';
     }
     std::cerr << "sizeof(Instruction)=" << sizeof(Instruction) << " sizeof(Value)="
               << sizeof(ql32::Value) << '\n';

@@ -254,3 +254,69 @@ compile (re-evaluate after Phase 3), moving code to flash, PSRAM boards.
 See `docs/plans/compile-on-disk-review.md`: removing the duplicate source copies
 (Step A) is independent of this plan; an on-disk artifact (Step B) should reuse this
 plan's segment, side-table and position layouts and therefore follows Phase 1-3.
+
+## 9. Phase 0 and Phase 1 status (implemented)
+
+### 9.1 Full-screen dirplayer on the CYD (firmware 85dc17c, repo `dirplayer.bas`, 320x240, 14 rows)
+
+Measured with `FREE()` markers (free, largest block) and `HEAP STATS`:
+
+| Phase | Free | Largest | Gate (>=125K / >=60K) |
+| --- | ---: | ---: | --- |
+| Idle | 180.7K | 110.6K | |
+| LOAD | 164.7K | 110.6K | |
+| RUN start (after compile) | 96.0K | 47.1K | gap 29K free, 13K largest |
+| After 38.4 KB canvas | 65.5K | 18.4K | |
+| Ready screen | 70.7K | 18.4K | |
+| Playing (z00m) | 44.0K | 4.6K | late=0, failedalloc=0 |
+| After exit | 138.9K | 55.3K | lifetime min free 32.8K |
+
+Full-screen playback worked (late=0, failedalloc=0, 1311 music blocks) but with only 4.6K contiguous
+left; the margin is thin.
+
+### 9.2 Host baseline (`ql32_bytecode_footprint`, instrumented `operator new`)
+
+| Program | Instr | Retained | Compile peak | Compact code+pos+index | per instr |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dirplayer | 1162 | 66.6 KB | 91.7 KB | 9.5 KB | 8.2 B |
+| attractor | 114 | 10.2 KB | 20.1 KB | 0.9 KB | 8.0 B |
+| artcircles | 150 | 9.5 KB | 19.6 KB | 1.2 KB | 7.9 B |
+| embedded_ui | 122 | 10.9 KB | 20.7 KB | 1.0 KB | 8.3 B |
+
+Retained (66.6 KB) matches the layout estimate (66.5 KB) so the model is sound. In the Phase 1
+encoding, instruction stream = ~4 B/instr, positions = ~3 B/instr (higher than the 2 B planned:
+column deltas are rarely small), jump index = 1 B/instr (two 4 B entries per 8 instructions;
+can be halved by sharing one table). Side tables are still copies of the full records (names
+144 entries, extras 60 records for dirplayer); packing those is Phase 2/4 and is where the rest
+of the saving has to come from. So the stream is ~8 B/instr against 40 B (host) / 32 B (ESP32)
+records; total retained will be bounded by the pool and extras, not the stream.
+
+### 9.3 What was built
+
+- `src/language/compact_program.{hpp,cpp}`: `CompactProgram::encode`/`decode`, 1 KB segmented
+  byte buffers, delta position table, jump index every 8 instructions, side tables for names and
+  extras, `instructionsEqual`, `verifyCompactRoundTrip`, `compactDualRunCheck`.
+- Dual-run: CMake option `QL32_COMPACT_DUALRUN` (host debug, off by default, never defined for
+  firmware). The VM checks every instruction before executing it; a stale encoding (EVAL
+  append/erase) is re-encoded once before a mismatch is reported. Verified sensitive by
+  injecting a deliberate mismatch: 5+ test binaries fail.
+- `tests/compact_program_tests.cpp`: literal edge cases (-0.0, NaN, inf, int32 boundaries),
+  4000-line program across many segments and index strides, 16-bit field limits, extras and
+  procedures, mismatch detection, and a corpus walk over every compilable `*.bas` in
+  `examples/` and `tests/` (99 programs, 8243 instructions round-trip exactly).
+- `tools/bytecode_footprint.cpp`: instrumented allocator (retained and peak bytes) plus compact
+  columns.
+- The old VM is authoritative; device behaviour is unchanged.
+
+### 9.4 Gate results
+
+Host ctest 92/92, sanitized 92/92, dual-run build 92/92 (every executed instruction of every
+test compared against its compact decode), 3 pio builds, golden 16/16 on CYD.
+
+### 9.5 Next
+
+Phase 2 needs the decoder cheap enough for the VM hot path (the O(8) seek per jump and the
+3-varint position stream are not an issue for execution, since positions are only read on
+errors; the real cost is decoding every instruction into an `Instruction`). Before Phase 2:
+pack names/extras tables (shared name list instead of `SharedText` copies; extras as packed
+records), and measure decode cost per instruction on the CYD.

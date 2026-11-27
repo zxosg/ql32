@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(ql32 VERSION 0.1.0 LANGUAGES CXX)
 
 option(QL32_BUILD_TESTS "Build QL/32 host tests" ON)
+option(QL32_COMPACT_DUALRUN "VM checks every executed instruction against its compact encoding (host debug)" OFF)
 option(QL32_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
 if(QL32_ENABLE_SANITIZERS)
@@ -25,6 +26,7 @@ add_library(ql32_portable
   src/music/pt3_tables.cpp
   src/music/sqt.cpp
   src/language/interpreter.cpp
+  src/language/compact_program.cpp
   src/graphics/bitmap.cpp
   src/graphics/font.cpp
   src/graphics/window_manager.cpp
@@ -59,6 +61,10 @@ target_link_libraries(ql32_host_adapters PUBLIC ql32_portable)
 
 # Host applications and integration tests use the portable runtime plus its
 # host service adapters. Embedded builds link ql32_portable with board adapters.
+if(QL32_COMPACT_DUALRUN)
+  target_compile_definitions(ql32_portable PUBLIC QL32_COMPACT_DUALRUN=1)
+endif()
+
 add_library(ql32_host INTERFACE)
 target_link_libraries(ql32_host INTERFACE ql32_portable ql32_host_adapters)
 
@@ -161,6 +167,10 @@ if(QL32_BUILD_TESTS)
   target_link_libraries(ql32_bytecode_layout_tests PRIVATE ql32_host)
   target_include_directories(ql32_bytecode_layout_tests PRIVATE src)
   add_test(NAME ql32_bytecode_layout_tests COMMAND ql32_bytecode_layout_tests)
+  add_executable(ql32_compact_program_tests tests/compact_program_tests.cpp)
+  target_link_libraries(ql32_compact_program_tests PRIVATE ql32_host)
+  target_include_directories(ql32_compact_program_tests PRIVATE src)
+  add_test(NAME ql32_compact_program_tests COMMAND ql32_compact_program_tests ${CMAKE_SOURCE_DIR})
   add_executable(ql32_memory_budget_tests tests/memory_budget_tests.cpp)
   target_link_libraries(ql32_memory_budget_tests PRIVATE ql32_host)
   target_include_directories(ql32_memory_budget_tests PRIVATE src)
