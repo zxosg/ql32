@@ -1,3 +1,4 @@
+#include "ql32/version.hpp"
 #include "ql32/platform/esp32/application_input.hpp"
 #include <Arduino.h>
 #include <Adafruit_ST7789.h>
@@ -538,7 +539,7 @@ void setup() {
     if (storageReady && !SPIFFS.exists("/supervisor"))
         (void)SPIFFS.mkdir("/supervisor");
 
-    Serial.println("QL/32 Tenstar ESP32-S3 ready");
+    Serial.println("QL/32 Tenstar ESP32-S3 ready, version " QL32_VERSION_STRING QL32_VERSION_FEATURES);
     Serial.printf("Uptime ms: %llu\n",
                   static_cast<unsigned long long>(boardClock.monotonicMilliseconds()));
     const auto wallTime = boardClock.unixTimeSeconds();

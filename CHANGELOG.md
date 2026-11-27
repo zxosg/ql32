@@ -13,7 +13,12 @@ First release candidate.
 - Digi-drum budget 8192 with a memory-based fallback and `[no drums]` indication.
 - BASIC music player example (`examples/music-player`).
 - Tests: compact ring-of-8 and truncate/append, EVAL/TRAP rollback conformance case, spill write-failure and missing-file tests.
+- `VER` command and version in boot banners (`include/ql32/version.hpp`).
+- `programSpillMinBytes`: programs under 4 KB are not spilled on the CYD (spill adds 1.5-2.4 s to RUN on FFS:); see `docs/test-results/CYD-spill-latency-2026-11-24.md`.
 - CI workflow: host ctest matrix and PlatformIO builds.
+
+### Fixed
+- Orphan `.q32-run-*.meta` sidecars no longer exhaust the recovery-file slots and silently disable the spill.
 
 ### Changed
 - Debug bar is off by default (enable with `DEBUGBAR ON`).

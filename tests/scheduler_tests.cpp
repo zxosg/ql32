@@ -1,3 +1,4 @@
+#include "ql32/version.hpp"
 #include "ql32/vm/scheduler.hpp"
 #include "ql32/ui/service.hpp"
 #include "ql32/graphics/windowed_service.hpp"
@@ -1642,6 +1643,15 @@ void testRebootInteractiveCommandCallsSystemService() {
             "REBOOT did not notify and invoke the system-control service");
 }
 
+void testVerCommandReportsVersion() {
+    ql32::vm::SessionScheduler scheduler(ql32::vm::Services{}, 16);
+    std::ostringstream output;
+    const auto repl = scheduler.launchInteractive(output);
+    require(scheduler.submit(repl, "VER\n"), "VER rejected");
+    for (int tick = 0; tick < 5; ++tick) scheduler.tick();
+    require(output.str().find("QL/32 " QL32_VERSION_STRING) != std::string::npos, "VER did not print the version");
+}
+
 void testSupervisorCanListAndChangeDisplayMode() {
     auto presenter = std::make_shared<ModeFramePresenter>();
     auto graphics = std::make_shared<ql32::graphics::WindowedService>(320, 200, presenter);
@@ -1848,6 +1858,44 @@ void testSpillMissingFileIsReportedNotSilentlyEmptied() {
     require(output.str().find("20 PAUSE 50") == std::string::npos, "phantom listing from a missing file");
 }
 
+void testSpillSkipsProgramsBelowMinimumSize() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.programSpillPath = "FFS:.q32-run";
+    policy.programSpillMinBytes = 1 << 20;
+    memory->setAdmissionPolicy(policy);
+    auto storage = std::make_shared<ProgramStorage>();
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.storage = storage;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    ql32::vm::TaskId repl = 0;
+    runSpillProgram(scheduler, output, repl);
+    require(countRecoveryFiles(*storage) == 0, "small program was spilled despite programSpillMinBytes");
+}
+
+void testSpillIgnoresOrphanSidecars() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.programSpillPath = "FFS:.q32-run";
+    memory->setAdmissionPolicy(policy);
+    auto storage = std::make_shared<ProgramStorage>();
+    for (int i = 0; i < 16; ++i)
+        storage->files["FFS:.q32-run-1" + (i ? "." + std::to_string(i) : std::string()) + ".meta"] = "stale\n";
+    ql32::vm::Services services;
+    services.memory = memory;
+    services.storage = storage;
+    ql32::vm::SessionScheduler scheduler(std::move(services), 16);
+    std::ostringstream output;
+    ql32::vm::TaskId repl = 0;
+    runSpillProgram(scheduler, output, repl);
+    std::size_t spilled = 0;
+    for (const auto& file : storage->files)
+        if (file.first.rfind("FFS:.q32-run", 0) == 0 && file.first.find(".meta") == std::string::npos) ++spilled;
+    require(spilled == 1, "orphan sidecars disabled the program spill");
+}
+
 void testRunSpillsProgramAndRestoresOnDemand() {
     for (const bool canVerify : {true, false}) {
         auto memory = std::make_shared<FakeMemory>();
@@ -2049,9 +2097,12 @@ int main() {
     testBasicTaskViewCommandIsSupervisorOnly();
     testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt();
     testRunSpillsProgramAndRestoresOnDemand();
+    testVerCommandReportsVersion();
     testSpillRecoveryFilesSurviveResetsAndFaults();
     testSpillWriteFailureKeepsProgramInRam();
     testSpillMissingFileIsReportedNotSilentlyEmptied();
+    testSpillIgnoresOrphanSidecars();
+    testSpillSkipsProgramsBelowMinimumSize();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();

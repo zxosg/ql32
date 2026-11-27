@@ -30,6 +30,7 @@ struct AdmissionPolicy {
     std::uint64_t musicDrumsContiguousBytes = 0;
     bool displayModeGuard = false;            // refuse MODE growth that cannot fit
     bool freezeWindowsAfterRun = false;       // finished RUN leaves a reclaimable last frame, not live canvases
+    std::size_t programSpillMinBytes = 0;     // programs with less listing text than this stay in RAM (a spill costs ~1.5 s on FFS:)
     std::string programSpillPath;             // non-empty: RUN parks the editable program here to free RAM
     bool canvasGuard = false;                 // refuse a new canvas that cannot fit
     std::uint64_t canvasHeadroomBytes = 0;    // free bytes that must remain after a canvas
