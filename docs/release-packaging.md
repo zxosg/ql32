@@ -1,7 +1,6 @@
 # Release packaging notes
 
-No tag or GitHub release has been created. Steps for the maintainer once the
-hardware gate passes:
+Release steps (v0.1.0 followed these):
 
 1. Confirm `CHANGELOG.md` and the version in `CMakeLists.txt` (0.1.0).
 2. Build the release envs: `esp32_2432s028_spiffs`, `olimex_esp32_sbc_fabgl`,

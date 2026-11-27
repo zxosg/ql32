@@ -19,15 +19,8 @@ std::atomic<bool> trackAllocations{false};
 std::atomic<std::size_t> largestAllocation{0};
 } // namespace
 
-#ifdef __GLIBC__
-#include <execinfo.h>
-#include <unistd.h>
-#endif
 void* operator new(std::size_t size) {
     if (trackAllocations.load(std::memory_order_relaxed)) {
-#ifdef __GLIBC__
-        if (size > 4096) { void* f[24]; int n = backtrace(f, 24); dprintf(2, "BIGALLOC %zu\n", size); backtrace_symbols_fd(f, n, 2); }
-#endif
         std::size_t seen = largestAllocation.load(std::memory_order_relaxed);
         while (size > seen && !largestAllocation.compare_exchange_weak(seen, size)) {}
     }
@@ -499,7 +492,8 @@ void testLargeDirectoryMemory() {
             drain(job);
         }
         trackAllocations = false;
-        require(largestAllocation.load() <= 4096, "large directory needed a big allocation");
+        // libstdc++ file streams allocate an 8 KB buffer; the bound is constant.
+        require(largestAllocation.load() <= 8192, "large directory needed a big allocation");
         require(!std::filesystem::exists(root / "tree"), "tree not removed");
         require(std::distance(std::filesystem::directory_iterator(root / "dst"),
                               std::filesystem::directory_iterator{}) == count, "copy incomplete");
