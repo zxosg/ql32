@@ -14,7 +14,7 @@ namespace {
 
 constexpr std::int16_t characterWidth = 6;
 constexpr std::int16_t characterHeight = 8;
-constexpr std::int16_t consoleHeight = 64;
+constexpr std::int16_t consoleHeight = 24; // 3 text rows; keep equal to main.cpp
 
 std::uint16_t color565(graphics::ColorIndex index) {
     static constexpr std::array<graphics::RgbColor, 16> palette{{

@@ -38,7 +38,7 @@ bar, song count, entry n/N, now playing, approximate time (counted from
 
 Host: no audio, Enter reports "Service unavailable". CYD (verified on
 device): navigation, folders, scroll bar, Home/End/PgUp/PgDn and the sort
-toggle work. The CYD text console is a fixed 64 px overlay at the bottom, so
+toggle work. The CYD text console is a fixed 24 px (3 row) overlay at the bottom, so
 the program moves it with `WINDOW #0` and restores it on exit. Playback from
 the app run in the foreground fails with "Out of memory": the REPL-held
 source plus the 4-bit canvas leave about 44K free but only 6K contiguous,
