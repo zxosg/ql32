@@ -32,7 +32,7 @@ REPeat find WHILE nsong < 1 AND r < 3
   LoadDir
   r = r + 1
 END REPeat find
-msg$ = hlp$
+msg$ = hlp$ : shown$ = ""
 Redraw
 REPeat main WHILE quit = 0
   k$ = INKEY$(250)
@@ -186,6 +186,8 @@ DEFine PROCedure DrawTime
   IF l > 0 THEN
     t$ = t$ + " / " + Mmss$(l)
   END IF
+  IF t$ = shown$ THEN RETurn
+  shown$ = t$
   INK 0
   RECT 0, SY + 33, GW, 10, 1
   INK 7
@@ -197,6 +199,7 @@ DEFine PROCedure DrawStatus
   INK 0
   RECT 0, SY, GW, GH - SY, 1
   INK 7
+  shown$ = ""
   n = INT(vol / 16)
   TEXT 2, SY + 3, MID$("STOPPED PLAYING PAUSED  ", state * 8 + 1, 8) + "Vol " + STR$(vol) + " [" + REPT$("#", n) + REPT$("-", 16 - n) + "]"
   TEXT 2, SY + 13, "Songs " + STR$(nsong) + "  Entry " + STR$(cur + 1) + "/" + STR$(total)
