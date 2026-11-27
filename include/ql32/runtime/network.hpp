@@ -26,6 +26,9 @@ public:
                              const std::string& password) = 0;
     virtual void disconnectWifi() = 0;
     virtual WifiStatus wifiStatus() const = 0;
+    // UTC "YYYY-MM-DD HH:MM:SS" from network time (SNTP starts on first call
+    // while connected); empty until the clock has synchronised.
+    virtual std::string networkTime() { return {}; }
 };
 
 } // namespace ql32::runtime

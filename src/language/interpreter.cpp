@@ -229,7 +229,7 @@ constexpr std::string_view builtinFunctions[] = {
     "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
     "EOF", "FPOS", "FLEN", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
-    "NETADDR$", "NETSIGNAL", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
+    "NETADDR$", "NETSIGNAL", "NETTIME$", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
     "GORIGINX", "GORIGINY", "GROTATION", "GPALETTESIZE", "GPALETTE$", "GX", "GY",
     "LOADFONT", "GETFONT", "LOADIMAGE", "SYSINFO$", "CAPABILITY",
     "RND", "RGB", "MODE", "CPUFREQ", "INSTR", "MIN", "MAX", "CLAMP", "TICKS", "TIMER",
@@ -474,7 +474,7 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "GETNET") return {2, false};
     if (instruction.name == "DISNET") return {0, false};
     if (instruction.name == "NETSTAT$" || instruction.name == "NETADDR$") return {0, true};
-    if (instruction.name == "NETSIGNAL") return {0, true};
+    if (instruction.name == "NETSIGNAL" || instruction.name == "NETTIME$") return {0, true};
     if (instruction.name == "ALERT") return {2, false};
     if (instruction.name == "CONFIRM") return {2, true};
     if (instruction.name == "OPEN") return {2, true};
