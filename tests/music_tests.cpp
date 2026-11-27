@@ -1089,6 +1089,37 @@ void testYmStreamedCache() {
         ++songs;
     }
     require(songs >= 2, "example YM files not found");
+
+    // Soak: switching between two songs repeatedly reuses their caches; a cache whose
+    // key does not match (a different drum policy) is rebuilt, not reused.
+    {
+        MemoryStorage storage;
+        std::vector<std::string> names;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(dir)) {
+            std::string ext = entry.path().extension().string();
+            for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (ext != ".ym" || entry.file_size() > YmSong::MaximumPackedBytes || names.size() == 2) continue;
+            std::ifstream in(entry.path(), std::ios::binary);
+            const std::string name = "FFS:/s" + std::to_string(names.size()) + ".ym";
+            storage.files[name] = std::string((std::istreambuf_iterator<char>(in)), {});
+            names.push_back(name);
+        }
+        require(names.size() == 2, "soak needs two YM files");
+        VtxStreamInfo info;
+        for (int round = 0; round < 8; ++round) {
+            for (const auto& name : names) {
+                auto song = openYmStreamed(storage, name, roots, &info);
+                require(info.cacheHit == (round > 0), "soak cache hit/miss pattern differs");
+                require(!song.metadata().drumsDropped, "host build dropped YM drums");
+                require(song.frameCount() > 0 && !song.failed(), "soak song unusable");
+            }
+        }
+        const std::string cache = info.cachePath;
+        storage.files[cache][24] = static_cast<char>(storage.files[cache][24] ^ 0x5A);
+        const int writes = storage.writes;
+        openYmStreamed(storage, names.back(), roots, &info);
+        require(!info.cacheHit && storage.writes > writes, "stale-key YM cache was reused");
+    }
     require(cacheBytes * 10 < rawBytes * 4, "YM cache is not compressed");
 
     MemoryStorage storage;

@@ -22,6 +22,7 @@ struct YmMetadata {
     std::uint16_t frameRateHz = 50;
     std::uint32_t loopFrame = 0;
     bool hasLoop = true;
+    bool drumsDropped = false;   // digi-drums omitted to fit the device memory budget
     std::uint8_t trackerVoices = 0;   // YMT1 only: sample voices (1-4); registers() holds 4 bytes each
 };
 

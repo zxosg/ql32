@@ -680,6 +680,7 @@ struct YmInput {
     std::size_t planes = 14;
     bool interleaved = false;
     bool effects = false;
+    bool drumsDropped = false;    // a drum exceeded the device sample budget
     std::uint64_t prefix = 0;     // unpacked bytes before the register data
 
     void unpack(runtime::StorageReadHandle& file, const Lh5OutputSink& sink) const {
@@ -847,6 +848,7 @@ private:
                                  : beu32(lengthBytes_);
         current_.clear();
         keep_ = drumTotal_ + drumLeft_ <= YmDrumSampleBudget;
+        if (!keep_ && drumLeft_ != 0) y_.drumsDropped = true;
         if (keep_) {
             drumTotal_ += drumLeft_;
         }
@@ -957,7 +959,8 @@ public:
 
     void writeTo(runtime::TextStreamSink& sink) const override {
         std::uint8_t header[VtxPlaneFile::HeaderBytes] = {'Q', '3', '2', 'Y', YmCacheVersion};
-        header[5] = static_cast<std::uint8_t>((y_.interleaved ? 1 : 0) | (y_.effects ? 2 : 0));
+        header[5] = static_cast<std::uint8_t>((y_.interleaved ? 1 : 0) | (y_.effects ? 2 : 0) |
+                                              (y_.drumsDropped ? 4 : 0));
         header[6] = static_cast<std::uint8_t>(y_.planes);
         header[7] = static_cast<std::uint8_t>(formatCode());
         put32(header + 8, static_cast<std::uint32_t>(y_.frames));
@@ -1052,6 +1055,7 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
         YmCacheContents contents;
         contents.frames = frames;
         contents.effects = (header[5] & 2) != 0;
+        contents.metadata.drumsDropped = (header[5] & 4) != 0;
         auto& m = contents.metadata;
         switch (header[7]) {
         case '2': m.format = "YM2!"; break;
@@ -1106,7 +1110,10 @@ YmSong openYmStreamed(runtime::StorageService& storage, const std::string& path,
                                     "music: no music cache location configured");
     auto source = storage.openRead(path);
     const auto srcSize = static_cast<std::uint32_t>(source->size());
-    const std::uint32_t key = sourceKey(*source);
+    // The drum budget is part of the key: a cache written under another policy
+    // (possibly with drums dropped) is rebuilt instead of reused silently.
+    const std::uint32_t key = sourceKey(*source) ^
+        (static_cast<std::uint32_t>(YmDrumSampleBudget) * 0x9E3779B1u);
 
     YmCacheContents contents;
     const auto finish = [&](std::shared_ptr<VtxPlaneFile> planes, const std::string& cache,

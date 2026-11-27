@@ -167,6 +167,8 @@ struct MusicService::Impl {
         std::int64_t lastWriteDoneUs = 0;
         std::uint32_t maxGapUs = 0;
         std::uint32_t lateBlocks = 0;
+        std::uint32_t reportedLate = 0;
+        std::uint32_t reportedErrors = 0;
         int blockMin = std::numeric_limits<int>::max();
         int blockMax = std::numeric_limits<int>::min();
         for (;;) {            lock();
@@ -244,9 +246,15 @@ struct MusicService::Impl {
             if (lastWriteDoneUs != 0) {
                 const std::uint32_t gap = static_cast<std::uint32_t>(now - lastWriteDoneUs);
                 maxGapUs = std::max(maxGapUs, gap);
-                if (gap > UnderrunGapUs) ++lateBlocks;
+                if (gap > UnderrunGapUs) {
+                    ++lateBlocks;
+                    platform::esp32::diagnostics().musicLateBlocks.fetch_add(1);
+                }
+                auto& peak = platform::esp32::diagnostics().musicMaxGapUs;
+                if (gap > peak.load()) peak.store(gap);
             }
             lastWriteDoneUs = now;
+            platform::esp32::diagnostics().musicBlocks.fetch_add(1);
             const auto limits = std::minmax_element(pcm.begin(), pcm.end());
             blockMin = std::min<int>(blockMin, *limits.first);
             blockMax = std::max<int>(blockMax, *limits.second);
@@ -257,11 +265,29 @@ struct MusicService::Impl {
                         static_cast<unsigned>(written));
                 }
                 writeErrorLogged = false;
-            } else if (!writeErrorLogged) {
-                Serial.printf("music: I2S0 write failed (error=%d, bytes=%u/%u)\n",
-                    static_cast<int>(writeResult), static_cast<unsigned>(written),
-                    static_cast<unsigned>(sizeof(dac)));
-                writeErrorLogged = true;
+            } else {
+                platform::esp32::diagnostics().musicWriteErrors.fetch_add(1);
+                if (!writeErrorLogged) {
+                    Serial.printf("music: I2S0 write failed (error=%d, bytes=%u/%u)\n",
+                        static_cast<int>(writeResult), static_cast<unsigned>(written),
+                        static_cast<unsigned>(sizeof(dac)));
+                    writeErrorLogged = true;
+                }
+            }
+            // After the first-10-seconds diagnostics, report only when the cumulative
+            // late or write-error counters have grown (at most once a second).
+            if (blockNumber % DiagnosticIntervalBlocks == 0 && blockNumber > DiagnosticLastBlock) {
+                auto& d = platform::esp32::diagnostics();
+                const std::uint32_t late = d.musicLateBlocks.load();
+                const std::uint32_t errors = d.musicWriteErrors.load();
+                if (late != reportedLate || errors != reportedErrors) {
+                    Serial.printf("music: total late=%u writeerrors=%u maxGap=%uus blocks=%u\n",
+                        static_cast<unsigned>(late), static_cast<unsigned>(errors),
+                        static_cast<unsigned>(d.musicMaxGapUs.load()),
+                        static_cast<unsigned>(d.musicBlocks.load()));
+                    reportedLate = late;
+                    reportedErrors = errors;
+                }
             }
             if (blockNumber % DiagnosticIntervalBlocks == 0 && blockNumber <= DiagnosticLastBlock) {
                 Serial.printf("music: blocks=%u pcm=%d..%d dac=0x%04x..0x%04x maxGap=%uus late=%u stack=%u iostack=%u\n",
@@ -294,7 +320,8 @@ void MusicService::prepareOutput(const char* what, bool loadsSong) {
     if (impl_->memory) {
         const auto& policy = impl_->memory->admissionPolicy();
         const auto failure = running ?
-            (loadsSong ? impl_->memory->admissionFailure(what, policy.musicPlayTotalBytes) :
+            (loadsSong ? impl_->memory->admissionFailure(what, policy.musicPlayTotalBytes,
+                                                    policy.musicPlayContiguousBytes) :
                          std::nullopt) :
             impl_->memory->admissionFailure(what, policy.musicStartTotalBytes,
                                             policy.musicStartContiguousBytes);

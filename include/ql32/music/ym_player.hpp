@@ -88,7 +88,10 @@ public:
     std::uint32_t lengthMs() const noexcept override {
         return static_cast<std::uint32_t>(player_.frameCount() * 1000ULL / hz());
     }
-    std::string title() const override { return player_.metadata().title; }
+    std::string title() const override {
+        const auto& m = player_.metadata();
+        return m.drumsDropped ? m.title + " [no drums]" : m.title;
+    }
 
 private:
     std::uint32_t hz() const noexcept {

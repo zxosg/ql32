@@ -190,3 +190,11 @@ CYD, dirplayer, `FREE()` (free, largest) by phase, before -> after:
 - after canvas 58.3K/19.4K -> 66.2K/22.5K
 - playing z00m 36.8K/5.9K -> 44.6K/8.2K (largest +2.3K, now above the 8K admission)
 - exit: failedalloc 1 -> 0
+
+## P13: music diagnostics and cache policy
+
+- Whole-run audio counters (`musicBlocks`, `musicLateBlocks`, `musicWriteErrors`, `musicMaxGapUs`) live in the ESP32 diagnostics. They appear in HEAPSTATS (`musicblocks|musiclate|musicwriteerr|musicmaxgap`), as ` LATE:n` on the CYD debug bar once non-zero, and as a serial `music: total ...` line when they grow after the first 10 s.
+- The YM cache key now includes the drum sample budget, so caches written under another policy are rebuilt. Cache header byte 5 bit 2 (value 4) marks drums dropped; the `MUSIC TITLE$` readback appends ` [no drums]`.
+- Song loads while audio runs now also require a 4 KiB contiguous block (`musicPlayContiguousBytes`).
+- Host soak: repeated switching between two YM songs (cache miss then hits) and rebuild on a stale-key cache.
+- Hardware gate (golden 16/16, CYD soak) is still pending for this change.
