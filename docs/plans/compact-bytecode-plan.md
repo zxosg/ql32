@@ -248,3 +248,9 @@ the CYD per-instruction cost.
 
 Language changes, a new instruction set visible to users, lazy per-procedure
 compile (re-evaluate after Phase 3), moving code to flash, PSRAM boards.
+
+## 8. Related: compiling from disk and a `.q32b` cache
+
+See `docs/plans/compile-on-disk-review.md`: removing the duplicate source copies
+(Step A) is independent of this plan; an on-disk artifact (Step B) should reuse this
+plan's segment, side-table and position layouts and therefore follows Phase 1-3.
