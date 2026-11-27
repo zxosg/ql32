@@ -3782,31 +3782,64 @@ private:
 
 bool Interpreter::spillProgramForRun() {
     if (programSpill_ || program_.empty() || !storage_ || !memory_) return false;
-    const std::string& path = memory_->admissionPolicy().programSpillPath;
-    if (path.empty()) return false;
+    const std::string& base = memory_->admissionPolicy().programSpillPath;
+    if (base.empty()) return false;
+    std::string path;
+    bool created = false;
     try {
         ProgramListingSource source(program_);
         SpillHasher expected;
         source.writeTo(expected);
-        storage_->writeTextStreamAtomic(path, source);
-        // Verify by streaming the file back before the RAM copy is dropped.
-        auto reader = storage_->openRead(path);
-        SpillHasher actual;
-        std::uint8_t buffer[256];
-        std::uint64_t offset = 0;
-        for (;;) {
-            const std::size_t got = reader->readAt(offset, buffer, sizeof(buffer));
-            if (got == 0) break;
-            actual.update(buffer, got);
-            offset += got;
+        const auto hashFile = [this](const std::string& file) {
+            auto reader = storage_->openRead(file);
+            SpillHasher result;
+            std::uint8_t buffer[256];
+            std::uint64_t offset = 0;
+            for (;;) {
+                const std::size_t got = reader->readAt(offset, buffer, sizeof(buffer));
+                if (got == 0) break;
+                result.update(buffer, got);
+                offset += got;
+            }
+            return result;
+        };
+        // Existing files are never overwritten: after a reset the previous run's recovery files
+        // still belong to the user. A leftover holding exactly this program is adopted instead.
+        for (int attempt = 0; attempt < 16 && path.empty(); ++attempt) {
+            std::string candidate = base + "-" + std::to_string(session_id_);
+            if (attempt) candidate += "." + std::to_string(attempt);
+            const bool haveFile = storage_->exists(candidate);
+            const bool haveMeta = storage_->exists(candidate + ".meta");
+            if (!haveFile && !haveMeta) {
+                path = std::move(candidate);
+                created = true;
+            } else if (haveFile && haveMeta) {
+                const SpillHasher found = hashFile(candidate);
+                if (found.count == expected.count && found.hash == expected.hash)
+                    path = std::move(candidate);
+            }
         }
-        if (actual.count != expected.count || actual.hash != expected.hash)
-            throw std::runtime_error("program spill verification failed");
+        if (path.empty()) return false;
+        if (created) {
+            storage_->writeTextStreamAtomic(path, source);
+            // Verify by streaming the file back before the RAM copy is dropped.
+            const SpillHasher actual = hashFile(path);
+            if (actual.count != expected.count || actual.hash != expected.hash)
+                throw std::runtime_error("program spill verification failed");
+            // The recovery file is plain numbered BASIC (LOAD-able); the sidecar records what it should be.
+            storage_->writeText(path + ".meta", "Q32RECOVER1 session=" + std::to_string(session_id_) +
+                                                    " bytes=" + std::to_string(expected.count) +
+                                                    " fnv=" + std::to_string(expected.hash) + "\n");
+        }
         programSpill_ = ProgramSpill{path, expected.count, expected.hash};
         program_.clear();
         return true;
     } catch (...) {
-        try { if (storage_->exists(path)) storage_->remove(path); } catch (...) {}
+        if (created) {
+            // The names were unused before this call, so both files are ours to drop.
+            try { if (storage_->exists(path)) storage_->remove(path); } catch (...) {}
+            try { if (storage_->exists(path + ".meta")) storage_->remove(path + ".meta"); } catch (...) {}
+        }
         return false;
     }
 }
@@ -3814,37 +3847,53 @@ bool Interpreter::spillProgramForRun() {
 void Interpreter::discardProgramSpill() noexcept {
     if (!programSpill_) return;
     try { storage_->remove(programSpill_->path); } catch (...) {}
+    try { if (storage_->exists(programSpill_->path + ".meta")) storage_->remove(programSpill_->path + ".meta"); }
+    catch (...) {}
     programSpill_.reset();
 }
 
 ProgramStore& Interpreter::program() {
     if (!programSpill_) return program_;
-    std::string contents = storage_->readText(programSpill_->path);
-    SpillHasher check;
-    check.update(contents.data(), contents.size());
-    if (check.count != programSpill_->bytes || check.hash != programSpill_->hash)
-        throw std::runtime_error("program recovery file " + programSpill_->path +
-                                 " is damaged; it was not removed");
+    // Transactional streaming restore: nothing changes unless the whole file verifies.
+    auto reader = storage_->openRead(programSpill_->path);
     ProgramStore restored;
-    for (std::size_t cursor = 0; cursor < contents.size();) {
-        const std::size_t end = std::min(contents.find('\n', cursor), contents.size());
-        const std::string_view line(contents.data() + cursor, end - cursor);
-        cursor = end + 1;
+    SpillHasher check;
+    std::string pending;
+    const auto addLine = [&restored](std::string_view line) {
         int number = 0;
         const auto parsed = std::from_chars(line.data(), line.data() + line.size(), number);
-        if (parsed.ec != std::errc{}) continue;
+        if (parsed.ec != std::errc{}) return;
         std::string_view body(parsed.ptr, static_cast<std::size_t>(line.data() + line.size() - parsed.ptr));
         if (!body.empty() && body.front() == ' ') body.remove_prefix(1);
         restored.set(number, body);
+    };
+    std::uint8_t buffer[256];
+    std::uint64_t offset = 0;
+    for (;;) {
+        const std::size_t got = reader->readAt(offset, buffer, sizeof(buffer));
+        if (got == 0) break;
+        offset += got;
+        check.update(buffer, got);
+        for (std::size_t i = 0; i < got; ++i) {
+            if (buffer[i] == '\n') {
+                addLine(pending);
+                pending.clear();
+            } else {
+                pending.push_back(static_cast<char>(buffer[i]));
+            }
+        }
     }
-    contents = std::string();
+    if (!pending.empty()) addLine(pending);
+    if (check.count != programSpill_->bytes || check.hash != programSpill_->hash)
+        throw std::runtime_error("program recovery file " + programSpill_->path +
+                                 " is damaged; it was not removed");
     program_.swap(restored);
     discardProgramSpill();
     return program_;
 }
 
 Interpreter::~Interpreter() {
-    discardProgramSpill();
+    // A still-spilled program is deliberately left on disk: it may be the only copy.
     if (ui_) ui_->cancelSession(session_id_);
     if (channels_) channels_->closeSession(session_id_);
     if (graphics_) graphics_->closeSession(session_id_);

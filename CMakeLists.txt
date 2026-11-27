@@ -11,8 +11,8 @@ if(QL32_ENABLE_SANITIZERS)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     message(FATAL_ERROR "QL32_ENABLE_SANITIZERS requires GCC or Clang")
   endif()
-  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-  add_link_options(-fsanitize=address,undefined)
+  add_compile_options(-fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=float-cast-overflow -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined,float-cast-overflow)
 endif()
 
 add_library(ql32_portable

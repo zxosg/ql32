@@ -204,3 +204,8 @@ CYD, dirplayer, `FREE()` (free, largest) by phase, before -> after:
 After the program spill (PR #57) the player runs full screen again (320x240 canvas, 14-row list, no shrunk
 `TRAP WINDOW`). The ESP YM drum budget is 8192 samples, so KNUCKLE.YM plays with its digi-drums.
 CYD, debug bar on: playing KNUCKLE free 53K / min 44K, LyraII1 free 70K / min 43K, late=0, failedalloc=0.
+
+## Drum fallback and recovery files
+
+- YM digi-drums use an 8192-sample budget when at least 48 KiB is free with a 4 KiB contiguous block at load time; otherwise (or if the load runs out of memory) the song is reloaded with a 4096 budget and the title shows `[no drums]`. If even that fails the load is refused with `music: not enough memory (heap fragmented)`.
+- `RUN` parks the program in `FFS:.q32-run-<session>` (plus `.meta`). Files left by a reset are kept and listed on the serial console at boot; `LOAD "FFS:.q32-run-N"` restores one. Delete them yourself when no longer needed.

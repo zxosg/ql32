@@ -1712,6 +1712,89 @@ void testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt() {
     }
 }
 
+std::size_t countRecoveryFiles(const ProgramStorage& storage) {
+    std::size_t count = 0;
+    for (const auto& file : storage.files)
+        if (file.first.rfind("FFS:.q32-run", 0) == 0) ++count;
+    return count;
+}
+
+// Runs a three-line program on a fresh scheduler and returns once the REPL waits for input.
+void runSpillProgram(ql32::vm::SessionScheduler& scheduler, std::ostringstream& output,
+                     ql32::vm::TaskId& repl) {
+    repl = scheduler.launchInteractive(output);
+    require(scheduler.submit(repl, "10 PRINT \"A\"\n20 PAUSE 50\n30 PRINT \"B\"\n"), "lines rejected");
+    require(scheduler.tick(), "lines did not run");
+    require(scheduler.submit(repl, "RUN\n"), "RUN rejected");
+    for (int tick = 0; tick < 2000; ++tick) {
+        if (tick > 10) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const auto info = scheduler.task(repl);
+        if (tick > 1 && info && info->status == ql32::vm::TaskStatus::WaitingInput) break;
+        scheduler.tick();
+    }
+}
+
+void testSpillRecoveryFilesSurviveResetsAndFaults() {
+    auto memory = std::make_shared<FakeMemory>();
+    ql32::runtime::AdmissionPolicy policy;
+    policy.programSpillPath = "FFS:.q32-run";
+    memory->setAdmissionPolicy(policy);
+    auto storage = std::make_shared<ProgramStorage>();
+    const auto makeScheduler = [&] {
+        ql32::vm::Services services;
+        services.memory = memory;
+        services.storage = storage;
+        return std::make_unique<ql32::vm::SessionScheduler>(std::move(services), 16);
+    };
+
+    // A leftover from a previous boot must never be overwritten or deleted.
+    for (int id = 1; id <= 400; ++id) {
+        storage->files["FFS:.q32-run-" + std::to_string(id)] = "10 PRINT \"OLD\"\n";
+        storage->files["FFS:.q32-run-" + std::to_string(id) + ".meta"] = "old";
+    }
+    std::ostringstream output;
+    ql32::vm::TaskId repl = 0;
+    auto first = makeScheduler();
+    runSpillProgram(*first, output, repl);
+    std::string firstSpill;
+    for (const auto& file : storage->files)
+        if (file.first.size() > 2 && file.first.compare(file.first.size() - 2, 2, ".1") == 0)
+            firstSpill = file.first;
+    require(!firstSpill.empty() && storage->files.count(firstSpill + ".meta"),
+            [&] { std::string s = "spill did not pick an unused recovery name:"; for (auto& f : storage->files) s += " " + f.first; return s; }().c_str());
+    for (int id = 1; id <= 400; ++id)
+        require(storage->files["FFS:.q32-run-" + std::to_string(id)] == "10 PRINT \"OLD\"\n" &&
+                    storage->files["FFS:.q32-run-" + std::to_string(id) + ".meta"] == "old",
+                "orphan recovery file was overwritten");
+
+    // Reset while the program is spilled: the files stay for the user.
+    first.reset();
+    require(storage->files.count(firstSpill) &&
+                storage->files[firstSpill].find("20 PAUSE 50") != std::string::npos,
+            "reset removed the recovery file");
+
+    // Damaged recovery file: restoring fails and keeps the file.
+    auto second = makeScheduler();
+    std::ostringstream output2;
+    ql32::vm::TaskId repl2 = 0;
+    runSpillProgram(*second, output2, repl2);
+    std::string spilled;
+    for (const auto& file : storage->files)
+        if (file.first != firstSpill && file.first.find(".meta") == std::string::npos &&
+            file.first.size() > 2 && file.first.compare(file.first.size() - 2, 2, ".1") == 0)
+            spilled = file.first;
+    require(!spilled.empty(), "second session did not spill");
+    storage->files[spilled][3] = 'X';
+    output2.str("");
+    require(second->submit(repl2, "LIST\n"), "LIST rejected");
+    for (int tick = 0; tick < 20; ++tick) second->tick();
+    const auto failed = second->task(repl2);
+    require((output2.str() + (failed ? failed->error : std::string())).find("damaged") != std::string::npos,
+            "damaged recovery file not reported");
+    require(storage->files.count(spilled) && storage->files.count(spilled + ".meta"),
+            "damaged recovery file was deleted");
+}
+
 void testRunSpillsProgramAndRestoresOnDemand() {
     for (const bool canVerify : {true, false}) {
         auto memory = std::make_shared<FakeMemory>();
@@ -1732,7 +1815,7 @@ void testRunSpillsProgramAndRestoresOnDemand() {
         bool sawSpill = false;
         for (int tick = 0; tick < 2000; ++tick) {
             if (tick > 10) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            sawSpill = sawSpill || storage->files.count("FFS:.q32-run") != 0;
+            sawSpill = sawSpill || countRecoveryFiles(*storage) != 0;
             const auto info = scheduler.task(repl);
             if (tick > 1 && info && info->status == ql32::vm::TaskStatus::WaitingInput) break;
             scheduler.tick();
@@ -1743,7 +1826,7 @@ void testRunSpillsProgramAndRestoresOnDemand() {
         for (int tick = 0; tick < 20; ++tick) scheduler.tick();
         require(output.str().find("20 PAUSE 50") != std::string::npos,
                 "program was not restored for LIST");
-        require(storage->files.count("FFS:.q32-run") == 0, "recovery file not removed after restore");
+        require(countRecoveryFiles(*storage) == 0, "recovery file not removed after restore");
         require(scheduler.submit(repl, "25 PRINT 1\nSAVE \"x\"\n"), "edit rejected");
         for (int tick = 0; tick < 20; ++tick) scheduler.tick();
         require(storage->files["x"].find("25 PRINT 1\n") != std::string::npos &&
@@ -1913,6 +1996,7 @@ int main() {
     testBasicTaskViewCommandIsSupervisorOnly();
     testFinishedRunFreezesWindowsOnlyWhenPolicyAsksForIt();
     testRunSpillsProgramAndRestoresOnDemand();
+    testSpillRecoveryFilesSurviveResetsAndFaults();
     testSupervisorWindowModeTilesTasksAndRestoresSharedDisplay();
     testSincosWorkerTaskViewOffsetBounce();
     testSupervisorCanToggleDebugBar();

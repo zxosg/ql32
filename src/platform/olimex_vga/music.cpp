@@ -369,8 +369,31 @@ void MusicService::play(runtime::MusicSessionId session, const std::string& path
                               std::memcmp(lead + 2, "-lh0-", 5) == 0)))) {
         source.reset();
         try {
-            startMusic(session, std::make_unique<music::YmSource>(
-                music::openYmStreamed(*impl_->storage, path, impl_->vtxCacheRoots)));
+            bool reducedDrums = false;
+            if (impl_->memory) {
+                const auto& policy = impl_->memory->admissionPolicy();
+                reducedDrums = (policy.musicDrumsTotalBytes || policy.musicDrumsContiguousBytes) &&
+                    impl_->memory->admissionFailure("YM drums", policy.musicDrumsTotalBytes,
+                                                    policy.musicDrumsContiguousBytes).has_value();
+            }
+            music::setYmDrumBudgetReduced(reducedDrums);
+            std::optional<music::YmSong> opened;
+            try {
+                opened.emplace(music::openYmStreamed(*impl_->storage, path, impl_->vtxCacheRoots));
+            } catch (const std::bad_alloc&) {
+                // Peak or fragmentation exceeded the estimate: the failed attempt has released
+                // everything, so retry once with the reduced drum budget before refusing.
+                if (reducedDrums) throw;
+                music::setYmDrumBudgetReduced(true);
+                opened.emplace(music::openYmStreamed(*impl_->storage, path, impl_->vtxCacheRoots));
+            }
+            Serial.printf("music: YM drums %s title='%s' (free=%u largest=%u)\n",
+                          opened->metadata().drumsDropped ? "dropped" : "kept",
+                          (opened->metadata().drumsDropped ? opened->metadata().title + " [no drums]"
+                                                           : opened->metadata().title).c_str(),
+                          static_cast<unsigned>(ESP.getFreeHeap()),
+                          static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+            startMusic(session, std::make_unique<music::YmSource>(std::move(*opened)));
         } catch (const runtime::ServiceError&) {
             throw;
         } catch (const std::bad_alloc&) {

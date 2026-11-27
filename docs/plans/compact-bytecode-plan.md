@@ -366,7 +366,7 @@ Full-screen dirplayer on the CYD after Phase 2: RUN start 122.4K free / 43.0K la
 
 ## 13. ProgramStore spill during RUN
 
-`RUN` writes the editable program to `FFS:.q32-run` (atomic, streamed, FNV hash + size, verified by streaming read-back) right after compile, then frees the RAM copy. Any later edit/LIST/SAVE/RUN restores it (hash checked); NEW/LOAD discard it; if any step fails the RAM copy is kept. Enabled by `AdmissionPolicy::programSpillPath` (CYD only). The file is removed on restore and on interpreter destruction. Spill/restore latency depends on the storage backend (FFS/SPIFFS here).
+`RUN` writes the editable program to `FFS:.q32-run` (atomic, streamed, FNV hash + size, verified by streaming read-back) right after compile, then frees the RAM copy. Any later edit/LIST/SAVE/RUN restores it (hash checked); NEW/LOAD discard it; if any step fails the RAM copy is kept. Enabled by `AdmissionPolicy::programSpillPath` (CYD only). (Superseded by section 14: per-session names, sidecar metadata, never deleted on destruction.) Spill/restore latency depends on the storage backend (FFS/SPIFFS here).
 
 Full-screen dirplayer, CYD, free/largest KB (main at same time / with spill):
 
@@ -379,3 +379,31 @@ Full-screen dirplayer, CYD, free/largest KB (main at same time / with spill):
 | exit (after canvas hook) | 107.2 / 25.6 | 123.2 / 43.0 |
 
 Free gate (>=125K at RUN start) met; largest gate (>=60K) not met: the largest block at RUN start is still 43K (pinned small allocations, see sections 11-12). The arena (section 12) gives ~49K at a cost of ~7K free, so spill + arena would reach ~129K / 49K, still short of 60K.
+
+## 14. Review fixes, drum fallback and final full-screen state
+
+Rubber-duck review of #53-#58 led to these changes:
+
+- **Spill ownership.** Recovery files are `FFS:.q32-run-<session>[.n]` with a `.meta` sidecar (`Q32RECOVER1 session bytes fnv`). Existing files are never overwritten or deleted: a leftover that holds exactly the program being run is adopted, any other leftover makes the spill pick the next name (16 tries), otherwise the spill is refused and the RAM copy is kept. The interpreter destructor no longer deletes a spilled program (it may be the only copy); only a successful restore, NEW or LOAD of that session discards it. The recovery file is plain numbered BASIC, so `LOAD "FFS:.q32-run-N"` restores it by hand; the CYD prints `Recovery file kept: ...` on the serial console at boot. Restore streams the file in 256-byte reads into a fresh `ProgramStore` and only swaps after the FNV hash and size match (damaged file: error, file kept). Tests: orphan not overwritten, reset keeps the file, damaged file reported and kept (`scheduler_tests`).
+- **UB in the compact encoder.** `double -> long long` was cast before the range check (UB for 1e300/inf/NaN). Now the range test (false for NaN) comes first. The sanitizer build adds `float-cast-overflow` (non-recoverable); it reproduced the bug on the old code and the existing literal round-trip test now passes under it.
+- **Drum admission.** Free/contiguous admission (48 KiB / 4 KiB) picks the full (8192) or reduced (4096) drum budget per song; if the open still throws `bad_alloc` (peak or fragmentation exceeded the estimate) the failed attempt unwinds, and it is retried once with the reduced budget before the load is refused cleanly. The cache key includes the budget so full and reduced caches never mix; the player title gets `[no drums]`. Device evidence (serial log `music: YM drums ...`): normal memory `kept`; with ~60 KB of BASIC arrays held `dropped title=' [no drums]'` and playback continued; with ~85 KB held the load is refused with `music: not enough memory (heap fragmented)` and the player stays alive. Host test: reduced budget drops drums, flags the title, uses another cache entry and returns to the full one.
+
+Device state on this build (full-screen dirplayer, FFS): RUN start 135.5K free / 40.9K largest (spill active), ready 97K / 21K, playing KNUCKLE with drums 71K / 3.6K, exit 152K free. KNUCKLE, LyraII1 and LyraII9: late=0, failedalloc=0, writeerr=0, min free 45.6K, maxgap ~11.7 ms. The 60K largest gate is **not** met (about 41-43K); only chase more fragmentation work if tied to a measured requirement.
+
+### Cheap-optimization review (ranked)
+
+Measured costs come from sections 9-13; "est." is an estimate.
+
+| # | Candidate | Free gain | Largest gain | Effort | Verdict |
+|---|---|---:|---:|---|---|
+| 1 | Spill ProgramStore during RUN | +16K (done) | 0 | done | shipped |
+| 2 | Drum budget 8192 with fallback | KNUCKLE audio | 0 | done | shipped |
+| 3 | Pack names/extras/constant tables (ql32.inc retains 20.6K) | est. 5-8K | est. small | medium (touches decode) | worth doing next, needs speed gate |
+| 4 | Position table 3 B -> 2 B per instruction | est. 1-2K | small | low | marginal, skip |
+| 5 | shrink_to_fit on retained containers | est. 1-3K | may help largest | low | try after 3 |
+| 6 | Music worker stack 6K / VFS setvbuf 4K / LH5 tables 2K reuse | est. 2-4K only while playing | none | medium | only if playback min-free becomes the constraint |
+| 7 | Lazy canvas for programs that never print | 39K for text-only programs | large | already measured in section 9; benchmark is full screen | no gain for the benchmark |
+| 8 | Compile-time transients | compile peak only | largest at compile | arena tried (section 12) | parked: +6K largest costs -7K free |
+| 9 | Drum cache block size, task stacks, debug bar | < 1-2K each | none | low-medium | not paying for themselves |
+
+Recommendation: do #3 then #5 as one measured step (host differential tests already cover the compact encoding); stop there unless a new requirement appears. Only #3 and #5 are not yet implemented, so no code change for them in this step.

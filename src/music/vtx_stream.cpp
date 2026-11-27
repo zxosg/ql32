@@ -655,10 +655,14 @@ constexpr std::uint8_t YmCacheVersion = 2;
 // Digi-drum samples are 2 bytes each; small boards keep fewer so playback never
 // competes with the running program for heap (larger drums play silently).
 #if defined(ESP_PLATFORM)
-constexpr std::size_t YmDrumSampleBudget = 8192;
+constexpr std::size_t YmFullDrumBudget = 8192;
+constexpr std::size_t YmReducedDrumBudget = 4096;
 #else
-constexpr std::size_t YmDrumSampleBudget = 12288;
+constexpr std::size_t YmFullDrumBudget = 12288;
+constexpr std::size_t YmReducedDrumBudget = 4096;
 #endif
+std::atomic<std::size_t> gYmDrumBudget{YmFullDrumBudget};
+std::size_t ymDrumBudget() { return gYmDrumBudget.load(std::memory_order_relaxed); }
 
 std::uint32_t beu32(const std::uint8_t* p) {
     return (static_cast<std::uint32_t>(p[0]) << 24) | (static_cast<std::uint32_t>(p[1]) << 16) |
@@ -847,7 +851,7 @@ private:
         drumLeft_ = tracker_ ? static_cast<std::uint32_t>((lengthBytes_[0] << 8) | lengthBytes_[1])
                                  : beu32(lengthBytes_);
         current_.clear();
-        keep_ = drumTotal_ + drumLeft_ <= YmDrumSampleBudget;
+        keep_ = drumTotal_ + drumLeft_ <= ymDrumBudget();
         if (!keep_ && drumLeft_ != 0) y_.drumsDropped = true;
         if (keep_) {
             drumTotal_ += drumLeft_;
@@ -1079,7 +1083,7 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
             cursor += 4;
             const std::size_t count = le32(length);
             samples += count;
-            if (samples > YmDrumSampleBudget || cursor + count * 2ull > size) return nullptr;
+            if (samples > ymDrumBudget() || cursor + count * 2ull > size) return nullptr;
             DrumSamples pcm;
             pcm.resize(count);
             std::uint8_t piece[256];
@@ -1103,6 +1107,11 @@ std::shared_ptr<VtxPlaneFile> openYmCache(runtime::StorageService& storage,
 }
 } // namespace
 
+void setYmDrumBudgetReduced(bool reduced) {
+    gYmDrumBudget.store(reduced ? YmReducedDrumBudget : YmFullDrumBudget,
+                        std::memory_order_relaxed);
+}
+
 YmSong openYmStreamed(runtime::StorageService& storage, const std::string& path,
                       const std::vector<std::string>& cacheRoots, VtxStreamInfo* info) {
     if (cacheRoots.empty())
@@ -1113,7 +1122,7 @@ YmSong openYmStreamed(runtime::StorageService& storage, const std::string& path,
     // The drum budget is part of the key: a cache written under another policy
     // (possibly with drums dropped) is rebuilt instead of reused silently.
     const std::uint32_t key = sourceKey(*source) ^
-        (static_cast<std::uint32_t>(YmDrumSampleBudget) * 0x9E3779B1u);
+        (static_cast<std::uint32_t>(ymDrumBudget()) * 0x9E3779B1u);
 
     YmCacheContents contents;
     const auto finish = [&](std::shared_ptr<VtxPlaneFile> planes, const std::string& cache,
