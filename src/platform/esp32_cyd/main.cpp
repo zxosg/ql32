@@ -1,3 +1,4 @@
+#include "ql32/version.hpp"
 #include "ql32/platform/esp32/application_input.hpp"
 #include "ql32/platform/esp32/diagnostics.hpp"
 #include <Arduino.h>
@@ -688,7 +689,7 @@ void setup() {
                                       sdBus, 4000000, "/sd", 5);
 #endif
 
-    Serial.println("QL/32 ESP32-2432S028 ready");
+    Serial.println("QL/32 ESP32-2432S028 ready, version " QL32_VERSION_STRING QL32_VERSION_FEATURES);
     Serial.printf("Uptime ms: %llu\n",
                   static_cast<unsigned long long>(boardClock.monotonicMilliseconds()));
     const auto wallTime = boardClock.unixTimeSeconds();
@@ -824,7 +825,14 @@ void setup() {
     // A full-screen canvas is 38400 bytes in one block; leave room for the music service.
     admission.canvasGuard = true;
     admission.freezeWindowsAfterRun = true;
-    admission.programSpillPath = "FFS:.q32-run";
+#if !defined(QL32_PROGRAM_SPILL_MIN_BYTES)
+#define QL32_PROGRAM_SPILL_MIN_BYTES 4096
+#endif
+#if !defined(QL32_PROGRAM_SPILL_PATH)
+#define QL32_PROGRAM_SPILL_PATH "FFS:.q32-run"
+#endif
+    admission.programSpillPath = QL32_PROGRAM_SPILL_PATH;
+    admission.programSpillMinBytes = QL32_PROGRAM_SPILL_MIN_BYTES;
     admission.canvasHeadroomBytes = 8 * 1024;
     boardMemory.setAdmissionPolicy(admission);
     boardMemory.setReclaimer([] {

@@ -1,3 +1,4 @@
+#include "ql32/version.hpp"
 #include "ql32/platform/esp32/application_input.hpp"
 #include <Arduino.h>
 #include <SD.h>
@@ -1931,7 +1932,7 @@ void setup() {
                                        sdBus, 4000000, "/sd", 5);
 #endif
 
-    Serial.printf("QL/32 %s bring-up ready\n", kBoardName);
+    Serial.printf("QL/32 %s bring-up ready, version %s\n", kBoardName, QL32_VERSION_STRING QL32_VERSION_FEATURES);
     Serial.printf("Uptime ms: %llu\n",
                   static_cast<unsigned long long>(boardClock.monotonicMilliseconds()));
     const auto wallTime = boardClock.unixTimeSeconds();

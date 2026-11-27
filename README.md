@@ -39,6 +39,10 @@ flash is CYD-only. See [docs/plans/release-checklist.md](docs/plans/release-chec
 and [CHANGELOG.md](CHANGELOG.md). Known limit: the full-screen CYD music player
 runs with about 11 KB largest free block while playing; WiFi/NTP pins about 16 KB.
 
+**Version:** type `VER` at the prompt (prints e.g. `QL/32 0.1.0 compact`); the boot banner on the serial
+port shows it too. It is defined in `include/ql32/version.hpp` (keep in step with `CMakeLists.txt`).
+No git tag exists yet.
+
 ## Implemented software
 
 The host CLI includes expressions, structured blocks, procedures, functions,

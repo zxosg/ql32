@@ -1,3 +1,4 @@
+#include "ql32/version.hpp"
 #include "ql32/interpreter.hpp"
 #include "ql32/runtime/file_ops.hpp"
 #include "ql32/runtime/path_glob.hpp"
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <cstdio>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -242,7 +244,7 @@ constexpr std::string_view shellHelpCommands[] = {
     "LOGOFF", "SUSPEND", "RESUME", "SLICE", "PRIORITY", "DEBUG", "BREAK",
     "CLEARBREAK", "STEP", "NEXT", "CONTINUE", "DEBUG CONTINUE", "WHERE", "LOCALS", "GLOBALS",
     "STACK", "STATS", "WATCHES", "BREAKPOINTS", "WATCH", "UNWATCH", "EVAL",
-    "DIAGNOSTICS", "TRACE", "DEBUGBAR", "MUSIC"
+    "DIAGNOSTICS", "TRACE", "DEBUGBAR", "MUSIC", "VER"
 };
 
 template <typename Range>
@@ -3780,7 +3782,23 @@ private:
 };
 } // namespace
 
+#if defined(QL32_SPILL_TIMING)
+#if defined(ARDUINO) || defined(ESP_PLATFORM)
+#include "esp_rom_sys.h"
+#define QL32_SPILL_PRINTF esp_rom_printf
+#else
+#define QL32_SPILL_PRINTF std::printf
+#endif
+#define QL32_SPILL_T0() const auto spillT0 = std::chrono::steady_clock::now()
+#define QL32_SPILL_LOG(what, bytes) QL32_SPILL_PRINTF("SPILLTIME %s bytes=%llu ms=%lld\n", what, static_cast<unsigned long long>(bytes), \
+    static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - spillT0).count()))
+#else
+#define QL32_SPILL_T0() ((void)0)
+#define QL32_SPILL_LOG(what, bytes) ((void)0)
+#endif
+
 bool Interpreter::spillProgramForRun() {
+    QL32_SPILL_T0();
     if (programSpill_ || program_.empty() || !storage_ || !memory_) return false;
     const std::string& base = memory_->admissionPolicy().programSpillPath;
     if (base.empty()) return false;
@@ -3790,6 +3808,7 @@ bool Interpreter::spillProgramForRun() {
         ProgramListingSource source(program_);
         SpillHasher expected;
         source.writeTo(expected);
+        if (expected.count < memory_->admissionPolicy().programSpillMinBytes) return false;
         const auto hashFile = [this](const std::string& file) {
             auto reader = storage_->openRead(file);
             SpillHasher result;
@@ -3810,7 +3829,8 @@ bool Interpreter::spillProgramForRun() {
             if (attempt) candidate += "." + std::to_string(attempt);
             const bool haveFile = storage_->exists(candidate);
             const bool haveMeta = storage_->exists(candidate + ".meta");
-            if (!haveFile && !haveMeta) {
+            // A sidecar without a recovery file protects no user data and is simply replaced.
+            if (!haveFile) {
                 path = std::move(candidate);
                 created = true;
             } else if (haveFile && haveMeta) {
@@ -3819,7 +3839,7 @@ bool Interpreter::spillProgramForRun() {
                     path = std::move(candidate);
             }
         }
-        if (path.empty()) return false;
+        if (path.empty()) { QL32_SPILL_LOG("nopath", 0); return false; }
         if (created) {
             storage_->writeTextStreamAtomic(path, source);
             // Verify by streaming the file back before the RAM copy is dropped.
@@ -3833,8 +3853,10 @@ bool Interpreter::spillProgramForRun() {
         }
         programSpill_ = ProgramSpill{path, expected.count, expected.hash};
         program_.clear();
+        QL32_SPILL_LOG(created ? "write+verify" : "adopt", expected.count);
         return true;
     } catch (...) {
+        QL32_SPILL_LOG("exception", 0);
         if (created) {
             // The names were unused before this call, so both files are ours to drop.
             try { if (storage_->exists(path)) storage_->remove(path); } catch (...) {}
@@ -3846,14 +3868,16 @@ bool Interpreter::spillProgramForRun() {
 
 void Interpreter::discardProgramSpill() noexcept {
     if (!programSpill_) return;
-    try { storage_->remove(programSpill_->path); } catch (...) {}
+    // Sidecar first: an interrupted discard then leaves a plain, LOAD-able recovery file, never an orphan sidecar.
     try { if (storage_->exists(programSpill_->path + ".meta")) storage_->remove(programSpill_->path + ".meta"); }
     catch (...) {}
+    try { storage_->remove(programSpill_->path); } catch (...) {}
     programSpill_.reset();
 }
 
 ProgramStore& Interpreter::program() {
     if (!programSpill_) return program_;
+    QL32_SPILL_T0();
     // Transactional streaming restore: nothing changes unless the whole file verifies.
     auto reader = storage_->openRead(programSpill_->path);
     ProgramStore restored;
@@ -3888,6 +3912,7 @@ ProgramStore& Interpreter::program() {
         throw std::runtime_error("program recovery file " + programSpill_->path +
                                  " is damaged; it was not removed");
     program_.swap(restored);
+    QL32_SPILL_LOG("restore", check.count);
     discardProgramSpill();
     return program_;
 }
@@ -4339,7 +4364,7 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
             word.rfind("RENUMBER ", 0) == 0 || word == "PAGER" ||
             word.rfind("PAGER ", 0) == 0 || word == "RUN" || word == "LIST" ||
             word.rfind("LIST ", 0) == 0 || word.rfind("LIST#", 0) == 0 ||
-            word == "NEW" || word == "REBOOT" ||
+            word == "NEW" || word == "REBOOT" || word == "VER" ||
             word == "LOAD" || word.rfind("LOAD ", 0) == 0 || word == "SAVE" ||
             word.rfind("SAVE ", 0) == 0 || word == "DIR" ||
             word.rfind("DIR ", 0) == 0 || word.rfind("DIR#", 0) == 0 ||
@@ -4719,6 +4744,12 @@ ExecutionStatus Interpreter::executeInteractiveSlice(
                 preserveInteractiveTail();
                 return ExecutionStatus::Suspended;
             }
+            }
+        } else if (word == "VER") {
+            if (writeGeneratedListing(default_output_channel_,
+                                      std::string("QL/32 ") + QL32_VERSION_STRING + QL32_VERSION_FEATURES + "\n")) {
+                preserveInteractiveTail();
+                return ExecutionStatus::Suspended;
             }
         } else if (word == "REBOOT") {
             if (!systemControl_)
