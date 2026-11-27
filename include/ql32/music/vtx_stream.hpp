@@ -109,6 +109,10 @@ namespace ql32::music {
 // windows, so a song costs a few KiB of heap instead of frames x 16 bytes. Digi-drum
 // samples stay in RAM (at most 32 KiB in total; larger drums are silent). Title,
 // author and comment are not kept. Cache files use the "Q32Y" magic.
+// Chooses the digi-drum sample budget for the next YM load: the platform's full
+// budget, or a reduced one (drums above it are dropped and the song is flagged).
+void setYmDrumBudgetReduced(bool reduced);
+
 YmSong openYmStreamed(runtime::StorageService& storage, const std::string& path,
                       const std::vector<std::string>& cacheRoots,
                       VtxStreamInfo* info = nullptr);

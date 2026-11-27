@@ -1006,6 +1006,22 @@ void testYmTracker() {
             streamed.drumCount() == reference.drumCount(), "streamed KNUCKLE.YM metadata differs");
     for (std::size_t i = 0; i < reference.drumCount(); ++i)
         require(streamed.drum(i) == reference.drum(i), "streamed KNUCKLE.YM drum differs");
+    {
+        // Reduced drum budget: drums are dropped, flagged, and cached under another key.
+        setYmDrumBudgetReduced(true);
+        VtxStreamInfo reducedInfo;
+        auto reduced = openYmStreamed(storage, "FFS:/k.ym", roots, &reducedInfo);
+        require(reduced.metadata().drumsDropped && !reducedInfo.cacheHit,
+                "reduced drum budget did not drop drums or reused the full cache");
+        require(YmSource(std::move(reduced)).title().find("[no drums]") != std::string::npos,
+                "reduced-drum song title lacks the [no drums] note");
+        setYmDrumBudgetReduced(false);
+        VtxStreamInfo fullAgain;
+        auto restored = openYmStreamed(storage, "FFS:/k.ym", roots, &fullAgain);
+        require(!restored.metadata().drumsDropped && !fullAgain.cacheHit &&
+                    restored.drumCount() == reference.drumCount(),
+                "full drum budget reused the reduced cache");
+    }
     const auto pump = streamed.prefetcher();
     for (std::size_t frame = 0; frame < reference.frameCount(); frame += 7) {
         if (frame % 64 == 0) pump->run();

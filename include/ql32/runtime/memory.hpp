@@ -26,6 +26,8 @@ struct AdmissionPolicy {
     std::uint64_t musicStartContiguousBytes = 0;
     std::uint64_t musicPlayTotalBytes = 0;    // loading a song once audio is running
     std::uint64_t musicPlayContiguousBytes = 0;
+    std::uint64_t musicDrumsTotalBytes = 0;   // free bytes needed to load YM digi-drums at full budget
+    std::uint64_t musicDrumsContiguousBytes = 0;
     bool displayModeGuard = false;            // refuse MODE growth that cannot fit
     bool freezeWindowsAfterRun = false;       // finished RUN leaves a reclaimable last frame, not live canvases
     std::string programSpillPath;             // non-empty: RUN parks the editable program here to free RAM

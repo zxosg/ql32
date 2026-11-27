@@ -194,9 +194,10 @@ void CompactProgram::appendRecord(const Instruction& in,
         const double value = in.literal();
         std::uint64_t bits;
         std::memcpy(&bits, &value, sizeof bits);
-        const long long whole = static_cast<long long>(value);
-        double back = 0;
+        // NaN and infinities fail the range test, so the cast below is always defined.
         const bool small = value > -2147483648.0 && value < 2147483648.0;
+        const long long whole = small ? static_cast<long long>(value) : 0;
+        double back = 0;
         if (small) back = static_cast<double>(whole);
         std::uint64_t backBits;
         std::memcpy(&backBits, &back, sizeof backBits);

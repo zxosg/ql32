@@ -697,6 +697,19 @@ void setup() {
     else
         Serial.println("Wall clock unsynchronized");
     Serial.println(storageReady ? "Storage ready" : "Storage unavailable");
+#if defined(QL32_CYD_USE_SPIFFS)
+    if (storageReady) {
+        // Program recovery files from an interrupted RUN are never deleted automatically.
+        File root = SPIFFS.open("/");
+        for (File entry = root.openNextFile(); entry; entry = root.openNextFile()) {
+            const char* name = entry.name();
+            if (name[0] == '/') ++name;
+            if (std::strncmp(name, ".q32-run-", 9) == 0 && !std::strstr(name, ".meta"))
+                Serial.printf("Recovery file kept: LOAD \"FFS:%s\" restores the program; delete it when done\n",
+                              name);
+        }
+    }
+#endif
 
     std::string startupProgram;
     if (storageReady) {
@@ -804,6 +817,9 @@ void setup() {
     admission.musicStartContiguousBytes = 8 * 1024;
     admission.musicPlayTotalBytes = 14 * 1024;
     admission.musicPlayContiguousBytes = 4 * 1024;
+    // Full digi-drum bank (8192 samples) took ~15 KB; below this free heap fall back to the reduced bank.
+    admission.musicDrumsTotalBytes = 48 * 1024;
+    admission.musicDrumsContiguousBytes = 4 * 1024;
     admission.displayModeGuard = true;
     // A full-screen canvas is 38400 bytes in one block; leave room for the music service.
     admission.canvasGuard = true;
