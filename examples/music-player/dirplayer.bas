@@ -17,10 +17,11 @@ play$ = ""
 GW = GWIDTH()
 GH = GHEIGHT()
 LY = 14
-SY = GH - 56
+SY = GH - 64
 rows = INT((SY - LY) / 10)
 cols = INT((GW - 8) / 6)
 TRAP VOLUME vol
+TRAP WINDOW #0, 0, GH - 8, GW, 8
 PAPER 0
 INK 7
 CLS
@@ -52,6 +53,7 @@ REPeat main WHILE quit = 0
   END IF
 END REPeat main
 TRAP MUSIC STOP
+TRAP WINDOW #0, 0, GH - 64, GW, 64
 CLS
 
 DEFine PROCedure LoadDir
@@ -225,7 +227,11 @@ DEFine PROCedure MoveTo(n)
   ELSE
     d = top - d
     IF d = 1 OR d = -1 THEN
-      DrawRow old - top + d
+      top = top - d
+      cur = -1
+      DrawRow old - top
+      top = top + d
+      cur = n
       FOR s = 1 TO 2
         GCOPY 0, LY + (d + 1) * 5 / 2, GW, rows * 10 - 5, 0, LY + (1 - d) * 5 / 2, 0, 1
       END FOR s

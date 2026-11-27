@@ -113,3 +113,15 @@ Format: wanted / limitation / did instead / suggested improvement.
 - CYD sustained check (z00m and KNUCKLE, 3 cold boots, play/switch/up/down cycles):
   late=0, maxGap ~11.6 ms, music stack high-water 1.8 KB free, iostack ~2.3 KB free,
   heap recovers to 110.8 KB / 69.6 KB largest after quit.
+
+## P9 (CYD device test of the full player)
+
+- The CYD text console is a fixed 64 px opaque overlay (y 176..240); the
+  status area is placed at `GH - 64` and the console is moved with
+  `WINDOW #0` while the player runs.
+- Fixed a one-row scroll redraw glitch in `MoveTo` (two highlighted rows).
+- Open: foreground run leaves FREE ~44K / largest 6K (canvas + stored
+  source fragment the heap), so music start (32K total, 8K contiguous)
+  fails with "Out of memory". Under `WINDOWMODE SHARED` + `TASK ...,
+  KTaskWait` the heap is 59K / 45K, but serial keys do not reach the task.
+  The earlier "plays from the app at 124.8K" claim was not reproducible.

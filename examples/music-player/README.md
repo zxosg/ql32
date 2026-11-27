@@ -36,8 +36,11 @@ folder; Backspace goes up; Space pause/resume; `s` stop; `+`/Right and
 bar, song count, entry n/N, now playing, approximate time (counted from
 `INKEY$` timeouts: no clock exists), and trapped errors.
 
-Host: no audio, Enter reports "Service unavailable". CYD: compile admission
-needs 56 B per token (about 2150 tokens free at idle), so the app was
-trimmed to fit (no scroll bar, Home/End, sort/filter toggles, playing-row
-marker). Playing knuckle.ym and z00m.vtx from the app fails with allocation
-errors (heap fragmentation). See `docs/notes/dirplayer-workarounds.md`.
+Host: no audio, Enter reports "Service unavailable". CYD (verified on
+device): navigation, folders, scroll bar, Home/End/PgUp/PgDn and the sort
+toggle work. The CYD text console is a fixed 64 px overlay at the bottom, so
+the program moves it with `WINDOW #0` and restores it on exit. Playback from
+the app run in the foreground fails with "Out of memory": the REPL-held
+source plus the 4-bit canvas leave about 44K free but only 6K contiguous,
+below the 8K music-start admission. Not a regression (same on the earlier
+main). See `docs/notes/dirplayer-workarounds.md`.
