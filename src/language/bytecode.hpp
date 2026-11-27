@@ -107,6 +107,44 @@ private:
     std::unique_ptr<Vector> values_;
 };
 
+// Parameter/local name lists are identical for every call of a procedure:
+// calls share one immutable list and copy it only when modified.
+class SharedNames {
+public:
+    using Vector = std::vector<std::string>;
+    using const_iterator = Vector::const_iterator;
+    using iterator = const_iterator;
+    SharedNames() = default;
+    explicit SharedNames(std::shared_ptr<const Vector> shared) : values_(std::move(shared)) {}
+    SharedNames& operator=(const Vector& values) {
+        if (values.empty()) values_.reset();
+        else values_ = std::make_shared<const Vector>(values);
+        return *this;
+    }
+    SharedNames& operator=(Vector&& values) {
+        if (values.empty()) values_.reset();
+        else values_ = std::make_shared<const Vector>(std::move(values));
+        return *this;
+    }
+    bool empty() const noexcept { return !values_ || values_->empty(); }
+    std::size_t size() const noexcept { return values_ ? values_->size() : 0; }
+    const_iterator begin() const { return values_ ? values_->begin() : emptyVector().begin(); }
+    const_iterator end() const { return values_ ? values_->end() : emptyVector().end(); }
+    const std::string& operator[](std::size_t index) const { return (*values_)[index]; }
+    void push_back(std::string value) {
+        Vector copy = values_ ? *values_ : Vector{};
+        copy.push_back(std::move(value));
+        values_ = std::make_shared<const Vector>(std::move(copy));
+    }
+
+private:
+    static const Vector& emptyVector() {
+        static const Vector empty;
+        return empty;
+    }
+    std::shared_ptr<const Vector> values_;
+};
+
 // These two labels are empty on almost every instruction. Store nonempty
 // values out of line to keep the common bytecode record compact.
 class OptionalString {
@@ -198,6 +236,7 @@ public:
     SharedText& operator=(const char* value) { assign(value); return *this; }
 
     const std::string& str() const noexcept { return text_ ? *text_ : emptyText(); }
+    const std::string& get() const noexcept { return str(); }
     operator const std::string&() const noexcept { return str(); }
     bool empty() const noexcept { return !text_; }
     std::size_t size() const noexcept { return str().size(); }
@@ -235,11 +274,11 @@ inline std::string operator+(const SharedText& a, const char* b) { return a.str(
 // need. Instructions without any of it carry a single null pointer.
 struct InstructionExtras {
     OptionalVector<ForItemSpec> forItems;
-    OptionalVector<std::string> parameters;
+    SharedNames parameters;
     OptionalVector<std::string> inputVariables;
-    OptionalVector<std::string> localNames;
+    SharedNames localNames;
     OptionalVector<ArrayArgumentCandidate> arrayArgumentCandidates;
-    OptionalString ownerDefinition;
+    SharedText ownerDefinition;
     OptionalString targetVariable;
     OptionalVector<SelectItemSpec> selectItems;
     OptionalVector<std::size_t> jumpScopes;

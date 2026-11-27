@@ -125,3 +125,29 @@ Format: wanted / limitation / did instead / suggested improvement.
   fails with "Out of memory". Under `WINDOWMODE SHARED` + `TASK ...,
   KTaskWait` the heap is 59K / 45K, but serial keys do not reach the task.
   The earlier "plays from the app at 124.8K" claim was not reproducible.
+
+## P10: why dirplayer cannot play in the foreground (CYD)
+
+Measured on the CYD (no PSRAM), dirplayer.bas (1144 instructions):
+
+| Point | Free | Largest block |
+| --- | --- | --- |
+| Idle | 180.5K | 110.6K |
+| After LOAD | 164.7K | 110.6K |
+| After RUN starts (before canvas) | 82.9K | 38.9K |
+| After the 38.4K canvas | ~43K | 4-7K |
+
+- RUN retains about 83K (compiled bytecode, pool, extras), and the freed
+  compile transients leave ~43K of holes that are each under ~5K. The canvas
+  then takes the only large block.
+- Playback needs contiguous blocks (6 KiB music worker stack, 4 KiB VFS file
+  buffers, 2 KiB LH5 tables, 8 KiB admission). With the app loaded the largest
+  block is 2-4.6K, so play fails with "Out of memory" for every song type.
+- Shrinking the contiguous admission to 2K only moves the failure to the 6144 B
+  worker stack; a static .bss stack lets the app start but the VFS 4096 B
+  `setvbuf` buffer and LH5 vectors then fail. These were not shipped.
+- Shipped: calls to one procedure now share a single immutable parameter and
+  local-name list and `ownerDefinition` is a pooled `SharedText` (about 1.3K
+  saved on the device at program start, ~3K on host).
+- Real fix needs a bounded pre-reserved music arena or smaller retained code
+  (Call extras side table, 24 B instructions), or a smaller dirplayer canvas.
