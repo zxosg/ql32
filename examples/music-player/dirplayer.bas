@@ -56,6 +56,8 @@ REPeat main WHILE quit = 0
   END IF
 END REPeat main
 TRAP MUSIC STOP
+REM Release the 25.6K canvas first so the console window can be re-created.
+TRAP WINDOW #1, 0, 0, 8, 8
 TRAP WINDOW #0, 0, SH - 64, GW, 64
 CLS
 

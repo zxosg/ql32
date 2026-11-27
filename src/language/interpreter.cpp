@@ -1110,6 +1110,7 @@ public:
         resolveSourceJumps(tolerateUnresolvedSourceJumps);
         resolveDataRestores();
         resolveCalls(tolerateUnresolvedCalls);
+        dropCompileOnlyMetadata();
         for (const auto& [name, definition] : definitions_) {
             code_.functions.emplace(name, detail::FunctionMetadata{
                 definition.address, definition.function, definition.parameters,
@@ -1135,6 +1136,7 @@ public:
         expression();
         if (!check(Kind::End)) error(peek(), "unexpected text after expression");
         resolveCalls(false);
+        dropCompileOnlyMetadata();
         code_.functions = enclosingFunctions_;
         code_.arrays = arrays_;
         // Transfer the table: copying all include constants doubles preparation RAM.
@@ -1198,6 +1200,9 @@ private:
         advance(); // ':'
         if (!labels_.emplace(scopedLabel(label.text), currentSourceTarget(label)).second)
             error(label, "duplicate label");
+    }
+    void dropCompileOnlyMetadata() {
+        for (Instruction& instruction : code_) instruction.dropCompileOnlyExtras();
     }
     void resolveSourceJumps(bool tolerateUnresolved) {
         for (Instruction& instruction : code_) {
@@ -1767,8 +1772,10 @@ private:
         instruction.setArgCount(arguments + static_cast<std::size_t>(channelArgument));
         instruction.channelArgument = channelArgument;
         instruction.expectsValue = expectsValue;
-        instruction.mutableExtra().arrayArgumentCandidates = std::move(arrayCandidates);
-        instruction.mutableExtra().ownerDefinition = currentDefinitionName_;
+        if (!arrayCandidates.empty() || !currentDefinitionName_.empty()) {
+            instruction.mutableExtra().arrayArgumentCandidates = std::move(arrayCandidates);
+            instruction.mutableExtra().ownerDefinition = currentDefinitionName_;
+        }
         code_.push_back(std::move(instruction));
     }
     void blockDim() {
