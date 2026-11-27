@@ -174,3 +174,19 @@ failed allocation left is the 10 KB console-window restore when the app exits.
 
 Still open: a compact (OPL-style) bytecode would cut the ~83 KB retained program
 to roughly a third and is the next lever if more features are restored.
+
+## P12: compile-only metadata released
+
+`ownerDefinition`, `jumpScopes` and `arrayArgumentCandidates` are read only
+while compiling; they are now dropped after resolution and the per-instruction
+extras record is freed when nothing the VM needs remains. `emitCall` no longer
+allocates an extras record for calls without candidates or owner.
+`dirplayer.bas` also shrinks the canvas before restoring the console window at
+exit (removes the 10 KB ALLOCFAIL).
+
+CYD, dirplayer, `FREE()` (free, largest) by phase, before -> after:
+- idle prompt 180.7K/110.6K (unchanged); after LOAD 164.7K/110.6K (unchanged)
+- RUN start 88.9K/45.0K -> 96.7K/47.1K (+7.8K)
+- after canvas 58.3K/19.4K -> 66.2K/22.5K
+- playing z00m 36.8K/5.9K -> 44.6K/8.2K (largest +2.3K, now above the 8K admission)
+- exit: failedalloc 1 -> 0

@@ -282,6 +282,18 @@ struct InstructionExtras {
     OptionalString targetVariable;
     OptionalVector<SelectItemSpec> selectItems;
     OptionalVector<std::size_t> jumpScopes;
+
+    // ownerDefinition, jumpScopes and arrayArgumentCandidates are only read while
+    // the program is being compiled and resolved.
+    void dropCompileOnly() {
+        arrayArgumentCandidates = std::vector<ArrayArgumentCandidate>{};
+        ownerDefinition = std::string{};
+        jumpScopes = std::vector<std::size_t>{};
+    }
+    bool hasRuntimeData() const {
+        return !forItems.empty() || !parameters.empty() || !inputVariables.empty() ||
+               !localNames.empty() || !targetVariable.empty() || !selectItems.empty();
+    }
 };
 
 class ExtrasPtr {
@@ -305,6 +317,12 @@ public:
     InstructionExtras& mutate() {
         if (!value_) value_ = std::make_unique<InstructionExtras>();
         return *value_;
+    }
+    // Frees the record once nothing the VM reads remains in it.
+    void dropCompileOnly() {
+        if (!value_) return;
+        value_->dropCompileOnly();
+        if (!value_->hasRuntimeData()) value_.reset();
     }
 
 private:
@@ -380,6 +398,7 @@ struct Instruction : InstructionHead, InstructionFlags {
     // Read access never allocates; mutableExtra() creates the side record.
     const InstructionExtras& extra() const { return extras.get(); }
     InstructionExtras& mutableExtra() { return extras.mutate(); }
+    void dropCompileOnlyExtras() { extras.dropCompileOnly(); }
 
     // Declaration order is deliberate: the 16-bit fields fill the tail padding
     // after the flag bits before the 32-bit words start.
