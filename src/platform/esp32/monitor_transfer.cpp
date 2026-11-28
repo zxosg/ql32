@@ -158,11 +158,11 @@ bool handleMonitorTransferCommand(std::string_view input,
                 return h ? static_cast<unsigned>(uxTaskGetStackHighWaterMark(
                                static_cast<TaskHandle_t>(h))) : 0u;
             };
-            char buf[280];
+            char buf[400];
             std::snprintf(buf, sizeof(buf),
                 "HEAPSTATS|free=%u|largest=%u|min=%u|loopstack=%u|musicstack=%u|"
                 "musiciostack=%u|failedalloc=%u|lastfail=%u|musicblocks=%u|musiclate=%u|"
-                "musicwriteerr=%u|musicmaxgap=%u",
+                "musicwriteerr=%u|musicmaxgap=%u|ifree=%u|ilargest=%u|psfree=%u|pslargest=%u",
                 static_cast<unsigned>(info.total_free_bytes),
                 static_cast<unsigned>(info.largest_free_block),
                 static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT)),
@@ -173,7 +173,11 @@ bool handleMonitorTransferCommand(std::string_view input,
                 static_cast<unsigned>(d.musicBlocks.load()),
                 static_cast<unsigned>(d.musicLateBlocks.load()),
                 static_cast<unsigned>(d.musicWriteErrors.load()),
-                static_cast<unsigned>(d.musicMaxGapUs.load()));
+                static_cast<unsigned>(d.musicMaxGapUs.load()),
+                static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
             serial.println(buf);
             return true;
         }
