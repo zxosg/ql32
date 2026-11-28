@@ -1625,8 +1625,9 @@ private:
                 if (check(Kind::Newline) || check(Kind::Colon) || check(Kind::End) ||
                     check(Kind::Else) || check(Kind::EndKeyword)) continue;
             }
+            // Definitions (e.g. from an INCLUDE) do not end the CONST/OPTION preamble.
             const bool moduleDeclaration = moduleScope &&
-                (check(Kind::Const) || check(Kind::Option));
+                (check(Kind::Const) || check(Kind::Option) || check(Kind::Define));
             statement(moduleScope);
             if (moduleScope && !moduleDeclaration) moduleCodeStarted_ = true;
             if (!check(Kind::End) && !check(Kind::Newline) && !check(Kind::Colon) &&
@@ -3258,6 +3259,20 @@ std::optional<std::string> includePathFromLine(const std::string& sourceLine,
     return path;
 }
 
+// CONST and OPTION lines are module declarations and do not close the INCLUDE preamble.
+bool isPreambleDeclaration(const std::string& line) {
+    const std::string text = trimSourceLine(line);
+    for (const std::string_view word : {std::string_view("CONST"), std::string_view("OPTION")}) {
+        if (text.size() <= word.size() || !std::isspace(static_cast<unsigned char>(text[word.size()])))
+            continue;
+        bool same = true;
+        for (std::size_t i = 0; i < word.size(); ++i)
+            same = same && std::toupper(static_cast<unsigned char>(text[i])) == word[i];
+        if (same) return true;
+    }
+    return false;
+}
+
 std::string expandIncludesRecursive(const std::string& source,
                                     runtime::StorageService* storage,
                                     const std::string& parent,
@@ -3302,7 +3317,8 @@ std::string expandIncludesRecursive(const std::string& source,
             continue;
         }
 
-        if (!trimSourceLine(line).empty() && !isSourceComment(line)) headerOpen = false;
+        if (!trimSourceLine(line).empty() && !isSourceComment(line) && !isPreambleDeclaration(line))
+            headerOpen = false;
         if (line.size() + 1 > maxBytes - expandedBytes)
             throw std::runtime_error("expanded source exceeds 64 KiB");
         expandedBytes += line.size() + 1;
