@@ -1687,6 +1687,21 @@ void testDebugOverlayComposesAboveGraphics() {
     require(glyphVisible, "debug overlay text glyph was not composed");
 }
 
+void testFilledRectangleOutsideCanvasIsIgnored() {
+    using namespace ql32::graphics;
+    auto presenter = std::make_shared<CapturingPresenter>();
+    WindowedService graphics(24, 16, presenter);
+    graphics.setInk(52, 7);
+    graphics.fillRectangle(52, {30, 2}, 10, 4);
+    graphics.fillRectangle(52, {2, 20}, 10, 4);
+    graphics.fillRectangle(52, {-20, 2}, 10, 4);
+    graphics.fillRectangle(52, {20, 12}, 10, 10);
+    const auto id = graphics.windowForSession(52);
+    require(graphics.windowManager().canvas(id).pixel(21, 13) == 7 &&
+                graphics.windowManager().canvas(id).pixel(5, 3) == 0,
+            "filled rectangle clipping was wrong for off-canvas rectangles");
+}
+
 void testCanvasStorageReleasesAndReusesAllocations() {
     using namespace ql32::graphics;
     WindowManager manager(16, 8);
@@ -2930,6 +2945,7 @@ int main() {
     testDiscardSessionReleasesActiveAndFrozenWindowsByOwner();
     testRepeatedWindowSessionBurstsReleaseAndRecreate();
     testDebugOverlayComposesAboveGraphics();
+    testFilledRectangleOutsideCanvasIsIgnored();
     testCanvasStorageReleasesAndReusesAllocations();
     testPackedCanvasScrollCopiesAlignedStorageAndHandlesOddRows();
     testRowCompositionMatchesFullFrameForPackedCanvasWidths();

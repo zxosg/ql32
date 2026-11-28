@@ -835,6 +835,7 @@ void IndexedCanvas::rectangle(Point topLeft, std::int32_t width, std::int32_t he
         const auto clippedRight = std::min<std::int64_t>(width_ - 1, right);
         const auto top = std::max<std::int64_t>(0, topLeft.y);
         const auto clippedBottom = std::min<std::int64_t>(height_ - 1, bottom);
+        if (left > clippedRight || top > clippedBottom) return;
         for (auto y = top; y <= clippedBottom; ++y) {
             const auto firstPixel = static_cast<std::size_t>(y) * width_ +
                                     static_cast<std::size_t>(left);
