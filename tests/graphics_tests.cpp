@@ -2696,6 +2696,74 @@ void testStartupSplashIsCentredAtDefaultResolutions() {
     }
 }
 
+std::string readShowcaseFile(const std::string& name) {
+    std::ifstream file(std::string(QL32_SOURCE_DIR) + "/examples/showcase/" + name);
+    require(file.good(), ("examples/showcase/" + name + " is missing").c_str());
+    std::ostringstream text;
+    text << file.rdbuf();
+    return text.str();
+}
+
+// Replaces each INCLUDE line with the file it names, as the device does at load time.
+std::string inlineShowcaseIncludes(std::string source) {
+    for (const char* name : {"gt-layout.bas", "gt-title.bas"}) {
+        const std::string line = std::string("INCLUDE \"") + name + "\"\n";
+        const auto at = source.find(line);
+        require(at != std::string::npos, "showcase lost an INCLUDE line");
+        source.replace(at, line.size(), readShowcaseFile(name));
+    }
+    return source;
+}
+
+void replaceFirst(std::string& text, const std::string& from, const std::string& to) {
+    const auto at = text.find(from);
+    require(at != std::string::npos, "showcase test hook missing");
+    text.replace(at, from.size(), to);
+}
+
+void testShowcaseBootSceneIsCentredAtDefaultResolutions() {
+    const std::array<std::pair<std::uint32_t, std::uint32_t>, 6> sizes{{
+        {320, 216}, {320, 200}, {320, 240}, {400, 300}, {640, 400}, {640, 480}}};
+    for (const auto& size : sizes) {
+        std::string source = inlineShowcaseIncludes(readShowcaseFile("showcase.bas"));
+        replaceFirst(source, "autoSecs = 0", "autoSecs = 1");
+        replaceFirst(source, "holdScene = -1", "holdScene = 0");
+        ql32::runtime::SystemInfoProfile profile;
+        profile.values = {"0.1.0", "unknown", "test_board_platform",
+                          "test " + std::to_string(size.first) + "x" +
+                              std::to_string(size.second) + " rgb565", "i", "s", "f"};
+        auto systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
+            std::move(profile));
+        auto presenter = std::make_shared<CapturingPresenter>();
+        auto graphics = std::make_shared<WindowedService>(size.first, size.second, presenter);
+        ql32::Interpreter interpreter({}, {}, {}, graphics, {}, {}, {}, 0, {}, {}, {},
+                                      systemInfo);
+        std::ostringstream output;
+        interpreter.executeResumable(source, output);
+        const auto& frame = presenter->lastFrame;
+        require(frame.width == size.first && presenter->presentCount > 0,
+                "showcase boot scene did not present a frame");
+        std::uint32_t minX = frame.width, maxX = 0, minY = frame.height, maxY = 0;
+        for (std::uint32_t y = 0; y < frame.height; ++y)
+            for (std::uint32_t x = 0; x < frame.width; ++x)
+                if (frame.pixels[static_cast<std::size_t>(y) * frame.width + x]) {
+                    minX = std::min(minX, x);
+                    maxX = std::max(maxX, x);
+                    minY = std::min(minY, y);
+                    maxY = std::max(maxY, y);
+                }
+        require(minX <= maxX, "showcase boot scene drew nothing");
+        require(std::abs(static_cast<int>(minX + maxX) / 2 -
+                         static_cast<int>(frame.width / 2)) <= 6,
+                "showcase boot scene is not horizontally centred");
+        require(std::abs(static_cast<int>(minY + maxY) / 2 -
+                         static_cast<int>(frame.height / 2)) <= 12,
+                "showcase boot scene is not vertically centred");
+        require(minX > 0 && maxX + 1 < frame.width && maxY + 1 < frame.height,
+                "showcase boot scene leaves the screen");
+    }
+}
+
 void testSystemInfoRejectsInvalidSelector() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -2814,6 +2882,7 @@ void testMenuEnableRejectsInvalidValuesAndUnknownItems() {
 
 int main() {
     testStartupSplashIsCentredAtDefaultResolutions();
+    testShowcaseBootSceneIsCentredAtDefaultResolutions();
     testDrawingCallsAndSessionOwnership();
     testFractionalDrawingGeometryFloorsToPixels();
     testFontSelectionChangesNativeTextCellSize();
