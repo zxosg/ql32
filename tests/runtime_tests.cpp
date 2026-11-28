@@ -1683,6 +1683,15 @@ void testProceduresUseGlobalArrays() {
         "procedures defined before DIM must use global arrays");
 }
 
+void testConstOptionAfterDefinitions() {
+    ql32::Interpreter second;
+    require(runBasic(second,
+        "DEFine FuNction two\nRETurn 2\nEND DEFine two\n"
+        "CONST KLate = 5\nPRINT KLate + two()\n") == "7\n", "CONST after definitions must be accepted");
+    ql32::Interpreter third;
+    require(runFails(third, "PRINT 1\nCONST KBad = 1\n"), "CONST after executable code still rejected");
+}
+
 void testKeyConstantNamesReserved() {
     const char* programs[] = {
         "KKeyUp=7\n", "kkeyup=7\n", "DIM KKeyUp(3)\n", "FOR KKeyUp=1 TO 2\nNEXT KKeyUp\n",
@@ -1805,6 +1814,7 @@ int main() {
     try {
         testLanguageAdditionsBatch2();
         testKeyConstantNamesReserved();
+        testConstOptionAfterDefinitions();
         testProceduresUseGlobalArrays();
         testLanguageAdditionsBatch1();
         testPrintLinesAreChargedToSliceBudget();

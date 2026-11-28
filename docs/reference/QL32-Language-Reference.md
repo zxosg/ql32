@@ -206,7 +206,7 @@ limits and board pin ownership.
 | `STOP` | `STOP` | Ends the current run while retaining enough state for shell `CONTINUE`. | `IF pause% THEN STOP` |
 | `REM` | `REM text` or `' text` | Starts a comment through the end of the source line. `REMark` is also accepted. | `REM initialize counters` |
 | `CONST` | `CONST name = [sign] number` or `CONST name$ = string` | Declares an immutable compile-time numeric or string value in the module preamble. | `CONST Limit = 8` |
-| `OPTION` | `OPTION KOptMathSingle\|KOptMathDouble\|KEspCpuFreq80\|KEspCpuFreq160\|KEspCpuFreq240` | Selects math precision per module or requests device-wide ESP32 CPU frequency. Include `ql32.inc`; options must precede definitions and executable code. | `OPTION KOptMathSingle` |
+| `OPTION` | `OPTION KOptMathSingle\|KOptMathDouble\|KEspCpuFreq80\|KEspCpuFreq160\|KEspCpuFreq240` | Selects math precision per module or requests device-wide ESP32 CPU frequency. Include `ql32.inc`; options must precede executable code (definitions, e.g. from `INCLUDE`, may come first). | `OPTION KOptMathSingle` |
 | `DIV` | `integer DIV integer` | Floor quotient for integral Int32 operands. | `q% = 7 DIV 3` |
 | `MOD` | `integer MOD integer` | Remainder paired with floor `DIV`; divisor cannot be zero. | `r% = 7 MOD 3` |
 | `AND` | `number AND number` | Logical AND; returns `1` when both operands are nonzero. | `IF a% AND b% THEN PRINT "both"` |

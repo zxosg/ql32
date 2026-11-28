@@ -62,7 +62,10 @@ coverage against the complete keyword table.
 
 `INCLUDE "relative/path.bas"` is a QL/32 source directive processed before
 tokenization. It must appear in the module preamble, before executable module
-code and outside procedure bodies; blank lines and comments may precede it.
+code and outside procedure bodies; blank lines, comments, `CONST` and `OPTION`
+lines may precede it. `CONST` and `OPTION` may also follow definitions (such as
+an included body) but never executable code; a definition compiled before a
+`CONST` does not see that constant.
 Included files may contain more preamble includes and BASIC procedure/function
 definitions. Those definitions are textually inserted into the including
 module and can be called like local definitions. Includes resolve relative to

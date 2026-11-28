@@ -676,6 +676,18 @@ void testGetChannelInspection() {
                                    std::string::npos;
         }
         require(closedHandleRejected, "GETCHANNEL accepted a closed handle");
+
+        {
+            std::ofstream body(root / "body.bas", std::ios::binary);
+            body << "DEFine FuNction two\nRETurn 2\nEND DEFine two\n";
+        }
+        std::ostringstream preamble;
+        interpreter.execute("INCLUDE \"ql32.inc\"\n"
+                            "CONST KLate = 5\n"
+                            "INCLUDE \"body.bas\"\n"
+                            "CONST KLater = 6\n"
+                            "PRINT KLate + KLater + two()\n", preamble);
+        require(preamble.str() == "13\n", "CONST around INCLUDE of definitions failed");
     } catch (...) {
         std::error_code ignored;
         std::filesystem::remove_all(root, ignored);
