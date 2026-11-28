@@ -1667,6 +1667,22 @@ bool runFails(ql32::Interpreter& interpreter, const std::string& source) {
     return false;
 }
 
+void testProceduresUseGlobalArrays() {
+    ql32::Interpreter interpreter;
+    const std::string out = runBasic(interpreter,
+        "DIM g$(3)\nDIM n(3)\nDIM m(2,2)\n"
+        "DEFine PROCedure setit\ng$(0) = \"hi\"\nn(1) = 5\nm(1,2) = 7\nEND DEFine setit\n"
+        "DEFine FuNction getit\nRETurn n(1) + LEN(g$(0)) + m(1,2)\nEND DEFine getit\n"
+        "setit\nPRINT g$(0)\nPRINT getit()\n");
+    require(out == "hi\n14\n", "procedures must read and write global arrays");
+    ql32::Interpreter later;
+    require(runBasic(later,
+        "DEFine PROCedure setit\ng$(0) = \"hi\"\nn(1) = 5\nEND DEFine setit\n"
+        "DEFine FuNction getit\nRETurn n(1) + LEN(g$(0))\nEND DEFine getit\n"
+        "DIM g$(3)\nDIM n(3)\nsetit\nPRINT g$(0)\nPRINT getit()\n") == "hi\n7\n",
+        "procedures defined before DIM must use global arrays");
+}
+
 void testKeyConstantNamesReserved() {
     const char* programs[] = {
         "KKeyUp=7\n", "kkeyup=7\n", "DIM KKeyUp(3)\n", "FOR KKeyUp=1 TO 2\nNEXT KKeyUp\n",
@@ -1789,6 +1805,7 @@ int main() {
     try {
         testLanguageAdditionsBatch2();
         testKeyConstantNamesReserved();
+        testProceduresUseGlobalArrays();
         testLanguageAdditionsBatch1();
         testPrintLinesAreChargedToSliceBudget();
         testInterpreterSessions();

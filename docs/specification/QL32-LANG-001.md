@@ -455,6 +455,10 @@ compile error ("name is a reserved built-in key constant"), never a silent
 shadow. `TICKS`, `TIMER`, `MIN`, `MAX`, `CLAMP` and `INSTR` are functions only
 when followed by `(`; without it they remain ordinary variable names.
 
+Definitions may read and write global arrays even when they appear before the
+`DIM` that declares them (QL/32-specific; the array must be dimensioned before
+the definition runs).
+
 Block `IF`, `FOR`, `REPeat`, `EXIT`, and `SELect ON` use SuperBASIC
 spellings. The M1 `FOR` target preserves the useful SuperBASIC range model:
 
