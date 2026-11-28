@@ -520,6 +520,10 @@ void setup() {
         0, std::max<std::int32_t>(0, static_cast<std::int32_t>(display.height()) - 40),
         static_cast<std::uint32_t>(display.width()),
         static_cast<std::uint32_t>(std::min<std::int32_t>(40, display.height()))});
+    // Keep the default graphics window clear of the console strip so centred output stays visible.
+    if (display.height() > 40)
+        graphics->setDefaultWindowBounds(1, {0, 0, static_cast<std::uint32_t>(display.width()),
+                                              static_cast<std::uint32_t>(display.height() - 40)});
     graphics->setConsoleBoundsCallback([](ql32::graphics::Rect bounds) {
         if (tftConsole) tftConsole->setBounds(bounds);
     });
