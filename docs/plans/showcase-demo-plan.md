@@ -191,11 +191,13 @@ for layout; Olimex/LILYGO build-only).
 * **SMSQ/E or QL emulation features** (pointer environment, QDOS sprites, windows managers): QL/32 is not an emulator.
 * **Board-specific verification**: Olimex, LILYGO and Tenstar results are layout-tested only, audio unverified on Tenstar.
 
-## 11. Decisions for the product owner
+## 11. Decisions (answered by the product owner)
 
-1. **Concept**: (a) **guided tour + scene menu (recommended)**, (b) pure continuous demoscene show with no captions, (c) interactive launcher only (no autorun).
-2. **Scope**: core scenes 0-10 only, or include optional scenes A-F (touch, rotate, mirror, network, hardware, modes)?
-3. **Music**: bundled tiny VTX tunes from `examples/music` (recommended) or user-supplied songs on SD?
-4. **Assets**: procedural bitmaps only (no licensing, smaller) or add a few generated QIMG sprites (needs a small converter tool)?
-5. **Autorun**: opt-in via `showcase.bas` (recommended; splash stays the default `startup.bas`) or an alternative `startup.bas`?
-6. **Name**: "QL/32: The Grand Tour" or another.
+1. Concept: **guided tour + scene menu**.
+2. Scope: **core scenes 0-10 only**; optional scenes A-F are out of scope for now.
+3. Music: **bundled tiny VTX tunes** from `examples/music` (LyraII1, Bosconia1).
+4. Assets: **procedural bitmaps only**; no QIMG assets or converter.
+5. Autorun: **opt-in `showcase.bas`**; `startup.bas` stays the splash.
+6. Name: **"The Grand Tour"** (QL/32: The Grand Tour).
+
+Platform notes: the Tenstar has no audio or SD card, so scenes 5 (music part) and 7 (SDC: part) skip those parts gracefully there.
