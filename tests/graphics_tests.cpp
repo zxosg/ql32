@@ -2617,6 +2617,7 @@ void testSystemInfoFunctionsUseInjectedPortableProfile() {
                       "vga 320x200", "ps2", "ffs,sd", "vga,ps2"};
     profile.capabilities = {{"display", true}, {"PS2", true},
                             {"spi bus", false}};
+    profile.properties = {{"Display.Width", 320}, {"display.height", 200}};
     auto systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
         std::move(profile));
     ql32::Interpreter interpreter({}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {},
@@ -2630,6 +2631,11 @@ void testSystemInfoFunctionsUseInjectedPortableProfile() {
     require(output.str() ==
                 "0.1.0|test-build|test-board|vga 320x200|ps2|ffs,sd|vga,ps2\n1|0|-1\n",
             "SYSINFO$/CAPABILITY did not expose the injected portable profile");
+    std::ostringstream size;
+    interpreter.executeResumable(
+        "PRINT CAPABILITY(\"display.width\");\"x\";CAPABILITY(\"display.height\");"
+        "\"|\";CAPABILITY(\"display.depth\")\n", size);
+    require(size.str() == "320x200|-1\n", "display properties were not exposed by CAPABILITY");
 }
 
 std::string readSplashSource() {

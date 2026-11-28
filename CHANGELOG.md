@@ -10,6 +10,7 @@
 - `HEAP STATS` reports internal and PSRAM free/largest (`ifree`, `ilargest`, `psfree`, `pslargest`); new `ql32_tenstar_esp32s3_diag` env; Tenstar hardware test report `docs/test-results/tenstar-hardware-2026-11-28.md`; `examples/stress/bench.bas`.
 - `examples/startup/startup.bas`: boot splash (large QL32 title; version, free memory and platform in the small font) that stays on screen after boot (held as a frozen image, ~40K, reclaimed automatically under memory pressure). Copy it to `FFS:/startup.bas` to run at boot. One shared source: layout is computed at run time from window size and font metrics so it is centred on every default resolution (host-tested at six sizes; only the CYD is hardware-verified). See `examples/startup/README.md`.
 
+- Language: `SQRT`, `LN`, `EXP`, `ATAN`; `CAPABILITY("display.width"/"display.height"/"display.depth")` numeric display properties; truthful `CAPABILITY("audio")` and `CAPABILITY("sdc")` on every profile.
 - `examples/showcase/`: "The Grand Tour" framework (phase 1): director with run-time layout library, block-letter title, tiled worker scenes via `TASKVIEW`, keys N/space, P, Q, and a hands-free test mode. See `examples/showcase/README.md`.
 - `examples/showcase/`: Grand Tour phase 2 scenes: palette cycling, fonts with a `GCOPY` scroller, binary64 versus binary32 math twins, and a procedural parallax.
 
