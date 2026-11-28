@@ -1,5 +1,6 @@
 #include "ql32/version.hpp"
 #include "ql32/vm/scheduler.hpp"
+#include "ql32/vm/tick_batch.hpp"
 #include "ql32/ui/service.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 
@@ -2199,7 +2200,31 @@ void testBasicProgramChangesModeWhileWorkersRunAndQueriesMode() {
 
 } // namespace
 
+void testTickBatchHonoursBudgetIdleAndUiWait() {
+    struct Fake {
+        int slices = 0;
+        int limit = 0;
+        int uiAfter = -1;
+        bool tick() { if (slices >= limit) return false; ++slices; return true; }
+        bool hasWaitingUiTask() const { return slices == uiAfter; }
+    };
+    std::uint64_t clock = 0;
+    const auto now = [&] { return clock += 100; };
+    Fake idle;
+    require(!ql32::vm::tickBatch(idle, 5000, now) && idle.slices == 0, "idle scheduler reports no slice");
+    Fake busy{0, 1000};
+    require(ql32::vm::tickBatch(busy, 1000, now) && busy.slices > 1 && busy.slices < 20,
+            "batch runs several slices within the budget");
+    Fake one{0, 1000};
+    require(ql32::vm::tickBatch(one, 0, now) && one.slices == 1, "zero budget runs one slice");
+    Fake ui{0, 1000, 3};
+    require(ql32::vm::tickBatch(ui, 1000000, now) && ui.slices == 3, "UI wait ends the batch");
+    Fake few{0, 4};
+    require(ql32::vm::tickBatch(few, 1000000, now) && few.slices == 4, "batch stops when nothing is runnable");
+}
+
 int main() {
+    testTickBatchHonoursBudgetIdleAndUiWait();
     testAdmissionRefusesWorkersAndModeGrowthWhenMemoryIsLow();
     testAdmissionDisabledByDefault();
     testCanvasAdmissionNeedsContiguousBlockPlusHeadroom();

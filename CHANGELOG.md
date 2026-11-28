@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Scheduler runs time-budgeted batches of VM slices per `loop()` on ESP platforms: up to 3.4x faster
+  integer loops on Tenstar, 1.8x mandelbrot on CYD; music timing unchanged (late=0). See
+  `docs/test-results/scheduler-batching-2026-11-28.md`.
+
 ### Added
 - `HEAP STATS` reports internal and PSRAM free/largest (`ifree`, `ilargest`, `psfree`, `pslargest`); new `ql32_tenstar_esp32s3_diag` env; Tenstar hardware test report `docs/test-results/tenstar-hardware-2026-11-28.md`; `examples/stress/bench.bas`.
 - `examples/startup/startup.bas`: boot splash (large QL32 title; version, free memory and platform in the small font) that stays on screen after boot (held as a frozen image, ~40K, reclaimed automatically under memory pressure). Copy it to `FFS:/startup.bas` to run at boot. One shared source: layout is computed at run time from window size and font metrics so it is centred on every default resolution (host-tested at six sizes; only the CYD is hardware-verified). See `examples/startup/README.md`.
