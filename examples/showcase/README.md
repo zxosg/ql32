@@ -10,7 +10,10 @@ not `startup.bas`.
 | `showcase.bas` | Director: runs foreground (`RUN`) because `TASKVIEW` is supervisor-only. |
 | `gt-layout.bas` | Display size from `SYSINFO$(3)`, tile size helpers. INCLUDEd, so kept tiny. |
 | `gt-title.bas` | Block-letter title proc used by the boot and finale screens. |
-| `gt-tile.bas` | Placeholder tile worker (replaced by real scenes in later phases). |
+| `gt-s01-palette.bas` | Scene 1: concentric rectangles, `PALROT`, `PALFADE`. |
+| `gt-s02-fonts.bas` | Scene 2: four fonts and a `GCOPY` scroller. |
+| `gt-s03-double.bas`, `gt-s03-single.bas`, `gt-mathbody.bas`, `gt-optsingle.bas` | Scene 3: the same maths under binary64 and `OPTION KOptMathSingle`, side by side. |
+| `gt-s06-parallax.bas` | Scene 4: three-layer procedural parallax with `GCOPY`. |
 
 ## Run
 
@@ -27,6 +30,6 @@ source serves every board; only the CYD and Tenstar are hardware-verified.
 ## Test mode
 
 `autoSecs > 0` advances scenes without keys; `holdScene = N` ends the run with `STOP` while
-scene N stays on screen, so `SCREEN` can capture it. The host test
+scene N stays on screen for 6 seconds before `STOP`, so `SCREEN` can capture it. The host test
 (`testShowcaseBootSceneIsCentredAtDefaultResolutions`) checks the boot scene is centred at six
 resolutions.

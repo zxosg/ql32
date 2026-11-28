@@ -28,3 +28,7 @@ END DEFine TileW
 DEFine FuNction TileH()
   RETurn INT(TileW() * 9 / 16)
 END DEFine TileH
+
+DEFine FuNction StageH()
+  RETurn TileH() * 2
+END DEFine StageH
