@@ -31,6 +31,7 @@
 #include "capabilities.hpp"
 #include "pins.hpp"
 #include "ql32/vm/scheduler.hpp"
+#include "ql32/vm/tick_batch.hpp"
 #include "ql32/platform/esp32/sd_channels.hpp"
 #include "ql32/platform/esp32/idf_sd.hpp"
 #include "ql32/platform/esp32/drive_router.hpp"
@@ -1033,12 +1034,18 @@ void refreshDebugOverlay() {
     graphics->setDebugOverlayText(line);
 }
 
+// Slices run back to back for up to this long per loop() pass; the loop only sleeps when idle.
+constexpr std::uint64_t kSchedulerBatchMicros = 6000;
+bool schedulerRanSlice = false;
+
 void advanceScheduler() {
 #if defined(QL32_OLIMEX_USE_SPIFFS) && defined(QL32_OLIMEX_DMA_DISPLAY)
     flashHoldPoll();
 #endif
     if (!scheduler) return;
-    if (!scheduler->executionPaused()) (void)scheduler->tick();
+    schedulerRanSlice = !scheduler->executionPaused() &&
+        ql32::vm::tickBatch(*scheduler, kSchedulerBatchMicros,
+            [] { return static_cast<std::uint64_t>(micros()); });
     if (uiPresenter) uiPresenter->refresh();
 
     refreshDebugOverlay();
@@ -2242,6 +2249,14 @@ void loop() {
     if (graphics) graphics->pollPendingPresentation();
 #endif
     refreshInputCaretBlink();
-    delay(1);
+    // Sleep only when nothing ran, and at least every 32 ms so lower-priority tasks and the idle task get time.
+    static std::uint32_t lastSleepMs = 0;
+    const auto nowMs = millis();
+    if (!schedulerRanSlice || nowMs - lastSleepMs >= 32) {
+        lastSleepMs = nowMs;
+        delay(1);
+    } else {
+        yield();
+    }
 #endif
 }

@@ -29,6 +29,7 @@
 #include "pins.hpp"
 #include "ql32/graphics/windowed_service.hpp"
 #include "ql32/vm/scheduler.hpp"
+#include "ql32/vm/tick_batch.hpp"
 #include "ql32/runtime/file_ops.hpp"
 #include "ql32/platform/esp32/clock.hpp"
 #include "ql32/platform/esp32/arduino_hardware.hpp"
@@ -527,9 +528,14 @@ bool acceptsInput() {
     return status && *status == ql32::vm::TaskStatus::WaitingInput;
 }
 
+// Slices run back to back for up to this long per loop() pass; the loop only sleeps when idle.
+constexpr std::uint64_t kSchedulerBatchMicros = 6000;
+bool schedulerRanSlice = false;
+
 void advanceScheduler() {
     if (!scheduler) return;
-    (void)scheduler->tick();
+    schedulerRanSlice = ql32::vm::tickBatch(*scheduler, kSchedulerBatchMicros,
+        [] { return static_cast<std::uint64_t>(micros()); });
     refreshDebugOverlay();
     if (uiPresenter) uiPresenter->refresh();
 
@@ -892,5 +898,13 @@ void loop() {
     pollTouch();
     if (uiPresenter) uiPresenter->flushSerialEscape(millis());
     advanceScheduler();
-    delay(1);
+    // Sleep only when nothing ran, and at least every 32 ms so lower-priority tasks and the idle task get time.
+    static std::uint32_t lastSleepMs = 0;
+    const auto nowMs = millis();
+    if (!schedulerRanSlice || nowMs - lastSleepMs >= 32) {
+        lastSleepMs = nowMs;
+        delay(1);
+    } else {
+        yield();
+    }
 }
