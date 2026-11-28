@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed heap corruption (seen as `TG1WDT_SYS_RESET` with several tasks) when a filled `RECT` lay entirely outside a task's window.
 - Scheduler runs time-budgeted batches of VM slices per `loop()` on ESP platforms: up to 3.4x faster
   integer loops on Tenstar, 1.8x mandelbrot on CYD; music timing unchanged (late=0). See
   `docs/test-results/scheduler-batching-2026-11-28.md`.
