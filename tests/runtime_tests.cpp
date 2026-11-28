@@ -1192,6 +1192,33 @@ void testTrigonometricFunctionsUseRadians() {
     require(!(values >> extra), "SIN or COS produced extra values");
 }
 
+void testSqrtLnExpAtanFunctions() {
+    ql32::Interpreter interpreter;
+    std::ostringstream output;
+    interpreter.execute(
+        "PRINT SQRT(2) * SQRT(2)\n"
+        "PRINT LN(EXP(2))\n"
+        "PRINT ATAN(1) * 4\n", output);
+    std::istringstream values(output.str());
+    const double expected[] = {2, 2, 3.141592653589793};
+    for (const double value : expected) {
+        double actual = 0;
+        require(static_cast<bool>(values >> actual) && std::fabs(actual - value) < 1e-12,
+                "SQRT, LN, EXP or ATAN returned a wrong value");
+    }
+    for (const char* bad : {"PRINT SQRT(-1)\n", "PRINT LN(0)\n", "PRINT EXP(1000)\n"}) {
+        bool rejected = false;
+        try {
+            ql32::Interpreter other;
+            std::ostringstream sink;
+            other.execute(bad, sink);
+        } catch (const ql32::runtime::Error&) {
+            rejected = true;
+        }
+        require(rejected, "out-of-domain math call was accepted");
+    }
+}
+
 void testRandomNumberFunctions() {
     ql32::Interpreter interpreter;
     std::ostringstream output;
@@ -1795,6 +1822,7 @@ int main() {
         testStringExtractionFunctions();
         testUnsignedBitFunctionsAndRadixLiterals();
         testTrigonometricFunctionsUseRadians();
+        testSqrtLnExpAtanFunctions();
         testRandomNumberFunctions();
         testPauseDurationRoundsUpAndResumes();
         testFreeReturnsAllMetricsWithoutSelector();

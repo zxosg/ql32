@@ -1,19 +1,11 @@
 REM The Grand Tour layout helpers. INCLUDEd into every task, so keep this tiny.
-REM Display size comes from SYSINFO$(3) ("name WxH format") because a task's own window is not the screen.
+REM Display size comes from CAPABILITY("display.width"/"display.height") because a task's own window is not the screen.
 DEFine FuNction DispW()
-  LOCal d$, x
-  d$ = MID$(SYSINFO$(3), INSTR(SYSINFO$(3), " ") + 1) + " "
-  x = INSTR(d$, "x")
-  IF x < 2 THEN RETurn 320
-  RETurn VAL(LEFT$(d$, x - 1))
+  RETurn CAPABILITY("display.width")
 END DEFine DispW
 
 DEFine FuNction DispH()
-  LOCal d$, x
-  d$ = MID$(SYSINFO$(3), INSTR(SYSINFO$(3), " ") + 1) + " "
-  x = INSTR(d$, "x")
-  IF x < 2 THEN RETurn 240
-  RETurn VAL(MID$(d$, x + 1, INSTR(d$, " ") - x - 1))
+  RETurn CAPABILITY("display.height")
 END DEFine DispH
 
 DEFine FuNction Cols()

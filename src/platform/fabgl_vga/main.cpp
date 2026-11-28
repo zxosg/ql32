@@ -2069,7 +2069,7 @@ void setup() {
 #endif
                                 }, {"network", true},
                                 {"wifi", true}, {"ps2", true}, {"serial", true},
-                                {"sd", true}, {"ffs",
+                                {"sd", true}, {"sdc", true}, {"ffs",
 #if defined(QL32_OLIMEX_USE_SPIFFS)
                                 true
 #else
@@ -2085,6 +2085,8 @@ void setup() {
                                 {"gpio", true}, {"adc", true}, {"timer", true},
                                 {"touch", false}, {"buttons", false},
                                 {"usb-hid", false}};
+        profile.properties = {{"display.width", 320}, {"display.height", 200},
+                              {"display.depth", 3}};
         services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
             std::move(profile));
     }

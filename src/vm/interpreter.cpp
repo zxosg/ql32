@@ -1602,6 +1602,8 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     break;
                 }
                 if (instruction.name == "SIN" || instruction.name == "COS" ||
+                    instruction.name == "SQRT" || instruction.name == "LN" ||
+                    instruction.name == "EXP" || instruction.name == "ATAN" ||
                     instruction.name == "INT") {
                     const auto* number = std::get_if<double>(&arguments[0]);
                     if (!number) runtimeError(instruction, "numeric value required");
@@ -1616,8 +1618,23 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                         result = singlePrecision ?
                             static_cast<double>(std::cos(static_cast<float>(*number))) :
                             std::cos(*number);
-                    else
+                    else if (instruction.name == "INT")
                         result = std::floor(*number);
+                    else {
+                        if (instruction.name == "SQRT" && *number < 0)
+                            runtimeError(instruction, "SQRT argument must not be negative");
+                        if (instruction.name == "LN" && *number <= 0)
+                            runtimeError(instruction, "LN argument must be positive");
+                        const double x = singlePrecision ?
+                            static_cast<double>(static_cast<float>(*number)) : *number;
+                        if (instruction.name == "SQRT") result = std::sqrt(x);
+                        else if (instruction.name == "LN") result = std::log(x);
+                        else if (instruction.name == "EXP") result = std::exp(x);
+                        else result = std::atan(x);
+                        if (singlePrecision) result = static_cast<double>(static_cast<float>(result));
+                        if (!std::isfinite(result))
+                            runtimeError(instruction, "result out of range");
+                    }
                     pushValue(result);
                     break;
                 }
@@ -3194,6 +3211,10 @@ ExecutionStatus Interpreter::runExecutionBody(std::ostream& output,
                     const auto* query = std::get_if<std::string>(&arguments[0]);
                     if (!query) runtimeError(instruction,
                         "capability query must be a string");
+                    if (const auto property = systemInfo_->property(*query)) {
+                        pushValue(static_cast<double>(*property));
+                        break;
+                    }
                     const auto supported = systemInfo_->capability(*query);
                     pushValue(supported ? (*supported ? 1.0 : 0.0) : -1.0);
                 } else if (instruction.name == "OPEN") {

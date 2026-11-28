@@ -184,7 +184,7 @@ bitwise operators, and chained comparisons are outside M1.
 
 The math functions `SIN(angle)` and `COS(angle)` accept finite numeric angles
 in radians and return binary64 results. They do not use a mutable global angle
-mode; this matches common host APIs and keeps sessions independent. `INT(value)`
+mode; this matches common host APIs. `SQRT(x)`, `LN(x)`, `EXP(x)` and `ATAN(x)` (radians) follow the same rules; `SQRT` of a negative, `LN` of zero or a negative, and any non-finite result are errors. Under `OPTION KOptMathSingle` they round to binary32. These are QL/32-specific names (SuperBASIC uses `SQRT`, `LN`, `EXP`, `ATAN` but no conformance test is claimed) and keeps sessions independent. `INT(value)`
 returns the greatest integer less than or equal to the finite numeric value,
 which is useful when converting drawing positions to pixel coordinates. These
 functions are available for later language slices and are not part of the M1
@@ -1026,7 +1026,12 @@ Selectors `KSysVersion`, `KSysBuild`, `KSysPlatform`, `KSysDisplay`,
 `KCapabilityUnknown` (-1). Capability names are case-insensitive and repeated
 whitespace is collapsed. These calls describe support compiled into the
 selected profile; they do not report changing state such as whether storage is
-mounted or Wi-Fi is associated. Current profiles include the host, Olimex VGA,
+mounted or Wi-Fi is associated. `audio` and `sdc` report compiled-in music and
+removable-card (`SDC:`) support, not whether a card is inserted.
+Numeric profile properties are read through the same function: `CAPABILITY("display.width")`,
+`CAPABILITY("display.height")` (physical pixels, independent of the current window) and
+`CAPABILITY("display.depth")` (bits per pixel: 16 on CYD and Tenstar, 3 on the VGA boards,
+8 on the host) return the number, or -1 when the profile does not define it. Current profiles include the host, Olimex VGA,
 CYD, and Tenstar ESP32-S3 targets.
 
 `TILE` is a supervisor-only display command that re-arranges all visible
@@ -1402,7 +1407,7 @@ element. Dimensioned arrays are session-owned and passed by reference.
 
 String: `LEN`, `LEFT$`, `RIGHT$`, `MID$`, `REPT$`, `CODE`, `ASC`, `CHR$`,
 `UPPER$`, `LOWER$`, `STR$`, `VAL`, `HEX$`, `BIN$`, `EVAL`, `EVAL$`, `LOC`.
-Numeric: `SIN`, `COS`, `INT`, `RND`, `RGB`, `CPUFREQ`, `FREE`, and the 32-bit
+Numeric: `SIN`, `COS`, `SQRT`, `LN`, `EXP`, `ATAN`, `INT`, `RND`, `RGB`, `CPUFREQ`, `FREE`, and the 32-bit
 bit functions `BAND`, `BOR`, `BXOR`, `BNOT`, `ROL`, `ROR`, `SRA`, `SRL`, `SLA`,
 `SLL`. `RANDOMIZE seed` seeds `RND`. Errors: `ERR`, `ERR$(code)`, `ERRX$`.
 Tasks: `TASK`, `TASKRESULT`, `GETTASK`. System: `SYSINFO$(selector)`,

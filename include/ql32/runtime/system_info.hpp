@@ -25,6 +25,7 @@ enum class SystemInfoSelector : std::uint32_t {
 struct SystemInfoProfile {
     std::array<std::string, 7> values;
     std::vector<std::pair<std::string, bool>> capabilities;
+    std::vector<std::pair<std::string, std::int32_t>> properties;
 };
 
 class SystemInfoService {
@@ -34,6 +35,8 @@ public:
     // nullopt means the query name is unknown; otherwise true/false describe
     // support compiled into the selected profile, not current device state.
     virtual std::optional<bool> capability(std::string_view query) const = 0;
+    // Numeric profile properties such as "display.width"; nullopt when absent.
+    virtual std::optional<std::int32_t> property(std::string_view) const { return std::nullopt; }
 };
 
 class StaticSystemInfoService final : public SystemInfoService {
@@ -50,6 +53,13 @@ public:
     std::optional<bool> capability(std::string_view query) const override {
         const auto normalized = normalize(query);
         for (const auto& entry : profile_.capabilities)
+            if (normalize(entry.first) == normalized) return entry.second;
+        return std::nullopt;
+    }
+
+    std::optional<std::int32_t> property(std::string_view query) const override {
+        const auto normalized = normalize(query);
+        for (const auto& entry : profile_.properties)
             if (normalize(entry.first) == normalized) return entry.second;
         return std::nullopt;
     }
@@ -82,10 +92,12 @@ inline std::shared_ptr<SystemInfoService> makeHostSystemInfoService() {
                       "hostfs", ""};
     profile.capabilities = {{"display", true}, {"input", true}, {"storage", true},
                             {"network", false}, {"wifi", false}, {"ps2", false},
-                            {"serial", true}, {"sd", false}, {"ffs", false},
+                            {"serial", true}, {"audio", false}, {"sdc", false}, {"sd", false}, {"ffs", false},
                             {"psram", false}, {"spi", false}, {"i2c", false},
                             {"gpio", false}, {"adc", false}, {"timer", false},
                             {"touch", false}, {"buttons", false}, {"usb-hid", false}};
+    profile.properties = {{"display.width", 320}, {"display.height", 240},
+                          {"display.depth", 8}};
     return std::make_shared<StaticSystemInfoService>(std::move(profile));
 }
 

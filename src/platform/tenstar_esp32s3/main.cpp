@@ -581,12 +581,15 @@ void setup() {
                           "st7789-tft 240x135 rgb565", "serial", "ffs",
                           "tft,psram,network,wifi"};
         profile.capabilities = {{"display", true}, {"input", true},
-                                {"storage", true}, {"network", true},
+                                {"storage", true}, {"audio", false}, {"sdc", false},
+                                {"network", true},
                                 {"wifi", true}, {"ps2", false}, {"serial", true},
                                 {"sd", false}, {"ffs", true}, {"psram", true},
                                 {"spi", true}, {"i2c", true}, {"gpio", true},
                                 {"adc", true}, {"timer", true}, {"touch", false},
                                 {"buttons", false}, {"usb-hid", false}};
+        profile.properties = {{"display.width", 240}, {"display.height", 135},
+                              {"display.depth", 16}};
         services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
             std::move(profile));
     }

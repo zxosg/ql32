@@ -228,7 +228,7 @@ constexpr std::string_view builtinFunctions[] = {
     "MID$", "REPT$", "CODE", "ASC", "CHR$", "LOC", "UPPER$", "LOWER$",
     "STR$", "VAL", "EVAL", "EVAL$",
     "BAND", "BOR", "BXOR", "BNOT", "ROL", "ROR", "SRA", "SRL", "SLA", "SLL",
-    "HEX$", "BIN$", "FREE", "SIN", "COS", "INT", "OPEN", "READ$",
+    "HEX$", "BIN$", "FREE", "SIN", "COS", "SQRT", "LN", "EXP", "ATAN", "INT", "OPEN", "READ$",
     "EOF", "FPOS", "FLEN", "IN", "ALLOC", "PEEK", "PEEK_W", "PEEK_L", "IOREAD", "IOWRITE",
     "CONFIRM", "DIALOG", "DINIT", "DGET", "DGET$", "MINIT", "MENU", "NETSTAT$",
     "NETADDR$", "NETSIGNAL", "NETTIME$", "GETCHANNEL", "GETTASK", "GWIDTH", "GHEIGHT", "GDEPTH",
@@ -461,6 +461,8 @@ std::pair<std::size_t, bool> builtinSignature(const Instruction& instruction) {
     if (instruction.name == "BNOT" || instruction.name == "HEX$" ||
         instruction.name == "BIN$") return {1, true};
     if (instruction.name == "SIN" || instruction.name == "COS" ||
+        instruction.name == "SQRT" || instruction.name == "LN" ||
+        instruction.name == "EXP" || instruction.name == "ATAN" ||
         instruction.name == "INT") return {1, true};
     if (instruction.name == "RND") return {0, true};
     if (instruction.name == "CPUFREQ") return {0, true};

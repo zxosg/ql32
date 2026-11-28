@@ -769,7 +769,7 @@ void setup() {
         profile.capabilities = {{"display", true}, {"input", true},
                                 {"storage", true}, {"network", true},
                                 {"wifi", true}, {"ps2", false}, {"serial", true},
-                                {"touch", true}, {"sd",
+                                {"touch", true}, {"audio", true}, {"sdc", true}, {"sd",
 #if defined(QL32_CYD_USE_SPIFFS)
                                 false
 #else
@@ -784,6 +784,8 @@ void setup() {
                                 }, {"psram", false}, {"spi", true}, {"i2c", true},
                                 {"gpio", true}, {"adc", true}, {"timer", true},
                                 {"buttons", false}, {"usb-hid", false}};
+        profile.properties = {{"display.width", 320}, {"display.height", 240},
+                              {"display.depth", 16}};
         services.systemInfo = std::make_shared<ql32::runtime::StaticSystemInfoService>(
             std::move(profile));
     }
