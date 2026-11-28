@@ -1342,6 +1342,7 @@ private:
         code_.push_back(std::move(instruction));
     }
     void resolveCalls(bool tolerateUnresolvedCalls) {
+        relinkArraySlices();
         std::unordered_map<std::string,
             std::pair<std::shared_ptr<const std::vector<std::string>>,
                       std::shared_ptr<const std::vector<std::string>>>> sharedNames;
@@ -1787,6 +1788,20 @@ private:
         if (builtinKeyConstant(std::string_view(name.text), ignored) &&
             constants_.find(name.text) == constants_.end())
             error(name, "name is a reserved built-in key constant");
+    }
+    // `name(...) =` before the DIM is seen (definitions precede DIM): an array store.
+    bool assignsToUndeclaredArray() const {
+        if (definitions_.find(peek().text) != definitions_.end() || isBuiltinName(peek().text) ||
+            declaredFunctions_.find(peek().text) != declaredFunctions_.end())
+            return false;
+        std::size_t i = current_ + 2;
+        for (int depth = 1; tokens_.has(i); ++i) {
+            const Kind kind = tokens_[i].kind;
+            if (kind == Kind::End || kind == Kind::Newline) return false;
+            if (kind == Kind::LeftParen) ++depth;
+            if (kind == Kind::RightParen && --depth == 0) break;
+        }
+        return tokens_.has(i + 1) && tokens_[i + 1].kind == Kind::Equal;
     }
     void blockDim() {
         const Token keyword = advance();
@@ -2789,7 +2804,8 @@ private:
         }
         if (check(Kind::BuiltinFunction))
             error(peek(), "function call must be used as a value");
-        if (check(Kind::Identifier) && (arrays_.find(peek().text) != arrays_.end() || isCurrentParameter(peek().text)) &&
+        if (check(Kind::Identifier) && (arrays_.find(peek().text) != arrays_.end() || isCurrentParameter(peek().text) ||
+                                        assignsToUndeclaredArray()) &&
             tokens_.has(current_ + 1) && tokens_[current_ + 1].kind == Kind::LeftParen) {
             const Token name = advance();
             const std::size_t rank = callArguments();
@@ -2966,10 +2982,35 @@ private:
         }
         return false;
     }
+    bool isCurrentLocal(const std::string& name) const {
+        const auto definition = definitions_.find(currentDefinitionName_);
+        return definition != definitions_.end() &&
+               std::find(definition->second.locals.begin(), definition->second.locals.end(), name) !=
+                   definition->second.locals.end();
+    }
     void stringSlice(const Token& name) {
         const Token open = advance();
+        const std::size_t loadIndex = code_.size();
         emit(Op::Load, name, 0.0, name.text);
         stringSliceSuffix(open);
+        // A definition may precede the DIM of a global string array: `g$(i)` is then
+        // re-linked as an element read once the array is known.
+        if (!currentDefinitionName_.empty() && code_.back().sliceSingle &&
+            !isCurrentParameter(name.text) && !isCurrentLocal(name.text))
+            pendingSlices_.push_back({loadIndex, code_.size() - 1});
+    }
+    std::vector<std::pair<std::size_t, std::size_t>> pendingSlices_;
+    void relinkArraySlices() {
+        for (const auto& [load, slice] : pendingSlices_) {
+            const auto array = arrays_.find(code_[load].name);
+            if (array == arrays_.end() || array->second != 1) continue;
+            code_[slice].op = Op::ArrayGet;
+            code_[slice].name = code_[load].name;
+            code_[slice].rank = 1;
+            code_[load].op = Op::Jump;
+            code_[load].target = load + 1;
+        }
+        pendingSlices_.clear();
     }
     void stringSliceSuffix(const Token& open) {
         Instruction slice{Op::StringSlice, 0.0, {}, open.line, open.column()};
